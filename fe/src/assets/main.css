@@ -2,6 +2,7 @@
 
 /* Global spinner animation for Phosphor Icons */
 .ph-spin {
+  display: inline-block;
   animation: ph-spin 1s linear infinite;
 }
 
