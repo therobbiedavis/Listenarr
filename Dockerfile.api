@@ -1,0 +1,21 @@
+# Listenarr Backend Dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:7.0 AS base
+WORKDIR /app
+EXPOSE 80
+EXPOSE 443
+
+FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
+WORKDIR /src
+COPY ["listenarr.api/Listenarr.Api.csproj", "listenarr.api/"]
+RUN dotnet restore "listenarr.api/Listenarr.Api.csproj"
+COPY . .
+WORKDIR "/src/listenarr.api"
+RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "Listenarr.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Listenarr.Api.dll"]

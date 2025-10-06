@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  listenarr-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: listenarr-api
+    ports:
+      - "5000:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    restart: unless-stopped
+    
+  listenarr-fe:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: listenarr-fe
+    ports:
+      - "8080:80"
+    depends_on:
+      - listenarr-api
+    restart: unless-stopped
+
+volumes:
+  data:
+  config:
