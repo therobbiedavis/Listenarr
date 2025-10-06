@@ -1,0 +1,269 @@
+# How to Contribute
+
+We're always looking for people to help make Listenarr even better! There are a number of ways to contribute, from documentation to development.
+
+## Documentation
+
+Setup guides, FAQ, troubleshooting tips - the more information we have in the documentation, the better. Help us improve:
+
+- [Wiki](https://github.com/therobbiedavis/Listenarr/wiki) (coming soon)
+- Code comments and inline documentation
+- README improvements
+- Tutorial videos or blog posts
+
+## Development
+
+### Tools Required
+
+- **Visual Studio 2022** or higher ([https://www.visualstudio.com/vs/](https://www.visualstudio.com/vs/)). The community version is free and works fine.
+- **Rider** (optional alternative to Visual Studio, preferred by many) ([https://www.jetbrains.com/rider/](https://www.jetbrains.com/rider/))
+- **VS Code** (recommended for frontend) ([https://code.visualstudio.com/](https://code.visualstudio.com/))
+- **Git** ([https://git-scm.com/downloads](https://git-scm.com/downloads))
+- **Node.js** (Node 20.x or higher) ([https://nodejs.org/](https://nodejs.org/))
+- **.NET 7.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
+
+### Getting Started
+
+1. **Fork Listenarr** on GitHub
+2. **Clone** the repository to your development machine
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/Listenarr.git
+   cd Listenarr
+   ```
+3. **Install root dependencies** (for concurrently)
+   ```bash
+   npm install
+   ```
+4. **Install frontend dependencies**
+   ```bash
+   cd fe
+   npm install
+   cd ..
+   ```
+5. **Restore .NET dependencies**
+   ```bash
+   cd listenarr.api
+   dotnet restore
+   cd ..
+   ```
+6. **Start development servers**
+   
+   Option 1 - Single command (from root):
+   ```bash
+   npm run dev
+   ```
+   
+   Option 2 - Use startup scripts:
+   - Windows: `start-dev.bat` or `.\start-dev.ps1`
+   - Linux/macOS: `./start-dev.sh`
+   
+   Option 3 - Start separately:
+   ```bash
+   # Terminal 1 - Backend
+   cd listenarr.api
+   dotnet run --urls http://localhost:5146
+   
+   # Terminal 2 - Frontend
+   cd fe
+   npm run dev
+   ```
+
+7. **Open your browser**
+   - Frontend: [http://localhost:5173](http://localhost:5173)
+   - Backend API: [http://localhost:5146](http://localhost:5146)
+
+### Debugging
+
+#### Visual Studio / Rider
+1. Open `listenarr.sln` in Visual Studio or Rider
+2. Set `listenarr.api` as the startup project
+3. Press F5 to start debugging
+4. The API will be available at [http://localhost:5146](http://localhost:5146)
+
+#### VS Code
+1. Open the root folder in VS Code
+2. Use the provided launch configurations in `.vscode/launch.json`
+3. Press F5 to start debugging both frontend and backend
+
+#### Debugging on Mobile/Other Devices
+- Update the API URL in `fe/src/services/api.ts` to use your development machine's IP address instead of `localhost`
+- Example: `http://192.168.1.100:5146` instead of `http://localhost:5146`
+
+### Contributing Code
+
+**Before you start:**
+- If you're adding a new feature, please check [GitHub Issues](https://github.com/therobbiedavis/Listenarr/issues) to see if it's already requested
+- Comment on the issue so work isn't duplicated
+- If adding something not already requested, please create an issue first to discuss it
+- Reach out on [Discussions](https://github.com/therobbiedavis/Listenarr/discussions) if you have questions
+
+**Code guidelines:**
+- Rebase from Listenarr's `develop` branch, don't merge
+- Make meaningful commits, or squash them before submitting PR
+- Feel free to make a pull request before work is complete (mark as draft) - this lets us see progress and provide feedback
+- Add tests where applicable (unit/integration)
+- Commit with *nix line endings for consistency (We checkout Windows and commit *nix)
+- One feature/bug fix per pull request to keep things clean and easy to understand
+
+**Code style:**
+- **Backend (C#)**: Use 4 spaces instead of tabs (default in VS 2022/Rider)
+- **Frontend (Vue/TS)**: Use 2 spaces for indentation
+- Follow existing code patterns and conventions
+- Use meaningful variable and function names
+- Add comments for complex logic
+
+**Testing:**
+- Run backend tests: `cd listenarr.api && dotnet test`
+- Run frontend tests: `cd fe && npm run test:unit`
+- Ensure all tests pass before submitting PR
+
+### Pull Request Guidelines
+
+**Branch naming:**
+- Create PRs from feature branches, not from `develop` in your fork
+- Use meaningful branch names that describe what is being added/fixed
+
+Good examples:
+- `feature/audible-integration`
+- `feature/download-queue`
+- `bugfix/search-results`
+- `enhancement/ui-improvements`
+
+Bad examples:
+- `new-feature`
+- `fix-bug`
+- `patch`
+- `develop`
+
+**PR process:**
+1. **Target branch**: Only make pull requests to `develop`, never `main`
+   - PRs to `main` will be commented on and closed
+2. **Description**: Provide a clear description of what your PR does
+   - Reference related issues (e.g., "Fixes #123")
+   - Include screenshots for UI changes
+   - List breaking changes if any
+3. **Review**: You'll probably get comments or questions from us
+   - These are to ensure consistency and maintainability
+   - Don't take them personally - we appreciate your contribution!
+4. **Response time**: We'll try to respond as soon as possible
+   - If it's been a few days without response, please ping us
+   - We may have missed the notification
+
+**PR checklist:**
+- [ ] Code follows project style guidelines
+- [ ] Self-review of code completed
+- [ ] Comments added for complex logic
+- [ ] Tests added/updated (if applicable)
+- [ ] All tests pass
+- [ ] No console errors or warnings
+- [ ] Documentation updated (if needed)
+- [ ] Rebased on latest `develop` branch
+
+### API Documentation
+
+If you want to explore the API using Swagger:
+
+1. Start the backend API
+   ```bash
+   cd listenarr.api
+   dotnet run
+   ```
+2. Navigate to [http://localhost:5146/swagger](http://localhost:5146/swagger)
+3. You can test all API endpoints directly from the Swagger UI
+
+### Project Structure
+
+```
+Listenarr/
+├── listenarr.api/          # Backend API (.NET Core)
+│   ├── Controllers/        # API endpoints
+│   ├── Models/            # Data models
+│   ├── Services/          # Business logic
+│   └── Program.cs         # Application entry
+├── fe/                    # Frontend (Vue.js)
+│   ├── src/
+│   │   ├── components/   # Reusable Vue components
+│   │   ├── views/        # Page components
+│   │   ├── stores/       # Pinia state management
+│   │   ├── services/     # API client services
+│   │   └── types/        # TypeScript type definitions
+│   └── public/           # Static assets
+├── tests/                # Test scripts
+├── .github/              # GitHub configuration
+├── docker-compose.yml    # Docker setup
+└── README.md            # Main documentation
+```
+
+### Technology Stack
+
+**Backend:**
+- ASP.NET Core Web API
+- Entity Framework Core with SQLite
+- C# 12 / .NET 7.0+
+
+**Frontend:**
+- Vue 3 (Composition API)
+- TypeScript
+- Pinia (state management)
+- Vue Router
+- Vite (build tool)
+
+## Localization
+
+We plan to support multiple languages in the future. If you'd like to help translate Listenarr into your language, please let us know on [Discussions](https://github.com/therobbiedavis/Listenarr/discussions).
+
+## Feature Requests
+
+Got an idea for a new feature? Here's how to suggest it:
+
+1. Check [GitHub Discussions](https://github.com/therobbiedavis/Listenarr/discussions) to see if it's already been suggested
+2. If not, create a new discussion in the "Ideas" category
+3. Clearly describe the feature and why it would be useful
+4. Include mockups or examples if applicable
+
+## Bug Reports
+
+Found a bug? Please report it!
+
+1. Check [GitHub Issues](https://github.com/therobbiedavis/Listenarr/issues) to see if it's already reported
+2. If not, create a new issue with:
+   - Clear title describing the bug
+   - Steps to reproduce
+   - Expected behavior
+   - Actual behavior
+   - Screenshots (if applicable)
+   - Environment details (OS, browser, .NET version, Node version)
+
+## Code of Conduct
+
+### Our Pledge
+
+We are committed to providing a welcoming and inspiring community for all. Please be respectful and constructive in your interactions with other contributors.
+
+### Expected Behavior
+
+- Be respectful and inclusive
+- Provide constructive feedback
+- Accept constructive criticism gracefully
+- Focus on what's best for the community
+- Show empathy towards other community members
+
+### Unacceptable Behavior
+
+- Harassment, discrimination, or offensive comments
+- Personal attacks or insults
+- Trolling or inflammatory comments
+- Publishing others' private information
+- Any conduct that would be inappropriate in a professional setting
+
+## Questions?
+
+If you have any questions about contributing, please:
+
+1. Check the [Wiki](https://github.com/therobbiedavis/Listenarr/wiki) (coming soon)
+2. Ask in [GitHub Discussions](https://github.com/therobbiedavis/Listenarr/discussions)
+3. Open an issue if you think something is unclear in this guide
+
+---
+
+Thank you for contributing to Listenarr! 🎵📚
