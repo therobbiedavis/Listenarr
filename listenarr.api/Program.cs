@@ -1,0 +1,118 @@
+using Listenarr.Api.Services;
+using Listenarr.Api.Models;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddControllers();
+
+// Add in-memory cache for metadata prefetch / reuse
+builder.Services.AddMemoryCache();
+
+// Add HTTP client for external API calls with decompression support
+builder.Services.AddHttpClient<IAudibleMetadataService, AudibleMetadataService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
+
+// Add default HTTP client for other services
+builder.Services.AddHttpClient();
+
+// Register our custom services
+builder.Services.AddDbContext<ListenArrDbContext>(options =>
+    options.UseSqlite("Data Source=listenarr.db"));
+builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
+builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
+builder.Services.AddScoped<ISearchService, SearchService>();
+builder.Services.AddScoped<IMetadataService, MetadataService>();
+builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
+// NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
+// Removing duplicate scoped registration to avoid overriding the typed client configuration.
+builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
+builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
+
+// Register background service for daily cache cleanup
+builder.Services.AddHostedService<ImageCacheCleanupService>();
+// Typed HttpClients with automatic decompression for scraping services
+builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
+
+builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
+
+// Register Playwright page fetcher for JS-rendered pages and bot-workarounds
+// Playwright-based page fetcher removed; AudibleMetadataService will create Playwright on-demand if needed.
+
+// Add CORS support for frontend
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowVueApp",
+        policy =>
+        {
+            policy.WithOrigins(
+                    "http://localhost:5173",
+                    "https://localhost:5173",
+                    "http://localhost:3000",
+                    "https://localhost:3000"
+                )
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        });
+
+    // Development fallback (use cautiously). This can help diagnose unexpected origin mismatches.
+    options.AddPolicy("DevAll", p => p
+    .AllowAnyOrigin()
+    .AllowAnyHeader()
+    .AllowAnyMethod());
+});
+
+// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+// Ensure database is created
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+    context.Database.EnsureCreated();
+    
+    // Apply SQLite PRAGMA settings after database is created
+    SqlitePragmaInitializer.ApplyPragmas(context);
+}
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+
+// Enable CORS (use restrictive policy by default, allow override via environment var)
+var corsPolicy = Environment.GetEnvironmentVariable("LISTENARR_CORS_POLICY");
+if (!string.IsNullOrWhiteSpace(corsPolicy) && corsPolicy == "DevAll")
+{
+    app.UseCors("DevAll");
+}
+else
+{
+    app.UseCors("AllowVueApp");
+}
+
+app.UseAuthorization();
+
+app.MapControllers();
+
+app.Run();

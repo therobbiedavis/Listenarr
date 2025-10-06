@@ -1,0 +1,90 @@
+<template>
+  <div class="library-import-view">
+    <div class="page-header">
+      <h1>Library Import</h1>
+    </div>
+
+    <div class="import-options">
+      <div class="import-card" @click="importFromFolder">
+        <div class="import-icon">📁</div>
+        <h3>Import from Folder</h3>
+        <p>Scan a local folder for audio files and import them into your library</p>
+      </div>
+
+      <div class="import-card" @click="importFromRSS">
+        <div class="import-icon">📡</div>
+        <h3>Import from RSS Feed</h3>
+        <p>Add episodes from an RSS feed URL</p>
+      </div>
+
+      <div class="import-card" @click="importFromOPML">
+        <div class="import-icon">📋</div>
+        <h3>Import OPML</h3>
+        <p>Import podcast subscriptions from an OPML file</p>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+const importFromFolder = () => {
+  console.log('Import from folder')
+}
+
+const importFromRSS = () => {
+  console.log('Import from RSS')
+}
+
+const importFromOPML = () => {
+  console.log('Import from OPML')
+}
+</script>
+
+<style scoped>
+.library-import-view {
+  padding: 0;
+}
+
+.page-header h1 {
+  margin: 0 0 2rem 0;
+  color: white;
+  font-size: 2rem;
+}
+
+.import-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.import-card {
+  background-color: #2a2a2a;
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.import-card:hover {
+  background-color: #333;
+  border-color: #007acc;
+  transform: translateY(-4px);
+}
+
+.import-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.import-card h3 {
+  color: white;
+  margin-bottom: 1rem;
+}
+
+.import-card p {
+  color: #ccc;
+  margin: 0;
+}
+</style>
