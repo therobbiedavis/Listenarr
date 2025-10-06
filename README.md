@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/therobbiedavis/Listenarr/releases"><img alt="Release" src="https://img.shields.io/github/v/release/therobbiedavis/Listenarr?style=flat-square"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/therobbiedavis/Listenarr?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square"></a>
   <a href="https://github.com/therobbiedavis/Listenarr/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/therobbiedavis/Listenarr/total?style=flat-square"></a>
   <a href="https://hub.docker.com/r/therobbiedavis/listenarr"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/therobbiedavis/listenarr?style=flat-square"></a>
 </p>
@@ -216,8 +216,12 @@ This project exists thanks to all the people who contribute. [Contribute](CONTRI
 
 ## License
 
-- [MIT License](LICENSE)
-- Copyright 2024-2025
+- [GNU Affero General Public License v3.0](LICENSE)
+- Copyright 2024-2025 Robbie Davis
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+The AGPL-3.0 license ensures that any modifications made to Listenarr, including when hosted as a network service, must be shared with users. This protects the open-source nature of the project and prevents proprietary forks.
 
 ## Acknowledgments
 
