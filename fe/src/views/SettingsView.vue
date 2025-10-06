@@ -915,11 +915,3 @@ onMounted(async () => {
   }
 }
 </style>
-
-<style>
-/* Global animation for spinner (non-scoped to work properly) */
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-</style>

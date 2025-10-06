@@ -532,15 +532,3 @@ const validatePath = async () => {
   }
 }
 </style>
-
-<style>
-/* Global animation for spinner */
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.ph-spin {
-  animation: spin 1s linear infinite;
-}
-</style>
