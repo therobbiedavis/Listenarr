@@ -194,7 +194,7 @@
       <h2>No Audiobook Found</h2>
       <p>No audiobook was found with ASIN "{{ asinQuery }}". Please check the ASIN and try again.</p>
       <div class="quick-actions">
-        <button class="btn btn-primary" @click="searchMethod = 'title'">
+        <button class="btn btn-primary" @click="searchQuery = ''; searchType = 'title'">
           <i class="ph ph-magnifying-glass"></i>
           Try Title Search
         </button>
@@ -268,6 +268,11 @@ const titleResultsCount = ref(0)
 const isLoadingMore = ref(false)
 const currentPage = ref(0)
 const resultsPerPage = 10
+
+// Parsed search query components (for error messages)
+const asinQuery = ref('')
+const titleQuery = ref('')
+const authorQuery = ref('')
 
 // General state
 const errorMessage = ref('')
@@ -375,6 +380,7 @@ const searchByAsin = async (asin: string) => {
   titleResults.value = []
   isbnResult.value = null
   errorMessage.value = ''
+  asinQuery.value = asin
   try {
     const result = await apiService.request<AudibleBookMetadata>(`/audible/metadata/${asin}`)
     audibleResult.value = result
@@ -397,6 +403,11 @@ const searchByTitle = async (query: string) => {
   errorMessage.value = ''
   resolvedAsins.value = {}
   asinFilteringApplied.value = false
+  
+  // Parse query for display in error messages
+  const parsed = parseSearchQuery(query)
+  titleQuery.value = parsed.title
+  authorQuery.value = parsed.author || ''
   
   try {
     // Use backend search API which now searches Amazon/Audible directly
@@ -1162,16 +1173,6 @@ onMounted(async () => {
   color: #f1c40f;
 }
 
-/* Animations */
-.ph-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 /* Responsive design */
 @media (max-width: 768px) {
   .search-tabs {
@@ -1210,13 +1211,5 @@ onMounted(async () => {
     flex-direction: column;
     align-items: center;
   }
-}
-</style>
-
-<style>
-/* Global animation for spinner (non-scoped to work properly) */
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 </style>
