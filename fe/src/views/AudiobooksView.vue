@@ -576,21 +576,4 @@ async function executeDelete() {
   opacity: 0.6;
   cursor: not-allowed;
 }
-
-.ph-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-</style>
-
-<style>
-/* Global animation for spinner (non-scoped to work properly) */
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 </style>

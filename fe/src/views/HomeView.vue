@@ -209,7 +209,7 @@ const recentlyAdded = ref([
     narrator: 'Nick Podehl',
     duration: '27h 55m',
     addedDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    poster: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=300&h=450&fit=crop'
+    poster: '/placeholder-audiobook.jpg'
   },
   {
     id: '2',
@@ -218,7 +218,7 @@ const recentlyAdded = ref([
     narrator: 'Michael Kramer',
     duration: '24h 39m',
     addedDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-    poster: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=300&h=450&fit=crop'
+    poster: '/placeholder-audiobook.jpg'
   }
 ])
 

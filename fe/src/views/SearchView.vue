@@ -34,6 +34,7 @@
     </div>
 
     <div v-if="searchStore.isSearching" class="loading">
+      <i class="ph ph-spinner ph-spin"></i>
       <p>Searching...</p>
     </div>
 
@@ -252,6 +253,13 @@ const formatRuntime = (minutes: number): string => {
   text-align: center;
   padding: 2rem;
   color: #666;
+}
+
+.loading i {
+  font-size: 2rem;
+  color: #3498db;
+  display: block;
+  margin-bottom: 1rem;
 }
 
 .search-results h3 {

@@ -1,5 +1,19 @@
 @import './base.css';
 
+/* Global spinner animation for Phosphor Icons */
+.ph-spin {
+  animation: ph-spin 1s linear infinite;
+}
+
+@keyframes ph-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 #app {
   font-weight: normal;
 }
