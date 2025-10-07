@@ -2,8 +2,6 @@
   <img src=".github/logo-full.png" alt="Listenarr Logo" width="600">
 </p>
 
-<h1 align="center">Listenarr</h1>
-
 <p align="center">
   <strong>Automated Audiobook Management and Downloading</strong>
 </p>
