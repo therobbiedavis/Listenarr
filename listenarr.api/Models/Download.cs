@@ -32,6 +32,7 @@ namespace Listenarr.Api.Models
     public class Download
     {
         public string Id { get; set; } = Guid.NewGuid().ToString();
+        public int? AudiobookId { get; set; } // Link to Audiobook record for metadata
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
         public string Album { get; set; } = string.Empty;

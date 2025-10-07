@@ -218,8 +218,9 @@ async function downloadResult(result: SearchResult) {
       console.log('Starting DDL download:', result.title)
       console.log('Download type:', result.downloadType)
       console.log('Download URL:', result.torrentUrl)
+      console.log('Audiobook ID:', props.audiobook.id)
       
-      const response = await apiService.sendToDownloadClient(result)
+      const response = await apiService.sendToDownloadClient(result, undefined, props.audiobook.id)
       console.log('DDL download started:', response)
       
       // Add to activity/downloads view (will be tracked there)
@@ -231,8 +232,8 @@ async function downloadResult(result: SearchResult) {
         delete downloading.value[result.id]
       }, 1000)
     } else {
-      // For torrents/NZB, send to download client
-      const response = await apiService.sendToDownloadClient(result)
+      // For torrents/NZB, send to download client (also pass audiobookId for future processing)
+      const response = await apiService.sendToDownloadClient(result, undefined, props.audiobook.id)
       console.log('Download started:', response)
       emit('downloaded', result)
       

@@ -78,7 +78,8 @@ namespace Listenarr.Api.Controllers
                 
                 var downloadId = await _downloadService.SendToDownloadClientAsync(
                     request.SearchResult, 
-                    request.DownloadClientId
+                    request.DownloadClientId,
+                    request.AudiobookId
                 );
                 return Ok(new { downloadId, message = "Sent to download client successfully" });
             }
@@ -139,5 +140,6 @@ namespace Listenarr.Api.Controllers
     {
         public SearchResult SearchResult { get; set; } = new();
         public string? DownloadClientId { get; set; }
+        public int? AudiobookId { get; set; }
     }
 }

@@ -48,9 +48,9 @@ namespace Listenarr.Api.Services
         }
 
         // Placeholder implementations for existing interface methods
-        public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId)
+        public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
         {
-            return await SendToDownloadClientAsync(searchResult, downloadClientId);
+            return await SendToDownloadClientAsync(searchResult, downloadClientId, audiobookId);
         }
 
         public async Task<List<Download>> GetActiveDownloadsAsync()
@@ -136,8 +136,8 @@ namespace Listenarr.Api.Services
                             continue;
                         }
 
-                        // Send to download client
-                        var downloadId = await SendToDownloadClientAsync(bestResult, downloadClientId);
+                        // Send to download client with audiobookId for proper metadata linking
+                        var downloadId = await SendToDownloadClientAsync(bestResult, downloadClientId, audiobookId);
 
                         // Log to history
                         await LogDownloadHistory(audiobook, indexer.Name, bestResult);
@@ -171,20 +171,21 @@ namespace Listenarr.Api.Services
             };
         }
 
-        public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null)
+        public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
-            _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}", 
+            _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}, AudiobookId: {AudiobookId}", 
                 searchResult.Title, 
                 searchResult.DownloadType ?? "(null)", 
-                searchResult.TorrentUrl ?? "(null)");
+                searchResult.TorrentUrl ?? "(null)",
+                audiobookId);
             
             // Check if this is a DDL (Direct Download Link) - handle it differently
             // Use case-insensitive comparison in case of serialization casing issues
             if (!string.IsNullOrEmpty(searchResult.DownloadType) && 
                 searchResult.DownloadType.Equals("DDL", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogInformation("Processing DDL for: {Title}", searchResult.Title);
-                return await DownloadDirectlyAsync(searchResult);
+                _logger.LogInformation("Processing DDL for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
+                return await DownloadDirectlyAsync(searchResult, audiobookId);
             }
             
             _logger.LogInformation("Not a DDL, processing as torrent/usenet. DownloadType was: '{DownloadType}'", searchResult.DownloadType);
@@ -1053,12 +1054,14 @@ namespace Listenarr.Api.Services
             await _dbContext.SaveChangesAsync();
         }
 
-        private async Task<string> DownloadDirectlyAsync(SearchResult searchResult)
+        private async Task<string> DownloadDirectlyAsync(SearchResult searchResult, int? audiobookId = null)
         {
             var downloadId = Guid.NewGuid().ToString();
             
             try
             {
+                _logger.LogInformation("Starting direct download for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
+                
                 // Get the download path from application settings
                 var appSettings = await _configurationService.GetApplicationSettingsAsync();
                 if (appSettings == null || string.IsNullOrEmpty(appSettings.OutputPath))
@@ -1109,6 +1112,7 @@ namespace Listenarr.Api.Services
                 var download = new Download
                 {
                     Id = downloadId,
+                    AudiobookId = audiobookId, // Link to audiobook for metadata
                     Title = searchResult.Title,
                     Artist = searchResult.Artist,
                     Album = searchResult.Album,
@@ -1194,7 +1198,171 @@ namespace Listenarr.Api.Services
 
                         var fileInfo = new FileInfo(filePath);
                         
-                        // Create a new scope for final database update
+                        _logger.LogInformation("DDL download [{DownloadId}] completed: {FileName} ({Size} MB)", 
+                            downloadId, fileName, fileInfo.Length / 1024 / 1024);
+
+                        // Apply file naming pattern and move file to final location
+                        string finalPath = filePath;
+                        try
+                        {
+                            using (var scope = _serviceScopeFactory.CreateScope())
+                            {
+                                var fileNamingService = scope.ServiceProvider.GetRequiredService<IFileNamingService>();
+                                var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
+                                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                                
+                                var settings = await configService.GetApplicationSettingsAsync();
+                                
+                                _logger.LogInformation("DDL download [{DownloadId}] Settings: EnableMetadataProcessing={Enabled}, OutputPath={OutputPath}, Pattern={Pattern}", 
+                                    downloadId, settings.EnableMetadataProcessing, settings.OutputPath, settings.FileNamingPattern);
+                                
+                                // Only process if metadata processing is enabled
+                                if (settings.EnableMetadataProcessing)
+                                {
+                                    _logger.LogInformation("DDL download [{DownloadId}] processing with file naming pattern...", downloadId);
+                                    
+                                    // Try to get audiobook metadata if linked
+                                    Audiobook? audiobook = null;
+                                    using (var lookupScope = _serviceScopeFactory.CreateScope())
+                                    {
+                                        var dbContext = lookupScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                                        var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                                        if (completedDownload?.AudiobookId != null)
+                                        {
+                                            audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
+                                            if (audiobook != null)
+                                            {
+                                                _logger.LogInformation("DDL download [{DownloadId}] Found linked audiobook: {Title} by {Authors}", 
+                                                    downloadId, audiobook.Title, string.Join(", ", audiobook.Authors ?? new List<string>()));
+                                            }
+                                            else
+                                            {
+                                                _logger.LogWarning("DDL download [{DownloadId}] AudiobookId {AudiobookId} not found in database", 
+                                                    downloadId, completedDownload.AudiobookId);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            _logger.LogInformation("DDL download [{DownloadId}] No audiobook linked, using search result data", downloadId);
+                                        }
+                                    }
+                                    
+                                    // Build metadata from audiobook if available, otherwise use search result
+                                    var metadata = new AudioMetadata();
+                                    
+                                    if (audiobook != null)
+                                    {
+                                        // Use audiobook metadata (preferred source)
+                                        metadata.Title = audiobook.Title ?? searchResult.Title;
+                                        metadata.Artist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
+                                        metadata.Album = audiobook.Series ?? audiobook.Title ?? searchResult.Album ?? searchResult.Title;
+                                        metadata.AlbumArtist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
+                                        metadata.Series = audiobook.Series ?? audiobook.Title;
+                                        metadata.SeriesPosition = !string.IsNullOrEmpty(audiobook.SeriesNumber) && decimal.TryParse(audiobook.SeriesNumber, out var pos) ? pos : null;
+                                        metadata.Narrator = audiobook.Narrators?.FirstOrDefault();
+                                        metadata.Publisher = audiobook.Publisher;
+                                        metadata.Isbn = audiobook.Isbn;
+                                        metadata.Asin = audiobook.Asin;
+                                        metadata.Year = !string.IsNullOrEmpty(audiobook.PublishYear) && int.TryParse(audiobook.PublishYear, out var year) ? year : null;
+                                        metadata.Description = audiobook.Description;
+                                        metadata.Language = audiobook.Language;
+                                        
+                                        _logger.LogInformation("DDL download [{DownloadId}] Using audiobook metadata: Title='{Title}', Author='{Author}', Series='{Series}'", 
+                                            downloadId, metadata.Title, metadata.Artist, metadata.Series);
+                                    }
+                                    else
+                                    {
+                                        // Fallback to search result data
+                                        metadata.Title = searchResult.Title;
+                                        metadata.Artist = searchResult.Artist ?? "Unknown Author";
+                                        metadata.Album = searchResult.Album ?? searchResult.Title;
+                                        metadata.AlbumArtist = searchResult.Artist ?? "Unknown Author";
+                                        metadata.Series = searchResult.Album ?? searchResult.Title;
+                                        
+                                        _logger.LogInformation("DDL download [{DownloadId}] Using search result metadata: Title='{Title}', Artist='{Artist}', Series='{Series}'", 
+                                            downloadId, metadata.Title, metadata.Artist, metadata.Series);
+                                    }
+
+                                    // Try to extract existing metadata from file (only supplement missing fields)
+                                    try
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Extracting metadata from file: {FilePath}", downloadId, filePath);
+                                        var existingMetadata = await metadataService.ExtractFileMetadataAsync(filePath);
+                                        if (existingMetadata != null)
+                                        {
+                                            // Only use file metadata to fill in missing fields, preserve audiobook/search result data
+                                            if (audiobook == null)
+                                            {
+                                                // If no audiobook linked, use file metadata as primary source
+                                                metadata.Title = existingMetadata.Title ?? metadata.Title;
+                                                metadata.Artist = existingMetadata.Artist ?? metadata.Artist;
+                                                metadata.Album = existingMetadata.Album ?? metadata.Album;
+                                                metadata.AlbumArtist = existingMetadata.AlbumArtist ?? metadata.AlbumArtist;
+                                                metadata.Series = existingMetadata.Series ?? metadata.Series;
+                                                metadata.Year = existingMetadata.Year ?? metadata.Year;
+                                            }
+                                            // Always use file metadata for track/disc numbers (these are per-file)
+                                            metadata.TrackNumber = existingMetadata.TrackNumber;
+                                            metadata.DiscNumber = existingMetadata.DiscNumber;
+                                            
+                                            _logger.LogInformation("DDL download [{DownloadId}] File metadata extracted - Track: {Track}, Disc: {Disc}", 
+                                                downloadId, metadata.TrackNumber, metadata.DiscNumber);
+                                        }
+                                    }
+                                    catch (Exception metaEx)
+                                    {
+                                        _logger.LogWarning(metaEx, "DDL download [{DownloadId}] Failed to extract metadata from {FilePath}, using audiobook/search result data", downloadId, filePath);
+                                    }
+
+                                    // Generate final path using naming pattern
+                                    _logger.LogInformation("DDL download [{DownloadId}] Generating final path with pattern: {Pattern}", downloadId, settings.FileNamingPattern);
+                                    var extension = Path.GetExtension(filePath);
+                                    finalPath = await fileNamingService.GenerateFilePathAsync(
+                                        metadata, 
+                                        diskNumber: metadata.DiscNumber, 
+                                        chapterNumber: metadata.TrackNumber, 
+                                        originalExtension: extension
+                                    );
+
+                                    _logger.LogInformation("DDL download [{DownloadId}] Generated final path: {FinalPath}", downloadId, finalPath);
+
+                                    // Create directory if it doesn't exist
+                                    var finalDirectory = Path.GetDirectoryName(finalPath);
+                                    if (!string.IsNullOrEmpty(finalDirectory) && !Directory.Exists(finalDirectory))
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Creating directory: {Directory}", downloadId, finalDirectory);
+                                        Directory.CreateDirectory(finalDirectory);
+                                    }
+
+                                    // Move file to final location
+                                    if (filePath != finalPath && File.Exists(filePath))
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, filePath, finalPath);
+                                        File.Move(filePath, finalPath, overwrite: true);
+                                        _logger.LogInformation("DDL download [{DownloadId}] ✅ File moved successfully to: {FinalPath}", downloadId, finalPath);
+                                    }
+                                    else if (filePath == finalPath)
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Source and destination paths are the same, no move needed: {Path}", downloadId, filePath);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("DDL download [{DownloadId}] Source file does not exist: {FilePath}", downloadId, filePath);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("DDL download [{DownloadId}] ⚠️ Metadata processing is DISABLED in settings, keeping file at: {FilePath}", downloadId, filePath);
+                                }
+                            }
+                        }
+                        catch (Exception processEx)
+                        {
+                            _logger.LogError(processEx, "DDL download [{DownloadId}] ❌ Failed to process file with naming pattern, keeping original location: {FilePath}", downloadId, filePath);
+                            finalPath = filePath; // Keep original path if processing fails
+                        }
+                        
+                        // Update database with completion status and final path
                         using (var scope = _serviceScopeFactory.CreateScope())
                         {
                             var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
@@ -1203,15 +1371,15 @@ namespace Listenarr.Api.Services
                             {
                                 completedDownload.Status = DownloadStatus.Completed;
                                 completedDownload.Progress = 100;
-                                completedDownload.DownloadedSize = fileInfo.Length;
+                                completedDownload.DownloadedSize = new FileInfo(finalPath).Length;
                                 completedDownload.CompletedAt = DateTime.UtcNow;
+                                completedDownload.FinalPath = finalPath;
                                 dbContext.Downloads.Update(completedDownload);
                                 await dbContext.SaveChangesAsync();
                             }
                         }
 
-                        _logger.LogInformation("DDL download [{DownloadId}] completed: {FileName} ({Size} MB)", 
-                            downloadId, fileName, fileInfo.Length / 1024 / 1024);
+                        _logger.LogInformation("DDL download [{DownloadId}] finalized at: {FinalPath}", downloadId, finalPath);
                     }
                     catch (Exception ex)
                     {

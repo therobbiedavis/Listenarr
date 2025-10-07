@@ -122,7 +122,7 @@ class ApiService {
     })
   }
 
-  async sendToDownloadClient(searchResult: SearchResult, downloadClientId?: string): Promise<{
+  async sendToDownloadClient(searchResult: SearchResult, downloadClientId?: string, audiobookId?: number): Promise<{
     downloadId: string
     message: string
   }> {
@@ -131,7 +131,7 @@ class ApiService {
       message: string
     }>('/download/send', {
       method: 'POST',
-      body: JSON.stringify({ searchResult, downloadClientId })
+      body: JSON.stringify({ searchResult, downloadClientId, audiobookId })
     })
   }
 

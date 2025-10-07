@@ -65,6 +65,7 @@ builder.Services.AddScoped<IDownloadService, DownloadService>();
 // Removing duplicate scoped registration to avoid overriding the typed client configuration.
 builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
 builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
+builder.Services.AddScoped<IFileNamingService, FileNamingService>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();

@@ -12,13 +12,13 @@ namespace Listenarr.Api.Services
 
     public interface IDownloadService
     {
-        Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId);
+        Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null);
         Task<List<Download>> GetActiveDownloadsAsync();
         Task<Download?> GetDownloadAsync(string downloadId);
         Task<bool> CancelDownloadAsync(string downloadId);
         Task UpdateDownloadStatusAsync();
         Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId);
-        Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null);
+        Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null);
         Task<List<QueueItem>> GetQueueAsync();
         Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
     }
@@ -76,5 +76,23 @@ namespace Listenarr.Api.Services
     public interface IAudibleSearchService
     {
         Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query);
+    }
+
+    public interface IFileNamingService
+    {
+        /// <summary>
+        /// Apply the configured file naming pattern to generate the final file path
+        /// </summary>
+        /// <param name="metadata">Audiobook metadata</param>
+        /// <param name="diskNumber">Optional disk/part number</param>
+        /// <param name="chapterNumber">Optional chapter number</param>
+        /// <param name="originalExtension">File extension (e.g., ".m4b", ".mp3")</param>
+        /// <returns>Full file path using the naming pattern</returns>
+        Task<string> GenerateFilePathAsync(AudioMetadata metadata, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
+        
+        /// <summary>
+        /// Parse a naming pattern and replace variables with actual values
+        /// </summary>
+        string ApplyNamingPattern(string pattern, Dictionary<string, object> variables);
     }
 }
