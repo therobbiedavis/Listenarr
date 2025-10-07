@@ -204,9 +204,21 @@ class ApiService {
     return this.request<{ success: boolean; asin?: string; error?: string }>(`/amazon/asin-from-isbn/${encodeURIComponent(isbn)}`)
   }
 
+  // Audible Metadata API
+  async getAudibleMetadata<T>(asin: string): Promise<T> {
+    return this.request<T>(`/audible/metadata/${asin}`)
+  }
+
   // Library API
   async getLibrary(): Promise<Audiobook[]> {
     return this.request<Audiobook[]>('/library')
+  }
+
+  async addToLibrary(audiobook: Partial<Audiobook>): Promise<{ message: string; audiobook: Audiobook }> {
+    return this.request<{ message: string; audiobook: Audiobook }>('/library/add', {
+      method: 'POST',
+      body: JSON.stringify(audiobook)
+    })
   }
 
   async getAudiobook(id: number): Promise<Audiobook> {

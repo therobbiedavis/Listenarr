@@ -243,9 +243,9 @@ const formatTime = (timestamp: Date): string => {
   return 'Just now'
 }
 
-const formatDate = (date: Date): string => {
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
+// const formatDate = (date: Date): string => {
+//   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+// }
 </script>
 
 <style scoped>

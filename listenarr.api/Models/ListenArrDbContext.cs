@@ -28,6 +28,7 @@ namespace Listenarr.Api.Models
         public DbSet<Indexer> Indexers { get; set; }
         public DbSet<ApiConfiguration> ApiConfigurations { get; set; }
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
+        public DbSet<Download> Downloads { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
@@ -89,6 +90,10 @@ namespace Listenarr.Api.Models
             // DownloadClientConfiguration - ignore computed properties
             modelBuilder.Entity<DownloadClientConfiguration>()
                 .Ignore(e => e.Settings);
+
+            // Download - ignore Metadata dictionary (not stored in DB for now)
+            modelBuilder.Entity<Download>()
+                .Ignore(e => e.Metadata);
         }
     }
 }

@@ -210,29 +210,24 @@ const addToLibrary = async (result: SearchResult) => {
   try {
     // Fetch full metadata from the backend
     console.log('Fetching metadata from /api/audible/metadata/' + result.asin)
-    const metadata = await apiService.request<AudibleBookMetadata>(`/audible/metadata/${result.asin}`)
+    const metadata = await apiService.getAudibleMetadata<AudibleBookMetadata>(result.asin)
     console.log('Metadata fetched:', metadata)
     
     // Add to library
     console.log('Adding to library via /api/library/add')
-    await apiService.request('/library/add', {
-      method: 'POST',
-      body: JSON.stringify(metadata),
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    })
+    await apiService.addToLibrary(metadata)
     
     console.log('Successfully added to library')
     success(`"${metadata.title}" has been added to your library!`)
     
     // Mark this result as added
     addedResults.value.add(result.id)
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to add audiobook:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error)
     
     // Check if it's a conflict (already exists)
-    if (error.message?.includes('409') || error.message?.includes('Conflict')) {
+    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
       warning('This audiobook is already in your library.')
     } else {
       showError('Failed to add audiobook. Please try again.')

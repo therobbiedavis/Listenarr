@@ -88,39 +88,65 @@
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import NotificationModal from '@/components/NotificationModal.vue'
 import { useNotification } from '@/composables/useNotification'
+import { useDownloadsStore } from '@/stores/downloads'
+import { signalRService } from '@/services/signalr'
 import { apiService } from '@/services/api'
+import type { QueueItem } from '@/types'
 
 const { notification, close: closeNotification } = useNotification()
+const downloadsStore = useDownloadsStore()
 
 // Reactive state for badges and counters
 const notificationCount = ref(0)
-const activityCount = ref(0)
+const queueItems = ref<QueueItem[]>([])
 const wantedCount = ref(0)
 const systemIssues = ref(0)
 
-let badgeRefreshInterval: number | undefined
+// Activity count: combines downloads (SignalR) + queue (SignalR)
+// All real-time, no polling!
+const activityCount = computed(() => {
+  const downloadsActive = downloadsStore.activeDownloads.length
+  const queueActive = queueItems.value.filter(item =>
+    item.status === 'downloading' ||
+    item.status === 'paused' ||
+    item.status === 'queued'
+  ).length
+  
+  // Count DDL downloads separately (they never appear in queue)
+  const ddlDownloads = downloadsStore.activeDownloads.filter(d => d.downloadClientId === 'DDL').length
+  
+  // Count external client downloads (may be in both downloads and queue)
+  const externalDownloads = downloadsActive - ddlDownloads
+  
+  // Total = DDL (unique) + max(external in downloads, external in queue)
+  // This avoids double-counting external clients that appear in both places
+  const count = ddlDownloads + Math.max(externalDownloads, queueActive)
+  
+  console.log('[App Badge] Activity:', {
+    ddl: ddlDownloads,
+    externalDownloads: externalDownloads,
+    queueActive: queueActive,
+    total: count
+  })
+  return count
+})
 
-// Fetch badge counts
-const refreshBadges = async () => {
+let wantedBadgeRefreshInterval: number | undefined
+let unsubscribeQueue: (() => void) | null = null
+
+// Fetch wanted badge count (library changes less frequently - minimal polling)
+const refreshWantedBadge = async () => {
   try {
-    // Activity badge: count active downloads (downloading, paused, queued)
-    const queue = await apiService.getQueue()
-    activityCount.value = queue.filter(item => 
-      item.status === 'downloading' || 
-      item.status === 'paused' || 
-      item.status === 'queued'
-    ).length
-
-    // Wanted badge: count monitored audiobooks without files (matching WantedView logic)
+    // Wanted badge: count monitored audiobooks without files
     const library = await apiService.getLibrary()
     wantedCount.value = library.filter(book => 
       book.monitored && (!book.filePath || book.filePath.trim() === '')
     ).length
   } catch (err) {
-    console.error('Failed to refresh badges:', err)
+    console.error('Failed to refresh wanted badge:', err)
   }
 }
 
@@ -133,15 +159,41 @@ const toggleNotifications = () => {
   console.log('Toggle notifications')
 }
 
-// Poll badge counts every 10 seconds
-onMounted(() => {
-  refreshBadges()
-  badgeRefreshInterval = window.setInterval(refreshBadges, 10000)
+// Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
+onMounted(async () => {
+  console.log('[App] Initializing real-time updates via SignalR...')
+  
+  // Load initial downloads
+  await downloadsStore.loadDownloads()
+  
+  // Subscribe to queue updates via SignalR (real-time, no polling!)
+  unsubscribeQueue = signalRService.onQueueUpdate((queue) => {
+    console.log('[App] Received queue update via SignalR:', queue.length, 'items')
+    queueItems.value = queue
+  })
+  
+  // Fetch initial queue state
+  try {
+    const initialQueue = await apiService.getQueue()
+    queueItems.value = initialQueue
+  } catch (err) {
+    console.error('[App] Failed to fetch initial queue:', err)
+  }
+  
+  // Only poll "Wanted" badge (library changes infrequently)
+  refreshWantedBadge()
+  wantedBadgeRefreshInterval = window.setInterval(refreshWantedBadge, 60000) // Every minute
+  
+  console.log('[App] ✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
 })
 
 onUnmounted(() => {
-  if (badgeRefreshInterval) {
-    clearInterval(badgeRefreshInterval)
+  // Clean up subscriptions
+  if (unsubscribeQueue) {
+    unsubscribeQueue()
+  }
+  if (wantedBadgeRefreshInterval) {
+    clearInterval(wantedBadgeRefreshInterval)
   }
 })
 </script>

@@ -11,6 +11,7 @@ export interface SearchResult {
   torrentUrl: string
   nzbUrl: string
   source: string
+  downloadType: string // "Torrent", "Usenet", or "DDL"
   publishedDate: string
   quality: string
   format: string
@@ -33,7 +34,7 @@ export interface Download {
   artist: string
   album: string
   originalUrl: string
-  status: 'Queued' | 'Downloading' | 'Completed' | 'Failed' | 'Processing' | 'Ready'
+  status: 'Queued' | 'Downloading' | 'Paused' | 'Completed' | 'Failed' | 'Processing' | 'Ready'
   progress: number
   totalSize: number
   downloadedSize: number
@@ -43,7 +44,7 @@ export interface Download {
   completedAt?: string
   errorMessage?: string
   downloadClientId: string
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>
 }
 
 export interface QueueItem {
@@ -98,7 +99,7 @@ export interface DownloadClientConfiguration {
   downloadPath: string
   useSSL: boolean
   isEnabled: boolean
-  settings: Record<string, any>
+  settings: Record<string, unknown>
 }
 
 export interface ApplicationSettings {

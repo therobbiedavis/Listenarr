@@ -169,6 +169,10 @@ async function search() {
   totalIndexers.value = 0
 
   try {
+    // Get count of enabled indexers first
+    const enabledIndexers = await apiService.getEnabledIndexers()
+    totalIndexers.value = enabledIndexers.length
+    
     // Build search query from title and author
     const query = buildSearchQuery()
     
@@ -176,9 +180,8 @@ async function search() {
     const searchResults = await apiService.searchIndexers(query)
     results.value = searchResults
     
-    // Update progress (we don't track individual indexer progress yet)
-    totalIndexers.value = 1
-    searchedIndexers.value = 1
+    // Mark all indexers as searched when complete
+    searchedIndexers.value = totalIndexers.value
     
   } catch (err) {
     console.error('Manual search failed:', err)
@@ -207,18 +210,48 @@ async function downloadResult(result: SearchResult) {
   downloading.value[result.id] = true
   
   try {
-    const response = await apiService.sendToDownloadClient(result)
-    console.log('Download started:', response)
-    emit('downloaded', result)
+    // Check if this is a DDL
+    const isDDL = getSourceType(result) === 'ddl'
     
-    // Show success feedback briefly, then remove
-    setTimeout(() => {
-      delete downloading.value[result.id]
-    }, 2000)
+    if (isDDL) {
+      // For DDL, start download in background and add to activity
+      console.log('Starting DDL download:', result.title)
+      console.log('Download type:', result.downloadType)
+      console.log('Download URL:', result.torrentUrl)
+      
+      const response = await apiService.sendToDownloadClient(result)
+      console.log('DDL download started:', response)
+      
+      // Add to activity/downloads view (will be tracked there)
+      // Show success message
+      emit('downloaded', result)
+      
+      // Show feedback briefly
+      setTimeout(() => {
+        delete downloading.value[result.id]
+      }, 1000)
+    } else {
+      // For torrents/NZB, send to download client
+      const response = await apiService.sendToDownloadClient(result)
+      console.log('Download started:', response)
+      emit('downloaded', result)
+      
+      // Show success feedback briefly, then remove
+      setTimeout(() => {
+        delete downloading.value[result.id]
+      }, 2000)
+    }
   } catch (err) {
     console.error('Download failed:', err)
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-    alert(`Download failed: ${errorMessage}`)
+    
+    // Show error in alert with more context
+    let userMessage = `Download failed: ${errorMessage}`
+    if (errorMessage.includes('Output path not configured')) {
+      userMessage = 'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
+    }
+    
+    alert(userMessage)
     delete downloading.value[result.id]
   }
 }
@@ -228,6 +261,12 @@ function close() {
 }
 
 function getSourceType(result: SearchResult): string {
+  // Check downloadType first if it's set
+  if (result.downloadType) {
+    return result.downloadType.toLowerCase()
+  }
+  
+  // Fallback to legacy detection logic
   // Check for torrent indicators
   if (result.magnetLink || result.torrentUrl) {
     return 'torrent'
@@ -236,7 +275,7 @@ function getSourceType(result: SearchResult): string {
   if (result.nzbUrl) {
     return 'nzb'
   }
-  // Fallback: check source name
+  // Check source name
   if (result.source?.toLowerCase().includes('torrent')) {
     return 'torrent'
   }
@@ -524,6 +563,16 @@ function formatSize(bytes: number): string {
 
 .source-badge.torrent {
   background-color: #2ecc71;
+  color: white;
+}
+
+.source-badge.ddl {
+  background-color: #9b59b6;
+  color: white;
+}
+
+.source-badge.usenet {
+  background-color: #3498db;
   color: white;
 }
 

@@ -29,19 +29,22 @@ namespace Listenarr.Api.Services
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<DownloadService> _logger;
         private readonly HttpClient _httpClient;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
             IConfigurationService configurationService,
             ListenArrDbContext dbContext,
             ILogger<DownloadService> logger,
-            HttpClient httpClient)
+            HttpClient httpClient,
+            IServiceScopeFactory serviceScopeFactory)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
             _dbContext = dbContext;
             _logger = logger;
             _httpClient = httpClient;
+            _serviceScopeFactory = serviceScopeFactory;
         }
 
         // Placeholder implementations for existing interface methods
@@ -170,6 +173,23 @@ namespace Listenarr.Api.Services
 
         public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null)
         {
+            _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}", 
+                searchResult.Title, 
+                searchResult.DownloadType ?? "(null)", 
+                searchResult.TorrentUrl ?? "(null)");
+            
+            // Check if this is a DDL (Direct Download Link) - handle it differently
+            // Use case-insensitive comparison in case of serialization casing issues
+            if (!string.IsNullOrEmpty(searchResult.DownloadType) && 
+                searchResult.DownloadType.Equals("DDL", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Processing DDL for: {Title}", searchResult.Title);
+                return await DownloadDirectlyAsync(searchResult);
+            }
+            
+            _logger.LogInformation("Not a DDL, processing as torrent/usenet. DownloadType was: '{DownloadType}'", searchResult.DownloadType);
+        
+
             // If no specific client provided, auto-select based on result type
             if (downloadClientId == null)
             {
@@ -252,6 +272,27 @@ namespace Listenarr.Api.Services
 
         private bool IsTorrentResult(SearchResult result)
         {
+            // Check DownloadType first if it's set
+            if (!string.IsNullOrEmpty(result.DownloadType))
+            {
+                if (result.DownloadType == "DDL")
+                {
+                    _logger.LogDebug("Result identified as DDL (DownloadType set): {Title}", result.Title);
+                    return false; // DDL is not a torrent
+                }
+                else if (result.DownloadType == "Torrent")
+                {
+                    _logger.LogDebug("Result identified as Torrent (DownloadType set): {Title}", result.Title);
+                    return true;
+                }
+                else if (result.DownloadType == "Usenet")
+                {
+                    _logger.LogDebug("Result identified as Usenet (DownloadType set): {Title}", result.Title);
+                    return false;
+                }
+            }
+
+            // Fallback to legacy detection logic
             // Check for NZB first - if it has an NZB URL, it's a Usenet/NZB download
             if (!string.IsNullOrEmpty(result.NzbUrl))
             {
@@ -1010,6 +1051,211 @@ namespace Listenarr.Api.Services
 
             _dbContext.History.Add(historyEntry);
             await _dbContext.SaveChangesAsync();
+        }
+
+        private async Task<string> DownloadDirectlyAsync(SearchResult searchResult)
+        {
+            var downloadId = Guid.NewGuid().ToString();
+            
+            try
+            {
+                // Get the download path from application settings
+                var appSettings = await _configurationService.GetApplicationSettingsAsync();
+                if (appSettings == null || string.IsNullOrEmpty(appSettings.OutputPath))
+                {
+                    throw new Exception("Output path not configured. Please configure it in Settings > Download Paths.");
+                }
+
+                var downloadPath = appSettings.OutputPath;
+                if (!Directory.Exists(downloadPath))
+                {
+                    _logger.LogInformation("Creating download directory: {Path}", downloadPath);
+                    Directory.CreateDirectory(downloadPath);
+                }
+
+                // Get the download URL (stored in TorrentUrl field for DDL)
+                var downloadUrl = searchResult.TorrentUrl;
+                if (string.IsNullOrEmpty(downloadUrl))
+                {
+                    throw new Exception("No download URL found for DDL result");
+                }
+
+                // Extract filename from URL or use title with format extension
+                var uri = new Uri(downloadUrl);
+                var fileName = Path.GetFileName(Uri.UnescapeDataString(uri.LocalPath));
+                if (string.IsNullOrEmpty(fileName) || !fileName.Contains('.'))
+                {
+                    // Fallback: use title and format
+                    var extension = searchResult.Format?.ToLower() switch
+                    {
+                        "librivox apple audiobook" => ".m4b",
+                        "m4b" => ".m4b",
+                        "128kbps mp3" => ".mp3",
+                        "vbr mp3" => ".mp3",
+                        "mp3" => ".mp3",
+                        "flac" => ".flac",
+                        "ogg vorbis" => ".ogg",
+                        "ogg" => ".ogg",
+                        "opus" => ".opus",
+                        "64kbps mp3" => ".mp3",
+                        _ => ".audio"
+                    };
+                    fileName = $"{SanitizeFileName(searchResult.Title)}{extension}";
+                }
+
+                var filePath = Path.Combine(downloadPath, fileName);
+                
+                // Create Download record in database
+                var download = new Download
+                {
+                    Id = downloadId,
+                    Title = searchResult.Title,
+                    Artist = searchResult.Artist,
+                    Album = searchResult.Album,
+                    OriginalUrl = downloadUrl,
+                    Status = DownloadStatus.Downloading,
+                    Progress = 0,
+                    TotalSize = searchResult.Size,
+                    DownloadedSize = 0,
+                    DownloadPath = filePath,
+                    FinalPath = filePath,
+                    StartedAt = DateTime.UtcNow,
+                    DownloadClientId = "DDL",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        { "Format", searchResult.Format ?? "Unknown" },
+                        { "Source", searchResult.Source ?? "Unknown" },
+                        { "DownloadType", "DDL" }
+                    }
+                };
+
+                _dbContext.Downloads.Add(download);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Starting DDL download [{DownloadId}]: {Title} from {Url}", downloadId, searchResult.Title, downloadUrl);
+                _logger.LogInformation("Saving to: {FilePath}", filePath);
+
+                // Download the file with progress tracking (background task)
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Create a new HttpClient for the background task to avoid disposal issues
+                        using var httpClient = new HttpClient();
+                        httpClient.Timeout = TimeSpan.FromHours(2); // Allow up to 2 hours for large files
+                        
+                        using (var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+                        {
+                            response.EnsureSuccessStatusCode();
+
+                            var totalBytes = response.Content.Headers.ContentLength ?? searchResult.Size;
+                            var downloadedBytes = 0L;
+
+                            using (var contentStream = await response.Content.ReadAsStreamAsync())
+                            using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                            {
+                                var buffer = new byte[8192];
+                                var lastProgressUpdate = DateTime.UtcNow;
+
+                                while (true)
+                                {
+                                    var bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length);
+                                    if (bytesRead == 0) break;
+
+                                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                                    downloadedBytes += bytesRead;
+
+                                    // Update database progress every 5 seconds
+                                    if ((DateTime.UtcNow - lastProgressUpdate).TotalSeconds >= 5)
+                                    {
+                                        var progress = totalBytes > 0 ? (decimal)((downloadedBytes * 100) / totalBytes) : 0;
+                                        
+                                        // Create a new scope for database operations
+                                        using (var scope = _serviceScopeFactory.CreateScope())
+                                        {
+                                            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                                            var downloadToUpdate = await dbContext.Downloads.FindAsync(downloadId);
+                                            if (downloadToUpdate != null)
+                                            {
+                                                downloadToUpdate.DownloadedSize = downloadedBytes;
+                                                downloadToUpdate.Progress = progress;
+                                                dbContext.Downloads.Update(downloadToUpdate);
+                                                await dbContext.SaveChangesAsync();
+                                            }
+                                        }
+
+                                        _logger.LogInformation("DDL download [{DownloadId}] progress: {Progress}% ({Downloaded}/{Total} MB)", 
+                                            downloadId, (int)progress, downloadedBytes / 1024 / 1024, totalBytes / 1024 / 1024);
+                                        lastProgressUpdate = DateTime.UtcNow;
+                                    }
+                                }
+                            }
+                        }
+
+                        var fileInfo = new FileInfo(filePath);
+                        
+                        // Create a new scope for final database update
+                        using (var scope = _serviceScopeFactory.CreateScope())
+                        {
+                            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                            var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                            if (completedDownload != null)
+                            {
+                                completedDownload.Status = DownloadStatus.Completed;
+                                completedDownload.Progress = 100;
+                                completedDownload.DownloadedSize = fileInfo.Length;
+                                completedDownload.CompletedAt = DateTime.UtcNow;
+                                dbContext.Downloads.Update(completedDownload);
+                                await dbContext.SaveChangesAsync();
+                            }
+                        }
+
+                        _logger.LogInformation("DDL download [{DownloadId}] completed: {FileName} ({Size} MB)", 
+                            downloadId, fileName, fileInfo.Length / 1024 / 1024);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "DDL download [{DownloadId}] failed: {Title}", downloadId, searchResult.Title);
+                        
+                        // Create a new scope for error update
+                        using (var scope = _serviceScopeFactory.CreateScope())
+                        {
+                            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                            var failedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                            if (failedDownload != null)
+                            {
+                                failedDownload.Status = DownloadStatus.Failed;
+                                failedDownload.ErrorMessage = ex.Message;
+                                dbContext.Downloads.Update(failedDownload);
+                                await dbContext.SaveChangesAsync();
+                            }
+                        }
+                    }
+                });
+
+                // Return immediately with download ID
+                return downloadId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error starting DDL download [{DownloadId}]: {Title}", downloadId, searchResult.Title);
+                throw new Exception($"Failed to start download: {ex.Message}", ex);
+            }
+        }
+
+        private string SanitizeFileName(string fileName)
+        {
+            // Remove invalid characters from filename
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var sanitized = new string(fileName.Select(c => invalidChars.Contains(c) ? '_' : c).ToArray());
+            
+            // Limit length to 200 characters
+            if (sanitized.Length > 200)
+            {
+                sanitized = sanitized.Substring(0, 200);
+            }
+            
+            return sanitized;
         }
     }
 }

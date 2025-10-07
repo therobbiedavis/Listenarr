@@ -163,8 +163,8 @@ const browseDirectory = async (path: string) => {
     currentPath.value = response.currentPath
     parentPath.value = response.parentPath
     items.value = response.items
-  } catch (err: any) {
-    error.value = err.message || 'Failed to browse directory'
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Failed to browse directory'
     console.error('Error browsing directory:', err)
   } finally {
     isLoading.value = false

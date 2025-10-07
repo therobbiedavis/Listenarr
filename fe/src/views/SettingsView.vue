@@ -70,7 +70,7 @@
               <div class="indexer-info">
                 <h4>{{ indexer.name }}</h4>
                 <span class="indexer-type" :class="indexer.type.toLowerCase()">
-                  {{ indexer.type }}
+                  {{ indexer.implementation === 'InternetArchive' ? 'DDL' : indexer.type }}
                 </span>
               </div>
               <div class="indexer-actions">

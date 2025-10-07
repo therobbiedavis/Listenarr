@@ -18,12 +18,26 @@
 
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
+using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Serialize enums as strings instead of integers for better frontend compatibility
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+
+// Add SignalR for real-time updates
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        // Serialize enums as strings for SignalR messages too
+        options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 
 // Add in-memory cache for metadata prefetch / reuse
 builder.Services.AddMemoryCache();
@@ -54,6 +68,13 @@ builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();
+
+// Register background service for download monitoring and real-time updates
+builder.Services.AddHostedService<DownloadMonitorService>();
+
+// Register background service for queue monitoring (external clients) and real-time updates
+builder.Services.AddHostedService<QueueMonitorService>();
+
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -84,7 +105,7 @@ builder.Services.AddCors(options =>
                 )
                 .AllowAnyHeader()
                 .AllowAnyMethod()
-                .AllowCredentials();
+                .AllowCredentials(); // Required for SignalR
         });
 
     // Development fallback (use cautiously). This can help diagnose unexpected origin mismatches.
@@ -135,5 +156,8 @@ else
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Map SignalR hub for real-time download updates
+app.MapHub<DownloadHub>("/hubs/downloads");
 
 app.Run();

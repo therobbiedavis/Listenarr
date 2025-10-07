@@ -22,6 +22,7 @@ namespace Listenarr.Api.Models
     {
         Queued,
         Downloading,
+        Paused,
         Completed,
         Failed,
         Processing,

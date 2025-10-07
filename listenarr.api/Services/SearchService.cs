@@ -691,7 +691,11 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
                 // Route to appropriate search method based on implementation
-                if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await SearchInternetArchiveAsync(indexer, query, category);
+                }
+                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
                 {
                     return await SearchMyAnonamouseAsync(indexer, query, category);
                 }
@@ -994,6 +998,248 @@ namespace Listenarr.Api.Services
             return $"{url}{apiPath}?{string.Join("&", queryParams)}";
         }
 
+        private async Task<List<SearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
+        {
+            try
+            {
+                _logger.LogInformation("Searching Internet Archive for: {Query}", query);
+
+                // Parse collection from AdditionalSettings (default: librivoxaudio)
+                var collection = "librivoxaudio";
+                
+                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
+                {
+                    try
+                    {
+                        var settings = JsonDocument.Parse(indexer.AdditionalSettings);
+                        if (settings.RootElement.TryGetProperty("collection", out var collectionElem))
+                        {
+                            var parsedCollection = collectionElem.GetString();
+                            if (!string.IsNullOrEmpty(parsedCollection))
+                                collection = parsedCollection;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse Internet Archive settings, using default collection");
+                    }
+                }
+
+                _logger.LogDebug("Using Internet Archive collection: {Collection}", collection);
+
+                // Build search query - search in title and creator (author) fields
+                var searchQuery = $"collection:{collection} AND (title:({query}) OR creator:({query}))";
+                var searchUrl = $"https://archive.org/advancedsearch.php?q={Uri.EscapeDataString(searchQuery)}&fl=identifier,title,creator,date,downloads,item_size,description&rows=100&output=json";
+
+                _logger.LogInformation("Internet Archive search URL: {Url}", searchUrl);
+
+                var response = await _httpClient.GetAsync(searchUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Internet Archive returned status {Status}", response.StatusCode);
+                    return new List<SearchResult>();
+                }
+
+                var jsonResponse = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug("Internet Archive response length: {Length}", jsonResponse.Length);
+                
+                var searchResults = await ParseInternetArchiveSearchResponse(jsonResponse, indexer);
+                
+                _logger.LogInformation("Internet Archive returned {Count} results", searchResults.Count);
+                return searchResults;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching Internet Archive indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private async Task<List<SearchResult>> ParseInternetArchiveSearchResponse(string jsonResponse, Indexer indexer)
+        {
+            var results = new List<SearchResult>();
+
+            try
+            {
+                _logger.LogInformation("Parsing Internet Archive response, length: {Length}", jsonResponse.Length);
+                
+                var doc = JsonDocument.Parse(jsonResponse);
+                
+                if (!doc.RootElement.TryGetProperty("response", out var responseObj))
+                {
+                    _logger.LogWarning("Internet Archive response missing 'response' object");
+                    return results;
+                }
+
+                if (!responseObj.TryGetProperty("docs", out var docsArray))
+                {
+                    _logger.LogWarning("Internet Archive response missing 'docs' array");
+                    return results;
+                }
+
+                _logger.LogInformation("Found {Count} Internet Archive items in response", docsArray.GetArrayLength());
+
+                // Limit to first 20 results to avoid timeout
+                var itemsToProcess = Math.Min(20, docsArray.GetArrayLength());
+                _logger.LogInformation("Processing first {Count} of {Total} Internet Archive items", itemsToProcess, docsArray.GetArrayLength());
+
+                var processedCount = 0;
+                foreach (var item in docsArray.EnumerateArray())
+                {
+                    if (processedCount >= itemsToProcess)
+                    {
+                        break;
+                    }
+                    processedCount++;
+
+                    try
+                    {
+                        var identifier = item.TryGetProperty("identifier", out var idElem) ? idElem.GetString() : "";
+                        var title = item.TryGetProperty("title", out var titleElem) ? titleElem.GetString() : "";
+                        var creator = item.TryGetProperty("creator", out var creatorElem) ? creatorElem.GetString() : "";
+                        var itemSize = item.TryGetProperty("item_size", out var sizeElem) ? sizeElem.GetInt64() : 0;
+
+                        if (string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(title))
+                        {
+                            _logger.LogDebug("Skipping item with missing identifier or title");
+                            continue;
+                        }
+
+                        _logger.LogDebug("Fetching metadata for {Identifier}", identifier);
+
+                        // Fetch detailed metadata to get file information
+                        var metadataUrl = $"https://archive.org/metadata/{identifier}";
+                        var metadataResponse = await _httpClient.GetAsync(metadataUrl);
+                        
+                        if (!metadataResponse.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("Failed to fetch metadata for {Identifier}", identifier);
+                            continue;
+                        }
+
+                        var metadataJson = await metadataResponse.Content.ReadAsStringAsync();
+                        var audioFile = GetBestAudioFile(metadataJson, identifier);
+
+                        if (audioFile == null)
+                        {
+                            _logger.LogDebug("No suitable audio file found for {Identifier}", identifier);
+                            continue;
+                        }
+
+                        // Build download URL
+                        var downloadUrl = $"https://archive.org/download/{identifier}/{audioFile.FileName}";
+
+                        _logger.LogDebug("Found audio file for {Title}: {FileName} ({Format}, {Size} bytes)", 
+                            title, audioFile.FileName, audioFile.Format, audioFile.Size);
+
+                        results.Add(new SearchResult
+                        {
+                            Id = Guid.NewGuid().ToString(),
+                            Title = title,
+                            Artist = creator ?? "Unknown",
+                            Album = title,
+                            Category = "Audiobook",
+                            Size = audioFile.Size,
+                            Seeders = 0, // N/A for direct downloads
+                            Leechers = 0, // N/A for direct downloads
+                            TorrentUrl = downloadUrl, // Using TorrentUrl field for direct download URL
+                            DownloadType = "DDL", // Direct Download Link
+                            Format = audioFile.Format,
+                            Source = $"{indexer.Name} (Internet Archive)"
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing Internet Archive item");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error parsing Internet Archive response");
+            }
+
+            return results;
+        }
+
+        private class AudioFileInfo
+        {
+            public string FileName { get; set; } = "";
+            public string Format { get; set; } = "";
+            public long Size { get; set; }
+            public int Priority { get; set; } // Lower = better
+        }
+
+        private AudioFileInfo? GetBestAudioFile(string metadataJson, string identifier)
+        {
+            try
+            {
+                var doc = JsonDocument.Parse(metadataJson);
+                
+                if (!doc.RootElement.TryGetProperty("files", out var filesArray))
+                {
+                    return null;
+                }
+
+                var audioFiles = new List<AudioFileInfo>();
+
+                foreach (var file in filesArray.EnumerateArray())
+                {
+                    var fileName = file.TryGetProperty("name", out var nameElem) ? nameElem.GetString() : "";
+                    var format = file.TryGetProperty("format", out var formatElem) ? formatElem.GetString() : "";
+                    
+                    // Size can be either a string or a number in Internet Archive API
+                    long size = 0;
+                    if (file.TryGetProperty("size", out var sizeElem))
+                    {
+                        if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            long.TryParse(sizeElem.GetString(), out size);
+                        }
+                        else if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            size = sizeElem.GetInt64();
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(fileName) || string.IsNullOrEmpty(format))
+                        continue;
+
+                    // Assign priority based on format (lower = better)
+                    int priority = format switch
+                    {
+                        "LibriVox Apple Audiobook" => 1,  // M4B - best quality, multi-chapter
+                        "M4B" => 1,
+                        "128Kbps MP3" => 2,                // Good quality MP3
+                        "VBR MP3" => 3,                    // Variable bitrate MP3
+                        "Ogg Vorbis" => 4,                 // OGG format
+                        "64Kbps MP3" => 5,                 // Lower quality MP3
+                        _ => int.MaxValue                  // Unknown format - lowest priority
+                    };
+
+                    // Only include known audio formats
+                    if (priority < int.MaxValue)
+                    {
+                        audioFiles.Add(new AudioFileInfo
+                        {
+                            FileName = fileName,
+                            Format = format,
+                            Size = size,
+                            Priority = priority
+                        });
+                    }
+                }
+
+                // Return the highest priority (lowest priority number) audio file
+                return audioFiles.OrderBy(f => f.Priority).ThenByDescending(f => f.Size).FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error parsing Internet Archive metadata for {Identifier}", identifier);
+                return null;
+            }
+        }
+
         private List<SearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
         {
             var results = new List<SearchResult>();
@@ -1176,6 +1422,16 @@ namespace Listenarr.Api.Services
                             !string.IsNullOrEmpty(result.TorrentUrl) || 
                             !string.IsNullOrEmpty(result.NzbUrl))
                         {
+                            // Set download type based on what's available
+                            if (!string.IsNullOrEmpty(result.NzbUrl))
+                            {
+                                result.DownloadType = "Usenet";
+                            }
+                            else if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
+                            {
+                                result.DownloadType = "Torrent";
+                            }
+                            
                             results.Add(result);
                         }
                         else
