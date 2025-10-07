@@ -199,12 +199,48 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // Try to parse as XML to verify it's a valid Torznab/Newznab response
-                var doc = System.Xml.Linq.XDocument.Parse(content);
-                var capsElement = doc.Root?.Element("caps");
-                
-                if (capsElement == null)
+                System.Xml.Linq.XDocument doc;
+                try
                 {
-                    throw new Exception("Invalid response: no caps element found");
+                    // Parse XML with more lenient settings
+                    var settings = new System.Xml.XmlReaderSettings
+                    {
+                        DtdProcessing = System.Xml.DtdProcessing.Ignore,
+                        XmlResolver = null,
+                        IgnoreWhitespace = true,
+                        IgnoreComments = true
+                    };
+
+                    using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(content), settings))
+                    {
+                        doc = System.Xml.Linq.XDocument.Load(reader);
+                    }
+                }
+                catch (System.Xml.XmlException xmlEx)
+                {
+                    _logger.LogError(xmlEx, "XML parsing error at Line {Line}, Position {Position}", 
+                        xmlEx.LineNumber, xmlEx.LinePosition);
+                    
+                    // Log context around the error
+                    var lines = content.Split('\n');
+                    if (xmlEx.LineNumber > 0 && xmlEx.LineNumber <= lines.Length)
+                    {
+                        var startLine = Math.Max(0, xmlEx.LineNumber - 3);
+                        var endLine = Math.Min(lines.Length - 1, xmlEx.LineNumber + 2);
+                        var context = string.Join("\n", lines[startLine..(endLine + 1)]);
+                        _logger.LogError("XML context:\n{Context}", context);
+                    }
+                    
+                    throw new Exception($"Invalid XML response: {xmlEx.Message}");
+                }
+                
+                // The root element should be 'caps' for Torznab/Newznab
+                var capsElement = doc.Root;
+                
+                if (capsElement == null || capsElement.Name.LocalName != "caps")
+                {
+                    _logger.LogWarning("Unexpected root element: {RootElement}", capsElement?.Name.LocalName ?? "null");
+                    throw new Exception($"Invalid response: expected 'caps' root element, got '{capsElement?.Name.LocalName ?? "null"}'");
                 }
 
                 // Extract capabilities info

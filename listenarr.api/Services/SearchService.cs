@@ -690,6 +690,27 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
+                // Route to appropriate search method based on implementation
+                if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await SearchMyAnonamouseAsync(indexer, query, category);
+                }
+                else
+                {
+                    return await SearchTorznabNewznabAsync(indexer, query, category);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private async Task<List<SearchResult>> SearchTorznabNewznabAsync(Indexer indexer, string query, string? category)
+        {
+            try
+            {
                 // Build Torznab/Newznab API URL
                 var url = BuildTorznabUrl(indexer, query, category);
                 _logger.LogDebug("Indexer API URL: {Url}", url);
@@ -712,9 +733,227 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
+                _logger.LogError(ex, "Error searching Torznab/Newznab indexer {Name}", indexer.Name);
                 return new List<SearchResult>();
             }
+        }
+
+        private async Task<List<SearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category)
+        {
+            try
+            {
+                _logger.LogInformation("Searching MyAnonamouse for: {Query}", query);
+
+                // Parse username and password from AdditionalSettings
+                var username = "";
+                var password = "";
+                
+                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
+                {
+                    try
+                    {
+                        var settings = JsonDocument.Parse(indexer.AdditionalSettings);
+                        if (settings.RootElement.TryGetProperty("username", out var userElem))
+                            username = userElem.GetString() ?? "";
+                        if (settings.RootElement.TryGetProperty("password", out var passElem))
+                            password = passElem.GetString() ?? "";
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to parse MyAnonamouse settings");
+                        return new List<SearchResult>();
+                    }
+                }
+
+                if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+                {
+                    _logger.LogWarning("MyAnonamouse indexer {Name} missing username or password", indexer.Name);
+                    return new List<SearchResult>();
+                }
+
+                // Build MyAnonamouse API request
+                var url = $"{indexer.Url.TrimEnd('/')}/tor/js/loadSearchJSONbasic.php";
+                
+                var requestBody = new
+                {
+                    tor = new
+                    {
+                        text = query,
+                        srchIn = new[] { "title", "author", "narrator", "series" },
+                        searchType = "all",
+                        searchIn = "torrents",
+                        cat = new[] { "0" }, // 0 = all categories
+                        main_cat = new[] { "13" }, // 13 = AudioBooks
+                        browseFlagsHideVsShow = "0",
+                        startDate = "",
+                        endDate = "",
+                        hash = "",
+                        sortType = "default",
+                        startNumber = "0",
+                        perpage = 100
+                    }
+                };
+
+                var jsonContent = new StringContent(
+                    JsonSerializer.Serialize(requestBody),
+                    System.Text.Encoding.UTF8,
+                    "application/json"
+                );
+
+                // Create request with basic auth
+                var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = jsonContent
+                };
+
+                var authBytes = System.Text.Encoding.UTF8.GetBytes($"{username}:{password}");
+                var authHeader = Convert.ToBase64String(authBytes);
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+
+                _logger.LogDebug("MyAnonamouse API URL: {Url}", url);
+
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
+                    return new List<SearchResult>();
+                }
+
+                var jsonResponse = await response.Content.ReadAsStringAsync();
+                var results = ParseMyAnonamouseResponse(jsonResponse, indexer);
+                
+                _logger.LogInformation("MyAnonamouse returned {Count} results", results.Count);
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching MyAnonamouse indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private List<SearchResult> ParseMyAnonamouseResponse(string jsonResponse, Indexer indexer)
+        {
+            var results = new List<SearchResult>();
+
+            try
+            {
+                var doc = JsonDocument.Parse(jsonResponse);
+                
+                if (!doc.RootElement.TryGetProperty("data", out var dataArray))
+                {
+                    return results;
+                }
+
+                foreach (var item in dataArray.EnumerateArray())
+                {
+                    try
+                    {
+                        var id = item.TryGetProperty("id", out var idElem) ? idElem.GetString() : "";
+                        var title = item.TryGetProperty("title", out var titleElem) ? titleElem.GetString() : "";
+                        var sizeStr = item.TryGetProperty("size", out var sizeElem) ? sizeElem.GetString() : "0";
+                        var seeders = item.TryGetProperty("seeders", out var seedElem) ? seedElem.GetInt32() : 0;
+                        var leechers = item.TryGetProperty("leechers", out var leechElem) ? leechElem.GetInt32() : 0;
+                        var dlHash = item.TryGetProperty("dl", out var dlElem) ? dlElem.GetString() : "";
+                        var category = item.TryGetProperty("catname", out var catElem) ? catElem.GetString() : "";
+                        var tags = item.TryGetProperty("tags", out var tagsElem) ? tagsElem.GetString() : "";
+
+                        if (string.IsNullOrEmpty(title))
+                            continue;
+
+                        // Parse size
+                        long size = 0;
+                        if (long.TryParse(sizeStr, out var parsedSize))
+                        {
+                            size = parsedSize;
+                        }
+
+                        // Extract author from author_info JSON
+                        string? author = null;
+                        if (item.TryGetProperty("author_info", out var authorInfo))
+                        {
+                            var authorJson = authorInfo.GetString();
+                            if (!string.IsNullOrEmpty(authorJson))
+                            {
+                                try
+                                {
+                                    var authorDoc = JsonDocument.Parse(authorJson);
+                                    var authors = new List<string>();
+                                    foreach (var prop in authorDoc.RootElement.EnumerateObject())
+                                    {
+                                        authors.Add(prop.Value.GetString() ?? "");
+                                    }
+                                    author = string.Join(", ", authors.Where(a => !string.IsNullOrEmpty(a)));
+                                }
+                                catch { }
+                            }
+                        }
+
+                        // Extract narrator from narrator_info JSON
+                        string? narrator = null;
+                        if (item.TryGetProperty("narrator_info", out var narratorInfo))
+                        {
+                            var narratorJson = narratorInfo.GetString();
+                            if (!string.IsNullOrEmpty(narratorJson))
+                            {
+                                try
+                                {
+                                    var narratorDoc = JsonDocument.Parse(narratorJson);
+                                    var narrators = new List<string>();
+                                    foreach (var prop in narratorDoc.RootElement.EnumerateObject())
+                                    {
+                                        narrators.Add(prop.Value.GetString() ?? "");
+                                    }
+                                    narrator = string.Join(", ", narrators.Where(n => !string.IsNullOrEmpty(n)));
+                                }
+                                catch { }
+                            }
+                        }
+
+                        // Detect quality and format from tags
+                        var quality = DetectQualityFromTags(tags ?? "");
+                        var format = DetectFormatFromTags(tags ?? "");
+
+                        // Build download URL
+                        var downloadUrl = "";
+                        if (!string.IsNullOrEmpty(dlHash))
+                        {
+                            downloadUrl = $"https://www.myanonamouse.net/tor/download.php/{dlHash}";
+                        }
+
+                        var result = new SearchResult
+                        {
+                            Id = id ?? Guid.NewGuid().ToString(),
+                            Title = title ?? "Unknown",
+                            Artist = author ?? "Unknown Author",
+                            Album = narrator != null ? $"Narrated by {narrator}" : "Unknown",
+                            Category = category ?? "Audiobook",
+                            Size = size,
+                            Seeders = seeders,
+                            Leechers = leechers,
+                            Source = indexer.Name,
+                            PublishedDate = DateTime.UtcNow,
+                            Quality = quality,
+                            Format = format,
+                            TorrentUrl = downloadUrl,
+                            MagnetLink = "",
+                            NzbUrl = ""
+                        };
+
+                        results.Add(result);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse MyAnonamouse result item");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to parse MyAnonamouse response");
+            }
+
+            return results;
         }
 
         private string BuildTorznabUrl(Indexer indexer, string query, string? category)
@@ -761,7 +1000,25 @@ namespace Listenarr.Api.Services
 
             try
             {
-                var doc = System.Xml.Linq.XDocument.Parse(xmlContent);
+                // Log first 500 chars of XML for debugging
+                var preview = xmlContent.Length > 500 ? xmlContent.Substring(0, 500) + "..." : xmlContent;
+                _logger.LogDebug("Parsing XML from {IndexerName}: {Preview}", indexer.Name, preview);
+
+                // Parse XML with settings that are more lenient
+                var settings = new System.Xml.XmlReaderSettings
+                {
+                    DtdProcessing = System.Xml.DtdProcessing.Ignore,
+                    XmlResolver = null,
+                    IgnoreWhitespace = true,
+                    IgnoreComments = true
+                };
+
+                System.Xml.Linq.XDocument doc;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlContent), settings))
+                {
+                    doc = System.Xml.Linq.XDocument.Load(reader);
+                }
+
                 var channel = doc.Root?.Element("channel");
                 if (channel == null)
                 {
@@ -932,6 +1189,24 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
+            catch (System.Xml.XmlException xmlEx)
+            {
+                _logger.LogError(xmlEx, "XML parsing error from {IndexerName} at Line {Line}, Position {Position}: {Message}", 
+                    indexer.Name, xmlEx.LineNumber, xmlEx.LinePosition, xmlEx.Message);
+                
+                // Log the problematic XML content around the error
+                if (!string.IsNullOrEmpty(xmlContent))
+                {
+                    var lines = xmlContent.Split('\n');
+                    if (xmlEx.LineNumber > 0 && xmlEx.LineNumber <= lines.Length)
+                    {
+                        var startLine = Math.Max(0, xmlEx.LineNumber - 3);
+                        var endLine = Math.Min(lines.Length - 1, xmlEx.LineNumber + 2);
+                        var context = string.Join("\n", lines[startLine..(endLine + 1)]);
+                        _logger.LogError("XML context around error:\n{Context}", context);
+                    }
+                }
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error parsing Torznab XML response from {IndexerName}", indexer.Name);
@@ -1029,6 +1304,46 @@ namespace Listenarr.Api.Services
                     Format = "MP3"
                 }
             };
+        }
+
+        private string DetectQualityFromTags(string tags)
+        {
+            var lowerTags = tags.ToLower();
+            
+            if (lowerTags.Contains("flac"))
+                return "FLAC";
+            else if (lowerTags.Contains("320") || lowerTags.Contains("320kbps"))
+                return "MP3 320kbps";
+            else if (lowerTags.Contains("256") || lowerTags.Contains("256kbps"))
+                return "MP3 256kbps";
+            else if (lowerTags.Contains("192") || lowerTags.Contains("192kbps"))
+                return "MP3 192kbps";
+            else if (lowerTags.Contains("128") || lowerTags.Contains("128kbps"))
+                return "MP3 128kbps";
+            else if (lowerTags.Contains("64") || lowerTags.Contains("64kbps"))
+                return "MP3 64kbps";
+            else if (lowerTags.Contains("m4b"))
+                return "M4B";
+            else
+                return "Unknown";
+        }
+
+        private string DetectFormatFromTags(string tags)
+        {
+            var lowerTags = tags.ToLower();
+            
+            if (lowerTags.Contains("m4b"))
+                return "M4B";
+            else if (lowerTags.Contains("flac"))
+                return "FLAC";
+            else if (lowerTags.Contains("mp3"))
+                return "MP3";
+            else if (lowerTags.Contains("opus"))
+                return "OPUS";
+            else if (lowerTags.Contains("aac"))
+                return "AAC";
+            else
+                return "MP3"; // Default to MP3
         }
     }
 }

@@ -336,17 +336,33 @@ namespace Listenarr.Api.Services
                 throw new Exception("Failed to login to qBittorrent");
             }
 
+            // Get torrent URL - prefer magnet link, fall back to torrent file URL
+            var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) 
+                ? result.MagnetLink 
+                : result.TorrentUrl;
+
+            if (string.IsNullOrEmpty(torrentUrl))
+            {
+                throw new Exception("No magnet link or torrent URL found in search result");
+            }
+
+            _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
+            _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
+
             // Add torrent
             var addData = new FormUrlEncodedContent(new[]
             {
-                new KeyValuePair<string, string>("urls", result.MagnetLink ?? ""),
+                new KeyValuePair<string, string>("urls", torrentUrl),
                 new KeyValuePair<string, string>("savepath", client.DownloadPath)
             });
 
             var addResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
             if (!addResponse.IsSuccessStatusCode)
             {
-                throw new Exception("Failed to add torrent to qBittorrent");
+                var responseContent = await addResponse.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to add torrent to qBittorrent. Status: {Status}, Response: {Response}", 
+                    addResponse.StatusCode, responseContent);
+                throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode}");
             }
 
             _logger.LogInformation("Successfully sent torrent to qBittorrent");

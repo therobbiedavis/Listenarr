@@ -229,9 +229,14 @@ function close() {
 
 function getSourceType(result: SearchResult): string {
   // Check for torrent indicators
-  if (result.magnetLink) {
+  if (result.magnetLink || result.torrentUrl) {
     return 'torrent'
   }
+  // Check for NZB indicator
+  if (result.nzbUrl) {
+    return 'nzb'
+  }
+  // Fallback: check source name
   if (result.source?.toLowerCase().includes('torrent')) {
     return 'torrent'
   }

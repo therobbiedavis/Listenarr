@@ -39,6 +39,7 @@
                 <select id="implementation" v-model="formData.implementation" required>
                   <option value="Newznab">Newznab</option>
                   <option value="Torznab">Torznab</option>
+                  <option value="MyAnonamouse">MyAnonamouse</option>
                   <option value="Custom">Custom</option>
                 </select>
               </div>
@@ -51,11 +52,41 @@
                 v-model="formData.url" 
                 type="url" 
                 required 
-                placeholder="https://indexer.example.com"
+                :placeholder="formData.implementation === 'MyAnonamouse' ? 'https://www.myanonamouse.net' : 'https://indexer.example.com'"
               />
             </div>
 
-            <div class="form-group">
+            <!-- MyAnonamouse Authentication -->
+            <div v-if="formData.implementation === 'MyAnonamouse'" class="form-section">
+              <h4>Authentication</h4>
+              <div class="form-group">
+                <label for="mam-username">Username *</label>
+                <input 
+                  id="mam-username" 
+                  v-model="mamUsername" 
+                  type="text" 
+                  :required="formData.implementation === 'MyAnonamouse'"
+                  placeholder="Your MyAnonamouse username"
+                />
+              </div>
+              <div class="form-group">
+                <label for="mam-password">Password *</label>
+                <input 
+                  id="mam-password" 
+                  v-model="mamPassword" 
+                  type="password" 
+                  :required="formData.implementation === 'MyAnonamouse'"
+                  placeholder="Your MyAnonamouse password"
+                />
+              </div>
+              <small class="info-text">
+                <i class="ph ph-info"></i>
+                MyAnonamouse requires your username and password for authentication. These are stored securely and only used to search the indexer.
+              </small>
+            </div>
+
+            <!-- API Key for other implementations -->
+            <div v-if="formData.implementation !== 'MyAnonamouse'" class="form-group">
               <label for="apiKey">API Key</label>
               <input 
                 id="apiKey" 
@@ -209,6 +240,10 @@ const { success, error: showError } = useNotification()
 const saving = ref(false)
 const testing = ref(false)
 
+// MyAnonamouse authentication fields
+const mamUsername = ref('')
+const mamPassword = ref('')
+
 const defaultFormData = {
   name: '',
   type: 'Torrent',
@@ -224,7 +259,8 @@ const defaultFormData = {
   priority: 25,
   minimumAge: 0,
   retention: 0,
-  maximumSize: 0
+  maximumSize: 0,
+  additionalSettings: ''
 }
 
 const formData = ref({ ...defaultFormData })
@@ -247,10 +283,26 @@ watch(() => props.editingIndexer, (newIndexer) => {
       priority: newIndexer.priority,
       minimumAge: newIndexer.minimumAge,
       retention: newIndexer.retention,
-      maximumSize: newIndexer.maximumSize
+      maximumSize: newIndexer.maximumSize,
+      additionalSettings: newIndexer.additionalSettings || ''
+    }
+    
+    // Parse MyAnonamouse credentials from additionalSettings
+    if (newIndexer.implementation === 'MyAnonamouse' && newIndexer.additionalSettings) {
+      try {
+        const settings = JSON.parse(newIndexer.additionalSettings)
+        mamUsername.value = settings.username || ''
+        mamPassword.value = settings.password || ''
+      } catch (e) {
+        console.error('Failed to parse MyAnonamouse settings:', e)
+        mamUsername.value = ''
+        mamPassword.value = ''
+      }
     }
   } else {
     formData.value = { ...defaultFormData }
+    mamUsername.value = ''
+    mamPassword.value = ''
   }
 }, { immediate: true })
 
@@ -284,13 +336,24 @@ const testConnection = async () => {
 const handleSubmit = async () => {
   saving.value = true
   try {
+    // Serialize MyAnonamouse credentials to additionalSettings
+    const submitData = { ...formData.value }
+    if (submitData.implementation === 'MyAnonamouse') {
+      submitData.additionalSettings = JSON.stringify({
+        username: mamUsername.value,
+        password: mamPassword.value
+      })
+      // Clear API key field for MyAnonamouse
+      submitData.apiKey = ''
+    }
+    
     if (props.editingIndexer) {
       // Update existing indexer
-      await updateIndexer(props.editingIndexer.id, formData.value)
+      await updateIndexer(props.editingIndexer.id, submitData)
       success('Indexer updated successfully')
     } else {
       // Create new indexer
-      await createIndexer(formData.value)
+      await createIndexer(submitData)
       success('Indexer created successfully')
     }
     
