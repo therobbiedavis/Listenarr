@@ -212,15 +212,16 @@ async function downloadResult(result: SearchResult) {
   try {
     // Check if this is a DDL
     const isDDL = getSourceType(result) === 'ddl'
+    const audiobookId = props.audiobook?.id
     
     if (isDDL) {
       // For DDL, start download in background and add to activity
       console.log('Starting DDL download:', result.title)
       console.log('Download type:', result.downloadType)
       console.log('Download URL:', result.torrentUrl)
-      console.log('Audiobook ID:', props.audiobook.id)
+      console.log('Audiobook ID:', audiobookId)
       
-      const response = await apiService.sendToDownloadClient(result, undefined, props.audiobook.id)
+      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
       console.log('DDL download started:', response)
       
       // Add to activity/downloads view (will be tracked there)
@@ -233,7 +234,7 @@ async function downloadResult(result: SearchResult) {
       }, 1000)
     } else {
       // For torrents/NZB, send to download client (also pass audiobookId for future processing)
-      const response = await apiService.sendToDownloadClient(result, undefined, props.audiobook.id)
+      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
       console.log('Download started:', response)
       emit('downloaded', result)
       

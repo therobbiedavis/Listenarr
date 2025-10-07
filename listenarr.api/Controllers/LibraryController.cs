@@ -111,7 +111,8 @@ namespace Listenarr.Api.Controllers
                 Runtime = metadata.Runtime,
                 Version = metadata.Version,
                 Explicit = metadata.Explicit,
-                Abridged = metadata.Abridged
+                Abridged = metadata.Abridged,
+                Monitored = true  // Enable monitoring by default for new audiobooks
             };
             
             await _repo.AddAsync(audiobook);

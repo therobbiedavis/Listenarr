@@ -50,5 +50,8 @@ namespace Listenarr.Api.Models
         public string? FilePath { get; set; }
         public long? FileSize { get; set; }
         public string? Quality { get; set; }
+        
+        // Quality Profile for automatic downloads
+        public int? QualityProfileId { get; set; }
     }
 }

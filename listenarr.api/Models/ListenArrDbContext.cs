@@ -29,6 +29,7 @@ namespace Listenarr.Api.Models
         public DbSet<ApiConfiguration> ApiConfigurations { get; set; }
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
         public DbSet<Download> Downloads { get; set; }
+        public DbSet<QualityProfile> QualityProfiles { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
@@ -94,6 +95,49 @@ namespace Listenarr.Api.Models
             // Download - ignore Metadata dictionary (not stored in DB for now)
             modelBuilder.Entity<Download>()
                 .Ignore(e => e.Metadata);
+
+            // QualityProfile configuration - store complex properties as JSON
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.Qualities)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<QualityDefinition>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<QualityDefinition>()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredFormats)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredWords)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.MustNotContain)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.MustContain)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredLanguages)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
         }
     }
 }

@@ -138,14 +138,31 @@ onMounted(async () => {
   loading.value = true
   await libraryStore.fetchLibrary()
   loading.value = false
+  
+  // Debug logging
+  console.log('Total audiobooks in library:', libraryStore.audiobooks.length)
+  console.log('Monitored audiobooks:', libraryStore.audiobooks.filter(a => a.monitored).length)
+  console.log('Audiobooks without files:', libraryStore.audiobooks.filter(a => !a.filePath || a.filePath.trim() === '').length)
+  console.log('Wanted audiobooks:', wantedAudiobooks.value.length)
+  
+  // Log first few audiobooks for inspection
+  if (libraryStore.audiobooks.length > 0) {
+    console.log('Sample audiobook:', libraryStore.audiobooks[0])
+  }
 })
 
 // Filter audiobooks that are monitored and missing files
 const wantedAudiobooks = computed(() => {
-  return libraryStore.audiobooks.filter(audiobook => 
-    audiobook.monitored && 
-    (!audiobook.filePath || audiobook.filePath.trim() === '')
-  )
+  // Show books that are monitored AND don't have a valid file path
+  return libraryStore.audiobooks.filter(audiobook => {
+    const isMonitored = audiobook.monitored === true
+    const hasNoFile = !audiobook.filePath || 
+                      audiobook.filePath.trim() === '' || 
+                      audiobook.filePath === 'null' ||
+                      audiobook.filePath === 'undefined'
+    
+    return isMonitored && hasNoFile
+  })
 })
 
 // Count by status (for now all are "missing")
