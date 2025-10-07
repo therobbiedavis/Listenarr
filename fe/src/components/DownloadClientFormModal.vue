@@ -330,10 +330,10 @@ const requiresApiKey = computed(() => {
 
 const getHostPlaceholder = () => {
   const placeholders: Record<string, string> = {
-    qbittorrent: 'qbittorrent.therobbiedavis.com',
-    transmission: 'transmission.therobbiedavis.com',
-    sabnzbd: 'sabnzbd.therobbiedavis.com',
-    nzbget: 'nzbget.therobbiedavis.com'
+    qbittorrent: 'qbittorrent.tld.com',
+    transmission: 'transmission.tld.com',
+    sabnzbd: 'sabnzbd.tld.com',
+    nzbget: 'nzbget.tld.com'
   }
   return placeholders[formData.value.type] || 'localhost'
 }
