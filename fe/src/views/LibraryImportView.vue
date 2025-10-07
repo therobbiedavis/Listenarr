@@ -33,7 +33,7 @@ const importFromFolder = () => {
 
 .import-options {
   display: flex;
-  justify-content: center;;
+  justify-content: center;
 }
 
 .import-card {
