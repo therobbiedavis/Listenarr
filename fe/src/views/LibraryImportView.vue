@@ -22,7 +22,7 @@ const importFromFolder = () => {
 
 <style scoped>
 .library-import-view {
-  padding: 2em;;
+  padding: 2em;
 }
 
 .page-header h1 {
