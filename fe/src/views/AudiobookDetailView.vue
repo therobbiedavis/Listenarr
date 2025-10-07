@@ -42,26 +42,22 @@
               <i class="ph ph-clock"></i>
               {{ formatRuntime(audiobook.runtime) }}
             </span>
-            <span class="rating" v-if="audiobook.rating">
-              <i class="ph ph-heart-fill"></i>
-              {{ audiobook.rating }}%
-            </span>
             <span class="genre">{{ audiobook.genres?.join(', ') || 'Audiobook' }}</span>
             <span class="year" v-if="audiobook.publishYear">{{ audiobook.publishYear }}</span>
           </div>
 
           <div class="key-details">
-            <div class="detail-item">
+            <div class="detail-item" v-if="audiobook.filePath">
               <i class="ph ph-folder"></i>
-              <span>{{ audiobook.filePath || '/server/mnt/tv/Audiobooks/' + audiobook.title }}</span>
+              <span>{{ audiobook.filePath }}</span>
             </div>
-            <div class="detail-item">
+            <div class="detail-item" v-if="audiobook.fileSize">
               <i class="ph ph-database"></i>
               <span>{{ formatFileSize(audiobook.fileSize) }}</span>
             </div>
-            <div class="detail-item">
+            <div class="detail-item" v-if="audiobook.quality">
               <i class="ph ph-speaker-high"></i>
-              <span>{{ audiobook.quality || 'HD - 720p/1080p' }}</span>
+              <span>{{ audiobook.quality }}</span>
             </div>
             <div class="detail-item" v-if="audiobook.language">
               <i class="ph ph-globe"></i>
@@ -77,10 +73,6 @@
             <span class="badge monitored" v-if="audiobook.monitored">
               <i class="ph ph-bookmark-fill"></i>
               Monitored
-            </span>
-            <span class="badge continuing" v-if="audiobook.status === 'continuing'">
-              <i class="ph ph-play"></i>
-              Continuing
             </span>
             <span class="badge language">
               <i class="ph ph-chat-circle"></i>
@@ -228,19 +220,25 @@
       <div v-if="activeTab === 'files'" class="files-content">
         <div class="files-header">
           <h3>Files</h3>
-          <button class="action-btn">
+          <button class="action-btn" v-if="audiobook.filePath" @click="openFolder">
             <i class="ph ph-folder-open"></i>
             Open Folder
           </button>
         </div>
-        <div class="file-list">
+        <div v-if="audiobook.filePath" class="file-list">
           <div class="file-item">
             <div class="file-info">
               <i class="ph ph-file-audio"></i>
-              <span class="file-name">{{ audiobook.title }}.m4b</span>
+              <span class="file-name">{{ getFileName(audiobook.filePath) }}</span>
             </div>
-            <span class="file-size">{{ formatFileSize(audiobook.fileSize) }}</span>
+            <span class="file-size" v-if="audiobook.fileSize">{{ formatFileSize(audiobook.fileSize) }}</span>
+            <span class="file-size" v-else>Unknown size</span>
           </div>
+        </div>
+        <div v-else class="empty-files">
+          <i class="ph ph-file-dashed"></i>
+          <p>No files available</p>
+          <p class="hint">This audiobook hasn't been downloaded yet</p>
         </div>
       </div>
 
@@ -248,10 +246,47 @@
       <div v-if="activeTab === 'history'" class="history-content">
         <div class="history-header">
           <h3>History</h3>
+          <button v-if="history.length > 0" class="refresh-btn" @click="loadHistory" :disabled="historyLoading">
+            <i class="ph ph-arrow-clockwise" :class="{ 'ph-spin': historyLoading }"></i>
+            Refresh
+          </button>
         </div>
-        <div class="empty-history">
+        
+        <!-- Loading State -->
+        <div v-if="historyLoading" class="history-loading">
+          <i class="ph ph-spinner ph-spin"></i>
+          <p>Loading history...</p>
+        </div>
+        
+        <!-- Error State -->
+        <div v-else-if="historyError" class="history-error">
+          <i class="ph ph-warning-circle"></i>
+          <p>{{ historyError }}</p>
+          <button class="retry-btn" @click="loadHistory">Retry</button>
+        </div>
+        
+        <!-- History List -->
+        <div v-else-if="history.length > 0" class="history-list">
+          <div v-for="entry in history" :key="entry.id" class="history-entry">
+            <div class="history-icon" :class="getEventTypeClass(entry.eventType)">
+              <i :class="getEventIcon(entry.eventType)"></i>
+            </div>
+            <div class="history-details">
+              <div class="history-event">
+                <span class="event-type">{{ entry.eventType }}</span>
+                <span v-if="entry.source" class="event-source">from {{ entry.source }}</span>
+              </div>
+              <div v-if="entry.message" class="history-message">{{ entry.message }}</div>
+              <div class="history-time">{{ formatHistoryTime(entry.timestamp) }}</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div v-else class="empty-history">
           <i class="ph ph-clock-counter-clockwise"></i>
           <p>No history available</p>
+          <p class="hint">Activity for this audiobook will appear here</p>
         </div>
       </div>
     </div>
@@ -302,11 +337,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
-import type { Audiobook } from '@/types'
+import type { Audiobook, History } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -319,6 +354,18 @@ const activeTab = ref('details')
 const showDeleteDialog = ref(false)
 const deleting = ref(false)
 const showFullDescription = ref(false)
+
+// History state
+const history = ref<History[]>([])
+const historyLoading = ref(false)
+const historyError = ref<string | null>(null)
+
+// Watch for tab changes to load history when needed
+watch(activeTab, async (newTab) => {
+  if (newTab === 'history' && audiobook.value && history.value.length === 0) {
+    await loadHistory()
+  }
+})
 
 onMounted(async () => {
   await loadAudiobook()
@@ -335,7 +382,7 @@ async function loadAudiobook() {
     if (libraryStore.audiobooks.length > 0) {
       const book = libraryStore.audiobooks.find(b => b.id === id)
       if (book) {
-        audiobook.value = { ...book, monitored: true, status: 'continuing' } as any
+        audiobook.value = book
       } else {
         error.value = 'Audiobook not found'
       }
@@ -344,7 +391,7 @@ async function loadAudiobook() {
       await libraryStore.fetchLibrary()
       const book = libraryStore.audiobooks.find(b => b.id === id)
       if (book) {
-        audiobook.value = { ...book, monitored: true, status: 'continuing' } as any
+        audiobook.value = book
       } else {
         error.value = 'Audiobook not found'
       }
@@ -363,11 +410,46 @@ function goBack() {
 
 async function refresh() {
   await loadAudiobook()
+  // Reload history if history tab is active
+  if (activeTab.value === 'history') {
+    await loadHistory()
+  }
+}
+
+async function loadHistory() {
+  if (!audiobook.value) return
+  
+  historyLoading.value = true
+  historyError.value = null
+  
+  try {
+    history.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
+    console.log('Loaded history:', history.value)
+  } catch (err) {
+    historyError.value = err instanceof Error ? err.message : 'Failed to load history'
+    console.error('Failed to load history:', err)
+  } finally {
+    historyLoading.value = false
+  }
 }
 
 function toggleMonitored() {
   if (audiobook.value) {
-    audiobook.value = { ...audiobook.value, monitored: !(audiobook.value as any).monitored } as any
+    const newMonitoredValue = !audiobook.value.monitored
+    audiobook.value = { ...audiobook.value, monitored: newMonitoredValue }
+    
+    // Persist to API
+    apiService.updateAudiobook(audiobook.value.id, { monitored: newMonitoredValue })
+      .then(() => {
+        console.log('Monitored status updated successfully')
+      })
+      .catch((err) => {
+        console.error('Failed to update monitored status:', err)
+        // Revert on error
+        if (audiobook.value) {
+          audiobook.value = { ...audiobook.value, monitored: !newMonitoredValue }
+        }
+      })
   }
 }
 
@@ -404,9 +486,83 @@ function formatRuntime(minutes: number): string {
 }
 
 function formatFileSize(bytes?: number): string {
-  if (!bytes) return '47.2 GiB'
-  const gb = bytes / (1024 * 1024 * 1024)
-  return `${gb.toFixed(1)} GiB`
+  if (!bytes || bytes === 0) return 'Unknown'
+  
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = bytes
+  let unitIndex = 0
+  
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex++
+  }
+  
+  return `${size.toFixed(1)} ${units[unitIndex]}`
+}
+
+function formatHistoryTime(timestamp: string): string {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMins / 60)
+  const diffDays = Math.floor(diffHours / 24)
+  
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`
+  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
+  if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
+  
+  return date.toLocaleDateString('en-US', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function getEventIcon(eventType: string): string {
+  const icons: Record<string, string> = {
+    'Added': 'ph ph-plus-circle',
+    'Downloaded': 'ph ph-download',
+    'Imported': 'ph ph-upload',
+    'Deleted': 'ph ph-trash',
+    'Updated': 'ph ph-pencil',
+    'Monitored': 'ph ph-bookmark',
+    'Unmonitored': 'ph ph-bookmark-simple',
+    'Grabbed': 'ph ph-hand-grabbing',
+    'Failed': 'ph ph-warning-circle'
+  }
+  return icons[eventType] || 'ph ph-circle'
+}
+
+function getEventTypeClass(eventType: string): string {
+  const classes: Record<string, string> = {
+    'Added': 'event-success',
+    'Downloaded': 'event-success',
+    'Imported': 'event-info',
+    'Deleted': 'event-danger',
+    'Updated': 'event-info',
+    'Monitored': 'event-info',
+    'Unmonitored': 'event-warning',
+    'Grabbed': 'event-info',
+    'Failed': 'event-danger'
+  }
+  return classes[eventType] || 'event-default'
+}
+
+function getFileName(filePath?: string): string {
+  if (!filePath) return 'Unknown'
+  const parts = filePath.split(/[\\/]/)
+  const fileName = parts[parts.length - 1]
+  return fileName || 'Unknown'
+}
+
+function openFolder() {
+  if (!audiobook.value?.filePath) return
+  // This would need backend support to open the folder
+  console.log('Open folder:', audiobook.value.filePath)
 }
 </script>
 
@@ -961,6 +1117,171 @@ function formatFileSize(bytes?: number): string {
 .empty-history i {
   font-size: 48px;
   margin-bottom: 12px;
+}
+
+.empty-history .hint {
+  font-size: 14px;
+  color: #555;
+  margin-top: 8px;
+}
+
+.empty-files {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #666;
+}
+
+.empty-files i {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.empty-files .hint {
+  font-size: 14px;
+  color: #555;
+  margin-top: 8px;
+}
+
+/* History Styles */
+.history-loading, .history-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #999;
+}
+
+.history-loading i {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+.history-error i {
+  font-size: 36px;
+  margin-bottom: 12px;
+  color: #e74c3c;
+}
+
+.retry-btn, .refresh-btn {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background-color: #007acc;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.retry-btn:hover, .refresh-btn:hover {
+  background-color: #005fa3;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.history-entry {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  background-color: #333;
+  border-radius: 8px;
+  border-left: 3px solid #555;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.history-entry:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.history-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.history-icon i {
+  font-size: 20px;
+}
+
+.event-success {
+  background-color: rgba(46, 204, 113, 0.2);
+  color: #2ecc71;
+}
+
+.event-info {
+  background-color: rgba(52, 152, 219, 0.2);
+  color: #3498db;
+}
+
+.event-warning {
+  background-color: rgba(241, 196, 15, 0.2);
+  color: #f1c40f;
+}
+
+.event-danger {
+  background-color: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+}
+
+.event-default {
+  background-color: rgba(149, 165, 166, 0.2);
+  color: #95a5a6;
+}
+
+.history-details {
+  flex: 1;
+}
+
+.history-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.event-type {
+  font-weight: 600;
+  color: #fff;
+  font-size: 14px;
+}
+
+.event-source {
+  font-size: 12px;
+  color: #999;
+  padding: 2px 8px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+}
+
+.history-message {
+  color: #ccc;
+  font-size: 14px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.history-time {
+  color: #777;
+  font-size: 12px;
 }
 
 .loading-container, .error-container {

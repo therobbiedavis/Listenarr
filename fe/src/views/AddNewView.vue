@@ -97,9 +97,13 @@
               <span v-if="audibleResult.abridged">Abridged</span>
             </div>
             <div class="result-actions">
-              <button class="btn btn-primary" @click="addToLibrary(audibleResult)">
-                <i class="ph ph-plus"></i>
-                Add to Library
+              <button 
+                :class="['btn', addedAsins.has(audibleResult.asin) ? 'btn-success' : 'btn-primary']"
+                @click="addToLibrary(audibleResult)"
+                :disabled="addedAsins.has(audibleResult.asin)"
+              >
+                <i :class="addedAsins.has(audibleResult.asin) ? 'ph ph-check' : 'ph ph-plus'"></i>
+                {{ addedAsins.has(audibleResult.asin) ? 'Added' : 'Add to Library' }}
               </button>
               <button class="btn btn-secondary" @click="viewDetails(audibleResult)">
                 <i class="ph ph-eye"></i>
@@ -163,9 +167,13 @@
               </div>
             </div>
             <div class="result-actions">
-              <button class="btn btn-primary" @click="selectTitleResult(book)">
-                <i class="ph ph-plus"></i>
-                Add to Library
+              <button 
+                :class="['btn', getAsin(book) && addedAsins.has(getAsin(book)!) ? 'btn-success' : 'btn-primary']"
+                @click="selectTitleResult(book)"
+                :disabled="!!(getAsin(book) && addedAsins.has(getAsin(book)!))"
+              >
+                <i :class="getAsin(book) && addedAsins.has(getAsin(book)!) ? 'ph ph-check' : 'ph ph-plus'"></i>
+                {{ getAsin(book) && addedAsins.has(getAsin(book)!) ? 'Added' : 'Add to Library' }}
               </button>
               <button class="btn btn-secondary" @click="viewTitleResultDetails(book)">
                 <i class="ph ph-eye"></i>
@@ -237,17 +245,75 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata } from '@/types'
 import { apiService } from '@/services/api'
 import { openLibraryService, type OpenLibraryBook } from '@/services/openlibrary'
 import { isbnService, type ISBNBook } from '@/services/isbn'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
+import { useNotification } from '@/composables/useNotification'
 
 const router = useRouter()
 const configStore = useConfigurationStore()
+const libraryStore = useLibraryStore()
+const { success, error: showError, warning } = useNotification()
+
+console.log('AddNewView component loaded')
+console.log('libraryStore:', libraryStore)
+
+// Library checking functions
+const checkExistingInLibrary = async () => {
+  console.log('Checking existing audiobooks in library...')
+  
+  // Ensure library is loaded
+  if (!libraryStore.audiobooks || libraryStore.audiobooks.length === 0) {
+    console.log('Loading library...')
+    await libraryStore.fetchLibrary()
+  }
+  
+  console.log('Library has', libraryStore.audiobooks.length, 'audiobooks')
+  markExistingResults()
+}
+
+const markExistingResults = () => {
+  console.log('Marking existing results...')
+  const libraryAsins = new Set(
+    libraryStore.audiobooks
+      .map(book => book.asin)
+      .filter((asin): asin is string => !!asin)
+  )
+  
+  console.log('Library ASINs:', Array.from(libraryAsins))
+  
+  // Check ASIN search result
+  if (audibleResult.value?.asin) {
+    console.log('Checking ASIN result:', audibleResult.value.asin)
+    if (libraryAsins.has(audibleResult.value.asin)) {
+      console.log('ASIN result is in library - marking as added')
+      addedAsins.value.add(audibleResult.value.asin)
+    }
+  }
+  
+  // Check title search results
+  if (titleResults.value.length > 0) {
+    console.log('Checking', titleResults.value.length, 'title results')
+    titleResults.value.forEach((book, index) => {
+      const asin = getAsin(book)
+      if (asin) {
+        console.log(`Title result ${index}: ASIN=${asin}, inLibrary=${libraryAsins.has(asin)}`)
+        if (libraryAsins.has(asin)) {
+          console.log(`Marking title result ${index} as added`)
+          addedAsins.value.add(asin)
+        }
+      }
+    })
+  }
+  
+  console.log('Added ASINs:', Array.from(addedAsins.value))
+}
 
 // Unified Search
 const searchQuery = ref('')
@@ -273,6 +339,9 @@ const resultsPerPage = 10
 const asinQuery = ref('')
 const titleQuery = ref('')
 const authorQuery = ref('')
+
+// Library tracking
+const addedAsins = ref(new Set<string>())
 
 // General state
 const errorMessage = ref('')
@@ -384,6 +453,9 @@ const searchByAsin = async (asin: string) => {
   try {
     const result = await apiService.request<AudibleBookMetadata>(`/audible/metadata/${asin}`)
     audibleResult.value = result
+    
+    // Check library status after getting result
+    await checkExistingInLibrary()
   } catch (error) {
     console.error('ASIN search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
@@ -442,6 +514,9 @@ const searchByTitle = async (query: string) => {
     if (titleResults.value.length === 0) {
       errorMessage.value = 'No audiobooks found. Try refining your search terms.'
     }
+    
+    // Check library status after getting results
+    await checkExistingInLibrary()
   } catch (error) {
     console.error('Title search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
@@ -507,7 +582,7 @@ const selectTitleResult = async (book: any) => {
   
   if (!asin) {
     console.error('No ASIN available for selected book')
-    alert('Cannot add to library: No ASIN available')
+    warning('Cannot add to library: No ASIN available')
     return
   }
 
@@ -523,7 +598,7 @@ const selectTitleResult = async (book: any) => {
     await addToLibrary(metadata)
   } catch (error) {
     console.error('Failed to add audiobook:', error)
-    alert('Failed to add audiobook. Please try again.')
+    showError('Failed to add audiobook. Please try again.')
   }
 }
 
@@ -536,7 +611,7 @@ const viewTitleResultDetails = async (book: any) => {
       showDetailsModal.value = true
     } catch (error) {
       console.error('Failed to fetch detailed metadata:', error)
-      alert('Failed to fetch audiobook details. Please try again.')
+      showError('Failed to fetch audiobook details. Please try again.')
     }
   } else {
     console.error('No ASIN available for selected book')
@@ -563,7 +638,13 @@ const addToLibrary = async (book: AudibleBookMetadata) => {
       }
     })
     
-    alert(`"${book.title}" has been added to your library!`)
+    success(`"${book.title}" has been added to your library!`)
+    
+    // Mark as added in the UI
+    if (book.asin) {
+      console.log('Marking ASIN as added:', book.asin)
+      addedAsins.value.add(book.asin)
+    }
     
     // Reset search if needed
     if (searchType.value === 'asin') {
@@ -575,9 +656,13 @@ const addToLibrary = async (book: AudibleBookMetadata) => {
     
     // Check if it's a conflict (already exists)
     if (error.message?.includes('409') || error.message?.includes('Conflict')) {
-      alert('This audiobook is already in your library.')
+      warning('This audiobook is already in your library.')
+      // Mark as added in the UI even for duplicates
+      if (book.asin) {
+        addedAsins.value.add(book.asin)
+      }
     } else {
-      alert('Failed to add audiobook. Please try again.')
+      showError('Failed to add audiobook. Please try again.')
     }
   }
 }
@@ -896,6 +981,16 @@ onMounted(async () => {
 
 .btn-primary:hover:not(:disabled) {
   background-color: #005fa3;
+}
+
+.btn-success {
+  background-color: #27ae60;
+  color: white;
+}
+
+.btn-success:disabled {
+  opacity: 1;
+  cursor: not-allowed;
 }
 
 .btn-secondary {

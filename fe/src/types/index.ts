@@ -46,6 +46,32 @@ export interface Download {
   metadata: Record<string, any>
 }
 
+export interface QueueItem {
+  id: string
+  title: string
+  author?: string
+  series?: string
+  seriesNumber?: string
+  quality: string
+  status: string // downloading, paused, queued, completed, failed
+  progress: number // 0-100
+  size: number // in bytes
+  downloaded: number // in bytes
+  downloadSpeed: number // bytes per second
+  eta?: number // seconds remaining
+  indexer?: string
+  downloadClient: string
+  downloadClientId: string
+  downloadClientType: string
+  addedAt: string
+  errorMessage?: string
+  canPause: boolean
+  canRemove: boolean
+  seeders?: number
+  leechers?: number
+  ratio?: number
+}
+
 export interface ApiConfiguration {
   id: string
   name: string
@@ -135,4 +161,42 @@ export interface Audiobook {
   filePath?: string
   fileSize?: number
   quality?: string
+}
+
+export interface History {
+  id: number
+  audiobookId?: number
+  audiobookTitle?: string
+  eventType: string
+  message?: string
+  source?: string
+  timestamp: string
+  data?: string
+}
+
+export interface Indexer {
+  id: number
+  name: string
+  type: string // "Torrent" or "Usenet"
+  implementation: string // "Newznab", "Torznab", "Custom"
+  url: string
+  apiKey?: string
+  categories?: string
+  animeCategories?: string
+  tags?: string
+  enableRss: boolean
+  enableAutomaticSearch: boolean
+  enableInteractiveSearch: boolean
+  enableAnimeStandardSearch: boolean
+  isEnabled: boolean
+  priority: number
+  minimumAge: number
+  retention: number
+  maximumSize: number
+  additionalSettings?: string
+  createdAt: string
+  updatedAt: string
+  lastTestedAt?: string
+  lastTestSuccessful?: boolean
+  lastTestError?: string
 }

@@ -10,18 +10,6 @@
         <h3>Import from Folder</h3>
         <p>Scan a local folder for audio files and import them into your library</p>
       </div>
-
-      <div class="import-card" @click="importFromRSS">
-        <div class="import-icon">📡</div>
-        <h3>Import from RSS Feed</h3>
-        <p>Add episodes from an RSS feed URL</p>
-      </div>
-
-      <div class="import-card" @click="importFromOPML">
-        <div class="import-icon">📋</div>
-        <h3>Import OPML</h3>
-        <p>Import podcast subscriptions from an OPML file</p>
-      </div>
     </div>
   </div>
 </template>
@@ -30,19 +18,11 @@
 const importFromFolder = () => {
   console.log('Import from folder')
 }
-
-const importFromRSS = () => {
-  console.log('Import from RSS')
-}
-
-const importFromOPML = () => {
-  console.log('Import from OPML')
-}
 </script>
 
 <style scoped>
 .library-import-view {
-  padding: 0;
+  padding: 2em;;
 }
 
 .page-header h1 {
@@ -52,9 +32,8 @@ const importFromOPML = () => {
 }
 
 .import-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 2rem;
+  display: flex;
+  justify-content: center;;
 }
 
 .import-card {

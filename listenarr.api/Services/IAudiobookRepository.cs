@@ -11,6 +11,7 @@ namespace Listenarr.Api.Services
         Task<Audiobook?> GetByIsbnAsync(string isbn);
         Task<Audiobook?> GetByIdAsync(int id);
         Task AddAsync(Audiobook audiobook);
+        Task<bool> UpdateAsync(Audiobook audiobook);
         Task<bool> DeleteAsync(Audiobook audiobook);
         Task<bool> DeleteByIdAsync(int id);
         Task<int> DeleteBulkAsync(List<int> ids);

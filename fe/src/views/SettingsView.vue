@@ -10,6 +10,14 @@
 
     <div class="settings-tabs">
       <button 
+        @click="router.push({ hash: '#indexers' })" 
+        :class="{ active: activeTab === 'indexers' }"
+        class="tab-button"
+      >
+        <i class="ph ph-list-magnifying-glass"></i>
+        Indexers
+      </button>
+      <button 
         @click="router.push({ hash: '#apis' })" 
         :class="{ active: activeTab === 'apis' }"
         class="tab-button"
@@ -36,6 +44,102 @@
     </div>
 
     <div class="settings-content">
+      <!-- Indexers Tab -->
+      <div v-if="activeTab === 'indexers'" class="tab-content">
+        <div class="section-header">
+          <h3>Indexers</h3>
+          <button @click="showIndexerForm = true" class="add-button">
+            <i class="ph ph-plus"></i>
+            Add Indexer
+          </button>
+        </div>
+
+        <div v-if="indexers.length === 0" class="empty-state">
+          <i class="ph ph-list-magnifying-glass"></i>
+          <p>No indexers configured. Add Newznab or Torznab indexers to search for audiobooks.</p>
+        </div>
+
+        <div v-else class="indexers-grid">
+          <div 
+            v-for="indexer in indexers" 
+            :key="indexer.id"
+            class="indexer-card"
+            :class="{ disabled: !indexer.isEnabled }"
+          >
+            <div class="indexer-header">
+              <div class="indexer-info">
+                <h4>{{ indexer.name }}</h4>
+                <span class="indexer-type" :class="indexer.type.toLowerCase()">
+                  {{ indexer.type }}
+                </span>
+              </div>
+              <div class="indexer-actions">
+                <button 
+                  @click="toggleIndexerFunc(indexer.id)" 
+                  class="icon-button"
+                  :title="indexer.isEnabled ? 'Disable' : 'Enable'"
+                >
+                  <i :class="indexer.isEnabled ? 'ph ph-toggle-right' : 'ph ph-toggle-left'"></i>
+                </button>
+                <button 
+                  @click="testIndexerFunc(indexer.id)" 
+                  class="icon-button"
+                  title="Test"
+                  :disabled="testingIndexer === indexer.id"
+                >
+                  <i v-if="testingIndexer === indexer.id" class="ph ph-spinner ph-spin"></i>
+                  <i v-else class="ph ph-check-circle"></i>
+                </button>
+                <button 
+                  @click="editIndexer(indexer)" 
+                  class="icon-button"
+                  title="Edit"
+                >
+                  <i class="ph ph-pencil"></i>
+                </button>
+                <button 
+                  @click="confirmDeleteIndexer(indexer)" 
+                  class="icon-button danger"
+                  title="Delete"
+                >
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="indexer-details">
+              <div class="detail-row">
+                <i class="ph ph-link"></i>
+                <span class="detail-label">URL:</span>
+                <span class="detail-value">{{ indexer.url }}</span>
+              </div>
+              <div class="detail-row">
+                <i class="ph ph-list-checks"></i>
+                <span class="detail-label">Features:</span>
+                <div class="feature-badges">
+                  <span v-if="indexer.enableRss" class="badge">RSS</span>
+                  <span v-if="indexer.enableAutomaticSearch" class="badge">Automatic Search</span>
+                  <span v-if="indexer.enableInteractiveSearch" class="badge">Interactive Search</span>
+                </div>
+              </div>
+              <div class="detail-row" v-if="indexer.lastTestedAt">
+                <i class="ph ph-clock"></i>
+                <span class="detail-label">Last Tested:</span>
+                <span class="detail-value" :class="{ success: indexer.lastTestSuccessful, error: indexer.lastTestSuccessful === false }">
+                  {{ formatDate(indexer.lastTestedAt) }}
+                  <i v-if="indexer.lastTestSuccessful" class="ph ph-check-circle success"></i>
+                  <i v-else-if="indexer.lastTestSuccessful === false" class="ph ph-x-circle error"></i>
+                </span>
+              </div>
+              <div class="detail-row error-row" v-if="indexer.lastTestError">
+                <i class="ph ph-warning"></i>
+                <span class="detail-value error">{{ indexer.lastTestError }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- API Sources Tab -->
       <div v-if="activeTab === 'apis'" class="tab-content">
         <div class="section-header">
@@ -88,7 +192,7 @@
       <div v-if="activeTab === 'clients'" class="tab-content">
         <div class="section-header">
           <h3>Download Clients</h3>
-          <button @click="showClientForm = true" class="add-button">
+          <button @click="showClientForm = true; editingClient = null" class="add-button">
             <i class="ph ph-plus"></i>
             Add Download Client
           </button>
@@ -96,37 +200,71 @@
 
         <div v-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
           <i class="ph ph-download-simple"></i>
-          <p>No download clients configured. Add one to start downloading media.</p>
+          <p>No download clients configured. Add qBittorrent, Transmission, SABnzbd, or NZBGet to download audiobooks.</p>
         </div>
 
-        <div v-else class="config-list">
+        <div v-else class="indexers-grid">
           <div 
             v-for="client in configStore.downloadClientConfigurations" 
             :key="client.id"
-            class="config-card"
+            class="indexer-card"
+            :class="{ disabled: !client.isEnabled }"
           >
-            <div class="config-info">
-              <h4>{{ client.name }}</h4>
-              <p class="config-url">{{ client.host }}:{{ client.port }}</p>
-              <div class="config-meta">
-                <span class="config-type">{{ client.type.toUpperCase() }}</span>
-                <span class="config-status" :class="{ enabled: client.isEnabled }">
-                  <i :class="client.isEnabled ? 'ph ph-check-circle' : 'ph ph-x-circle'"></i>
-                  {{ client.isEnabled ? 'Enabled' : 'Disabled' }}
-                </span>
-                <span class="config-ssl" :class="{ enabled: client.useSSL }">
-                  <i :class="client.useSSL ? 'ph ph-lock' : 'ph ph-lock-open'"></i>
-                  {{ client.useSSL ? 'SSL' : 'No SSL' }}
+            <div class="indexer-header">
+              <div class="indexer-info">
+                <h4>{{ client.name }}</h4>
+                <span class="indexer-type" :class="getClientTypeClass(client.type)">
+                  {{ client.type }}
                 </span>
               </div>
+              <div class="indexer-actions">
+                <button 
+                  @click="editClientConfig(client)" 
+                  class="icon-button"
+                  title="Edit"
+                >
+                  <i class="ph ph-pencil"></i>
+                </button>
+                <button 
+                  @click="confirmDeleteClient(client)" 
+                  class="icon-button danger"
+                  title="Delete"
+                >
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
             </div>
-            <div class="config-actions">
-              <button @click="editClientConfig(client)" class="edit-button" title="Edit">
-                <i class="ph ph-pencil"></i>
-              </button>
-              <button @click="deleteClientConfig(client.id)" class="delete-button" title="Delete">
-                <i class="ph ph-trash"></i>
-              </button>
+
+            <div class="indexer-details">
+              <div class="detail-row">
+                <i class="ph ph-link"></i>
+                <span class="detail-label">Host:</span>
+                <span class="detail-value">{{ client.host }}:{{ client.port }}</span>
+              </div>
+              <div class="detail-row">
+                <i class="ph ph-shield-check"></i>
+                <span class="detail-label">Security:</span>
+                <div class="feature-badges">
+                  <span class="badge" v-if="client.useSSL">
+                    <i class="ph ph-lock"></i> SSL
+                  </span>
+                  <span class="badge" v-else>
+                    <i class="ph ph-lock-open"></i> No SSL
+                  </span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <i class="ph ph-folder"></i>
+                <span class="detail-label">Download Path:</span>
+                <span class="detail-value">{{ client.downloadPath }}</span>
+              </div>
+              <div class="detail-row">
+                <i class="ph ph-check-circle"></i>
+                <span class="detail-label">Status:</span>
+                <span class="detail-value" :class="{ success: client.isEnabled, error: !client.isEnabled }">
+                  {{ client.isEnabled ? 'Enabled' : 'Disabled' }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -250,29 +388,77 @@
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Download Client Configuration Modal (placeholder) -->
-    <div v-if="showClientForm" class="modal-overlay" @click="showClientForm = false">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ editingClient ? 'Edit' : 'Add' }} Download Client</h3>
-          <button @click="showClientForm = false" class="modal-close">
-            <i class="ph ph-x"></i>
-          </button>
-        </div>
-        <div class="modal-body">
-          <p>Download client configuration form would go here...</p>
-        </div>
-        <div class="modal-actions">
-          <button @click="showClientForm = false" class="cancel-button">
-            <i class="ph ph-x"></i>
-            Cancel
-          </button>
-          <button @click="saveClientConfig" class="save-button">
-            <i class="ph ph-check"></i>
-            Save
-          </button>
-        </div>
+  <!-- Download Client Form Modal -->
+  <DownloadClientFormModal 
+    :visible="showClientForm" 
+    :editing-client="editingClient"
+    @close="showClientForm = false; editingClient = null"
+    @saved="configStore.loadDownloadClientConfigurations()"
+    @delete="executeDeleteClient"
+  />
+
+  <!-- Indexer Form Modal -->
+  <IndexerFormModal 
+    :visible="showIndexerForm" 
+    :editing-indexer="editingIndexer"
+    @close="showIndexerForm = false; editingIndexer = null"
+    @saved="loadIndexers()"
+  />
+
+  <!-- Delete Client Confirmation Modal -->
+  <div v-if="clientToDelete" class="modal-overlay" @click="clientToDelete = null">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <h3>
+          <i class="ph ph-warning-circle"></i>
+          Delete Download Client
+        </h3>
+        <button @click="clientToDelete = null" class="modal-close">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete the download client <strong>{{ clientToDelete.name }}</strong>?</p>
+        <p>This action cannot be undone.</p>
+      </div>
+      <div class="modal-actions">
+        <button @click="clientToDelete = null" class="cancel-button">
+          Cancel
+        </button>
+        <button @click="executeDeleteClient()" class="delete-button">
+          <i class="ph ph-trash"></i>
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Indexer Confirmation Modal -->
+  <div v-if="indexerToDelete" class="modal-overlay" @click="indexerToDelete = null">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <h3>
+          <i class="ph ph-warning-circle"></i>
+          Delete Indexer
+        </h3>
+        <button @click="indexerToDelete = null" class="modal-close">
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete the indexer <strong>{{ indexerToDelete.name }}</strong>?</p>
+        <p>This action cannot be undone.</p>
+      </div>
+      <div class="modal-actions">
+        <button @click="indexerToDelete = null" class="cancel-button">
+          Cancel
+        </button>
+        <button @click="executeDeleteIndexer" class="delete-button">
+          <i class="ph ph-trash"></i>
+          Delete
+        </button>
       </div>
     </div>
   </div>
@@ -282,18 +468,28 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
-import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings } from '@/types'
+import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
+import IndexerFormModal from '@/components/IndexerFormModal.vue'
+import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
+import { useNotification } from '@/composables/useNotification'
+import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
-const activeTab = ref<'apis' | 'clients' | 'general'>('apis')
+const { success, error: showError, info } = useNotification()
+const activeTab = ref<'indexers' | 'apis' | 'clients' | 'general'>('indexers')
 const showApiForm = ref(false)
 const showClientForm = ref(false)
+const showIndexerForm = ref(false)
 const editingApi = ref<ApiConfiguration | null>(null)
 const editingClient = ref<DownloadClientConfiguration | null>(null)
+const editingIndexer = ref<Indexer | null>(null)
 const settings = ref<ApplicationSettings | null>(null)
+const indexers = ref<Indexer[]>([])
+const testingIndexer = ref<number | null>(null)
+const indexerToDelete = ref<Indexer | null>(null)
 
 const editApiConfig = (api: ApiConfiguration) => {
   editingApi.value = api
@@ -309,38 +505,50 @@ const deleteApiConfig = async (id: string) => {
   if (confirm('Are you sure you want to delete this API configuration?')) {
     try {
       await configStore.deleteApiConfiguration(id)
-      alert('API configuration deleted successfully')
+      success('API configuration deleted successfully')
     } catch (error) {
       console.error('Failed to delete API configuration:', error)
-      alert('Failed to delete API configuration')
+      showError('Failed to delete API configuration')
     }
   }
 }
 
-const deleteClientConfig = async (id: string) => {
-  if (confirm('Are you sure you want to delete this download client configuration?')) {
-    try {
-      await configStore.deleteDownloadClientConfiguration(id)
-      alert('Download client configuration deleted successfully')
-    } catch (error) {
-      console.error('Failed to delete download client configuration:', error)
-      alert('Failed to delete download client configuration')
-    }
+const clientToDelete = ref<DownloadClientConfiguration | null>(null)
+
+const confirmDeleteClient = (client: DownloadClientConfiguration) => {
+  clientToDelete.value = client
+}
+
+const executeDeleteClient = async (id?: string) => {
+  const clientId = id || clientToDelete.value?.id
+  if (!clientId) return
+  
+  try {
+    await configStore.deleteDownloadClientConfiguration(clientId)
+    success('Download client deleted successfully')
+  } catch (error) {
+    console.error('Failed to delete download client:', error)
+    showError('Failed to delete download client')
+  } finally {
+    clientToDelete.value = null
   }
+}
+
+const getClientTypeClass = (type: string): string => {
+  const typeMap: Record<string, string> = {
+    'qbittorrent': 'torrent',
+    'transmission': 'torrent',
+    'sabnzbd': 'usenet',
+    'nzbget': 'usenet'
+  }
+  return typeMap[type.toLowerCase()] || 'torrent'
 }
 
 const saveApiConfig = () => {
   // Placeholder for API config save
-  alert('API configuration form would be implemented here')
+  info('API configuration form would be implemented here')
   showApiForm.value = false
   editingApi.value = null
-}
-
-const saveClientConfig = () => {
-  // Placeholder for client config save
-  alert('Download client configuration form would be implemented here')
-  showClientForm.value = false
-  editingClient.value = null
 }
 
 const saveSettings = async () => {
@@ -348,22 +556,103 @@ const saveSettings = async () => {
   
   try {
     await configStore.saveApplicationSettings(settings.value)
-    alert('Settings saved successfully')
+    success('Settings saved successfully')
   } catch (error) {
     console.error('Failed to save settings:', error)
-    alert('Failed to save settings')
+    showError('Failed to save settings')
   }
+}
+
+// Indexer functions
+const loadIndexers = async () => {
+  try {
+    indexers.value = await getIndexers()
+  } catch (error) {
+    console.error('Failed to load indexers:', error)
+    showError('Failed to load indexers')
+  }
+}
+
+const toggleIndexerFunc = async (id: number) => {
+  try {
+    const updatedIndexer = await apiToggleIndexer(id)
+    const index = indexers.value.findIndex(i => i.id === id)
+    if (index !== -1) {
+      indexers.value[index] = updatedIndexer
+    }
+    success(`Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
+  } catch (error) {
+    console.error('Failed to toggle indexer:', error)
+    showError('Failed to toggle indexer')
+  }
+}
+
+const testIndexerFunc = async (id: number) => {
+  testingIndexer.value = id
+  try {
+    const result = await apiTestIndexer(id)
+    if (result.success) {
+      success(`Indexer tested successfully: ${result.message}`)
+      // Update the indexer with test results
+      const index = indexers.value.findIndex(i => i.id === id)
+      if (index !== -1) {
+        indexers.value[index] = result.indexer
+      }
+    } else {
+      showError(`Indexer test failed: ${result.error || result.message}`)
+      // Still update to show failed test status
+      const index = indexers.value.findIndex(i => i.id === id)
+      if (index !== -1) {
+        indexers.value[index] = result.indexer
+      }
+    }
+  } catch (error) {
+    console.error('Failed to test indexer:', error)
+    showError('Failed to test indexer')
+  } finally {
+    testingIndexer.value = null
+  }
+}
+
+const editIndexer = (indexer: Indexer) => {
+  editingIndexer.value = indexer
+  showIndexerForm.value = true
+}
+
+const confirmDeleteIndexer = (indexer: Indexer) => {
+  indexerToDelete.value = indexer
+}
+
+const executeDeleteIndexer = async () => {
+  if (!indexerToDelete.value) return
+  
+  try {
+    await deleteIndexer(indexerToDelete.value.id)
+    indexers.value = indexers.value.filter(i => i.id !== indexerToDelete.value!.id)
+    success('Indexer deleted successfully')
+  } catch (error) {
+    console.error('Failed to delete indexer:', error)
+    showError('Failed to delete indexer')
+  } finally {
+    indexerToDelete.value = null
+  }
+}
+
+const formatDate = (dateString: string | undefined): string => {
+  if (!dateString) return 'Never'
+  const date = new Date(dateString)
+  return date.toLocaleString()
 }
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
-  const hash = route.hash.replace('#', '') as 'apis' | 'clients' | 'general'
-  if (hash && ['apis', 'clients', 'general'].includes(hash)) {
+  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'general'
+  if (hash && ['indexers', 'apis', 'clients', 'general'].includes(hash)) {
     activeTab.value = hash
   } else {
-    // Default to apis and update URL
-    activeTab.value = 'apis'
-    router.replace({ hash: '#apis' })
+    // Default to indexers and update URL
+    activeTab.value = 'indexers'
+    router.replace({ hash: '#indexers' })
   }
 }
 
@@ -379,7 +668,8 @@ onMounted(async () => {
   await Promise.all([
     configStore.loadApiConfigurations(),
     configStore.loadDownloadClientConfigurations(),
-    configStore.loadApplicationSettings()
+    configStore.loadApplicationSettings(),
+    loadIndexers()
   ])
   
   settings.value = configStore.applicationSettings
@@ -870,6 +1160,149 @@ onMounted(async () => {
   transform: translateY(-1px);
 }
 
+/* Indexer Styles */
+.indexers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.indexer-card {
+  background-color: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: all 0.2s;
+}
+
+.indexer-card:hover {
+  border-color: #007acc;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 122, 204, 0.2);
+}
+
+.indexer-card.disabled {
+  opacity: 0.6;
+  filter: grayscale(50%);
+}
+
+.indexer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #333;
+}
+
+.indexer-info h4 {
+  margin: 0 0 0.5rem 0;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.indexer-type {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.indexer-type.torrent {
+  background-color: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+  border: 1px solid #4caf50;
+}
+
+.indexer-type.usenet {
+  background-color: rgba(33, 150, 243, 0.2);
+  color: #2196f3;
+  border: 1px solid #2196f3;
+}
+
+.indexer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.indexer-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.detail-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.detail-row i {
+  color: #007acc;
+  font-size: 1rem;
+}
+
+.detail-label {
+  color: #999;
+  min-width: 100px;
+}
+
+.detail-value {
+  color: #ccc;
+  word-break: break-all;
+}
+
+.detail-value.success {
+  color: #4caf50;
+}
+
+.detail-value.error {
+  color: #f44336;
+}
+
+.detail-value i {
+  margin-left: 0.5rem;
+}
+
+.feature-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(0, 122, 204, 0.2);
+  color: #007acc;
+  border: 1px solid #007acc;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.error-message {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background-color: rgba(244, 67, 54, 0.1);
+  border: 1px solid #f44336;
+  border-radius: 4px;
+  color: #f44336;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.error-message i {
+  font-size: 1rem;
+}
+
 @media (max-width: 768px) {
   .settings-page {
     padding: 1rem;
@@ -912,6 +1345,30 @@ onMounted(async () => {
   .save-button {
     width: 100%;
     justify-content: center;
+  }
+
+  .indexers-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .indexer-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .indexer-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  .detail-label {
+    min-width: auto;
   }
 }
 </style>

@@ -71,12 +71,12 @@ namespace Listenarr.Api.Controllers
         }
 
         [HttpPost("apis")]
-        public async Task<ActionResult<string>> SaveApiConfiguration([FromBody] ApiConfiguration config)
+        public async Task<ActionResult<object>> SaveApiConfiguration([FromBody] ApiConfiguration config)
         {
             try
             {
                 var id = await _configurationService.SaveApiConfigurationAsync(config);
-                return Ok(id);
+                return Ok(new { id });
             }
             catch (Exception ex)
             {
@@ -136,12 +136,12 @@ namespace Listenarr.Api.Controllers
         }
 
         [HttpPost("download-clients")]
-        public async Task<ActionResult<string>> SaveDownloadClientConfiguration([FromBody] DownloadClientConfiguration config)
+        public async Task<ActionResult<object>> SaveDownloadClientConfiguration([FromBody] DownloadClientConfiguration config)
         {
             try
             {
                 var id = await _configurationService.SaveDownloadClientConfigurationAsync(config);
-                return Ok(id);
+                return Ok(new { id });
             }
             catch (Exception ex)
             {
@@ -182,12 +182,14 @@ namespace Listenarr.Api.Controllers
         }
 
         [HttpPost("settings")]
-        public async Task<ActionResult> SaveApplicationSettings([FromBody] ApplicationSettings settings)
+        public async Task<ActionResult<ApplicationSettings>> SaveApplicationSettings([FromBody] ApplicationSettings settings)
         {
             try
             {
                 await _configurationService.SaveApplicationSettingsAsync(settings);
-                return Ok();
+                // Return the saved settings to confirm what was persisted
+                var savedSettings = await _configurationService.GetApplicationSettingsAsync();
+                return Ok(savedSettings);
             }
             catch (Exception ex)
             {

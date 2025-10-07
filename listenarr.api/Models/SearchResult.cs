@@ -49,4 +49,14 @@ namespace Listenarr.Api.Models
         // Indicates this result had a successful full metadata enrichment pass (Audible product scrape)
         public bool IsEnriched { get; set; }
     }
+
+    public class SearchAndDownloadResult
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? DownloadId { get; set; }
+        public string? IndexerUsed { get; set; }
+        public string? DownloadClientUsed { get; set; }
+        public SearchResult? SearchResult { get; set; }
+    }
 }

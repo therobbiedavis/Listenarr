@@ -46,6 +46,7 @@ builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<IMetadataService, MetadataService>();
 builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
+builder.Services.AddScoped<IDownloadService, DownloadService>();
 // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
 // Removing duplicate scoped registration to avoid overriding the typed client configuration.
 builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
@@ -99,11 +100,13 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Ensure database is created
+// Ensure database is created and migrations are applied
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-    context.Database.EnsureCreated();
+    
+    // Apply any pending migrations
+    context.Database.Migrate();
     
     // Apply SQLite PRAGMA settings after database is created
     SqlitePragmaInitializer.ApplyPragmas(context);

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Listenarr.Api.Models
 {
     public class ApiConfiguration
@@ -9,11 +11,31 @@ namespace Listenarr.Api.Models
         public string Type { get; set; } = string.Empty; // "torrent" or "nzb"
         public bool IsEnabled { get; set; } = true;
         public int Priority { get; set; } = 1;
-        public Dictionary<string, string> Headers { get; set; } = new();
-        public Dictionary<string, string> Parameters { get; set; } = new();
+        
+        // Store as JSON string in database
+        public string HeadersJson { get; set; } = "{}";
+        public string ParametersJson { get; set; } = "{}";
+        
         public string? RateLimitPerMinute { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LastUsed { get; set; }
+        
+        // Not mapped - for JSON serialization in API responses
+        public Dictionary<string, string> Headers
+        {
+            get => string.IsNullOrWhiteSpace(HeadersJson) 
+                ? new Dictionary<string, string>() 
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(HeadersJson) ?? new Dictionary<string, string>();
+            set => HeadersJson = JsonSerializer.Serialize(value);
+        }
+        
+        public Dictionary<string, string> Parameters
+        {
+            get => string.IsNullOrWhiteSpace(ParametersJson) 
+                ? new Dictionary<string, string>() 
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(ParametersJson) ?? new Dictionary<string, string>();
+            set => ParametersJson = JsonSerializer.Serialize(value);
+        }
     }
 
     public class DownloadClientConfiguration
@@ -28,11 +50,24 @@ namespace Listenarr.Api.Models
         public string DownloadPath { get; set; } = string.Empty;
         public bool UseSSL { get; set; } = false;
         public bool IsEnabled { get; set; } = true;
-        public Dictionary<string, object> Settings { get; set; } = new();
+        
+        // Store as JSON string in database
+        public string SettingsJson { get; set; } = "{}";
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        
+        // Not mapped - for JSON serialization in API responses
+        public Dictionary<string, object> Settings
+        {
+            get => string.IsNullOrWhiteSpace(SettingsJson) 
+                ? new Dictionary<string, object>() 
+                : JsonSerializer.Deserialize<Dictionary<string, object>>(SettingsJson) ?? new Dictionary<string, object>();
+            set => SettingsJson = JsonSerializer.Serialize(value);
+        }
     }
 
     public class ApplicationSettings
     {
+        public int Id { get; set; } = 1; // Singleton pattern - only one settings record
         public string OutputPath { get; set; } = string.Empty;
         public string FileNamingPattern { get; set; } = "{Artist}/{Album}/{TrackNumber:00} - {Title}";
         public bool EnableMetadataProcessing { get; set; } = true;

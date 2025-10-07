@@ -30,12 +30,18 @@ namespace Listenarr.Api.Controllers
         private readonly IAudiobookRepository _repo;
         private readonly IImageCacheService _imageCacheService;
         private readonly ILogger<LibraryController> _logger;
+        private readonly ListenArrDbContext _dbContext;
         
-        public LibraryController(IAudiobookRepository repo, IImageCacheService imageCacheService, ILogger<LibraryController> logger)
+        public LibraryController(
+            IAudiobookRepository repo, 
+            IImageCacheService imageCacheService, 
+            ILogger<LibraryController> logger,
+            ListenArrDbContext dbContext)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
             _logger = logger;
+            _dbContext = dbContext;
         }
 
         [HttpPost("add")]
@@ -109,6 +115,23 @@ namespace Listenarr.Api.Controllers
             };
             
             await _repo.AddAsync(audiobook);
+            
+            // Log history entry for the added audiobook
+            var historyEntry = new History
+            {
+                AudiobookId = audiobook.Id,
+                AudiobookTitle = audiobook.Title ?? "Unknown Title",
+                EventType = "Added",
+                Message = $"Audiobook '{audiobook.Title}' added to library from Add New page",
+                Source = "AddNew",
+                Timestamp = DateTime.UtcNow
+            };
+            
+            _dbContext.History.Add(historyEntry);
+            await _dbContext.SaveChangesAsync();
+            
+            _logger.LogInformation("Added audiobook '{Title}' (ASIN: {Asin}) to library with history log", audiobook.Title, audiobook.Asin);
+            
             return Ok(new { message = "Audiobook added to library successfully", audiobook });
         }
 
@@ -133,6 +156,58 @@ namespace Listenarr.Api.Controllers
             var book = await _repo.GetByIsbnAsync(isbn);
             if (book == null) return NotFound();
             return Ok(book);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(int id)
+        {
+            var audiobook = await _repo.GetByIdAsync(id);
+            if (audiobook == null)
+            {
+                return NotFound(new { message = "Audiobook not found" });
+            }
+            return Ok(audiobook);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateAudiobook(int id, [FromBody] Audiobook updatedAudiobook)
+        {
+            var existingAudiobook = await _repo.GetByIdAsync(id);
+            if (existingAudiobook == null)
+            {
+                return NotFound(new { message = "Audiobook not found" });
+            }
+
+            // Update properties
+            existingAudiobook.Title = updatedAudiobook.Title;
+            existingAudiobook.Subtitle = updatedAudiobook.Subtitle;
+            existingAudiobook.Authors = updatedAudiobook.Authors;
+            existingAudiobook.ImageUrl = updatedAudiobook.ImageUrl;
+            existingAudiobook.PublishYear = updatedAudiobook.PublishYear;
+            existingAudiobook.Series = updatedAudiobook.Series;
+            existingAudiobook.SeriesNumber = updatedAudiobook.SeriesNumber;
+            existingAudiobook.Description = updatedAudiobook.Description;
+            existingAudiobook.Genres = updatedAudiobook.Genres;
+            existingAudiobook.Tags = updatedAudiobook.Tags;
+            existingAudiobook.Narrators = updatedAudiobook.Narrators;
+            existingAudiobook.Isbn = updatedAudiobook.Isbn;
+            existingAudiobook.Asin = updatedAudiobook.Asin;
+            existingAudiobook.Publisher = updatedAudiobook.Publisher;
+            existingAudiobook.Language = updatedAudiobook.Language;
+            existingAudiobook.Runtime = updatedAudiobook.Runtime;
+            existingAudiobook.Version = updatedAudiobook.Version;
+            existingAudiobook.Explicit = updatedAudiobook.Explicit;
+            existingAudiobook.Abridged = updatedAudiobook.Abridged;
+            existingAudiobook.Monitored = updatedAudiobook.Monitored;
+            existingAudiobook.FilePath = updatedAudiobook.FilePath;
+            existingAudiobook.FileSize = updatedAudiobook.FileSize;
+            existingAudiobook.Quality = updatedAudiobook.Quality;
+
+            await _repo.UpdateAsync(existingAudiobook);
+
+            _logger.LogInformation("Updated audiobook '{Title}' (ID: {Id})", existingAudiobook.Title, id);
+
+            return Ok(new { message = "Audiobook updated successfully", audiobook = existingAudiobook });
         }
 
         [HttpDelete("{id}")]

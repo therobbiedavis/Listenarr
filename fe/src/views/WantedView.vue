@@ -7,8 +7,8 @@
       </h1>
       <div class="wanted-actions">
         <button class="btn btn-primary" @click="searchMissing" :disabled="wantedAudiobooks.length === 0">
-          <i class="ph ph-magnifying-glass"></i>
-          Search All Missing
+          <i class="ph ph-robot"></i>
+          Automatic Search All
         </button>
       </div>
     </div>
@@ -57,23 +57,39 @@
           <div class="wanted-quality">
             Wanted Quality: {{ item.quality || 'Any' }}
           </div>
+          <div v-if="searchResults[item.id]" class="search-status">
+            <i v-if="searching[item.id]" class="ph ph-spinner ph-spin"></i>
+            {{ searchResults[item.id] }}
+          </div>
         </div>
         <div class="wanted-status">
-          <span class="status-badge missing">
+          <span v-if="!searching[item.id]" class="status-badge missing">
             Missing
+          </span>
+          <span v-else class="status-badge searching">
+            Searching
           </span>
         </div>
         <div class="wanted-actions-cell">
           <button 
             class="btn-icon" 
             @click="searchAudiobook(item)"
-            title="Search for Audiobook"
+            :disabled="searching[item.id]"
+            title="Automatic Search"
+          >
+            <i class="ph ph-robot"></i>
+          </button>
+          <button 
+            class="btn-icon" 
+            @click="openManualSearch(item)"
+            title="Manual Search"
           >
             <i class="ph ph-magnifying-glass"></i>
           </button>
           <button 
             class="btn-icon" 
             @click="markAsSkipped(item)"
+            :disabled="searching[item.id]"
             title="Unmonitor Audiobook"
           >
             <i class="ph ph-x"></i>
@@ -91,6 +107,14 @@
       <p v-if="wantedAudiobooks.length === 0">All your monitored audiobooks have files!</p>
       <p v-else>Switch tabs to see audiobooks in other states.</p>
     </div>
+
+    <!-- Manual Search Modal -->
+    <ManualSearchModal
+      :is-open="showManualSearchModal"
+      :audiobook="selectedAudiobook"
+      @close="closeManualSearch"
+      @downloaded="handleDownloaded"
+    />
   </div>
 </template>
 
@@ -98,12 +122,17 @@
 import { ref, computed, onMounted } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
-import type { Audiobook } from '@/types'
+import ManualSearchModal from '@/components/ManualSearchModal.vue'
+import type { Audiobook, SearchResult } from '@/types'
 
 const libraryStore = useLibraryStore()
 
 const selectedTab = ref('missing')
 const loading = ref(false)
+const searching = ref<Record<number, boolean>>({})
+const searchResults = ref<Record<number, string>>({})
+const showManualSearchModal = ref(false)
+const selectedAudiobook = ref<Audiobook | null>(null)
 
 onMounted(async () => {
   loading.value = true
@@ -143,19 +172,80 @@ const formatDate = (date: string | undefined): string => {
   }
 }
 
-const searchMissing = () => {
-  console.log('Search all missing audiobooks')
-  // TODO: Implement search all functionality
+const searchMissing = async () => {
+  console.log('Automatic search for all missing audiobooks')
+  
+  // Search all wanted audiobooks sequentially
+  for (const audiobook of wantedAudiobooks.value) {
+    await searchAudiobook(audiobook)
+    // Add a small delay between searches to avoid overwhelming indexers
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
 }
 
-const searchAudiobook = (item: Audiobook) => {
-  console.log('Search audiobook:', item.title)
-  // TODO: Navigate to search with this audiobook's details
+function openManualSearch(item: Audiobook) {
+  selectedAudiobook.value = item
+  showManualSearchModal.value = true
 }
 
-const markAsSkipped = (item: Audiobook) => {
+function closeManualSearch() {
+  showManualSearchModal.value = false
+  selectedAudiobook.value = null
+}
+
+function handleDownloaded(result: SearchResult) {
+  console.log('Downloaded:', result)
+  // Refresh library after successful download
+  setTimeout(async () => {
+    await libraryStore.fetchLibrary()
+    closeManualSearch()
+  }, 2000)
+}
+
+const searchAudiobook = async (item: Audiobook) => {
+  console.log('Searching audiobook:', item.title)
+  
+  searching.value[item.id] = true
+  searchResults.value[item.id] = 'Searching...'
+  
+  try {
+    const result = await apiService.searchAndDownload(item.id)
+    
+    if (result.success) {
+      searchResults.value[item.id] = `Found on ${result.indexerUsed}, downloading...`
+      
+      // Refresh library to update status
+      setTimeout(async () => {
+        await libraryStore.fetchLibrary()
+        delete searching.value[item.id]
+        delete searchResults.value[item.id]
+      }, 2000)
+    } else {
+      searchResults.value[item.id] = result.message || 'No matches found'
+      setTimeout(() => {
+        delete searching.value[item.id]
+        delete searchResults.value[item.id]
+      }, 5000)
+    }
+  } catch (err) {
+    console.error('Search failed:', err)
+    searchResults.value[item.id] = 'Search failed'
+    setTimeout(() => {
+      delete searching.value[item.id]
+      delete searchResults.value[item.id]
+    }, 5000)
+  }
+}
+
+const markAsSkipped = async (item: Audiobook) => {
   console.log('Mark as skipped:', item.title)
-  // TODO: Implement skip functionality (unmonitor)
+  
+  try {
+    await apiService.updateAudiobook(item.id, { monitored: false })
+    await libraryStore.fetchLibrary()
+  } catch (err) {
+    console.error('Failed to unmonitor audiobook:', err)
+  }
 }
 </script>
 
@@ -229,9 +319,23 @@ const markAsSkipped = (item: Audiobook) => {
   font-size: 1.2rem;
 }
 
-.btn-icon:hover {
+.btn-icon:hover:not(:disabled) {
   background-color: #3a3a3a;
   color: white;
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Robot icon for automatic search */
+.btn-icon .ph-robot {
+  color: #4caf50;
+}
+
+.btn-icon:hover:not(:disabled) .ph-robot {
+  color: #66bb6a;
 }
 
 .wanted-filters {
@@ -309,8 +413,8 @@ const markAsSkipped = (item: Audiobook) => {
 }
 
 .wanted-poster {
-  width: 60px;
-  height: 90px;
+  width: 80px;
+  height: 80px;
   margin-right: 1rem;
   background-color: #555;
   border-radius: 4px;
@@ -355,6 +459,19 @@ const markAsSkipped = (item: Audiobook) => {
   color: #f39c12;
   font-size: 0.85rem;
   font-weight: 500;
+}
+
+.search-status {
+  margin-top: 0.5rem;
+  color: #007acc;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.search-status i {
+  font-size: 1rem;
 }
 
 .wanted-status {

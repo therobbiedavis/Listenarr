@@ -107,9 +107,9 @@
               <i class="icon-plus"></i>
               Add New Audiobook
             </RouterLink>
-            <RouterLink to="/search" class="action-button">
-              <i class="icon-search"></i>
-              Search Audiobooks
+                        <RouterLink to="/add-new" class="action-button">
+              <i class="ph ph-magnifying-glass"></i>
+              <span>Search</span>
             </RouterLink>
             <RouterLink to="/library-import" class="action-button">
               <i class="icon-import"></i>

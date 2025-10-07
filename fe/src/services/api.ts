@@ -4,7 +4,10 @@ import type {
   ApiConfiguration, 
   DownloadClientConfiguration, 
   ApplicationSettings,
-  Audiobook
+  Audiobook,
+  History,
+  Indexer,
+  QueueItem
 } from '@/types'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -38,7 +41,13 @@ class ApiService {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
-      return await response.json()
+      // Handle empty responses (204 No Content or empty body)
+      const text = await response.text()
+      if (!text || text.trim().length === 0) {
+        return null as T
+      }
+      
+      return JSON.parse(text) as T
     } catch (error) {
       console.error('API request failed:', error)
       throw error
@@ -52,6 +61,13 @@ class ApiService {
     if (apiIds) apiIds.forEach(id => params.append('apiIds', id))
     
     return this.request<SearchResult[]>(`/search?${params}`)
+  }
+
+  async searchIndexers(query: string, category?: string): Promise<SearchResult[]> {
+    const params = new URLSearchParams({ query })
+    if (category) params.append('category', category)
+    
+    return this.request<SearchResult[]>(`/search/indexers?${params}`)
   }
 
   async searchByApi(apiId: string, query: string, category?: string): Promise<SearchResult[]> {
@@ -83,6 +99,52 @@ class ApiService {
 
   async cancelDownload(id: string): Promise<boolean> {
     return this.request<boolean>(`/downloads/${id}`, { method: 'DELETE' })
+  }
+
+  async searchAndDownload(audiobookId: number): Promise<{
+    success: boolean
+    message?: string
+    downloadId?: string
+    indexerUsed?: string
+    downloadClientUsed?: string
+    searchResult?: SearchResult
+  }> {
+    return this.request<{
+      success: boolean
+      message?: string
+      downloadId?: string
+      indexerUsed?: string
+      downloadClientUsed?: string
+      searchResult?: SearchResult
+    }>('/download/search-and-download', {
+      method: 'POST',
+      body: JSON.stringify({ audiobookId })
+    })
+  }
+
+  async sendToDownloadClient(searchResult: SearchResult, downloadClientId?: string): Promise<{
+    downloadId: string
+    message: string
+  }> {
+    return this.request<{
+      downloadId: string
+      message: string
+    }>('/download/send', {
+      method: 'POST',
+      body: JSON.stringify({ searchResult, downloadClientId })
+    })
+  }
+
+  // Download Queue API
+  async getQueue(): Promise<QueueItem[]> {
+    return this.request<QueueItem[]>('/download/queue')
+  }
+
+  async removeFromQueue(downloadId: string, downloadClientId?: string): Promise<{ message: string }> {
+    const params = downloadClientId ? `?downloadClientId=${downloadClientId}` : ''
+    return this.request<{ message: string }>(`/download/queue/${downloadId}${params}`, {
+      method: 'DELETE'
+    })
   }
 
   // API Configuration
@@ -130,8 +192,8 @@ class ApiService {
     return this.request<ApplicationSettings>('/configuration/settings')
   }
 
-  async saveApplicationSettings(settings: ApplicationSettings): Promise<void> {
-    await this.request<void>('/configuration/settings', {
+  async saveApplicationSettings(settings: ApplicationSettings): Promise<ApplicationSettings> {
+    return this.request<ApplicationSettings>('/configuration/settings', {
       method: 'POST',
       body: JSON.stringify(settings)
     })
@@ -145,6 +207,17 @@ class ApiService {
   // Library API
   async getLibrary(): Promise<Audiobook[]> {
     return this.request<Audiobook[]>('/library')
+  }
+
+  async getAudiobook(id: number): Promise<Audiobook> {
+    return this.request<Audiobook>(`/library/${id}`)
+  }
+
+  async updateAudiobook(id: number, audiobook: Partial<Audiobook>): Promise<{ message: string; audiobook: Audiobook }> {
+    return this.request<{ message: string; audiobook: Audiobook }>(`/library/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(audiobook)
+    })
   }
 
   async removeFromLibrary(id: number): Promise<{ message: string; id: number }> {
@@ -194,6 +267,116 @@ class ApiService {
     // Convert relative URL to absolute
     return `${BACKEND_BASE_URL}${imageUrl}`
   }
+
+  // History API
+  async getHistory(limit?: number, offset?: number): Promise<{
+    history: History[]
+    total: number
+    limit: number
+    offset: number
+  }> {
+    const params = new URLSearchParams()
+    if (limit) params.append('limit', limit.toString())
+    if (offset) params.append('offset', offset.toString())
+    const queryString = params.toString()
+    return this.request<{
+      history: History[]
+      total: number
+      limit: number
+      offset: number
+    }>(`/history${queryString ? '?' + queryString : ''}`)
+  }
+
+  async getHistoryByAudiobookId(audiobookId: number): Promise<History[]> {
+    return this.request<History[]>(`/history/audiobook/${audiobookId}`)
+  }
+
+  async getHistoryByEventType(eventType: string, limit?: number): Promise<History[]> {
+    const params = limit ? `?limit=${limit}` : ''
+    return this.request<History[]>(`/history/type/${eventType}${params}`)
+  }
+
+  async getHistoryBySource(source: string, limit?: number): Promise<History[]> {
+    const params = limit ? `?limit=${limit}` : ''
+    return this.request<History[]>(`/history/source/${source}${params}`)
+  }
+
+  async getRecentHistory(limit: number = 50): Promise<History[]> {
+    return this.request<History[]>(`/history/recent?limit=${limit}`)
+  }
+
+  async deleteHistoryEntry(id: number): Promise<{ message: string; id: number }> {
+    return this.request<{ message: string; id: number }>(`/history/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async clearAllHistory(): Promise<{ message: string; deletedCount: number }> {
+    return this.request<{ message: string; deletedCount: number }>('/history/clear', {
+      method: 'DELETE'
+    })
+  }
+
+  async cleanupOldHistory(days: number = 90): Promise<{ message: string; deletedCount: number }> {
+    return this.request<{ message: string; deletedCount: number }>(`/history/cleanup?days=${days}`, {
+      method: 'DELETE'
+    })
+  }
+
+  // Indexers API
+  async getIndexers(): Promise<Indexer[]> {
+    return this.request<Indexer[]>('/indexers')
+  }
+
+  async getIndexerById(id: number): Promise<Indexer> {
+    return this.request<Indexer>(`/indexers/${id}`)
+  }
+
+  async createIndexer(indexer: Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>): Promise<Indexer> {
+    return this.request<Indexer>('/indexers', {
+      method: 'POST',
+      body: JSON.stringify(indexer)
+    })
+  }
+
+  async updateIndexer(id: number, indexer: Partial<Indexer>): Promise<Indexer> {
+    return this.request<Indexer>(`/indexers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(indexer)
+    })
+  }
+
+  async deleteIndexer(id: number): Promise<{ message: string; id: number }> {
+    return this.request<{ message: string; id: number }>(`/indexers/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async testIndexer(id: number): Promise<{ success: boolean; message: string; error?: string; indexer: Indexer }> {
+    return this.request<{ success: boolean; message: string; error?: string; indexer: Indexer }>(`/indexers/${id}/test`, {
+      method: 'POST'
+    })
+  }
+
+  async toggleIndexer(id: number): Promise<Indexer> {
+    return this.request<Indexer>(`/indexers/${id}/toggle`, {
+      method: 'PUT'
+    })
+  }
+
+  async getEnabledIndexers(): Promise<Indexer[]> {
+    return this.request<Indexer[]>('/indexers/enabled')
+  }
 }
 
 export const apiService = new ApiService()
+
+// Export individual indexer functions for convenience
+export const getIndexers = () => apiService.getIndexers()
+export const getIndexerById = (id: number) => apiService.getIndexerById(id)
+export const createIndexer = (indexer: Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>) => apiService.createIndexer(indexer)
+export const updateIndexer = (id: number, indexer: Partial<Indexer>) => apiService.updateIndexer(id, indexer)
+export const deleteIndexer = (id: number) => apiService.deleteIndexer(id)
+export const testIndexer = (id: number) => apiService.testIndexer(id)
+export const toggleIndexer = (id: number) => apiService.toggleIndexer(id)
+export const getEnabledIndexers = () => apiService.getEnabledIndexers()

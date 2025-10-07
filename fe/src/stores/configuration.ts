@@ -87,8 +87,8 @@ export const useConfigurationStore = defineStore('configuration', () => {
   
   const saveApplicationSettings = async (settings: ApplicationSettings) => {
     try {
-      await apiService.saveApplicationSettings(settings)
-      applicationSettings.value = settings
+      const savedSettings = await apiService.saveApplicationSettings(settings)
+      applicationSettings.value = savedSettings
     } catch (error) {
       console.error('Failed to save application settings:', error)
       throw error

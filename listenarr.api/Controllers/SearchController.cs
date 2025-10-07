@@ -100,5 +100,27 @@ namespace Listenarr.Api.Controllers
                 return StatusCode(500, "Internal server error");
             }
         }
+
+        [HttpGet("indexers")]
+        public async Task<ActionResult<List<SearchResult>>> SearchIndexers(
+            [FromQuery] string query,
+            [FromQuery] string? category = null)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(query))
+                {
+                    return BadRequest("Query parameter is required");
+                }
+
+                var results = await _searchService.SearchIndexersAsync(query, category);
+                return Ok(results);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
+                return StatusCode(500, "Internal server error");
+            }
+        }
     }
 }

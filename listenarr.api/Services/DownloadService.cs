@@ -1,0 +1,999 @@
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2025 Robbie Davis
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using Listenarr.Api.Models;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+
+namespace Listenarr.Api.Services
+{
+    public class DownloadService : IDownloadService
+    {
+        private readonly IAudiobookRepository _audiobookRepository;
+        private readonly IConfigurationService _configurationService;
+        private readonly ListenArrDbContext _dbContext;
+        private readonly ILogger<DownloadService> _logger;
+        private readonly HttpClient _httpClient;
+
+        public DownloadService(
+            IAudiobookRepository audiobookRepository,
+            IConfigurationService configurationService,
+            ListenArrDbContext dbContext,
+            ILogger<DownloadService> logger,
+            HttpClient httpClient)
+        {
+            _audiobookRepository = audiobookRepository;
+            _configurationService = configurationService;
+            _dbContext = dbContext;
+            _logger = logger;
+            _httpClient = httpClient;
+        }
+
+        // Placeholder implementations for existing interface methods
+        public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId)
+        {
+            return await SendToDownloadClientAsync(searchResult, downloadClientId);
+        }
+
+        public async Task<List<Download>> GetActiveDownloadsAsync()
+        {
+            // TODO: Implement download status tracking
+            return await Task.FromResult(new List<Download>());
+        }
+
+        public async Task<Download?> GetDownloadAsync(string downloadId)
+        {
+            // TODO: Implement download retrieval
+            return await Task.FromResult<Download?>(null);
+        }
+
+        public async Task<bool> CancelDownloadAsync(string downloadId)
+        {
+            // TODO: Implement download cancellation
+            return await Task.FromResult(false);
+        }
+
+        public async Task UpdateDownloadStatusAsync()
+        {
+            // TODO: Implement download status updates
+            await Task.CompletedTask;
+        }
+
+        public async Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId)
+        {
+            // Get the audiobook
+            var audiobook = await _audiobookRepository.GetByIdAsync(audiobookId);
+            if (audiobook == null)
+            {
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = "Audiobook not found"
+                };
+            }
+
+            // Get all enabled indexers ordered by priority
+            var indexers = await _dbContext.Indexers
+                .Where(i => i.IsEnabled)
+                .OrderBy(i => i.Priority)
+                .ThenBy(i => i.Name)
+                .ToListAsync();
+
+            if (!indexers.Any())
+            {
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = "No enabled indexers configured"
+                };
+            }
+
+            // Build search query from audiobook metadata
+            var searchQuery = BuildSearchQuery(audiobook);
+            _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
+
+            // Search each indexer sequentially until we find a match
+            foreach (var indexer in indexers)
+            {
+                try
+                {
+                    _logger.LogInformation("Searching indexer: {IndexerName} (Priority: {Priority})", indexer.Name, indexer.Priority);
+
+                    var results = await SearchIndexerAsync(indexer, searchQuery);
+                    
+                    if (results.Any())
+                    {
+                        // Get the best result (highest seeders for torrents, newest for NZBs)
+                        var bestResult = GetBestResult(results, indexer.Type);
+                        
+                        _logger.LogInformation("Found match on indexer {IndexerName}: {Title}", indexer.Name, bestResult.Title);
+
+                        // Determine if this is a torrent or NZB and route to appropriate client
+                        var isTorrent = IsTorrentIndexer(indexer.Type);
+                        var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+
+                        if (downloadClientId == null)
+                        {
+                            _logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
+                            continue;
+                        }
+
+                        // Send to download client
+                        var downloadId = await SendToDownloadClientAsync(bestResult, downloadClientId);
+
+                        // Log to history
+                        await LogDownloadHistory(audiobook, indexer.Name, bestResult);
+
+                        return new SearchAndDownloadResult
+                        {
+                            Success = true,
+                            Message = $"Successfully sent to download client",
+                            DownloadId = downloadId,
+                            IndexerUsed = indexer.Name,
+                            DownloadClientUsed = downloadClientId,
+                            SearchResult = bestResult
+                        };
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No results found on indexer: {IndexerName}", indexer.Name);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error searching indexer {IndexerName}", indexer.Name);
+                    // Continue to next indexer
+                }
+            }
+
+            return new SearchAndDownloadResult
+            {
+                Success = false,
+                Message = $"No matches found across {indexers.Count} indexers"
+            };
+        }
+
+        public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null)
+        {
+            // If no specific client provided, auto-select based on result type
+            if (downloadClientId == null)
+            {
+                var isTorrent = IsTorrentResult(searchResult);
+                downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+                
+                if (downloadClientId == null)
+                {
+                    var clientType = isTorrent ? "torrent" : "NZB";
+                    var neededClients = isTorrent ? "qBittorrent or Transmission" : "SABnzbd or NZBGet";
+                    throw new Exception($"No suitable download client found for {clientType}. Please configure and enable a {clientType} client ({neededClients}) in Settings.");
+                }
+                
+                _logger.LogInformation("Auto-selected download client {ClientId} for {ClientType}", downloadClientId, isTorrent ? "torrent" : "NZB");
+            }
+
+            var downloadClient = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
+            if (downloadClient == null || !downloadClient.IsEnabled)
+            {
+                throw new Exception("Download client not found or disabled");
+            }
+
+            _logger.LogInformation("Sending to {ClientType} download client: {ClientName}", downloadClient.Type, downloadClient.Name);
+
+            // Route to appropriate client handler
+            return downloadClient.Type.ToLower() switch
+            {
+                "qbittorrent" => await SendToQBittorrent(downloadClient, searchResult),
+                "transmission" => await SendToTransmission(downloadClient, searchResult),
+                "sabnzbd" => await SendToSABnzbd(downloadClient, searchResult),
+                "nzbget" => await SendToNZBGet(downloadClient, searchResult),
+                _ => throw new Exception($"Unsupported download client type: {downloadClient.Type}")
+            };
+        }
+
+        private string BuildSearchQuery(Audiobook audiobook)
+        {
+            // Build a search query from audiobook metadata
+            var parts = new List<string>();
+
+            if (!string.IsNullOrEmpty(audiobook.Title))
+                parts.Add(audiobook.Title);
+
+            if (audiobook.Authors != null && audiobook.Authors.Any())
+                parts.Add(audiobook.Authors.First());
+
+            return string.Join(" ", parts);
+        }
+
+        private async Task<List<SearchResult>> SearchIndexerAsync(Indexer indexer, string query)
+        {
+            // TODO: Implement actual indexer search using Jackett/Prowlarr API
+            // For now, return empty list (placeholder)
+            _logger.LogInformation("Searching indexer {Name} with query: {Query}", indexer.Name, query);
+            
+            // Placeholder: In real implementation, make HTTP request to indexer API
+            await Task.Delay(100); // Simulate network delay
+            
+            return new List<SearchResult>();
+        }
+
+        private SearchResult GetBestResult(List<SearchResult> results, string indexerType)
+        {
+            // For torrents, prefer highest seeders
+            // For NZBs, prefer newest/largest
+            if (IsTorrentIndexer(indexerType))
+            {
+                return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.Size).First();
+            }
+            else
+            {
+                return results.OrderByDescending(r => r.PublishedDate).ThenByDescending(r => r.Size).First();
+            }
+        }
+
+        private bool IsTorrentIndexer(string indexerType)
+        {
+            return indexerType.ToLower() == "torrent";
+        }
+
+        private bool IsTorrentResult(SearchResult result)
+        {
+            // Check for NZB first - if it has an NZB URL, it's a Usenet/NZB download
+            if (!string.IsNullOrEmpty(result.NzbUrl))
+            {
+                _logger.LogDebug("Result identified as NZB (has NzbUrl): {Title}", result.Title);
+                return false;
+            }
+
+            // Check for torrent indicators - magnet link or torrent file
+            if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
+            {
+                _logger.LogDebug("Result identified as Torrent (has MagnetLink or TorrentUrl): {Title}", result.Title);
+                return true;
+            }
+
+            // If neither is set, we can't reliably determine the type
+            // Log a warning and default to false (NZB) as a safer choice
+            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.", 
+                result.Title, result.Source);
+            return false;
+        }
+
+        private async Task<string?> GetAppropriateDownloadClient(bool isTorrent)
+        {
+            var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+            var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
+
+            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}", 
+                isTorrent ? "torrent" : "NZB", 
+                enabledClients.Count,
+                string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
+
+            if (isTorrent)
+            {
+                // Prefer qBittorrent, then Transmission
+                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase)) 
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
+                
+                if (client != null)
+                {
+                    _logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
+                }
+                else
+                {
+                    _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
+                }
+                
+                return client?.Id;
+            }
+            else
+            {
+                // Prefer SABnzbd, then NZBGet
+                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
+                
+                if (client != null)
+                {
+                    _logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
+                }
+                else
+                {
+                    _logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
+                }
+                
+                return client?.Id;
+            }
+        }
+
+        private async Task<string> SendToQBittorrent(DownloadClientConfiguration client, SearchResult result)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+            
+            // Login to qBittorrent
+            var loginData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("username", client.Username),
+                new KeyValuePair<string, string>("password", client.Password)
+            });
+
+            var loginResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+            if (!loginResponse.IsSuccessStatusCode)
+            {
+                throw new Exception("Failed to login to qBittorrent");
+            }
+
+            // Add torrent
+            var addData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("urls", result.MagnetLink ?? ""),
+                new KeyValuePair<string, string>("savepath", client.DownloadPath)
+            });
+
+            var addResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
+            if (!addResponse.IsSuccessStatusCode)
+            {
+                throw new Exception("Failed to add torrent to qBittorrent");
+            }
+
+            _logger.LogInformation("Successfully sent torrent to qBittorrent");
+            return Guid.NewGuid().ToString(); // Return a download ID
+        }
+
+        private async Task<string> SendToTransmission(DownloadClientConfiguration client, SearchResult result)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
+            
+            // TODO: Implement Transmission RPC API
+            _logger.LogInformation("Sending to Transmission (not yet implemented)");
+            await Task.Delay(100);
+            
+            return Guid.NewGuid().ToString();
+        }
+
+        private async Task<string> SendToSABnzbd(DownloadClientConfiguration client, SearchResult result)
+        {
+            try
+            {
+                var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+                
+                // Get API key from settings
+                var apiKey = "";
+                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                {
+                    apiKey = apiKeyObj?.ToString() ?? "";
+                }
+
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    throw new Exception("SABnzbd API key not configured");
+                }
+
+                // Get NZB URL
+                var nzbUrl = result.NzbUrl;
+                if (string.IsNullOrEmpty(nzbUrl))
+                {
+                    throw new Exception("No NZB URL found in search result");
+                }
+
+                _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", result.Title, result.Source);
+                _logger.LogDebug("NZB URL: {Url}", nzbUrl);
+
+                // Build SABnzbd addurl API request
+                var queryParams = new Dictionary<string, string>
+                {
+                    { "mode", "addurl" },
+                    { "name", nzbUrl },
+                    { "apikey", apiKey },
+                    { "output", "json" },
+                    { "nzbname", result.Title }
+                };
+
+                // Add priority if configured
+                if (client.Settings != null && client.Settings.TryGetValue("recentPriority", out var priorityObj))
+                {
+                    var priority = priorityObj?.ToString();
+                    if (!string.IsNullOrEmpty(priority) && priority != "default")
+                    {
+                        queryParams["priority"] = priority switch
+                        {
+                            "force" => "2",
+                            "high" => "1",
+                            "normal" => "0",
+                            "low" => "-1",
+                            _ => "0"
+                        };
+                    }
+                }
+
+                // Add category for audiobooks
+                queryParams["cat"] = "audiobooks";
+
+                var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
+                var requestUrl = $"{baseUrl}?{queryString}";
+
+                _logger.LogDebug("SABnzbd request URL: {Url}", requestUrl.Replace(apiKey, "***"));
+
+                var response = await _httpClient.GetAsync(requestUrl);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("SABnzbd returned error status {Status}: {Content}", response.StatusCode, responseContent);
+                    throw new Exception($"SABnzbd returned status {response.StatusCode}: {responseContent}");
+                }
+
+                // Parse JSON response
+                var jsonDoc = JsonDocument.Parse(responseContent);
+                var root = jsonDoc.RootElement;
+
+                // Check for errors
+                if (root.TryGetProperty("error", out var errorElement))
+                {
+                    var errorMsg = errorElement.GetString();
+                    if (!string.IsNullOrEmpty(errorMsg))
+                    {
+                        throw new Exception($"SABnzbd error: {errorMsg}");
+                    }
+                }
+
+                // Get NZO ID (download ID)
+                string downloadId = "";
+                if (root.TryGetProperty("nzo_ids", out var nzoIds) && nzoIds.ValueKind == JsonValueKind.Array)
+                {
+                    var firstId = nzoIds.EnumerateArray().FirstOrDefault();
+                    downloadId = firstId.GetString() ?? Guid.NewGuid().ToString();
+                }
+                else
+                {
+                    downloadId = Guid.NewGuid().ToString();
+                }
+
+                _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", downloadId);
+                return downloadId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send NZB to SABnzbd");
+                throw;
+            }
+        }
+
+        private async Task<string> SendToNZBGet(DownloadClientConfiguration client, SearchResult result)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
+            
+            // TODO: Implement NZBGet JSON-RPC API
+            _logger.LogInformation("Sending to NZBGet (not yet implemented)");
+            await Task.Delay(100);
+            
+            return Guid.NewGuid().ToString();
+        }
+
+        public async Task<List<QueueItem>> GetQueueAsync()
+        {
+            var queueItems = new List<QueueItem>();
+            var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+            var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
+
+            foreach (var client in enabledClients)
+            {
+                try
+                {
+                    List<QueueItem> clientQueue = client.Type.ToLower() switch
+                    {
+                        "qbittorrent" => await GetQBittorrentQueueAsync(client),
+                        "transmission" => await GetTransmissionQueueAsync(client),
+                        "sabnzbd" => await GetSABnzbdQueueAsync(client),
+                        "nzbget" => await GetNZBGetQueueAsync(client),
+                        _ => new List<QueueItem>()
+                    };
+
+                    queueItems.AddRange(clientQueue);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error getting queue from download client {ClientName}", client.Name);
+                }
+            }
+
+            return queueItems.OrderByDescending(q => q.AddedAt).ToList();
+        }
+
+        public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null)
+        {
+            try
+            {
+                if (downloadClientId == null)
+                {
+                    // Try all clients to find and remove the item
+                    var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+                    var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
+
+                    foreach (var client in enabledClients)
+                    {
+                        bool removed = await RemoveFromClientAsync(client, downloadId);
+                        if (removed) return true;
+                    }
+                    return false;
+                }
+                else
+                {
+                    var client = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
+                    if (client == null) return false;
+                    return await RemoveFromClientAsync(client, downloadId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing from queue: {DownloadId}", downloadId);
+                return false;
+            }
+        }
+
+        private async Task<List<QueueItem>> GetQBittorrentQueueAsync(DownloadClientConfiguration client)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+            var items = new List<QueueItem>();
+
+            try
+            {
+                // Login
+                var loginData = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("username", client.Username),
+                    new KeyValuePair<string, string>("password", client.Password)
+                });
+
+                var loginResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+                if (!loginResponse.IsSuccessStatusCode) return items;
+
+                // Get torrents
+                var torrentsResponse = await _httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+                if (!torrentsResponse.IsSuccessStatusCode) return items;
+
+                var torrentsJson = await torrentsResponse.Content.ReadAsStringAsync();
+                var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(torrentsJson);
+
+                if (torrents != null)
+                {
+                    foreach (var torrent in torrents)
+                    {
+                        var name = torrent.ContainsKey("name") ? torrent["name"].GetString() ?? "" : "";
+                        var progress = torrent.ContainsKey("progress") ? torrent["progress"].GetDouble() * 100 : 0;
+                        var size = torrent.ContainsKey("size") ? torrent["size"].GetInt64() : 0;
+                        var downloaded = torrent.ContainsKey("downloaded") ? torrent["downloaded"].GetInt64() : 0;
+                        var dlspeed = torrent.ContainsKey("dlspeed") ? torrent["dlspeed"].GetDouble() : 0;
+                        var eta = torrent.ContainsKey("eta") ? (int?)torrent["eta"].GetInt32() : null;
+                        var state = torrent.ContainsKey("state") ? torrent["state"].GetString() ?? "unknown" : "unknown";
+                        var hash = torrent.ContainsKey("hash") ? torrent["hash"].GetString() ?? "" : "";
+                        var addedOn = torrent.ContainsKey("added_on") ? torrent["added_on"].GetInt64() : 0;
+                        var numSeeds = torrent.ContainsKey("num_seeds") ? (int?)torrent["num_seeds"].GetInt32() : null;
+                        var numLeechs = torrent.ContainsKey("num_leechs") ? (int?)torrent["num_leechs"].GetInt32() : null;
+                        var ratio = torrent.ContainsKey("ratio") ? (double?)torrent["ratio"].GetDouble() : null;
+
+                        var status = state switch
+                        {
+                            "downloading" => "downloading",
+                            "pausedDL" => "paused",
+                            "queuedDL" => "queued",
+                            "uploading" or "stalledUP" => "seeding",
+                            "completedUP" or "completedDL" => "completed",
+                            "error" or "missingFiles" => "failed",
+                            _ => "queued"
+                        };
+
+                        items.Add(new QueueItem
+                        {
+                            Id = hash,
+                            Title = name,
+                            Quality = "Unknown",
+                            Status = status,
+                            Progress = progress,
+                            Size = size,
+                            Downloaded = downloaded,
+                            DownloadSpeed = dlspeed,
+                            Eta = eta >= 8640000 ? null : eta, // Filter out invalid ETAs
+                            DownloadClient = client.Name,
+                            DownloadClientId = client.Id,
+                            DownloadClientType = "qbittorrent",
+                            AddedAt = DateTimeOffset.FromUnixTimeSeconds(addedOn).DateTime,
+                            Seeders = numSeeds,
+                            Leechers = numLeechs,
+                            Ratio = ratio,
+                            CanPause = status == "downloading" || status == "queued",
+                            CanRemove = true
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting qBittorrent queue");
+            }
+
+            return items;
+        }
+
+        private async Task<List<QueueItem>> GetTransmissionQueueAsync(DownloadClientConfiguration client)
+        {
+            // TODO: Implement Transmission queue retrieval
+            _logger.LogInformation("Transmission queue retrieval not yet implemented");
+            await Task.Delay(1);
+            return new List<QueueItem>();
+        }
+
+        private async Task<List<QueueItem>> GetSABnzbdQueueAsync(DownloadClientConfiguration client)
+        {
+            var items = new List<QueueItem>();
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+
+            try
+            {
+                // Get API key from settings
+                var apiKey = "";
+                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                {
+                    apiKey = apiKeyObj?.ToString() ?? "";
+                }
+
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    _logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
+                    return items;
+                }
+
+                // Build queue API request
+                var requestUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                
+                var response = await _httpClient.GetAsync(requestUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("SABnzbd queue request failed with status {Status}", response.StatusCode);
+                    return items;
+                }
+
+                var jsonContent = await response.Content.ReadAsStringAsync();
+                var doc = JsonDocument.Parse(jsonContent);
+                
+                // Navigate to queue.slots array
+                if (!doc.RootElement.TryGetProperty("queue", out var queue))
+                {
+                    return items;
+                }
+
+                if (!queue.TryGetProperty("slots", out var slots) || slots.ValueKind != JsonValueKind.Array)
+                {
+                    return items;
+                }
+
+                foreach (var slot in slots.EnumerateArray())
+                {
+                    try
+                    {
+                        var nzoId = slot.TryGetProperty("nzo_id", out var id) ? id.GetString() ?? "" : "";
+                        var filename = slot.TryGetProperty("filename", out var fn) ? fn.GetString() ?? "Unknown" : "Unknown";
+                        var status = slot.TryGetProperty("status", out var st) ? st.GetString() ?? "Unknown" : "Unknown";
+                        
+                        // Helper to parse numeric values that might be strings or numbers
+                        double ParseNumericValue(JsonElement element)
+                        {
+                            if (element.ValueKind == JsonValueKind.Number)
+                                return element.GetDouble();
+                            if (element.ValueKind == JsonValueKind.String)
+                            {
+                                var str = element.GetString() ?? "0";
+                                if (double.TryParse(str, out var value))
+                                    return value;
+                            }
+                            return 0;
+                        }
+                        
+                        var sizeMB = slot.TryGetProperty("mb", out var mb) ? ParseNumericValue(mb) : 0;
+                        var mbLeft = slot.TryGetProperty("mbleft", out var left) ? ParseNumericValue(left) : 0;
+                        var downloadedMB = sizeMB - mbLeft;
+                        var percentage = slot.TryGetProperty("percentage", out var pct) ? ParseNumericValue(pct) : 0;
+                        
+                        var timeLeft = slot.TryGetProperty("timeleft", out var time) ? time.GetString() ?? "0:00:00" : "0:00:00";
+                        var category = slot.TryGetProperty("cat", out var cat) ? cat.GetString() ?? "" : "";
+                        var priority = slot.TryGetProperty("priority", out var pri) ? pri.GetString() ?? "" : "";
+
+                        // Parse time left (format: "0:12:34" or "1 day 2:34:56")
+                        int etaSeconds = 0;
+                        if (!string.IsNullOrEmpty(timeLeft) && timeLeft != "0:00:00")
+                        {
+                            etaSeconds = ParseSABnzbdTimeLeft(timeLeft);
+                        }
+
+                        // Convert MB to bytes
+                        var sizeBytes = (long)(sizeMB * 1024 * 1024);
+                        var downloadedBytes = (long)(downloadedMB * 1024 * 1024);
+
+                        // Get download speed (bytes per second)
+                        var speed = 0.0;
+                        if (queue.TryGetProperty("speed", out var speedProp))
+                        {
+                            var speedStr = speedProp.GetString() ?? "0";
+                            // Speed is in format like "1.2 M" or "500 K"
+                            speed = ParseSABnzbdSpeed(speedStr);
+                        }
+
+                        // Map SABnzbd status to our status
+                        var mappedStatus = status.ToLower() switch
+                        {
+                            "downloading" => "downloading",
+                            "queued" => "queued",
+                            "paused" => "paused",
+                            "checking" => "downloading",
+                            "extracting" => "downloading",
+                            "moving" => "downloading",
+                            "completed" => "completed",
+                            "failed" => "failed",
+                            _ => "queued"
+                        };
+
+                        items.Add(new QueueItem
+                        {
+                            Id = nzoId,
+                            Title = filename,
+                            Quality = category,
+                            Status = mappedStatus,
+                            Progress = percentage,
+                            Size = sizeBytes,
+                            Downloaded = downloadedBytes,
+                            DownloadSpeed = speed,
+                            Eta = etaSeconds > 0 ? etaSeconds : null,
+                            DownloadClient = client.Name,
+                            DownloadClientId = client.Id,
+                            DownloadClientType = "sabnzbd",
+                            AddedAt = DateTime.UtcNow, // SABnzbd doesn't provide this easily
+                            CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
+                            CanRemove = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error parsing SABnzbd queue item");
+                    }
+                }
+
+                _logger.LogInformation("Retrieved {Count} items from SABnzbd queue", items.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting SABnzbd queue");
+            }
+
+            return items;
+        }
+
+        private int ParseSABnzbdTimeLeft(string timeLeft)
+        {
+            try
+            {
+                // Format can be "0:12:34" or "1 day 2:34:56"
+                var totalSeconds = 0;
+
+                if (timeLeft.Contains("day"))
+                {
+                    var parts = timeLeft.Split(new[] { " day ", " days " }, StringSplitOptions.None);
+                    if (parts.Length == 2 && int.TryParse(parts[0], out var days))
+                    {
+                        totalSeconds += days * 86400;
+                        timeLeft = parts[1];
+                    }
+                }
+
+                var timeParts = timeLeft.Split(':');
+                if (timeParts.Length == 3)
+                {
+                    if (int.TryParse(timeParts[0], out var hours))
+                        totalSeconds += hours * 3600;
+                    if (int.TryParse(timeParts[1], out var minutes))
+                        totalSeconds += minutes * 60;
+                    if (int.TryParse(timeParts[2], out var seconds))
+                        totalSeconds += seconds;
+                }
+
+                return totalSeconds;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private double ParseSABnzbdSpeed(string speedStr)
+        {
+            try
+            {
+                // Format: "1.2 M" (MB/s), "500 K" (KB/s), "5.0 B" (B/s)
+                var parts = speedStr.Trim().Split(' ');
+                if (parts.Length != 2)
+                    return 0;
+
+                if (!double.TryParse(parts[0], out var value))
+                    return 0;
+
+                var unit = parts[1].ToUpper();
+                return unit switch
+                {
+                    "B" => value,
+                    "K" => value * 1024,
+                    "M" => value * 1024 * 1024,
+                    "G" => value * 1024 * 1024 * 1024,
+                    _ => 0
+                };
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private async Task<List<QueueItem>> GetNZBGetQueueAsync(DownloadClientConfiguration client)
+        {
+            // TODO: Implement NZBGet queue retrieval
+            _logger.LogInformation("NZBGet queue retrieval not yet implemented");
+            await Task.Delay(1);
+            return new List<QueueItem>();
+        }
+
+        private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, string downloadId)
+        {
+            return client.Type.ToLower() switch
+            {
+                "qbittorrent" => await RemoveFromQBittorrentAsync(client, downloadId),
+                "transmission" => await RemoveFromTransmissionAsync(client, downloadId),
+                "sabnzbd" => await RemoveFromSABnzbdAsync(client, downloadId),
+                "nzbget" => await RemoveFromNZBGetAsync(client, downloadId),
+                _ => false
+            };
+        }
+
+        private async Task<bool> RemoveFromQBittorrentAsync(DownloadClientConfiguration client, string hash)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+
+            try
+            {
+                // Login
+                var loginData = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("username", client.Username),
+                    new KeyValuePair<string, string>("password", client.Password)
+                });
+
+                var loginResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+                if (!loginResponse.IsSuccessStatusCode) return false;
+
+                // Delete torrent
+                var deleteData = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("hashes", hash),
+                    new KeyValuePair<string, string>("deleteFiles", "true")
+                });
+
+                var deleteResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/torrents/delete", deleteData);
+                return deleteResponse.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing torrent from qBittorrent: {Hash}", hash);
+                return false;
+            }
+        }
+
+        private async Task<bool> RemoveFromTransmissionAsync(DownloadClientConfiguration client, string downloadId)
+        {
+            // TODO: Implement
+            await Task.Delay(1);
+            return false;
+        }
+
+        private async Task<bool> RemoveFromSABnzbdAsync(DownloadClientConfiguration client, string downloadId)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+
+            try
+            {
+                // Get API key from settings
+                var apiKey = "";
+                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                {
+                    apiKey = apiKeyObj?.ToString() ?? "";
+                }
+
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    _logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
+                    return false;
+                }
+
+                // Check if we should remove completed downloads or delete files
+                var removeCompleted = false;
+                if (client.Settings != null && client.Settings.TryGetValue("removeCompleted", out var removeObj))
+                {
+                    removeCompleted = removeObj is bool b && b;
+                }
+
+                // Build remove API request (mode=queue with name=delete and value=nzo_id)
+                var requestUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(downloadId)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                
+                if (removeCompleted)
+                {
+                    // Also delete files
+                    requestUrl += "&del_files=1";
+                }
+
+                var response = await _httpClient.GetAsync(requestUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to remove from SABnzbd: Status {Status}", response.StatusCode);
+                    return false;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                var doc = JsonDocument.Parse(content);
+
+                // Check for success
+                if (doc.RootElement.TryGetProperty("status", out var status))
+                {
+                    var statusBool = status.GetBoolean();
+                    _logger.LogInformation("Removed {DownloadId} from SABnzbd: {Success}", downloadId, statusBool);
+                    return statusBool;
+                }
+
+                return true; // Assume success if no error
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing from SABnzbd: {DownloadId}", downloadId);
+                return false;
+            }
+        }
+
+        private async Task<bool> RemoveFromNZBGetAsync(DownloadClientConfiguration client, string downloadId)
+        {
+            // TODO: Implement
+            await Task.Delay(1);
+            return false;
+        }
+
+        private async Task LogDownloadHistory(Audiobook audiobook, string indexerName, SearchResult result)
+        {
+            var historyEntry = new History
+            {
+                AudiobookId = audiobook.Id,
+                AudiobookTitle = audiobook.Title ?? "Unknown",
+                EventType = "Download Started",
+                Message = $"Found match on {indexerName}: {result.Title}",
+                Source = "AutomaticSearch",
+                Data = JsonSerializer.Serialize(new
+                {
+                    IndexerName = indexerName,
+                    ResultTitle = result.Title,
+                    ResultSize = result.Size,
+                    ResultSeeders = result.Seeders
+                }),
+                Timestamp = DateTime.UtcNow
+            };
+
+            _dbContext.History.Add(historyEntry);
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+}

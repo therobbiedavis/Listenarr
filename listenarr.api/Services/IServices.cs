@@ -7,6 +7,7 @@ namespace Listenarr.Api.Services
         Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null);
         Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null);
         Task<bool> TestApiConnectionAsync(string apiId);
+        Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null);
     }
 
     public interface IDownloadService
@@ -16,6 +17,10 @@ namespace Listenarr.Api.Services
         Task<Download?> GetDownloadAsync(string downloadId);
         Task<bool> CancelDownloadAsync(string downloadId);
         Task UpdateDownloadStatusAsync();
+        Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId);
+        Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null);
+        Task<List<QueueItem>> GetQueueAsync();
+        Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
     }
 
     public interface IMetadataService

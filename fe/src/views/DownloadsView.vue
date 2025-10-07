@@ -112,8 +112,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useDownloadsStore } from '@/stores/downloads'
 import type { Download } from '@/types'
+import { useNotification } from '@/composables/useNotification'
 
 const downloadsStore = useDownloadsStore()
+const { success, error: showError, info } = useNotification()
 const activeTab = ref<'active' | 'completed' | 'failed'>('active')
 
 const currentDownloads = computed(() => {
@@ -136,23 +138,23 @@ const refreshDownloads = async () => {
 const cancelDownload = async (downloadId: string) => {
   try {
     await downloadsStore.cancelDownload(downloadId)
-    alert('Download canceled successfully')
+    success('Download canceled successfully')
   } catch (error) {
     console.error('Failed to cancel download:', error)
-    alert('Failed to cancel download')
+    showError('Failed to cancel download')
   }
 }
 
 const retryDownload = async (download: Download) => {
   // For now, just show a message. In a real implementation, 
   // you would restart the download
-  alert('Retry functionality will be implemented soon')
+  info('Retry functionality will be implemented soon', 'Coming Soon')
 }
 
 const openFolder = (path: string) => {
   // This would need to be implemented with a backend endpoint
   // that can open the folder in the OS file explorer
-  alert(`Would open folder: ${path}`)
+  info(`Would open folder: ${path}`, 'Open Folder')
 }
 
 const getEmptyMessage = () => {

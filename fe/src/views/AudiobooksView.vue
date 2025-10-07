@@ -63,12 +63,22 @@
       <div class="empty-icon">
         <i class="ph ph-book-open"></i>
       </div>
-      <h2>No Audiobooks Yet</h2>
-      <p>Your library is empty. Add audiobooks to get started!</p>
-      <router-link to="/add-new" class="add-button">
-        <i class="ph ph-plus"></i>
-        Add Audiobooks
-      </router-link>
+      <template v-if="!hasRootFolderConfigured">
+        <h2>Root Folder Not Configured</h2>
+        <p>Please configure a root folder for your audiobook library in settings before adding audiobooks.</p>
+        <router-link to="/settings" class="add-button">
+          <i class="ph ph-gear"></i>
+          Go to Settings
+        </router-link>
+      </template>
+      <template v-else>
+        <h2>No Audiobooks Yet</h2>
+        <p>Your library is empty. Add audiobooks to get started!</p>
+        <router-link to="/add-new" class="add-button">
+          <i class="ph ph-plus"></i>
+          Add Audiobooks
+        </router-link>
+      </template>
     </div>
     
     <div v-else class="audiobooks-grid">
@@ -147,16 +157,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
+import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import type { Audiobook } from '@/types'
 
 const router = useRouter()
 const libraryStore = useLibraryStore()
+const configStore = useConfigurationStore()
 
 const audiobooks = computed(() => libraryStore.audiobooks)
 const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
+const hasRootFolderConfigured = computed(() => {
+  return configStore.applicationSettings?.outputPath && 
+         configStore.applicationSettings.outputPath.trim().length > 0
+})
 
 const showDeleteDialog = ref(false)
 const deleteTarget = ref<Audiobook | null>(null)
@@ -164,7 +180,10 @@ const bulkDeleteCount = ref(0)
 const deleting = ref(false)
 
 onMounted(async () => {
-  await libraryStore.fetchLibrary()
+  await Promise.all([
+    libraryStore.fetchLibrary(),
+    configStore.loadApplicationSettings()
+  ])
 })
 
 function navigateToDetail(id: number) {

@@ -20,6 +20,7 @@ using Listenarr.Api.Models;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
 {
@@ -33,6 +34,7 @@ namespace Listenarr.Api.Services
         private readonly IAmazonSearchService _amazonSearchService;
         private readonly IAudibleSearchService _audibleSearchService;
         private readonly IImageCacheService _imageCacheService;
+        private readonly ListenArrDbContext _dbContext;
 
         public SearchService(
             HttpClient httpClient, 
@@ -42,7 +44,8 @@ namespace Listenarr.Api.Services
             IOpenLibraryService openLibraryService,
             IAmazonSearchService amazonSearchService,
             IAudibleSearchService audibleSearchService,
-            IImageCacheService imageCacheService)
+            IImageCacheService imageCacheService,
+            ListenArrDbContext dbContext)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -52,6 +55,7 @@ namespace Listenarr.Api.Services
             _amazonSearchService = amazonSearchService;
             _audibleSearchService = audibleSearchService;
             _imageCacheService = imageCacheService;
+            _dbContext = dbContext;
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null)
@@ -90,6 +94,54 @@ namespace Listenarr.Api.Services
             }
 
             return results.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
+        }
+
+        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null)
+        {
+            var results = new List<SearchResult>();
+            var indexers = await _dbContext.Indexers
+                .Where(i => i.IsEnabled && i.EnableInteractiveSearch)
+                .OrderBy(i => i.Priority)
+                .ToListAsync();
+
+            _logger.LogInformation("Searching {Count} enabled indexers for query: {Query}", indexers.Count, query);
+
+            // If no indexers are configured, return mock data for development
+            if (!indexers.Any())
+            {
+                _logger.LogWarning("No indexers configured, returning mock results for query: {Query}", query);
+                return GenerateMockIndexerResults(query);
+            }
+
+            // Search all enabled indexers in parallel
+            var searchTasks = indexers.Select(async indexer =>
+            {
+                try
+                {
+                    _logger.LogInformation("Searching indexer {Name} ({Type}) for query: {Query}", indexer.Name, indexer.Type, query);
+                    var indexerResults = await SearchIndexerAsync(indexer, query, category);
+                    _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
+                    return indexerResults;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error searching indexer {Name} for query: {Query}", indexer.Name, query);
+                    return new List<SearchResult>();
+                }
+            }).ToList();
+
+            var indexerResults = await Task.WhenAll(searchTasks);
+            
+            // Flatten all results
+            foreach (var indexerResult in indexerResults)
+            {
+                results.AddRange(indexerResult);
+            }
+
+            _logger.LogInformation("Total {Count} results from all indexers for query: {Query}", results.Count, query);
+            
+            // Sort by seeders (descending) then by date
+            return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
         private async Task<List<SearchResult>> IntelligentSearchAsync(string query)
@@ -630,6 +682,329 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, $"Error testing API connection for {apiId}");
                 return false;
             }
+        }
+
+        private async Task<List<SearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null)
+        {
+            try
+            {
+                _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
+
+                // Build Torznab/Newznab API URL
+                var url = BuildTorznabUrl(indexer, query, category);
+                _logger.LogDebug("Indexer API URL: {Url}", url);
+
+                // Make HTTP request
+                var response = await _httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Indexer {Name} returned status {Status}", indexer.Name, response.StatusCode);
+                    return new List<SearchResult>();
+                }
+
+                var xmlContent = await response.Content.ReadAsStringAsync();
+                
+                // Parse Torznab/Newznab XML response
+                var results = ParseTorznabResponse(xmlContent, indexer);
+                
+                _logger.LogInformation("Indexer {Name} returned {Count} results", indexer.Name, results.Count);
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private string BuildTorznabUrl(Indexer indexer, string query, string? category)
+        {
+            var url = indexer.Url.TrimEnd('/');
+            var apiPath = indexer.Implementation.ToLower() switch
+            {
+                "torznab" => "/api",
+                "newznab" => "/api",
+                _ => "/api"
+            };
+
+            var queryParams = new List<string>
+            {
+                $"t=search",
+                $"q={Uri.EscapeDataString(query)}"
+            };
+
+            // Add API key if provided
+            if (!string.IsNullOrEmpty(indexer.ApiKey))
+            {
+                queryParams.Add($"apikey={Uri.EscapeDataString(indexer.ApiKey)}");
+            }
+
+            // Add categories if specified
+            if (!string.IsNullOrEmpty(category))
+            {
+                queryParams.Add($"cat={Uri.EscapeDataString(category)}");
+            }
+            else if (!string.IsNullOrEmpty(indexer.Categories))
+            {
+                queryParams.Add($"cat={Uri.EscapeDataString(indexer.Categories)}");
+            }
+
+            // Add limit
+            queryParams.Add("limit=100");
+
+            return $"{url}{apiPath}?{string.Join("&", queryParams)}";
+        }
+
+        private List<SearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
+        {
+            var results = new List<SearchResult>();
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Parse(xmlContent);
+                var channel = doc.Root?.Element("channel");
+                if (channel == null)
+                {
+                    _logger.LogWarning("Invalid Torznab response: no channel element");
+                    return results;
+                }
+
+                var items = channel.Elements("item");
+                var isUsenet = indexer.Type.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
+
+                foreach (var item in items)
+                {
+                    try
+                    {
+                        var result = new SearchResult
+                        {
+                            Id = item.Element("guid")?.Value ?? Guid.NewGuid().ToString(),
+                            Title = item.Element("title")?.Value ?? "Unknown",
+                            Source = indexer.Name,
+                            Category = item.Element("category")?.Value ?? "Audiobook"
+                        };
+
+                        // Parse published date
+                        var pubDateStr = item.Element("pubDate")?.Value;
+                        if (DateTime.TryParse(pubDateStr, out var pubDate))
+                        {
+                            result.PublishedDate = pubDate;
+                        }
+                        else
+                        {
+                            result.PublishedDate = DateTime.UtcNow;
+                        }
+
+                        // Parse Torznab/Newznab attributes
+                        var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
+                        var attributes = item.Elements(torznabNs + "attr").ToList();
+
+                        foreach (var attr in attributes)
+                        {
+                            var name = attr.Attribute("name")?.Value;
+                            var value = attr.Attribute("value")?.Value;
+
+                            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(value))
+                                continue;
+
+                            switch (name.ToLower())
+                            {
+                                case "size":
+                                    if (long.TryParse(value, out var size))
+                                        result.Size = size;
+                                    break;
+                                case "seeders":
+                                    if (int.TryParse(value, out var seeders))
+                                        result.Seeders = seeders;
+                                    break;
+                                case "peers":
+                                    if (int.TryParse(value, out var peers))
+                                        result.Leechers = peers;
+                                    break;
+                                case "magneturl":
+                                    result.MagnetLink = value;
+                                    break;
+                                case "grabs":
+                                    // Usenet grabs can be used as a quality indicator
+                                    break;
+                            }
+                        }
+
+                        // Get enclosure/link for download URL
+                        var enclosure = item.Element("enclosure");
+                        if (enclosure != null)
+                        {
+                            var enclosureUrl = enclosure.Attribute("url")?.Value;
+                            if (!string.IsNullOrEmpty(enclosureUrl))
+                            {
+                                if (isUsenet)
+                                {
+                                    result.NzbUrl = enclosureUrl;
+                                }
+                                else
+                                {
+                                    result.TorrentUrl = enclosureUrl;
+                                }
+                            }
+                        }
+
+                        // If no magnet link found in attributes, check link element
+                        if (string.IsNullOrEmpty(result.MagnetLink) && !isUsenet)
+                        {
+                            var link = item.Element("link")?.Value;
+                            if (!string.IsNullOrEmpty(link) && link.StartsWith("magnet:"))
+                            {
+                                result.MagnetLink = link;
+                            }
+                            else if (!string.IsNullOrEmpty(link) && string.IsNullOrEmpty(result.TorrentUrl))
+                            {
+                                result.TorrentUrl = link;
+                            }
+                        }
+
+                        // Parse description for additional metadata
+                        var description = item.Element("description")?.Value;
+                        if (!string.IsNullOrEmpty(description))
+                        {
+                            result.Description = description;
+                            
+                            // Try to extract quality/format from description or title
+                            var titleAndDesc = $"{result.Title} {description}".ToLower();
+                            
+                            if (titleAndDesc.Contains("flac"))
+                                result.Quality = "FLAC";
+                            else if (titleAndDesc.Contains("320") || titleAndDesc.Contains("320kbps"))
+                                result.Quality = "MP3 320kbps";
+                            else if (titleAndDesc.Contains("256") || titleAndDesc.Contains("256kbps"))
+                                result.Quality = "MP3 256kbps";
+                            else if (titleAndDesc.Contains("192") || titleAndDesc.Contains("192kbps"))
+                                result.Quality = "MP3 192kbps";
+                            else if (titleAndDesc.Contains("128") || titleAndDesc.Contains("128kbps"))
+                                result.Quality = "MP3 128kbps";
+                            else if (titleAndDesc.Contains("64") || titleAndDesc.Contains("64kbps"))
+                                result.Quality = "MP3 64kbps";
+                            else if (titleAndDesc.Contains("m4b"))
+                                result.Quality = "M4B";
+                            else
+                                result.Quality = "Unknown";
+
+                            // Detect format
+                            if (titleAndDesc.Contains("m4b"))
+                                result.Format = "M4B";
+                            else if (titleAndDesc.Contains("flac"))
+                                result.Format = "FLAC";
+                            else if (titleAndDesc.Contains("mp3"))
+                                result.Format = "MP3";
+                            else if (titleAndDesc.Contains("opus"))
+                                result.Format = "OPUS";
+                            else if (titleAndDesc.Contains("aac"))
+                                result.Format = "AAC";
+                        }
+
+                        // Extract author from title if possible (common format: "Author - Title")
+                        var titleParts = result.Title.Split(new[] { " - ", " – " }, StringSplitOptions.RemoveEmptyEntries);
+                        if (titleParts.Length >= 2)
+                        {
+                            result.Artist = titleParts[0].Trim();
+                            result.Album = string.Join(" - ", titleParts.Skip(1)).Trim();
+                        }
+                        else
+                        {
+                            result.Artist = "Unknown Author";
+                            result.Album = result.Title;
+                        }
+
+                        // Only add results that have a valid download link
+                        if (!string.IsNullOrEmpty(result.MagnetLink) || 
+                            !string.IsNullOrEmpty(result.TorrentUrl) || 
+                            !string.IsNullOrEmpty(result.NzbUrl))
+                        {
+                            results.Add(result);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Skipping result '{Title}' - no download link found", result.Title);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error parsing indexer result item");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error parsing Torznab XML response from {IndexerName}", indexer.Name);
+            }
+
+            return results;
+        }
+
+        private List<SearchResult> GenerateMockIndexerResults(string query)
+        {
+            // Generate multiple mock results to simulate real indexer responses
+            // Default to torrent for backwards compatibility
+            return GenerateMockIndexerResults(query, "Mock Indexer", "Torrent");
+        }
+
+        private List<SearchResult> GenerateMockIndexerResults(string query, string indexerName)
+        {
+            // Default to torrent for backwards compatibility
+            return GenerateMockIndexerResults(query, indexerName, "Torrent");
+        }
+
+        private List<SearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
+        {
+            // Generate multiple mock results to simulate real indexer responses
+            var random = new Random();
+            var results = new List<SearchResult>();
+            var isUsenet = indexerType.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
+            
+            _logger.LogInformation("Generating {Count} mock {Type} results for indexer {IndexerName}", 5, indexerType, indexerName);
+            
+            for (int i = 0; i < 5; i++)
+            {
+                var result = new SearchResult
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Title = $"{query} - Quality {i + 1}",
+                    Artist = "Various Authors",
+                    Album = $"{query} Series",
+                    Category = "Audiobook",
+                    Size = random.Next(200_000_000, 1_500_000_000), // 200 MB to 1.5 GB
+                    Seeders = isUsenet ? 0 : random.Next(5, 100), // Usenet doesn't have seeders
+                    Leechers = isUsenet ? 0 : random.Next(0, 20), // Usenet doesn't have leechers
+                    Source = indexerName,
+                    PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)),
+                    Quality = i switch
+                    {
+                        0 => "MP3 64kbps",
+                        1 => "MP3 128kbps",
+                        2 => "MP3 192kbps",
+                        3 => "M4B 128kbps",
+                        _ => "FLAC"
+                    },
+                    Format = i >= 3 ? "M4B" : "MP3",
+                    Language = "English"
+                };
+
+                // Set appropriate download link based on indexer type
+                if (isUsenet)
+                {
+                    result.NzbUrl = $"https://{indexerName.ToLower()}.example.com/api/nzb/{Guid.NewGuid():N}";
+                    result.MagnetLink = string.Empty;
+                    result.TorrentUrl = string.Empty;
+                }
+                else
+                {
+                    result.MagnetLink = $"magnet:?xt=urn:btih:{Guid.NewGuid():N}";
+                    result.NzbUrl = string.Empty;
+                }
+
+                results.Add(result);
+            }
+            
+            return results;
         }
 
         private List<SearchResult> GenerateMockResults(string query, string source)

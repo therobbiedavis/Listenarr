@@ -17,77 +17,78 @@
  */
 
 using Listenarr.Api.Models;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
 {
     public class ConfigurationService : IConfigurationService
     {
-        private readonly string _configPath;
+        private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<ConfigurationService> _logger;
-        private readonly JsonSerializerOptions _jsonOptions;
 
-        public ConfigurationService(ILogger<ConfigurationService> logger)
+        public ConfigurationService(ListenArrDbContext dbContext, ILogger<ConfigurationService> logger)
         {
+            _dbContext = dbContext;
             _logger = logger;
-            _configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ListenArr");
-            _jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-            
-            // Ensure config directory exists
-            Directory.CreateDirectory(_configPath);
         }
 
+        // API Configuration methods
         public async Task<List<ApiConfiguration>> GetApiConfigurationsAsync()
         {
             try
             {
-                var configFile = Path.Combine(_configPath, "apis.json");
-                if (!File.Exists(configFile))
-                {
-                    return new List<ApiConfiguration>();
-                }
-
-                var json = await File.ReadAllTextAsync(configFile);
-                return JsonSerializer.Deserialize<List<ApiConfiguration>>(json) ?? new List<ApiConfiguration>();
+                return await _dbContext.ApiConfigurations
+                    .OrderBy(c => c.Priority)
+                    .ToListAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error loading API configurations");
+                _logger.LogError(ex, "Error loading API configurations from database");
                 return new List<ApiConfiguration>();
             }
         }
 
         public async Task<ApiConfiguration?> GetApiConfigurationAsync(string id)
         {
-            var configs = await GetApiConfigurationsAsync();
-            return configs.FirstOrDefault(c => c.Id == id);
+            try
+            {
+                return await _dbContext.ApiConfigurations
+                    .FirstOrDefaultAsync(c => c.Id == id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading API configuration {Id} from database", id);
+                return null;
+            }
         }
 
         public async Task<string> SaveApiConfigurationAsync(ApiConfiguration config)
         {
             try
             {
-                var configs = await GetApiConfigurationsAsync();
-                var existingIndex = configs.FindIndex(c => c.Id == config.Id);
+                var existing = await _dbContext.ApiConfigurations
+                    .FirstOrDefaultAsync(c => c.Id == config.Id);
                 
-                if (existingIndex >= 0)
+                if (existing != null)
                 {
-                    configs[existingIndex] = config;
+                    // Update existing
+                    _dbContext.Entry(existing).CurrentValues.SetValues(config);
+                    existing.HeadersJson = config.HeadersJson;
+                    existing.ParametersJson = config.ParametersJson;
                 }
                 else
                 {
-                    configs.Add(config);
+                    // Add new
+                    config.CreatedAt = DateTime.UtcNow;
+                    _dbContext.ApiConfigurations.Add(config);
                 }
-
-                var configFile = Path.Combine(_configPath, "apis.json");
-                var json = JsonSerializer.Serialize(configs, _jsonOptions);
-                await File.WriteAllTextAsync(configFile, json);
                 
+                await _dbContext.SaveChangesAsync();
                 return config.Id;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error saving API configuration");
+                _logger.LogError(ex, "Error saving API configuration to database");
                 throw;
             }
         }
@@ -96,77 +97,79 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var configs = await GetApiConfigurationsAsync();
-                var configToRemove = configs.FirstOrDefault(c => c.Id == id);
+                var config = await _dbContext.ApiConfigurations
+                    .FirstOrDefaultAsync(c => c.Id == id);
                 
-                if (configToRemove == null) return false;
+                if (config == null) return false;
                 
-                configs.Remove(configToRemove);
-                
-                var configFile = Path.Combine(_configPath, "apis.json");
-                var json = JsonSerializer.Serialize(configs, _jsonOptions);
-                await File.WriteAllTextAsync(configFile, json);
+                _dbContext.ApiConfigurations.Remove(config);
+                await _dbContext.SaveChangesAsync();
                 
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error deleting API configuration");
+                _logger.LogError(ex, "Error deleting API configuration from database");
                 return false;
             }
         }
 
+        // Download Client Configuration methods
         public async Task<List<DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync()
         {
             try
             {
-                var configFile = Path.Combine(_configPath, "download-clients.json");
-                if (!File.Exists(configFile))
-                {
-                    return new List<DownloadClientConfiguration>();
-                }
-
-                var json = await File.ReadAllTextAsync(configFile);
-                return JsonSerializer.Deserialize<List<DownloadClientConfiguration>>(json) ?? new List<DownloadClientConfiguration>();
+                return await _dbContext.DownloadClientConfigurations
+                    .OrderBy(c => c.Name)
+                    .ToListAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error loading download client configurations");
+                _logger.LogError(ex, "Error loading download client configurations from database");
                 return new List<DownloadClientConfiguration>();
             }
         }
 
         public async Task<DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id)
         {
-            var configs = await GetDownloadClientConfigurationsAsync();
-            return configs.FirstOrDefault(c => c.Id == id);
+            try
+            {
+                return await _dbContext.DownloadClientConfigurations
+                    .FirstOrDefaultAsync(c => c.Id == id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading download client configuration {Id} from database", id);
+                return null;
+            }
         }
 
         public async Task<string> SaveDownloadClientConfigurationAsync(DownloadClientConfiguration config)
         {
             try
             {
-                var configs = await GetDownloadClientConfigurationsAsync();
-                var existingIndex = configs.FindIndex(c => c.Id == config.Id);
+                var existing = await _dbContext.DownloadClientConfigurations
+                    .FirstOrDefaultAsync(c => c.Id == config.Id);
                 
-                if (existingIndex >= 0)
+                if (existing != null)
                 {
-                    configs[existingIndex] = config;
+                    // Update existing
+                    _dbContext.Entry(existing).CurrentValues.SetValues(config);
+                    existing.SettingsJson = config.SettingsJson;
                 }
                 else
                 {
-                    configs.Add(config);
+                    // Add new
+                    config.CreatedAt = DateTime.UtcNow;
+                    _dbContext.DownloadClientConfigurations.Add(config);
                 }
-
-                var configFile = Path.Combine(_configPath, "download-clients.json");
-                var json = JsonSerializer.Serialize(configs, _jsonOptions);
-                await File.WriteAllTextAsync(configFile, json);
                 
+                await _dbContext.SaveChangesAsync();
                 return config.Id;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error saving download client configuration");
+                _logger.LogError(ex, "Error saving download client configuration to database");
                 throw;
             }
         }
@@ -175,44 +178,44 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var configs = await GetDownloadClientConfigurationsAsync();
-                var configToRemove = configs.FirstOrDefault(c => c.Id == id);
+                var config = await _dbContext.DownloadClientConfigurations
+                    .FirstOrDefaultAsync(c => c.Id == id);
                 
-                if (configToRemove == null) return false;
+                if (config == null) return false;
                 
-                configs.Remove(configToRemove);
-                
-                var configFile = Path.Combine(_configPath, "download-clients.json");
-                var json = JsonSerializer.Serialize(configs, _jsonOptions);
-                await File.WriteAllTextAsync(configFile, json);
+                _dbContext.DownloadClientConfigurations.Remove(config);
+                await _dbContext.SaveChangesAsync();
                 
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error deleting download client configuration");
+                _logger.LogError(ex, "Error deleting download client configuration from database");
                 return false;
             }
         }
 
+        // Application Settings methods
         public async Task<ApplicationSettings> GetApplicationSettingsAsync()
         {
             try
             {
-                var configFile = Path.Combine(_configPath, "settings.json");
-                if (!File.Exists(configFile))
+                // Try to get from database first
+                var settings = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
+                
+                if (settings == null)
                 {
-                    var defaultSettings = new ApplicationSettings();
-                    await SaveApplicationSettingsAsync(defaultSettings);
-                    return defaultSettings;
+                    // Create default settings
+                    settings = new ApplicationSettings();
+                    _dbContext.ApplicationSettings.Add(settings);
+                    await _dbContext.SaveChangesAsync();
                 }
 
-                var json = await File.ReadAllTextAsync(configFile);
-                return JsonSerializer.Deserialize<ApplicationSettings>(json) ?? new ApplicationSettings();
+                return settings;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error loading application settings");
+                _logger.LogError(ex, "Error loading application settings from database");
                 return new ApplicationSettings();
             }
         }
@@ -221,13 +224,29 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var configFile = Path.Combine(_configPath, "settings.json");
-                var json = JsonSerializer.Serialize(settings, _jsonOptions);
-                await File.WriteAllTextAsync(configFile, json);
+                // Ensure Id is always 1 (singleton pattern)
+                settings.Id = 1;
+                
+                var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
+                
+                if (existing != null)
+                {
+                    // Update existing settings
+                    _dbContext.Entry(existing).CurrentValues.SetValues(settings);
+                    // Manually update list property
+                    existing.AllowedFileExtensions = settings.AllowedFileExtensions;
+                }
+                else
+                {
+                    // Add new settings
+                    _dbContext.ApplicationSettings.Add(settings);
+                }
+                
+                await _dbContext.SaveChangesAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error saving application settings");
+                _logger.LogError(ex, "Error saving application settings to database");
                 throw;
             }
         }

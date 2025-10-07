@@ -79,11 +79,11 @@
           <div class="result-actions">
             <button 
               @click="addToLibrary(result)"
-              class="add-button"
-              :disabled="isAddingToLibrary"
+              :class="['add-button', { 'added': addedResults.has(result.id) }]"
+              :disabled="isAddingToLibrary || addedResults.has(result.id)"
             >
-              <i class="ph ph-plus"></i>
-              Add to Library
+              <i :class="addedResults.has(result.id) ? 'ph ph-check' : 'ph ph-plus'"></i>
+              {{ addedResults.has(result.id) ? 'Added' : 'Add to Library' }}
             </button>
           </div>
         </div>
@@ -97,32 +97,111 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useSearchStore } from '@/stores/search'
+import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
 import type { SearchResult, AudibleBookMetadata } from '@/types'
+import { useNotification } from '@/composables/useNotification'
 
 const searchStore = useSearchStore()
+const libraryStore = useLibraryStore()
+const { success, error: showError, warning } = useNotification()
+
+console.log('SearchView component loaded')
+console.log('searchStore:', searchStore)
+console.log('libraryStore:', libraryStore)
 
 const searchQuery = ref('')
 const selectedCategory = ref('')
 const isAddingToLibrary = ref(false)
+const addedResults = ref(new Set<string>())
 
 const performSearch = async () => {
-  if (!searchQuery.value.trim()) return
+  console.log('=== performSearch START ===')
+  console.log('Search query:', searchQuery.value)
   
+  if (!searchQuery.value.trim()) {
+    console.log('Search query is empty, aborting')
+    return
+  }
+  
+  // Clear added results for new search
+  console.log('Clearing added results')
+  addedResults.value.clear()
+  
+  console.log('Calling searchStore.search()')
   await searchStore.search(
     searchQuery.value.trim(),
     selectedCategory.value || undefined
   )
+  console.log('searchStore.search() completed')
+  console.log('Search results count:', searchStore.searchResults.length)
+  
+  // Wait for next tick to ensure searchResults are updated
+  console.log('Waiting for nextTick()')
+  await nextTick()
+  console.log('nextTick() completed')
+  
+  // Check which results are already in library
+  console.log('Calling checkExistingInLibrary()')
+  checkExistingInLibrary()
+  console.log('=== performSearch END ===')
 }
+
+const checkExistingInLibrary = () => {
+  console.log('checkExistingInLibrary called')
+  console.log('Library audiobooks count:', libraryStore.audiobooks.length)
+  
+  // Ensure library is loaded
+  if (libraryStore.audiobooks.length === 0) {
+    console.log('Library is empty, fetching...')
+    libraryStore.fetchLibrary().then(() => {
+      console.log('Library fetched, count:', libraryStore.audiobooks.length)
+      markExistingResults()
+    })
+  } else {
+    console.log('Library already loaded')
+    markExistingResults()
+  }
+}
+
+const markExistingResults = () => {
+  console.log('markExistingResults called')
+  console.log('Search results count:', searchStore.searchResults.length)
+  
+  const libraryAsins = new Set(
+    libraryStore.audiobooks
+      .filter(book => book.asin)
+      .map(book => book.asin!)
+  )
+  
+  console.log('Library ASINs:', Array.from(libraryAsins))
+  
+  searchStore.searchResults.forEach(result => {
+    console.log('Checking result:', result.id, 'ASIN:', result.asin)
+    if (result.asin && libraryAsins.has(result.asin)) {
+      console.log('Match found! Adding result ID:', result.id)
+      addedResults.value.add(result.id)
+    }
+  })
+  
+  console.log('Added results:', Array.from(addedResults.value))
+}
+
+// Watch for search results changes to mark existing audiobooks
+watch(() => searchStore.searchResults, () => {
+  if (searchStore.searchResults.length > 0) {
+    checkExistingInLibrary()
+  }
+}, { deep: true })
 
 const addToLibrary = async (result: SearchResult) => {
   console.log('addToLibrary called with result:', result)
   
   if (!result.asin) {
     console.warn('No ASIN available for result:', result)
-    alert('Cannot add to library: No ASIN available for this result')
+    warning('Cannot add to library: No ASIN available for this result')
     return
   }
 
@@ -145,15 +224,18 @@ const addToLibrary = async (result: SearchResult) => {
     })
     
     console.log('Successfully added to library')
-    alert(`"${metadata.title}" has been added to your library!`)
+    success(`"${metadata.title}" has been added to your library!`)
+    
+    // Mark this result as added
+    addedResults.value.add(result.id)
   } catch (error: any) {
     console.error('Failed to add audiobook:', error)
     
     // Check if it's a conflict (already exists)
     if (error.message?.includes('409') || error.message?.includes('Conflict')) {
-      alert('This audiobook is already in your library.')
+      warning('This audiobook is already in your library.')
     } else {
-      alert('Failed to add audiobook. Please try again.')
+      showError('Failed to add audiobook. Please try again.')
     }
   } finally {
     isAddingToLibrary.value = false
@@ -389,6 +471,16 @@ const formatRuntime = (minutes: number): string => {
 
 .add-button:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.add-button.added {
+  background-color: #27ae60;
+  opacity: 1;
+}
+
+.add-button.added:disabled {
+  opacity: 1;
   cursor: not-allowed;
 }
 

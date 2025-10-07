@@ -44,5 +44,11 @@ namespace Listenarr.Api.Models
         public string? Version { get; set; }
         public bool Explicit { get; set; }
         public bool Abridged { get; set; }
+        
+        // Monitoring and file management
+        public bool Monitored { get; set; } = true;
+        public string? FilePath { get; set; }
+        public long? FileSize { get; set; }
+        public string? Quality { get; set; }
     }
 }

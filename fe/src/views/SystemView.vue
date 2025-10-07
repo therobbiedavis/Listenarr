@@ -210,7 +210,7 @@ const downloadLogs = () => {
 
 <style scoped>
 .system-view {
-  padding: 0;
+  padding: 2em;
 }
 
 .page-header {

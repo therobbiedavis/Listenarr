@@ -50,6 +50,7 @@
             <RouterLink to="/wanted" class="nav-item">
               <i class="ph ph-heart"></i>
               <span>Wanted</span>
+              <span class="badge" v-if="wantedCount > 0">{{ wantedCount }}</span>
             </RouterLink>
           </div>
 
@@ -72,17 +73,56 @@
         <RouterView />
       </main>
     </div>
+
+    <!-- Global Notification Modal -->
+    <NotificationModal
+      :visible="notification.visible"
+      :message="notification.message"
+      :title="notification.title"
+      :type="notification.type"
+      :auto-close="notification.autoClose"
+      @close="closeNotification"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import NotificationModal from '@/components/NotificationModal.vue'
+import { useNotification } from '@/composables/useNotification'
+import { apiService } from '@/services/api'
+
+const { notification, close: closeNotification } = useNotification()
 
 // Reactive state for badges and counters
 const notificationCount = ref(0)
-const activityCount = ref(8)
-const systemIssues = ref(2)
+const activityCount = ref(0)
+const wantedCount = ref(0)
+const systemIssues = ref(0)
+
+let badgeRefreshInterval: number | undefined
+
+// Fetch badge counts
+const refreshBadges = async () => {
+  try {
+    // Activity badge: count active downloads (downloading, paused, queued)
+    const queue = await apiService.getQueue()
+    activityCount.value = queue.filter(item => 
+      item.status === 'downloading' || 
+      item.status === 'paused' || 
+      item.status === 'queued'
+    ).length
+
+    // Wanted badge: count monitored audiobooks without files (matching WantedView logic)
+    const library = await apiService.getLibrary()
+    wantedCount.value = library.filter(book => 
+      book.monitored && (!book.filePath || book.filePath.trim() === '')
+    ).length
+  } catch (err) {
+    console.error('Failed to refresh badges:', err)
+  }
+}
 
 // Methods for nav actions
 const toggleSearch = () => {
@@ -92,6 +132,18 @@ const toggleSearch = () => {
 const toggleNotifications = () => {
   console.log('Toggle notifications')
 }
+
+// Poll badge counts every 10 seconds
+onMounted(() => {
+  refreshBadges()
+  badgeRefreshInterval = window.setInterval(refreshBadges, 10000)
+})
+
+onUnmounted(() => {
+  if (badgeRefreshInterval) {
+    clearInterval(badgeRefreshInterval)
+  }
+})
 </script>
 
 <style scoped>

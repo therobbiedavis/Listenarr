@@ -58,6 +58,13 @@ namespace Listenarr.Api.Services
             await _db.SaveChangesAsync();
         }
 
+        public async Task<bool> UpdateAsync(Audiobook audiobook)
+        {
+            _db.Audiobooks.Update(audiobook);
+            await _db.SaveChangesAsync();
+            return true;
+        }
+
         public async Task<bool> DeleteAsync(Audiobook audiobook)
         {
             _db.Audiobooks.Remove(audiobook);
