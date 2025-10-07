@@ -1,0 +1,54 @@
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2025 Robbie Davis
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+
+namespace Listenarr.Api.Models
+{
+    public class Audiobook
+    {
+        [Key]
+        public int Id { get; set; }
+        public string? Title { get; set; }
+        public string? Subtitle { get; set; }
+        public List<string>? Authors { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? PublishYear { get; set; }
+        public string? Series { get; set; }
+        public string? SeriesNumber { get; set; }
+        public string? Description { get; set; }
+        public List<string>? Genres { get; set; }
+        public List<string>? Tags { get; set; }
+        public List<string>? Narrators { get; set; }
+        public string? Isbn { get; set; }
+        public string? Asin { get; set; }
+        public string? Publisher { get; set; }
+        public string? Language { get; set; }
+        public int? Runtime { get; set; }
+        public string? Version { get; set; }
+        public bool Explicit { get; set; }
+        public bool Abridged { get; set; }
+        
+        // Monitoring and file management
+        public bool Monitored { get; set; } = true;
+        public string? FilePath { get; set; }
+        public long? FileSize { get; set; }
+        public string? Quality { get; set; }
+    }
+}

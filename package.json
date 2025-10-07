@@ -1,0 +1,20 @@
+{
+  "name": "listenarr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Listenarr - Automated audiobook downloading and management",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" --names \"API,WEB\" --prefix-colors \"blue,green\"",
+    "dev:api": "cd listenarr.api && dotnet run --urls http://localhost:5146",
+    "dev:web": "cd fe && npm run dev",
+    "build": "npm run build:api && npm run build:web",
+    "build:api": "cd listenarr.api && dotnet build -c Release",
+    "build:web": "cd fe && npm run build",
+    "start": "npm run dev",
+    "install:all": "cd fe && npm install",
+    "test": "cd fe && npm run test:unit"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
