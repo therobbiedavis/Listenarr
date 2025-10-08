@@ -30,6 +30,7 @@ namespace Listenarr.Api.Services
         private readonly ILogger<DownloadService> _logger;
         private readonly HttpClient _httpClient;
         private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly IRemotePathMappingService _pathMappingService;
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
@@ -37,7 +38,8 @@ namespace Listenarr.Api.Services
             ListenArrDbContext dbContext,
             ILogger<DownloadService> logger,
             HttpClient httpClient,
-            IServiceScopeFactory serviceScopeFactory)
+            IServiceScopeFactory serviceScopeFactory,
+            IRemotePathMappingService pathMappingService)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
@@ -45,6 +47,7 @@ namespace Listenarr.Api.Services
             _logger = logger;
             _httpClient = httpClient;
             _serviceScopeFactory = serviceScopeFactory;
+            _pathMappingService = pathMappingService;
         }
 
         // Placeholder implementations for existing interface methods
@@ -642,6 +645,12 @@ namespace Listenarr.Api.Services
                         var numSeeds = torrent.ContainsKey("num_seeds") ? (int?)torrent["num_seeds"].GetInt32() : null;
                         var numLeechs = torrent.ContainsKey("num_leechs") ? (int?)torrent["num_leechs"].GetInt32() : null;
                         var ratio = torrent.ContainsKey("ratio") ? (double?)torrent["ratio"].GetDouble() : null;
+                        var savePath = torrent.ContainsKey("save_path") ? torrent["save_path"].GetString() ?? "" : "";
+
+                        // Apply remote path mapping for Docker scenarios
+                        var localPath = !string.IsNullOrEmpty(savePath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, savePath)
+                            : savePath;
 
                         var status = state switch
                         {
@@ -673,7 +682,9 @@ namespace Listenarr.Api.Services
                             Leechers = numLeechs,
                             Ratio = ratio,
                             CanPause = status == "downloading" || status == "queued",
-                            CanRemove = true
+                            CanRemove = true,
+                            RemotePath = savePath,
+                            LocalPath = localPath
                         });
                     }
                 }
@@ -803,6 +814,13 @@ namespace Listenarr.Api.Services
                             _ => "queued"
                         };
 
+                        // SABnzbd queue API doesn't include path, but we can get it from client config
+                        // The complete_dir setting would be the remote path to translate
+                        var remotePath = client.DownloadPath ?? "";
+                        var localPath = !string.IsNullOrEmpty(remotePath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, remotePath)
+                            : remotePath;
+
                         items.Add(new QueueItem
                         {
                             Id = nzoId,
@@ -819,7 +837,9 @@ namespace Listenarr.Api.Services
                             DownloadClientType = "sabnzbd",
                             AddedAt = DateTime.UtcNow, // SABnzbd doesn't provide this easily
                             CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
-                            CanRemove = true
+                            CanRemove = true,
+                            RemotePath = remotePath,
+                            LocalPath = localPath
                         });
                     }
                     catch (Exception ex)

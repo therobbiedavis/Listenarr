@@ -71,6 +71,8 @@ export interface QueueItem {
   seeders?: number
   leechers?: number
   ratio?: number
+  remotePath?: string // Path as seen by download client
+  localPath?: string // Path translated for Listenarr
 }
 
 export interface ApiConfiguration {
@@ -100,6 +102,28 @@ export interface DownloadClientConfiguration {
   useSSL: boolean
   isEnabled: boolean
   settings: Record<string, unknown>
+}
+
+export interface RemotePathMapping {
+  id: number
+  downloadClientId: string
+  name?: string
+  remotePath: string
+  localPath: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TranslatePathRequest {
+  downloadClientId: string
+  remotePath: string
+}
+
+export interface TranslatePathResponse {
+  downloadClientId: string
+  remotePath: string
+  localPath: string
+  translated: boolean
 }
 
 export interface ApplicationSettings {

@@ -7,7 +7,10 @@ import type {
   Audiobook,
   History,
   Indexer,
-  QueueItem
+  QueueItem,
+  RemotePathMapping,
+  TranslatePathRequest,
+  TranslatePathResponse
 } from '@/types'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -379,6 +382,46 @@ class ApiService {
   async getEnabledIndexers(): Promise<Indexer[]> {
     return this.request<Indexer[]>('/indexers/enabled')
   }
+
+  // Remote Path Mappings
+  async getRemotePathMappings(): Promise<RemotePathMapping[]> {
+    return this.request<RemotePathMapping[]>('/remotepath')
+  }
+
+  async getRemotePathMappingById(id: number): Promise<RemotePathMapping> {
+    return this.request<RemotePathMapping>(`/remotepath/${id}`)
+  }
+
+  async getRemotePathMappingsByClient(downloadClientId: string): Promise<RemotePathMapping[]> {
+    return this.request<RemotePathMapping[]>(`/remotepath/client/${encodeURIComponent(downloadClientId)}`)
+  }
+
+  async createRemotePathMapping(mapping: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>): Promise<RemotePathMapping> {
+    return this.request<RemotePathMapping>('/remotepath', {
+      method: 'POST',
+      body: JSON.stringify(mapping)
+    })
+  }
+
+  async updateRemotePathMapping(id: number, mapping: Partial<RemotePathMapping>): Promise<RemotePathMapping> {
+    return this.request<RemotePathMapping>(`/remotepath/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...mapping, id })
+    })
+  }
+
+  async deleteRemotePathMapping(id: number): Promise<void> {
+    return this.request<void>(`/remotepath/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async translatePath(request: TranslatePathRequest): Promise<TranslatePathResponse> {
+    return this.request<TranslatePathResponse>('/remotepath/translate', {
+      method: 'POST',
+      body: JSON.stringify(request)
+    })
+  }
 }
 
 export const apiService = new ApiService()
@@ -392,3 +435,12 @@ export const deleteIndexer = (id: number) => apiService.deleteIndexer(id)
 export const testIndexer = (id: number) => apiService.testIndexer(id)
 export const toggleIndexer = (id: number) => apiService.toggleIndexer(id)
 export const getEnabledIndexers = () => apiService.getEnabledIndexers()
+
+// Export individual remote path mapping functions for convenience
+export const getRemotePathMappings = () => apiService.getRemotePathMappings()
+export const getRemotePathMappingById = (id: number) => apiService.getRemotePathMappingById(id)
+export const getRemotePathMappingsByClient = (downloadClientId: string) => apiService.getRemotePathMappingsByClient(downloadClientId)
+export const createRemotePathMapping = (mapping: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>) => apiService.createRemotePathMapping(mapping)
+export const updateRemotePathMapping = (id: number, mapping: Partial<RemotePathMapping>) => apiService.updateRemotePathMapping(id, mapping)
+export const deleteRemotePathMapping = (id: number) => apiService.deleteRemotePathMapping(id)
+export const translatePath = (request: TranslatePathRequest) => apiService.translatePath(request)

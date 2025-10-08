@@ -66,6 +66,7 @@ builder.Services.AddScoped<IDownloadService, DownloadService>();
 builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
 builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
 builder.Services.AddScoped<IFileNamingService, FileNamingService>();
+builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();

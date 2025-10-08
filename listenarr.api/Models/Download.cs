@@ -78,5 +78,15 @@ namespace Listenarr.Api.Models
         public int? Seeders { get; set; }
         public int? Leechers { get; set; }
         public double? Ratio { get; set; }
+        
+        /// <summary>
+        /// The path as reported by the download client (may be in different mount point)
+        /// </summary>
+        public string? RemotePath { get; set; }
+        
+        /// <summary>
+        /// The path translated for Listenarr's filesystem (after applying remote path mapping)
+        /// </summary>
+        public string? LocalPath { get; set; }
     }
 }

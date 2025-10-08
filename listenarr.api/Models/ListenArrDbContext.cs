@@ -30,6 +30,7 @@ namespace Listenarr.Api.Models
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
         public DbSet<Download> Downloads { get; set; }
         public DbSet<QualityProfile> QualityProfiles { get; set; }
+        public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
