@@ -1082,18 +1082,12 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Starting direct download for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
                 
-                // Get the download path from application settings
-                var appSettings = await _configurationService.GetApplicationSettingsAsync();
-                if (appSettings == null || string.IsNullOrEmpty(appSettings.OutputPath))
+                // Create temporary download folder within the application directory
+                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "temp", "downloads");
+                if (!Directory.Exists(tempDownloadFolder))
                 {
-                    throw new Exception("Output path not configured. Please configure it in Settings > Download Paths.");
-                }
-
-                var downloadPath = appSettings.OutputPath;
-                if (!Directory.Exists(downloadPath))
-                {
-                    _logger.LogInformation("Creating download directory: {Path}", downloadPath);
-                    Directory.CreateDirectory(downloadPath);
+                    _logger.LogInformation("Creating temporary download directory: {Path}", tempDownloadFolder);
+                    Directory.CreateDirectory(tempDownloadFolder);
                 }
 
                 // Get the download URL (stored in TorrentUrl field for DDL)
@@ -1126,7 +1120,8 @@ namespace Listenarr.Api.Services
                     fileName = $"{SanitizeFileName(searchResult.Title)}{extension}";
                 }
 
-                var filePath = Path.Combine(downloadPath, fileName);
+                // Download to temporary folder first
+                var tempFilePath = Path.Combine(tempDownloadFolder, $"{downloadId}_{fileName}");
                 
                 // Create Download record in database
                 var download = new Download
@@ -1141,8 +1136,8 @@ namespace Listenarr.Api.Services
                     Progress = 0,
                     TotalSize = searchResult.Size,
                     DownloadedSize = 0,
-                    DownloadPath = filePath,
-                    FinalPath = filePath,
+                    DownloadPath = tempFilePath, // Store temp path initially
+                    FinalPath = tempFilePath, // Will be updated after processing
                     StartedAt = DateTime.UtcNow,
                     DownloadClientId = "DDL",
                     Metadata = new Dictionary<string, object>
@@ -1157,7 +1152,7 @@ namespace Listenarr.Api.Services
                 await _dbContext.SaveChangesAsync();
 
                 _logger.LogInformation("Starting DDL download [{DownloadId}]: {Title} from {Url}", downloadId, searchResult.Title, downloadUrl);
-                _logger.LogInformation("Saving to: {FilePath}", filePath);
+                _logger.LogInformation("Downloading to temporary location: {TempFilePath}", tempFilePath);
 
                 // Download the file with progress tracking (background task)
                 _ = Task.Run(async () =>
@@ -1176,7 +1171,7 @@ namespace Listenarr.Api.Services
                             var downloadedBytes = 0L;
 
                             using (var contentStream = await response.Content.ReadAsStreamAsync())
-                            using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                            using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                             {
                                 var buffer = new byte[8192];
                                 var lastProgressUpdate = DateTime.UtcNow;
@@ -1216,13 +1211,13 @@ namespace Listenarr.Api.Services
                             }
                         }
 
-                        var fileInfo = new FileInfo(filePath);
+                        var fileInfo = new FileInfo(tempFilePath);
                         
                         _logger.LogInformation("DDL download [{DownloadId}] completed: {FileName} ({Size} MB)", 
                             downloadId, fileName, fileInfo.Length / 1024 / 1024);
 
                         // Apply file naming pattern and move file to final location
-                        string finalPath = filePath;
+                        string finalPath = tempFilePath;
                         try
                         {
                             using (var scope = _serviceScopeFactory.CreateScope())
@@ -1306,8 +1301,8 @@ namespace Listenarr.Api.Services
                                     // Try to extract existing metadata from file (only supplement missing fields)
                                     try
                                     {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Extracting metadata from file: {FilePath}", downloadId, filePath);
-                                        var existingMetadata = await metadataService.ExtractFileMetadataAsync(filePath);
+                                        _logger.LogInformation("DDL download [{DownloadId}] Extracting metadata from file: {FilePath}", downloadId, tempFilePath);
+                                        var existingMetadata = await metadataService.ExtractFileMetadataAsync(tempFilePath);
                                         if (existingMetadata != null)
                                         {
                                             // Only use file metadata to fill in missing fields, preserve audiobook/search result data
@@ -1331,12 +1326,12 @@ namespace Listenarr.Api.Services
                                     }
                                     catch (Exception metaEx)
                                     {
-                                        _logger.LogWarning(metaEx, "DDL download [{DownloadId}] Failed to extract metadata from {FilePath}, using audiobook/search result data", downloadId, filePath);
+                                        _logger.LogWarning(metaEx, "DDL download [{DownloadId}] Failed to extract metadata from {FilePath}, using audiobook/search result data", downloadId, tempFilePath);
                                     }
 
                                     // Generate final path using naming pattern
                                     _logger.LogInformation("DDL download [{DownloadId}] Generating final path with pattern: {Pattern}", downloadId, settings.FileNamingPattern);
-                                    var extension = Path.GetExtension(filePath);
+                                    var extension = Path.GetExtension(tempFilePath);
                                     finalPath = await fileNamingService.GenerateFilePathAsync(
                                         metadata, 
                                         diskNumber: metadata.DiscNumber, 
@@ -1355,31 +1350,34 @@ namespace Listenarr.Api.Services
                                     }
 
                                     // Move file to final location
-                                    if (filePath != finalPath && File.Exists(filePath))
+                                    if (tempFilePath != finalPath && File.Exists(tempFilePath))
                                     {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, filePath, finalPath);
-                                        File.Move(filePath, finalPath, overwrite: true);
+                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
+                                        File.Move(tempFilePath, finalPath, overwrite: true);
                                         _logger.LogInformation("DDL download [{DownloadId}] ✅ File moved successfully to: {FinalPath}", downloadId, finalPath);
+                                        
+                                        // Clean up temp file after successful move
+                                        CleanupTempFile(tempFilePath);
                                     }
-                                    else if (filePath == finalPath)
+                                    else if (tempFilePath == finalPath)
                                     {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Source and destination paths are the same, no move needed: {Path}", downloadId, filePath);
+                                        _logger.LogInformation("DDL download [{DownloadId}] Source and destination paths are the same, no move needed: {Path}", downloadId, tempFilePath);
                                     }
                                     else
                                     {
-                                        _logger.LogWarning("DDL download [{DownloadId}] Source file does not exist: {FilePath}", downloadId, filePath);
+                                        _logger.LogWarning("DDL download [{DownloadId}] Source file does not exist: {FilePath}", downloadId, tempFilePath);
                                     }
                                 }
                                 else
                                 {
-                                    _logger.LogInformation("DDL download [{DownloadId}] ⚠️ Metadata processing is DISABLED in settings, keeping file at: {FilePath}", downloadId, filePath);
+                                    _logger.LogInformation("DDL download [{DownloadId}] ⚠️ Metadata processing is DISABLED in settings, keeping file at: {FilePath}", downloadId, tempFilePath);
                                 }
                             }
                         }
                         catch (Exception processEx)
                         {
-                            _logger.LogError(processEx, "DDL download [{DownloadId}] ❌ Failed to process file with naming pattern, keeping original location: {FilePath}", downloadId, filePath);
-                            finalPath = filePath; // Keep original path if processing fails
+                            _logger.LogError(processEx, "DDL download [{DownloadId}] ❌ Failed to process file with naming pattern, keeping original location: {FilePath}", downloadId, tempFilePath);
+                            finalPath = tempFilePath; // Keep original path if processing fails
                         }
                         
                         // Update database with completion status and final path
@@ -1444,6 +1442,63 @@ namespace Listenarr.Api.Services
             }
             
             return sanitized;
+        }
+
+        private void CleanupTempFile(string tempFilePath)
+        {
+            try
+            {
+                if (File.Exists(tempFilePath))
+                {
+                    File.Delete(tempFilePath);
+                    _logger.LogInformation("Cleaned up temporary file: {TempFilePath}", tempFilePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup temporary file: {TempFilePath}", tempFilePath);
+            }
+        }
+
+        /// <summary>
+        /// Clean up old temporary files that are older than the specified retention period
+        /// </summary>
+        public void CleanupOldTempFiles(int retentionHours = 24)
+        {
+            try
+            {
+                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "temp", "downloads");
+                if (!Directory.Exists(tempDownloadFolder))
+                {
+                    return;
+                }
+
+                var retentionTime = DateTime.UtcNow.AddHours(-retentionHours);
+                var tempFiles = Directory.GetFiles(tempDownloadFolder, "*.*", SearchOption.AllDirectories);
+                
+                foreach (var file in tempFiles)
+                {
+                    try
+                    {
+                        var fileInfo = new FileInfo(file);
+                        if (fileInfo.LastWriteTimeUtc < retentionTime)
+                        {
+                            fileInfo.Delete();
+                            _logger.LogInformation("Cleaned up old temporary file: {FilePath}", file);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to cleanup old temporary file: {FilePath}", file);
+                    }
+                }
+
+                _logger.LogInformation("Completed cleanup of old temporary files (retention: {RetentionHours} hours)", retentionHours);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during temporary file cleanup");
+            }
         }
     }
 }

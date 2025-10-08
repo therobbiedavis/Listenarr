@@ -78,6 +78,9 @@ builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 // Register background service for daily cache cleanup
 // builder.Services.AddHostedService<ImageCacheCleanupService>();
 
+// Register background service for temp file cleanup
+builder.Services.AddHostedService<TempFileCleanupService>();
+
 // Register background service for download monitoring and real-time updates
 builder.Services.AddHostedService<DownloadMonitorService>();
 
