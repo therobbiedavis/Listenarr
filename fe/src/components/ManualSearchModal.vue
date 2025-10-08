@@ -204,7 +204,7 @@ const totalIndexers = ref(0)
 const qualityScores = ref<Map<string, QualityScore>>(new Map())
 const qualityProfile = ref<QualityProfile | null>(null)
 const sortBy = ref<SearchSortBy | 'Score'>('Score')
-const sortDirection = ref<SearchSortDirection>('Ascending')
+const sortDirection = ref<SearchSortDirection>('Descending')
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen && props.audiobook) {
