@@ -225,3 +225,83 @@ export interface Indexer {
   lastTestSuccessful?: boolean
   lastTestError?: string
 }
+
+export interface SystemInfo {
+  version: string
+  operatingSystem: string
+  runtime: string
+  uptime: string
+  memory: MemoryInfo
+  cpu: CpuInfo
+  startTime: string
+}
+
+export interface MemoryInfo {
+  usedBytes: number
+  totalBytes: number
+  freeBytes: number
+  usedPercentage: number
+  usedFormatted: string
+  totalFormatted: string
+  freeFormatted: string
+}
+
+export interface CpuInfo {
+  usagePercentage: number
+  processorCount: number
+}
+
+export interface StorageInfo {
+  usedBytes: number
+  totalBytes: number
+  freeBytes: number
+  usedPercentage: number
+  usedFormatted: string
+  totalFormatted: string
+  freeFormatted: string
+  driveName: string
+  status: string
+}
+
+export interface ServiceHealth {
+  status: string // "healthy", "warning", "error", "unknown"
+  version: string
+  uptime: string
+  downloadClients: DownloadClientHealth
+  externalApis: ExternalApiHealth
+}
+
+export interface DownloadClientHealth {
+  status: string
+  connected: number
+  total: number
+  clients: ClientStatus[]
+}
+
+export interface ExternalApiHealth {
+  status: string
+  connected: number
+  total: number
+  apis: ApiStatus[]
+}
+
+export interface ClientStatus {
+  name: string
+  status: string // "connected", "disconnected", "unknown"
+  type?: string
+}
+
+export interface ApiStatus {
+  name: string
+  status: string // "connected", "disconnected", "unknown"
+  enabled: boolean
+}
+
+export interface LogEntry {
+  id: string
+  timestamp: string // ISO date string
+  level: string // "Info", "Warning", "Error", "Debug"
+  message: string
+  exception?: string
+  source?: string
+}

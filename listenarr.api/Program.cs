@@ -23,6 +23,11 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configure logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -67,6 +72,7 @@ builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
 builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
 builder.Services.AddScoped<IFileNamingService, FileNamingService>();
 builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
+builder.Services.AddScoped<ISystemService, SystemService>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();

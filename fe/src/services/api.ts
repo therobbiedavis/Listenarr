@@ -10,7 +10,11 @@ import type {
   QueueItem,
   RemotePathMapping,
   TranslatePathRequest,
-  TranslatePathResponse
+  TranslatePathResponse,
+  SystemInfo,
+  StorageInfo,
+  ServiceHealth,
+  LogEntry
 } from '@/types'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -422,6 +426,28 @@ class ApiService {
       body: JSON.stringify(request)
     })
   }
+
+  // System endpoints
+  async getSystemInfo(): Promise<SystemInfo> {
+    return this.request<SystemInfo>('/system/info')
+  }
+
+  async getStorageInfo(): Promise<StorageInfo> {
+    return this.request<StorageInfo>('/system/storage')
+  }
+
+  async getServiceHealth(): Promise<ServiceHealth> {
+    return this.request<ServiceHealth>('/system/health')
+  }
+
+  async getLogs(limit: number = 100): Promise<LogEntry[]> {
+    return this.request<LogEntry[]>(`/system/logs?limit=${limit}`)
+  }
+
+  async downloadLogs(): Promise<void> {
+    const url = `${API_BASE_URL}/system/logs/download`
+    window.open(url, '_blank')
+  }
 }
 
 export const apiService = new ApiService()
@@ -444,3 +470,9 @@ export const createRemotePathMapping = (mapping: Omit<RemotePathMapping, 'id' | 
 export const updateRemotePathMapping = (id: number, mapping: Partial<RemotePathMapping>) => apiService.updateRemotePathMapping(id, mapping)
 export const deleteRemotePathMapping = (id: number) => apiService.deleteRemotePathMapping(id)
 export const translatePath = (request: TranslatePathRequest) => apiService.translatePath(request)
+// Export individual system functions for convenience
+export const getSystemInfo = () => apiService.getSystemInfo()
+export const getStorageInfo = () => apiService.getStorageInfo()
+export const getServiceHealth = () => apiService.getServiceHealth()
+export const getLogs = (limit?: number) => apiService.getLogs(limit)
+export const downloadLogs = () => apiService.downloadLogs()
