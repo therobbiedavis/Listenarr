@@ -475,7 +475,7 @@ namespace Listenarr.Api.Services
         public string GetLogFilePath()
         {
             // Get the logs directory from the application base path
-            var logsDir = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+            var logsDir = Path.Combine(Directory.GetCurrentDirectory(), "config", "logs");
             
             // Ensure the directory exists
             if (!Directory.Exists(logsDir))

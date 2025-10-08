@@ -59,7 +59,7 @@ builder.Services.AddHttpClient();
 
 // Register our custom services
 builder.Services.AddDbContext<ListenArrDbContext>(options =>
-    options.UseSqlite("Data Source=listenarr.db"));
+    options.UseSqlite("Data Source=config/database/listenarr.db"));
 builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
 builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
 builder.Services.AddScoped<ISearchService, SearchService>();

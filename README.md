@@ -101,6 +101,12 @@ Got a great idea? Throw it up on [Discussions](https://github.com/therobbiedavis
 ```
 Listenarr/
 ├── listenarr.api/              # C# Backend API
+│   ├── config/                 # User configuration and data
+│   │   ├── appsettings/        # Application configuration files
+│   │   ├── cache/              # Image cache storage
+│   │   ├── database/           # SQLite database files
+│   │   ├── logs/               # Application log files
+│   │   └── temp/               # Temporary download storage
 │   ├── Controllers/            # API Endpoints
 │   ├── Models/                 # Data Models
 │   ├── Services/               # Business Logic

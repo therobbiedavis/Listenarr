@@ -1083,7 +1083,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Starting direct download for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
                 
                 // Create temporary download folder within the application directory
-                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "temp", "downloads");
+                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "config", "temp", "downloads");
                 if (!Directory.Exists(tempDownloadFolder))
                 {
                     _logger.LogInformation("Creating temporary download directory: {Path}", tempDownloadFolder);
@@ -1467,7 +1467,7 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "temp", "downloads");
+                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "config", "temp", "downloads");
                 if (!Directory.Exists(tempDownloadFolder))
                 {
                     return;

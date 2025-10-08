@@ -145,6 +145,10 @@ playwright-report/
 *.sqlite3
 
 # Application data directories
+**/config/temp/
+**/config/cache/
+**/config/logs/
+**/config/database/
 **/wwwroot/cache/
 **/wwwroot/downloads/
 **/Data/

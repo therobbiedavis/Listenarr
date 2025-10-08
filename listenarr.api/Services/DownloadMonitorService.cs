@@ -32,7 +32,7 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly ILogger<DownloadMonitorService> _logger;
-        private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(3);
+        private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
         private readonly Dictionary<string, Download> _lastDownloadStates = new();
 
         public DownloadMonitorService(
@@ -78,27 +78,39 @@ namespace Listenarr.Api.Services
 
             // Get all active downloads from database
             var activeDownloads = await dbContext.Downloads
-                .Where(d => d.Status == DownloadStatus.Queued || 
+                .Where(d => d.Status == DownloadStatus.Queued ||
                            d.Status == DownloadStatus.Downloading ||
                            d.Status == DownloadStatus.Processing)
                 .ToListAsync(cancellationToken);
 
-            // Check if we need to poll download clients
-            var clientDownloads = activeDownloads.Where(d => d.DownloadClientId != "DDL").ToList();
-            
-            if (clientDownloads.Any())
+            // Only poll download clients if there are active downloads
+            if (activeDownloads.Any())
             {
-                await PollDownloadClientsAsync(clientDownloads, configService, dbContext, cancellationToken);
+                var clientDownloads = activeDownloads.Where(d => d.DownloadClientId != "DDL").ToList();
+
+                if (clientDownloads.Any())
+                {
+                    await PollDownloadClientsAsync(clientDownloads, configService, dbContext, cancellationToken);
+                }
             }
 
-            // Get all downloads to send to clients
-            var allDownloads = await dbContext.Downloads
-                .OrderByDescending(d => d.StartedAt)
-                .Take(100) // Limit to recent 100 downloads
-                .ToListAsync(cancellationToken);
+            // Get all downloads to send to clients (only if there are active downloads or every 30 seconds)
+            List<Download> allDownloads = new();
+            var shouldFetchAll = activeDownloads.Any() || (DateTime.UtcNow.Second % 30 == 0);
 
-            // Check for changes and broadcast updates
-            await BroadcastDownloadUpdatesAsync(allDownloads, cancellationToken);
+            if (shouldFetchAll)
+            {
+                allDownloads = await dbContext.Downloads
+                    .OrderByDescending(d => d.StartedAt)
+                    .Take(100) // Limit to recent 100 downloads
+                    .ToListAsync(cancellationToken);
+            }
+
+            // Check for changes and broadcast updates (only if we have data)
+            if (allDownloads.Any())
+            {
+                await BroadcastDownloadUpdatesAsync(allDownloads, cancellationToken);
+            }
         }
 
         private async Task PollDownloadClientsAsync(
