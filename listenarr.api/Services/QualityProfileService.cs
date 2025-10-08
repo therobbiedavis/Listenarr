@@ -275,6 +275,7 @@ namespace Listenarr.Api.Services
                     searchResult.Title.Contains(forbidden, StringComparison.OrdinalIgnoreCase))
                 {
                     score.RejectionReasons.Add($"Contains forbidden word: '{forbidden}'");
+                    score.TotalScore = -99999; // Ensure rejected results always sort last
                     return Task.FromResult(score);
                 }
             }
@@ -286,27 +287,34 @@ namespace Listenarr.Api.Services
                     !searchResult.Title.Contains(required, StringComparison.OrdinalIgnoreCase))
                 {
                     score.RejectionReasons.Add($"Missing required word: '{required}'");
+                    score.TotalScore = -99999; // Ensure rejected results always sort last
                     return Task.FromResult(score);
                 }
             }
 
-            // Check size limits
-            if (profile.MinimumSize > 0 && searchResult.Size < profile.MinimumSize * 1024 * 1024)
+            // Check size limits (only if size is known)
+            if (searchResult.Size > 0)
             {
-                score.RejectionReasons.Add($"File too small (< {profile.MinimumSize} MB)");
-                return Task.FromResult(score);
-            }
+                if (profile.MinimumSize > 0 && searchResult.Size < profile.MinimumSize * 1024 * 1024)
+                {
+                    score.RejectionReasons.Add($"File too small (< {profile.MinimumSize} MB)");
+                    score.TotalScore = -99999; // Ensure rejected results always sort last
+                    return Task.FromResult(score);
+                }
 
-            if (profile.MaximumSize > 0 && searchResult.Size > profile.MaximumSize * 1024 * 1024)
-            {
-                score.RejectionReasons.Add($"File too large (> {profile.MaximumSize} MB)");
-                return Task.FromResult(score);
+                if (profile.MaximumSize > 0 && searchResult.Size > profile.MaximumSize * 1024 * 1024)
+                {
+                    score.RejectionReasons.Add($"File too large (> {profile.MaximumSize} MB)");
+                    score.TotalScore = -99999; // Ensure rejected results always sort last
+                    return Task.FromResult(score);
+                }
             }
 
             // Check seeders for torrents
             if (searchResult.DownloadType == "torrent" && searchResult.Seeders < profile.MinimumSeeders)
             {
                 score.RejectionReasons.Add($"Not enough seeders ({searchResult.Seeders} < {profile.MinimumSeeders})");
+                score.TotalScore = -99999; // Ensure rejected results always sort last
                 return Task.FromResult(score);
             }
 
@@ -317,8 +325,17 @@ namespace Listenarr.Api.Services
                 if (age > profile.MaximumAge)
                 {
                     score.RejectionReasons.Add($"Too old ({(int)age} days > {profile.MaximumAge} days)");
+                    score.TotalScore = -99999; // Ensure rejected results always sort last
                     return Task.FromResult(score);
                 }
+            }
+
+            // Penalize unknown size when size requirements exist
+            if (searchResult.Size <= 0 && (profile.MinimumSize > 0 || profile.MaximumSize > 0))
+            {
+                var sizePenalty = -20; // Significant penalty for unknown size
+                score.TotalScore += sizePenalty;
+                score.ScoreBreakdown["Size"] = sizePenalty;
             }
 
             // Score quality level - more flexible matching
@@ -409,6 +426,9 @@ namespace Listenarr.Api.Services
                     score.ScoreBreakdown["Age"] = ageScore;
                 }
             }
+
+            // Ensure non-rejected results never have negative scores
+            score.TotalScore = Math.Max(0, score.TotalScore);
 
             return Task.FromResult(score);
         }

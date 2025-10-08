@@ -111,9 +111,6 @@
                   <td class="col-title">
                     <div class="title-cell">
                       <span class="title-text">{{ result.title }}</span>
-                      <div class="title-meta">
-                        <span v-if="result.artist">{{ result.artist }}</span>
-                      </div>
                     </div>
                   </td>
                   <td class="col-indexer">
@@ -155,7 +152,7 @@
                       <span 
                         v-else
                         :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]"
-                        :title="`Total Score: ${getResultScore(result.id)?.totalScore}`"
+                        :title="getScoreBreakdownTooltip(getResultScore(result.id))"
                       >
                         {{ getResultScore(result.id)?.totalScore }}
                       </span>
@@ -256,14 +253,14 @@ function sortFrontendResults() {
     const scoreA = getResultScore(a.id)?.totalScore || 0
     const scoreB = getResultScore(b.id)?.totalScore || 0
     
-    // Handle rejected items (put them at the end)
+    // Handle rejected items (put them at the end regardless of sort direction)
     const rejectedA = getResultScore(a.id)?.isRejected || false
     const rejectedB = getResultScore(b.id)?.isRejected || false
     
-    if (rejectedA && !rejectedB) return direction > 0 ? 1 : -1
-    if (!rejectedA && rejectedB) return direction > 0 ? -1 : 1
+    if (rejectedA && !rejectedB) return 1  // A rejected, B not → A after B
+    if (!rejectedA && rejectedB) return -1 // A not rejected, B rejected → A before B
     
-    // Sort by score
+    // Both same rejection status, sort by score
     return (scoreA - scoreB) * direction
   })
 }
@@ -516,6 +513,41 @@ function getScoreClass(score: number): string {
   if (score >= 60) return 'good'
   if (score >= 40) return 'fair'
   return 'poor'
+}
+
+function getScoreBreakdownTooltip(score: QualityScore | undefined): string {
+  if (!score) return 'Score not available'
+  
+  const breakdown = score.scoreBreakdown
+  const parts: string[] = []
+  
+  // Add total score
+  parts.push(`Total Score: ${score.totalScore}`)
+  
+  // Add breakdown details
+  if (breakdown.Quality !== undefined) {
+    parts.push(`Quality: ${breakdown.Quality}`)
+  }
+  if (breakdown.Format !== undefined) {
+    parts.push(`Format: ${breakdown.Format}`)
+  }
+  if (breakdown.PreferredWords !== undefined) {
+    parts.push(`Preferred Words: ${breakdown.PreferredWords}`)
+  }
+  if (breakdown.Language !== undefined) {
+    parts.push(`Language: ${breakdown.Language}`)
+  }
+  if (breakdown.Seeders !== undefined) {
+    parts.push(`Seeders: ${breakdown.Seeders}`)
+  }
+  if (breakdown.Age !== undefined) {
+    parts.push(`Age: ${breakdown.Age}`)
+  }
+  if (breakdown.Size !== undefined) {
+    parts.push(`Size: ${breakdown.Size}`)
+  }
+  
+  return parts.join('\n')
 }
 </script>
 
@@ -821,11 +853,6 @@ function getScoreClass(score: number): string {
 .title-text {
   color: white;
   font-weight: 500;
-}
-
-.title-meta {
-  font-size: 0.8rem;
-  color: #999;
 }
 
 .indexer-name {
