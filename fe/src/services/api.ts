@@ -16,7 +16,9 @@ import type {
   StorageInfo,
   ServiceHealth,
   LogEntry,
-  QualityProfile
+  QualityProfile,
+  SearchSortBy,
+  SearchSortDirection
 } from '@/types'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -85,9 +87,11 @@ class ApiService {
     return this.request<SearchResult[]>(`/search?${params}`)
   }
 
-  async searchIndexers(query: string, category?: string): Promise<SearchResult[]> {
+  async searchIndexers(query: string, category?: string, sortBy?: SearchSortBy, sortDirection?: SearchSortDirection): Promise<SearchResult[]> {
     const params = new URLSearchParams({ query })
     if (category) params.append('category', category)
+    if (sortBy) params.append('sortBy', sortBy)
+    if (sortDirection) params.append('sortDirection', sortDirection)
     
     return this.request<SearchResult[]>(`/search/indexers?${params}`)
   }
@@ -96,7 +100,7 @@ class ApiService {
     const params = new URLSearchParams({ query })
     if (category) params.append('category', category)
     
-    return this.request<SearchResult[]>(`/search/api/${apiId}?${params}`)
+    return this.request<SearchResult[]>(`/search/${apiId}?${params}`)
   }
 
   async testApiConnection(apiId: string): Promise<boolean> {

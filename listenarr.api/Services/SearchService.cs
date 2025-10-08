@@ -58,7 +58,7 @@ namespace Listenarr.Api.Services
             _dbContext = dbContext;
         }
 
-        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null)
+        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending)
         {
             var results = new List<SearchResult>();
 
@@ -90,13 +90,94 @@ namespace Listenarr.Api.Services
                     fallback.Add(r);
                 }
                 _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
-                return fallback.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
+                return ApplySorting(fallback, sortBy, sortDirection);
             }
 
-            return results.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
+            return ApplySorting(results, sortBy, sortDirection);
         }
 
-        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null)
+        private List<SearchResult> ApplySorting(List<SearchResult> results, SearchSortBy sortBy, SearchSortDirection sortDirection)
+        {
+            if (!results.Any())
+                return results;
+
+            IOrderedEnumerable<SearchResult> orderedResults;
+
+            // Primary sort
+            switch (sortBy)
+            {
+                case SearchSortBy.Seeders:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Seeders)
+                        : results.OrderBy(r => r.Seeders);
+                    break;
+
+                case SearchSortBy.Size:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Size)
+                        : results.OrderBy(r => r.Size);
+                    break;
+
+                case SearchSortBy.PublishedDate:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.PublishedDate)
+                        : results.OrderBy(r => r.PublishedDate);
+                    break;
+
+                case SearchSortBy.Title:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Title, StringComparer.OrdinalIgnoreCase)
+                        : results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase);
+                    break;
+
+                case SearchSortBy.Source:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Source, StringComparer.OrdinalIgnoreCase)
+                        : results.OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase);
+                    break;
+
+                case SearchSortBy.Quality:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => GetQualityScore(r.Quality))
+                        : results.OrderBy(r => GetQualityScore(r.Quality));
+                    break;
+
+                default:
+                    // Default to seeders descending
+                    orderedResults = results.OrderByDescending(r => r.Seeders);
+                    break;
+            }
+
+            return orderedResults.ToList();
+        }
+
+        private int GetQualityScore(string? quality)
+        {
+            if (string.IsNullOrEmpty(quality))
+                return 0;
+
+            var lowerQuality = quality.ToLower();
+
+            // Higher scores = better quality
+            if (lowerQuality.Contains("flac"))
+                return 100;
+            else if (lowerQuality.Contains("m4b"))
+                return 90;
+            else if (lowerQuality.Contains("320"))
+                return 80;
+            else if (lowerQuality.Contains("256"))
+                return 70;
+            else if (lowerQuality.Contains("192"))
+                return 60;
+            else if (lowerQuality.Contains("128"))
+                return 50;
+            else if (lowerQuality.Contains("64"))
+                return 40;
+            else
+                return 0; // Unknown quality
+        }
+
+        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending)
         {
             var results = new List<SearchResult>();
             var indexers = await _dbContext.Indexers
@@ -641,27 +722,26 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var apiConfig = await _configurationService.GetApiConfigurationAsync(apiId);
-                if (apiConfig == null || !apiConfig.IsEnabled)
+                // Parse apiId as indexer ID (not API configuration ID)
+                if (!int.TryParse(apiId, out var indexerId))
                 {
+                    _logger.LogWarning("Invalid indexer ID format: {ApiId}", apiId);
                     return new List<SearchResult>();
                 }
 
-                // This is a placeholder implementation
-                // In a real implementation, you would make HTTP requests to the specific API
-                // based on the API configuration and parse the results
-                
-                _logger.LogInformation($"Searching API {apiConfig.Name} for query: {query}");
-                
-                // Simulate API call delay
-                await Task.Delay(500);
-                
-                // Return mock results for now
-                return GenerateMockResults(query, apiConfig.Name);
+                var indexer = await _dbContext.Indexers.FindAsync(indexerId);
+                if (indexer == null || !indexer.IsEnabled)
+                {
+                    _logger.LogWarning("Indexer {IndexerId} not found or not enabled", indexerId);
+                    return new List<SearchResult>();
+                }
+
+                // Search using the indexer
+                return await SearchIndexerAsync(indexer, query, category);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error searching API {apiId} for query: {query}");
+                _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
                 return new List<SearchResult>();
             }
         }
@@ -855,21 +935,51 @@ namespace Listenarr.Api.Services
                     {
                         var id = item.TryGetProperty("id", out var idElem) ? idElem.GetString() : "";
                         var title = item.TryGetProperty("title", out var titleElem) ? titleElem.GetString() : "";
-                        var sizeStr = item.TryGetProperty("size", out var sizeElem) ? sizeElem.GetString() : "0";
+                        var sizeStr = "";
+                        if (item.TryGetProperty("size", out var sizeElem))
+                        {
+                            if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                sizeStr = sizeElem.GetString() ?? "0";
+                            }
+                            else if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.Number)
+                            {
+                                sizeStr = sizeElem.GetInt64().ToString();
+                            }
+                            else
+                            {
+                                sizeStr = "0";
+                            }
+                        }
                         var seeders = item.TryGetProperty("seeders", out var seedElem) ? seedElem.GetInt32() : 0;
                         var leechers = item.TryGetProperty("leechers", out var leechElem) ? leechElem.GetInt32() : 0;
                         var dlHash = item.TryGetProperty("dl", out var dlElem) ? dlElem.GetString() : "";
                         var category = item.TryGetProperty("catname", out var catElem) ? catElem.GetString() : "";
                         var tags = item.TryGetProperty("tags", out var tagsElem) ? tagsElem.GetString() : "";
+                        var description = item.TryGetProperty("description", out var descElem) ? descElem.GetString() : "";
 
                         if (string.IsNullOrEmpty(title))
                             continue;
 
-                        // Parse size
+                        // Parse size - handle various formats
                         long size = 0;
-                        if (long.TryParse(sizeStr, out var parsedSize))
+                        if (!string.IsNullOrEmpty(sizeStr) && sizeStr != "0")
                         {
-                            size = parsedSize;
+                            size = ParseSizeString(sizeStr);
+                            _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from size field '{SizeStr}'", title, size, sizeStr);
+                        }
+                        else
+                        {
+                            // Try to extract size from description when size field is 0
+                            size = ExtractSizeFromMyAnonamouseDescription(description);
+                            if (size > 0)
+                            {
+                                _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from description", title, size);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("MyAnonamouse result '{Title}' has no size information in size field or description", title);
+                            }
                         }
 
                         // Extract author from author_info JSON
@@ -1145,6 +1255,7 @@ namespace Listenarr.Api.Services
                             TorrentUrl = downloadUrl, // Using TorrentUrl field for direct download URL
                             DownloadType = "DDL", // Direct Download Link
                             Format = audioFile.Format,
+                            Quality = DetectQualityFromFormat(audioFile.Format),
                             Source = $"{indexer.Name} (Internet Archive)"
                         });
                     }
@@ -1313,8 +1424,16 @@ namespace Listenarr.Api.Services
                             switch (name.ToLower())
                             {
                                 case "size":
-                                    if (long.TryParse(value, out var size))
-                                        result.Size = size;
+                                    var parsedSize = ParseSizeString(value);
+                                    if (parsedSize > 0)
+                                    {
+                                        result.Size = parsedSize;
+                                        _logger.LogDebug("Parsed size for {Title}: {Size} bytes from indexer {Indexer}", result.Title, parsedSize, indexer.Name);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("Failed to parse size value '{Value}' for result '{Title}' from indexer {Indexer}", value, result.Title, indexer.Name);
+                                    }
                                     break;
                                 case "seeders":
                                     if (int.TryParse(value, out var seeders))
@@ -1584,6 +1703,41 @@ namespace Listenarr.Api.Services
                 return "Unknown";
         }
 
+        private string DetectQualityFromFormat(string format)
+        {
+            if (string.IsNullOrEmpty(format))
+                return "Unknown";
+
+            var lowerFormat = format.ToLower();
+
+            if (lowerFormat.Contains("flac"))
+                return "FLAC";
+            else if (lowerFormat.Contains("m4b") || lowerFormat.Contains("apple audiobook"))
+                return "M4B";
+            else if (lowerFormat.Contains("320kbps") || lowerFormat.Contains("320 kbps"))
+                return "MP3 320kbps";
+            else if (lowerFormat.Contains("256kbps") || lowerFormat.Contains("256 kbps"))
+                return "MP3 256kbps";
+            else if (lowerFormat.Contains("192kbps") || lowerFormat.Contains("192 kbps"))
+                return "MP3 192kbps";
+            else if (lowerFormat.Contains("128kbps") || lowerFormat.Contains("128 kbps"))
+                return "MP3 128kbps";
+            else if (lowerFormat.Contains("64kbps") || lowerFormat.Contains("64 kbps"))
+                return "MP3 64kbps";
+            else if (lowerFormat.Contains("vbr mp3") || lowerFormat.Contains("variable bitrate"))
+                return "MP3 VBR";
+            else if (lowerFormat.Contains("ogg vorbis") || lowerFormat.Contains("ogg"))
+                return "OGG Vorbis";
+            else if (lowerFormat.Contains("opus"))
+                return "OPUS";
+            else if (lowerFormat.Contains("aac"))
+                return "AAC";
+            else if (lowerFormat.Contains("mp3"))
+                return "MP3";
+            else
+                return "Unknown";
+        }
+
         private string DetectFormatFromTags(string tags)
         {
             var lowerTags = tags.ToLower();
@@ -1600,6 +1754,101 @@ namespace Listenarr.Api.Services
                 return "AAC";
             else
                 return "MP3"; // Default to MP3
+        }
+
+        private long ExtractSizeFromMyAnonamouseDescription(string? description)
+        {
+            if (string.IsNullOrEmpty(description))
+                return 0;
+
+            // Look for patterns like "Total Size : 259MB (272 033 986 bytes)"
+            var match = Regex.Match(description, @"Total Size\s*:\s*([\d\.,]+)\s*(MB|GB|KB|B)\s*\(([\d\s,]+)\s*bytes?\)", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                // Try to parse the bytes value first (most accurate)
+                var bytesStr = match.Groups[3].Value.Replace(",", "").Replace(" ", "");
+                if (long.TryParse(bytesStr, out var bytes))
+                {
+                    _logger.LogDebug("Extracted size from MyAnonamouse description bytes: {Bytes}", bytes);
+                    return bytes;
+                }
+
+                // Fallback to parsing the formatted size
+                var sizeValue = match.Groups[1].Value.Replace(",", "");
+                var unit = match.Groups[2].Value.ToUpper();
+                if (double.TryParse(sizeValue, out var value))
+                {
+                    var result = unit switch
+                    {
+                        "B" => (long)value,
+                        "KB" => (long)(value * 1024),
+                        "MB" => (long)(value * 1024 * 1024),
+                        "GB" => (long)(value * 1024 * 1024 * 1024),
+                        _ => (long)value
+                    };
+                    _logger.LogDebug("Extracted size from MyAnonamouse description formatted: {Value} {Unit} = {Result} bytes", value, unit, result);
+                    return result;
+                }
+            }
+
+            // Alternative pattern: just "Total Size : 259MB" without bytes
+            match = Regex.Match(description, @"Total Size\s*:\s*([\d\.,]+)\s*(MB|GB|KB|B)", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                var sizeValue = match.Groups[1].Value.Replace(",", "");
+                var unit = match.Groups[2].Value.ToUpper();
+                if (double.TryParse(sizeValue, out var value))
+                {
+                    var result = unit switch
+                    {
+                        "B" => (long)value,
+                        "KB" => (long)(value * 1024),
+                        "MB" => (long)(value * 1024 * 1024),
+                        "GB" => (long)(value * 1024 * 1024 * 1024),
+                        _ => (long)value
+                    };
+                    _logger.LogDebug("Extracted size from MyAnonamouse description (no bytes): {Value} {Unit} = {Result} bytes", value, unit, result);
+                    return result;
+                }
+            }
+
+            _logger.LogDebug("No size found in MyAnonamouse description");
+            return 0;
+        }
+
+        private long ParseSizeString(string sizeStr)
+        {
+            if (string.IsNullOrEmpty(sizeStr))
+                return 0;
+
+            // Remove any commas and extra spaces
+            sizeStr = sizeStr.Replace(",", "").Trim();
+
+            // Try to parse as direct bytes first
+            if (long.TryParse(sizeStr, out var bytes))
+                return bytes;
+
+            // Handle formats like "500 MB", "1.2 GB", "1024 KB", etc.
+            var match = System.Text.RegularExpressions.Regex.Match(sizeStr, @"^([\d\.]+)\s*(KB|MB|GB|TB|B)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                if (double.TryParse(match.Groups[1].Value, out var value))
+                {
+                    var unit = match.Groups[2].Value.ToUpper();
+                    return unit switch
+                    {
+                        "B" => (long)value,
+                        "KB" => (long)(value * 1024),
+                        "MB" => (long)(value * 1024 * 1024),
+                        "GB" => (long)(value * 1024 * 1024 * 1024),
+                        "TB" => (long)(value * 1024 * 1024 * 1024 * 1024),
+                        _ => (long)value
+                    };
+                }
+            }
+
+            _logger.LogWarning("Unable to parse size string: '{SizeStr}'", sizeStr);
+            return 0;
         }
     }
 }

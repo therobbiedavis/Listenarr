@@ -19,10 +19,10 @@
         </div>
 
         <!-- Results Table -->
-        <div v-if="results.length > 0 || !searching" class="results-container">
+        <div v-if="displayResults.length > 0 || !searching" class="results-container">
           <div class="results-header">
             <div class="results-count">
-              {{ results.length }} result{{ results.length !== 1 ? 's' : '' }} found
+              {{ displayResults.length }} result{{ displayResults.length !== 1 ? 's' : '' }} found
             </div>
             <button 
               v-if="!searching" 
@@ -34,7 +34,7 @@
             </button>
           </div>
 
-          <div v-if="results.length === 0 && !searching" class="no-results">
+          <div v-if="displayResults.length === 0 && !searching" class="no-results">
             <i class="ph ph-magnifying-glass"></i>
             <p>No results found</p>
             <p class="hint">Try adjusting your indexer settings or search criteria</p>
@@ -44,21 +44,61 @@
             <table class="results-table">
               <thead>
                 <tr>
-                  <th class="col-source">Source</th>
-                  <th class="col-age">Age</th>
-                  <th class="col-title">Title</th>
-                  <th class="col-indexer">Indexer</th>
-                  <th class="col-size">Size</th>
-                  <th class="col-peers">Peers</th>
+                  <th class="col-source sortable" @click="setSort('Source')">
+                    <span class="header-content">
+                      Source
+                      <i :class="getSortIcon('Source')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-age sortable" @click="setSort('PublishedDate')">
+                    <span class="header-content">
+                      Age
+                      <i :class="getSortIcon('PublishedDate')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-title sortable" @click="setSort('Title')">
+                    <span class="header-content">
+                      Title
+                      <i :class="getSortIcon('Title')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-indexer sortable" @click="setSort('Source')">
+                    <span class="header-content">
+                      Indexer
+                      <i :class="getSortIcon('Source')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-size sortable" @click="setSort('Size')">
+                    <span class="header-content">
+                      Size
+                      <i :class="getSortIcon('Size')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-peers sortable" @click="setSort('Seeders')">
+                    <span class="header-content">
+                      Peers
+                      <i :class="getSortIcon('Seeders')" class="sort-icon"></i>
+                    </span>
+                  </th>
                   <th class="col-language">Languages</th>
-                  <th class="col-quality">Quality</th>
-                  <th class="col-score">Score</th>
+                  <th class="col-quality sortable" @click="setSort('Quality')">
+                    <span class="header-content">
+                      Quality
+                      <i :class="getSortIcon('Quality')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-score sortable" @click="setSort('Score')">
+                    <span class="header-content">
+                      Score
+                      <i :class="getSortIcon('Score')" class="sort-icon"></i>
+                    </span>
+                  </th>
                   <th class="col-actions"></th>
                 </tr>
               </thead>
               <tbody>
                 <tr 
-                  v-for="result in sortedResults" 
+                  v-for="result in displayResults" 
                   :key="result.id"
                   class="result-row"
                 >
@@ -146,7 +186,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
-import type { Audiobook, SearchResult, QualityScore, QualityProfile } from '@/types'
+import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
 
 interface Props {
   isOpen: boolean
@@ -166,6 +206,8 @@ const searchedIndexers = ref(0)
 const totalIndexers = ref(0)
 const qualityScores = ref<Map<string, QualityScore>>(new Map())
 const qualityProfile = ref<QualityProfile | null>(null)
+const sortBy = ref<SearchSortBy | 'Score'>('Score')
+const sortDirection = ref<SearchSortDirection>('Ascending')
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen && props.audiobook) {
@@ -173,15 +215,58 @@ watch(() => props.isOpen, (isOpen) => {
   }
 })
 
-const sortedResults = computed(() => {
-  return [...results.value].sort((a, b) => {
-    // Sort by seeders (descending) for torrents, then by date
-    if (a.seeders !== b.seeders) {
-      return b.seeders - a.seeders
-    }
-    return new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
-  })
+const displayResults = computed(() => {
+  // Use frontend-sorted results when sorting by Score, otherwise use backend-sorted results
+  return sortBy.value === 'Score' ? results.value : results.value
 })
+
+function setSort(column: SearchSortBy | 'Score') {
+  if (sortBy.value === column) {
+    // Toggle direction if same column
+    sortDirection.value = sortDirection.value === 'Ascending' ? 'Descending' : 'Ascending'
+  } else {
+    // New column, default to descending
+    sortBy.value = column as SearchSortBy
+    sortDirection.value = 'Descending'
+  }
+  
+  // For Score sorting, sort frontend results, otherwise re-search with backend sorting
+  if (column === 'Score') {
+    // Frontend sorting for Score column
+    sortFrontendResults()
+  } else {
+    // Backend sorting for other columns
+    search()
+  }
+}
+
+function getSortIcon(column: SearchSortBy | 'Score'): string {
+  if (sortBy.value !== column) {
+    return 'ph ph-arrows-down-up sort-icon-inactive'
+  }
+  return sortDirection.value === 'Ascending' 
+    ? 'ph ph-arrow-up sort-icon-active' 
+    : 'ph ph-arrow-down sort-icon-active'
+}
+
+function sortFrontendResults() {
+  const direction = sortDirection.value === 'Ascending' ? 1 : -1
+  
+  results.value.sort((a, b) => {
+    const scoreA = getResultScore(a.id)?.totalScore || 0
+    const scoreB = getResultScore(b.id)?.totalScore || 0
+    
+    // Handle rejected items (put them at the end)
+    const rejectedA = getResultScore(a.id)?.isRejected || false
+    const rejectedB = getResultScore(b.id)?.isRejected || false
+    
+    if (rejectedA && !rejectedB) return direction > 0 ? 1 : -1
+    if (!rejectedA && rejectedB) return direction > 0 ? -1 : 1
+    
+    // Sort by score
+    return (scoreA - scoreB) * direction
+  })
+}
 
 async function search() {
   if (!props.audiobook) return
@@ -199,15 +284,67 @@ async function search() {
     // Build search query from title and author
     const query = buildSearchQuery()
     
-    // Search all configured indexers (not Amazon/Audible)
-    const searchResults = await apiService.searchIndexers(query)
-    results.value = searchResults
+    // Search each indexer individually to show progress
+    const allResults: SearchResult[] = []
+    const searchPromises = enabledIndexers.map(async (indexer) => {
+      try {
+        const indexerResults = await apiService.searchByApi(indexer.id.toString(), query)
+        allResults.push(...indexerResults)
+        searchedIndexers.value++
+      } catch (error) {
+        console.warn(`Failed to search indexer ${indexer.name}:`, error)
+        searchedIndexers.value++ // Still count as completed even if failed
+      }
+    })
     
-    // Mark all indexers as searched when complete
-    searchedIndexers.value = totalIndexers.value
+    // Wait for all searches to complete
+    await Promise.all(searchPromises)
     
-    // Load quality profile and score results
+    // Apply backend sorting if needed (for non-Score columns)
+    if (sortBy.value !== 'Score') {
+      const backendSortBy = sortBy.value as SearchSortBy
+      // Sort results based on the current sort criteria
+      allResults.sort((a, b) => {
+        switch (backendSortBy) {
+          case 'Seeders':
+            return sortDirection.value === 'Ascending' 
+              ? a.seeders - b.seeders 
+              : b.seeders - a.seeders
+          case 'Size':
+            return sortDirection.value === 'Ascending' 
+              ? a.size - b.size 
+              : b.size - a.size
+          case 'PublishedDate':
+            return sortDirection.value === 'Ascending' 
+              ? new Date(a.publishedDate).getTime() - new Date(b.publishedDate).getTime()
+              : new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
+          case 'Title':
+            return sortDirection.value === 'Ascending' 
+              ? a.title.localeCompare(b.title) 
+              : b.title.localeCompare(a.title)
+          case 'Source':
+            return sortDirection.value === 'Ascending' 
+              ? a.source.localeCompare(b.source) 
+              : b.source.localeCompare(a.source)
+          case 'Quality':
+            return sortDirection.value === 'Ascending' 
+              ? a.quality.localeCompare(b.quality) 
+              : b.quality.localeCompare(a.quality)
+          default:
+            return 0
+        }
+      })
+    }
+    
+    results.value = allResults
+    
+    // Load quality profile and score results (always needed for Score column or display)
     await loadQualityProfileAndScore()
+    
+    // If sorting by Score, apply frontend sorting
+    if (sortBy.value === 'Score') {
+      sortFrontendResults()
+    }
     
   } catch (err) {
     console.error('Manual search failed:', err)
@@ -559,6 +696,39 @@ function getScoreClass(score: number): string {
   font-size: 0.75rem;
   letter-spacing: 0.5px;
   border-bottom: 2px solid #3a3a3a;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.sortable:hover {
+  background-color: #3a3a3a;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.sort-icon {
+  font-size: 0.8rem;
+  margin-left: 0.5rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.sort-icon-inactive {
+  opacity: 0.3;
+}
+
+.sort-icon-active {
+  opacity: 1;
+  color: #007acc;
 }
 
 .results-table tbody tr {

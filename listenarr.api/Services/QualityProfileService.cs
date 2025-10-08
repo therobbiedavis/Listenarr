@@ -60,7 +60,13 @@ namespace Listenarr.Api.Services
 
         public async Task<QualityProfile?> GetByIdAsync(int id)
         {
-            return await _dbContext.QualityProfiles.FindAsync(id);
+            var profile = await _dbContext.QualityProfiles.FindAsync(id);
+            if (profile != null && profile.IsDefault)
+            {
+                // Ensure default profiles have all required qualities
+                await EnsureProfileHasRequiredQualitiesAsync(profile);
+            }
+            return profile;
         }
 
         public async Task<QualityProfile?> GetDefaultAsync()
@@ -72,6 +78,11 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("No default quality profile found, creating one");
                 profile = await CreateDefaultProfileAsync();
+            }
+            else
+            {
+                // Ensure existing profiles have all required qualities
+                await EnsureProfileHasRequiredQualitiesAsync(profile);
             }
 
             return profile;
@@ -89,9 +100,10 @@ namespace Listenarr.Api.Services
                     new QualityDefinition { Quality = "M4B", Allowed = true, Priority = 1 },
                     new QualityDefinition { Quality = "MP3 320kbps", Allowed = true, Priority = 2 },
                     new QualityDefinition { Quality = "MP3 256kbps", Allowed = true, Priority = 3 },
-                    new QualityDefinition { Quality = "MP3 192kbps", Allowed = true, Priority = 4 },
-                    new QualityDefinition { Quality = "MP3 128kbps", Allowed = true, Priority = 5 },
-                    new QualityDefinition { Quality = "MP3 64kbps", Allowed = false, Priority = 6 }
+                    new QualityDefinition { Quality = "MP3 VBR", Allowed = true, Priority = 4 },
+                    new QualityDefinition { Quality = "MP3 192kbps", Allowed = true, Priority = 5 },
+                    new QualityDefinition { Quality = "MP3 128kbps", Allowed = true, Priority = 6 },
+                    new QualityDefinition { Quality = "MP3 64kbps", Allowed = false, Priority = 7 }
                 },
                 CutoffQuality = "MP3 128kbps",
                 MinimumSize = 50, // 50 MB minimum
@@ -108,6 +120,46 @@ namespace Listenarr.Api.Services
             };
 
             return await CreateAsync(defaultProfile);
+        }
+
+        private async Task EnsureProfileHasRequiredQualitiesAsync(QualityProfile profile)
+        {
+            var requiredQualities = new Dictionary<string, int>
+            {
+                { "FLAC", 0 },
+                { "M4B", 1 },
+                { "MP3 320kbps", 2 },
+                { "MP3 256kbps", 3 },
+                { "MP3 VBR", 4 },
+                { "MP3 192kbps", 5 },
+                { "MP3 128kbps", 6 },
+                { "MP3 64kbps", 7 }
+            };
+
+            var updated = false;
+            foreach (var (qualityName, priority) in requiredQualities)
+            {
+                if (!profile.Qualities.Any(q => q.Quality == qualityName))
+                {
+                    // Add missing quality
+                    var isAllowed = qualityName != "MP3 64kbps"; // Only MP3 64kbps is disabled by default
+                    profile.Qualities.Add(new QualityDefinition 
+                    { 
+                        Quality = qualityName, 
+                        Allowed = isAllowed, 
+                        Priority = priority 
+                    });
+                    updated = true;
+                    _logger.LogInformation("Added missing quality '{Quality}' to profile '{ProfileName}'", qualityName, profile.Name);
+                }
+            }
+
+            if (updated)
+            {
+                profile.UpdatedAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+                _logger.LogInformation("Updated quality profile '{ProfileName}' with missing qualities", profile.Name);
+            }
         }
 
         public async Task<QualityProfile> CreateAsync(QualityProfile profile)

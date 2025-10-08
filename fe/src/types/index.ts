@@ -342,3 +342,7 @@ export interface QualityScore {
   isRejected: boolean
 }
 
+export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Source' | 'Quality'
+
+export type SearchSortDirection = 'Ascending' | 'Descending'
+

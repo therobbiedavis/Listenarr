@@ -79,7 +79,7 @@ builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 // builder.Services.AddHostedService<ImageCacheCleanupService>();
 
 // Register background service for download monitoring and real-time updates
-// builder.Services.AddHostedService<DownloadMonitorService>();
+builder.Services.AddHostedService<DownloadMonitorService>();
 
 // Register background service for queue monitoring (external clients) and real-time updates
 // builder.Services.AddHostedService<QueueMonitorService>();
@@ -179,6 +179,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Map SignalR hub for real-time download updates
-// app.MapHub<DownloadHub>("/hubs/downloads");
+app.MapHub<DownloadHub>("/hubs/downloads");
 
 app.Run();
