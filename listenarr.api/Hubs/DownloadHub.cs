@@ -48,10 +48,11 @@ namespace Listenarr.Api.Hubs
         /// <summary>
         /// Client can request current downloads status
         /// </summary>
-        public async Task RequestDownloadsUpdate()
+        public Task RequestDownloadsUpdate()
         {
             _logger.LogDebug("Client {ConnectionId} requested downloads update", Context.ConnectionId);
             // The background service will handle sending updates
+            return Task.CompletedTask;
         }
     }
 }

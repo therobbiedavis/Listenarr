@@ -144,7 +144,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task PollQBittorrentAsync(
+        private Task PollQBittorrentAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -153,9 +153,10 @@ namespace Listenarr.Api.Services
             // TODO: Implement qBittorrent API polling
             // Get torrent list, match by hash/name, update progress
             _logger.LogDebug("Polling qBittorrent client {ClientName}", client.Name);
+            return Task.CompletedTask;
         }
 
-        private async Task PollTransmissionAsync(
+        private Task PollTransmissionAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -163,9 +164,10 @@ namespace Listenarr.Api.Services
         {
             // TODO: Implement Transmission API polling
             _logger.LogDebug("Polling Transmission client {ClientName}", client.Name);
+            return Task.CompletedTask;
         }
 
-        private async Task PollSABnzbdAsync(
+        private Task PollSABnzbdAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -173,9 +175,10 @@ namespace Listenarr.Api.Services
         {
             // TODO: Implement SABnzbd API polling
             _logger.LogDebug("Polling SABnzbd client {ClientName}", client.Name);
+            return Task.CompletedTask;
         }
 
-        private async Task PollNZBGetAsync(
+        private Task PollNZBGetAsync(
             DownloadClientConfiguration client,
             List<Download> downloads,
             ListenArrDbContext dbContext,
@@ -183,6 +186,7 @@ namespace Listenarr.Api.Services
         {
             // TODO: Implement NZBGet API polling
             _logger.LogDebug("Polling NZBGet client {ClientName}", client.Name);
+            return Task.CompletedTask;
         }
 
         private async Task BroadcastDownloadUpdatesAsync(
