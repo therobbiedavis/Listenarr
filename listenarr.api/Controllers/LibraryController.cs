@@ -20,6 +20,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Controllers
 {
@@ -31,17 +32,20 @@ namespace Listenarr.Api.Controllers
         private readonly IImageCacheService _imageCacheService;
         private readonly ILogger<LibraryController> _logger;
         private readonly ListenArrDbContext _dbContext;
+        private readonly IServiceProvider _serviceProvider;
         
         public LibraryController(
             IAudiobookRepository repo, 
             IImageCacheService imageCacheService, 
             ILogger<LibraryController> logger,
-            ListenArrDbContext dbContext)
+            ListenArrDbContext dbContext,
+            IServiceProvider serviceProvider)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
             _logger = logger;
             _dbContext = dbContext;
+            _serviceProvider = serviceProvider;
         }
 
         [HttpPost("add")]
@@ -115,6 +119,23 @@ namespace Listenarr.Api.Controllers
                 Monitored = true  // Enable monitoring by default for new audiobooks
             };
             
+            // Assign default quality profile to new audiobooks
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+                var defaultProfile = await qualityProfileService.GetDefaultAsync();
+                if (defaultProfile != null)
+                {
+                    audiobook.QualityProfileId = defaultProfile.Id;
+                    _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to new audiobook '{Title}'", 
+                        defaultProfile.Name, defaultProfile.Id, audiobook.Title);
+                }
+                else
+                {
+                    _logger.LogWarning("No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.", audiobook.Title);
+                }
+            }
+            
             await _repo.AddAsync(audiobook);
             
             // Log history entry for the added audiobook
@@ -160,13 +181,18 @@ namespace Listenarr.Api.Controllers
         }
 
         [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(int id)
+        public async Task<ActionResult<Audiobook>> GetAudiobook(int id)
         {
             var audiobook = await _repo.GetByIdAsync(id);
             if (audiobook == null)
             {
                 return NotFound(new { message = "Audiobook not found" });
             }
+            // Include QualityProfile in the query if not already done in repository
+            // Assuming _context is injected; adjust if using repository method
+            audiobook = await _dbContext.Audiobooks
+                .Include(a => a.QualityProfile)
+                .FirstOrDefaultAsync(a => a.Id == id);
             return Ok(audiobook);
         }
 
@@ -203,6 +229,7 @@ namespace Listenarr.Api.Controllers
             existingAudiobook.FilePath = updatedAudiobook.FilePath;
             existingAudiobook.FileSize = updatedAudiobook.FileSize;
             existingAudiobook.Quality = updatedAudiobook.Quality;
+            existingAudiobook.QualityProfileId = updatedAudiobook.QualityProfileId;
 
             await _repo.UpdateAsync(existingAudiobook);
 
@@ -310,10 +337,112 @@ namespace Listenarr.Api.Controllers
                 ids = request.Ids 
             });
         }
+
+        [HttpPost("bulk-update")]
+        public async Task<IActionResult> BulkUpdate([FromBody] BulkUpdateRequest request)
+        {
+            if (request.Ids == null || !request.Ids.Any())
+            {
+                return BadRequest(new { message = "No IDs provided for update" });
+            }
+
+            if (request.Updates == null || !request.Updates.Any())
+            {
+                return BadRequest(new { message = "No updates provided" });
+            }
+
+            var updatedCount = 0;
+
+            foreach (var id in request.Ids)
+            {
+                var audiobook = await _repo.GetByIdAsync(id);
+                if (audiobook != null)
+                {
+                    // Apply updates from the dictionary
+                    foreach (var update in request.Updates)
+                    {
+                        var property = typeof(Audiobook).GetProperty(
+                            update.Key, 
+                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase
+                        );
+
+                        if (property != null && property.CanWrite)
+                        {
+                            try
+                            {
+                                // Handle type conversion
+                                object? value = null;
+                                
+                                if (property.PropertyType == typeof(bool) || property.PropertyType == typeof(bool?))
+                                {
+                                    if (update.Value is System.Text.Json.JsonElement jsonElement)
+                                    {
+                                        value = jsonElement.GetBoolean();
+                                    }
+                                    else
+                                    {
+                                        value = Convert.ToBoolean(update.Value);
+                                    }
+                                }
+                                else if (property.PropertyType == typeof(int) || property.PropertyType == typeof(int?))
+                                {
+                                    if (update.Value is System.Text.Json.JsonElement jsonElement)
+                                    {
+                                        value = jsonElement.GetInt32();
+                                    }
+                                    else
+                                    {
+                                        value = Convert.ToInt32(update.Value);
+                                    }
+                                }
+                                else if (property.PropertyType == typeof(string))
+                                {
+                                    if (update.Value is System.Text.Json.JsonElement jsonElement)
+                                    {
+                                        value = jsonElement.GetString();
+                                    }
+                                    else
+                                    {
+                                        value = update.Value?.ToString();
+                                    }
+                                }
+                                else
+                                {
+                                    value = update.Value;
+                                }
+
+                                property.SetValue(audiobook, value);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to set property {Property} on audiobook {Id}", update.Key, id);
+                            }
+                        }
+                    }
+
+                    await _repo.UpdateAsync(audiobook);
+                    updatedCount++;
+                }
+            }
+
+            _logger.LogInformation("Bulk update: {UpdatedCount} audiobooks updated", updatedCount);
+            
+            return Ok(new 
+            { 
+                message = $"Successfully updated {updatedCount} audiobook(s)", 
+                updatedCount
+            });
+        }
     }
 
     public class BulkDeleteRequest
     {
         public List<int> Ids { get; set; } = new List<int>();
+    }
+
+    public class BulkUpdateRequest
+    {
+        public List<int> Ids { get; set; } = new List<int>();
+        public Dictionary<string, object> Updates { get; set; } = new Dictionary<string, object>();
     }
 }

@@ -186,6 +186,7 @@ export interface Audiobook {
   filePath?: string
   fileSize?: number
   quality?: string
+  qualityProfileId?: number
 }
 
 export interface History {
@@ -305,3 +306,39 @@ export interface LogEntry {
   exception?: string
   source?: string
 }
+
+export interface QualityProfile {
+  id?: number
+  name: string
+  description?: string
+  qualities: QualityDefinition[]
+  cutoffQuality?: string
+  minimumSize?: number // MB (optional - no minimum if not set)
+  maximumSize?: number // MB (optional - no maximum if not set)
+  preferredFormats?: string[] // e.g., ["m4b", "mp3", "m4a", "flac", "opus"]
+  preferredWords?: string[] // Words that increase score
+  mustNotContain?: string[] // Instant rejection
+  mustContain?: string[] // Must be present
+  preferredLanguages?: string[] // e.g., ["English", "Spanish"]
+  minimumSeeders?: number
+  isDefault?: boolean
+  preferNewerReleases?: boolean
+  maximumAge?: number // days (0 = no limit)
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface QualityDefinition {
+  quality: string // e.g., "320kbps", "192kbps", "lossless"
+  allowed: boolean
+  priority: number // Lower = higher priority
+}
+
+export interface QualityScore {
+  searchResult: SearchResult
+  totalScore: number
+  scoreBreakdown: Record<string, number>
+  rejectionReasons: string[]
+  isRejected: boolean
+}
+

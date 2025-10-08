@@ -73,15 +73,16 @@ builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
 builder.Services.AddScoped<IFileNamingService, FileNamingService>();
 builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
 builder.Services.AddScoped<ISystemService, SystemService>();
+builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 
 // Register background service for daily cache cleanup
-builder.Services.AddHostedService<ImageCacheCleanupService>();
+// builder.Services.AddHostedService<ImageCacheCleanupService>();
 
 // Register background service for download monitoring and real-time updates
-builder.Services.AddHostedService<DownloadMonitorService>();
+// builder.Services.AddHostedService<DownloadMonitorService>();
 
 // Register background service for queue monitoring (external clients) and real-time updates
-builder.Services.AddHostedService<QueueMonitorService>();
+// builder.Services.AddHostedService<QueueMonitorService>();
 
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
@@ -133,12 +134,24 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     
-    // Apply any pending migrations
-    context.Database.Migrate();
-    
-    // Apply SQLite PRAGMA settings after database is created
-    SqlitePragmaInitializer.ApplyPragmas(context);
+    try
+    {
+        logger.LogInformation("Applying database migrations...");
+        // Apply any pending migrations
+        context.Database.Migrate();
+        logger.LogInformation("Database migrations applied successfully");
+        
+        // Apply SQLite PRAGMA settings after database is created
+        SqlitePragmaInitializer.ApplyPragmas(context);
+        logger.LogInformation("SQLite pragmas applied successfully");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error during database initialization");
+        throw; // Re-throw to prevent app from starting
+    }
 }
 
 // Configure the HTTP request pipeline.
@@ -166,6 +179,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Map SignalR hub for real-time download updates
-app.MapHub<DownloadHub>("/hubs/downloads");
+// app.MapHub<DownloadHub>("/hubs/downloads");
 
 app.Run();

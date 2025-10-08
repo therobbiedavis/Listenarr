@@ -53,5 +53,6 @@ namespace Listenarr.Api.Models
         
         // Quality Profile for automatic downloads
         public int? QualityProfileId { get; set; }
+        public QualityProfile? QualityProfile { get; set; }
     }
 }

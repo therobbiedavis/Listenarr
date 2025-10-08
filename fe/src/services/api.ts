@@ -9,12 +9,14 @@ import type {
   Indexer,
   QueueItem,
   RemotePathMapping,
+  QualityScore,
   TranslatePathRequest,
   TranslatePathResponse,
   SystemInfo,
   StorageInfo,
   ServiceHealth,
-  LogEntry
+  LogEntry,
+  QualityProfile
 } from '@/types'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -42,21 +44,34 @@ class ApiService {
     }
 
     try {
-      const response = await fetch(url, config)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+      // Debug: log outbound request details in development
+      if (import.meta.env.DEV) {
+        try { console.debug('[ApiService] request', { url, config }) } catch {}
       }
-      
+
+      const response = await fetch(url, config)
+
+      if (!response.ok) {
+        const respText = await response.text().catch(() => '')
+        const err = new Error(`HTTP error! status: ${response.status} - ${respText}`)
+  const typedErr = err as Error & { status?: number; body?: string }
+  typedErr.status = response.status
+  typedErr.body = respText
+        throw err
+      }
+
       // Handle empty responses (204 No Content or empty body)
       const text = await response.text()
       if (!text || text.trim().length === 0) {
         return null as T
       }
-      
+
       return JSON.parse(text) as T
     } catch (error) {
-      console.error('API request failed:', error)
+      // Enhanced logging for browser console to capture connection failures
+      try {
+        console.error('[ApiService] request failed', { url, options: config, error })
+      } catch {}
       throw error
     }
   }
@@ -249,6 +264,13 @@ class ApiService {
     return this.request<{ message: string; deletedCount: number; deletedImagesCount: number; ids: number[] }>('/library/delete-bulk', {
       method: 'POST',
       body: JSON.stringify({ ids })
+    })
+  }
+
+  async bulkUpdateAudiobooks(ids: number[], updates: Record<string, boolean | number | string>): Promise<{ message: string; updatedCount: number }> {
+    return this.request<{ message: string; updatedCount: number }>('/library/bulk-update', {
+      method: 'POST',
+      body: JSON.stringify({ ids, updates })
     })
   }
 
@@ -448,6 +470,46 @@ class ApiService {
     const url = `${API_BASE_URL}/system/logs/download`
     window.open(url, '_blank')
   }
+
+  // Quality Profile endpoints
+  async getQualityProfiles(): Promise<QualityProfile[]> {
+    return this.request<QualityProfile[]>('/qualityprofile')
+  }
+
+  async getQualityProfileById(id: number): Promise<QualityProfile> {
+    return this.request<QualityProfile>(`/qualityprofile/${id}`)
+  }
+
+  async getDefaultQualityProfile(): Promise<QualityProfile> {
+    return this.request<QualityProfile>('/qualityprofile/default')
+  }
+
+  async createQualityProfile(profile: Omit<QualityProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<QualityProfile> {
+    return this.request<QualityProfile>('/qualityprofile', {
+      method: 'POST',
+      body: JSON.stringify(profile)
+    })
+  }
+
+  async updateQualityProfile(id: number, profile: Partial<QualityProfile>): Promise<QualityProfile> {
+    return this.request<QualityProfile>(`/qualityprofile/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...profile, id })
+    })
+  }
+
+  async deleteQualityProfile(id: number): Promise<{ message: string; id: number }> {
+    return this.request<{ message: string; id: number }>(`/qualityprofile/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async scoreSearchResults(profileId: number, searchResults: SearchResult[]): Promise<QualityScore[]> {
+    return this.request<QualityScore[]>(`/qualityprofile/${profileId}/score`, {
+      method: 'POST',
+      body: JSON.stringify(searchResults)
+    })
+  }
 }
 
 export const apiService = new ApiService()
@@ -476,3 +538,14 @@ export const getStorageInfo = () => apiService.getStorageInfo()
 export const getServiceHealth = () => apiService.getServiceHealth()
 export const getLogs = (limit?: number) => apiService.getLogs(limit)
 export const downloadLogs = () => apiService.downloadLogs()
+
+// Export individual quality profile functions for convenience
+export const getQualityProfiles = () => apiService.getQualityProfiles()
+export const getQualityProfileById = (id: number) => apiService.getQualityProfileById(id)
+export const getDefaultQualityProfile = () => apiService.getDefaultQualityProfile()
+export const createQualityProfile = (profile: Omit<QualityProfile, 'id' | 'createdAt' | 'updatedAt'>) => apiService.createQualityProfile(profile)
+export const updateQualityProfile = (id: number, profile: Partial<QualityProfile>) => apiService.updateQualityProfile(id, profile)
+export const deleteQualityProfile = (id: number) => apiService.deleteQualityProfile(id)
+export const scoreSearchResults = (profileId: number, searchResults: SearchResult[]) => apiService.scoreSearchResults(profileId, searchResults)
+
+

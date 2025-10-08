@@ -12,6 +12,14 @@
         </button>
         <button 
           v-if="selectedCount > 0" 
+          class="toolbar-btn edit-btn"
+          @click="showBulkEdit"
+        >
+          <i class="ph ph-pencil"></i>
+          Edit Selected
+        </button>
+        <button 
+          v-if="selectedCount > 0" 
           class="toolbar-btn delete-btn"
           @click="confirmBulkDelete"
         >
@@ -86,7 +94,12 @@
         v-for="audiobook in audiobooks" 
         :key="audiobook.id" 
         class="audiobook-item"
-        :class="{ selected: libraryStore.isSelected(audiobook.id) }"
+        :class="{ 
+          selected: libraryStore.isSelected(audiobook.id),
+          'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+          'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+          'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
+        }"
         @click="navigateToDetail(audiobook.id)"
       >
         <div class="selection-checkbox">
@@ -106,6 +119,14 @@
           <div class="status-overlay">
             <div class="audiobook-title">{{ audiobook.title }}</div>
             <div class="audiobook-author">{{ audiobook.authors?.join(', ') || 'Unknown Author' }}</div>
+            <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+              <i class="ph ph-star"></i>
+              {{ getQualityProfileName(audiobook.qualityProfileId) }}
+            </div>
+            <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+              <i :class="audiobook.monitored ? 'ph ph-eye' : 'ph ph-eye-slash'"></i>
+              {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+            </div>
           </div>
           <div class="action-buttons">
             <button 
@@ -150,6 +171,15 @@
         </div>
       </div>
     </div>
+
+    <!-- Bulk Edit Modal -->
+    <BulkEditModal
+      :is-open="showBulkEditModal"
+      :selected-count="selectedCount"
+      :selected-ids="libraryStore.selectedIds"
+      @close="closeBulkEdit"
+      @saved="handleBulkEditSaved"
+    />
   </div>
 </template>
 
@@ -159,7 +189,8 @@ import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
-import type { Audiobook } from '@/types'
+import BulkEditModal from '@/components/BulkEditModal.vue'
+import type { Audiobook, QualityProfile } from '@/types'
 
 const router = useRouter()
 const libraryStore = useLibraryStore()
@@ -178,13 +209,68 @@ const showDeleteDialog = ref(false)
 const deleteTarget = ref<Audiobook | null>(null)
 const bulkDeleteCount = ref(0)
 const deleting = ref(false)
+const qualityProfiles = ref<QualityProfile[]>([])
+const showBulkEditModal = ref(false)
+
+// Get the download status for an audiobook
+// Returns:
+// - 'no-file': No file downloaded yet (red border)
+// - 'quality-mismatch': Has file but doesn't meet quality cutoff (blue border)
+// - 'quality-match': Has file and meets quality cutoff (green border)
+// TODO: Add 'downloading' status when download-audiobook linking is implemented
+function getAudiobookStatus(audiobook: Audiobook): 'no-file' | 'quality-mismatch' | 'quality-match' {
+  // Check if audiobook has a file
+  const hasFile = audiobook.filePath && audiobook.fileSize && audiobook.fileSize > 0
+  if (!hasFile) {
+    return 'no-file'
+  }
+  
+  // Check quality against profile cutoff
+  const profile = qualityProfiles.value.find(p => p.id === audiobook.qualityProfileId)
+  if (!profile || !profile.cutoffQuality) {
+    // No quality profile or no cutoff defined - assume it matches
+    return 'quality-match'
+  }
+  
+  // Simple quality comparison (this could be enhanced with a more sophisticated comparison)
+  const currentQuality = audiobook.quality?.toLowerCase() || ''
+  const cutoffQuality = profile.cutoffQuality.toLowerCase()
+  
+  // For now, assume higher quality numbers are better
+  // This is a simplified comparison - you might want to implement a more robust quality comparison
+  if (currentQuality.includes('320') && cutoffQuality.includes('192')) {
+    return 'quality-match'
+  } else if (currentQuality.includes('192') && cutoffQuality.includes('320')) {
+    return 'quality-mismatch'
+  } else if (currentQuality === cutoffQuality) {
+    return 'quality-match'
+  }
+  
+  // Default to match if we can't determine
+  return 'quality-match'
+}
 
 onMounted(async () => {
   await Promise.all([
     libraryStore.fetchLibrary(),
-    configStore.loadApplicationSettings()
+    configStore.loadApplicationSettings(),
+    loadQualityProfiles()
   ])
 })
+
+async function loadQualityProfiles() {
+  try {
+    qualityProfiles.value = await apiService.getQualityProfiles()
+  } catch (error) {
+    console.warn('Failed to load quality profiles:', error)
+  }
+}
+
+function getQualityProfileName(profileId?: number): string | null {
+  if (!profileId) return null
+  const profile = qualityProfiles.value.find(p => p.id === profileId)
+  return profile?.name || null
+}
 
 function navigateToDetail(id: number) {
   router.push(`/audiobooks/${id}`)
@@ -231,6 +317,21 @@ async function executeDelete() {
   } finally {
     deleting.value = false
   }
+}
+
+function showBulkEdit() {
+  showBulkEditModal.value = true
+}
+
+function closeBulkEdit() {
+  showBulkEditModal.value = false
+}
+
+async function handleBulkEditSaved() {
+  // Refresh library to show updated data
+  await libraryStore.fetchLibrary()
+  // Clear selection after successful bulk edit
+  libraryStore.clearSelection()
 }
 </script>
 
@@ -281,6 +382,15 @@ async function executeDelete() {
   border-color: #007acc;
 }
 
+.toolbar-btn.edit-btn {
+  background-color: #3498db;
+  border-color: #2980b9;
+}
+
+.toolbar-btn.edit-btn:hover {
+  background-color: #2980b9;
+}
+
 .toolbar-btn.delete-btn {
   background-color: #e74c3c;
   border-color: #c0392b;
@@ -318,6 +428,18 @@ async function executeDelete() {
 .audiobook-item.selected .audiobook-poster-container {
   outline: 3px solid #007acc;
   outline-offset: 2px;
+}
+
+.audiobook-item.status-no-file .audiobook-poster-container {
+  border-bottom: 3px solid #e74c3c;
+}
+
+.audiobook-item.status-quality-mismatch .audiobook-poster-container {
+  border-bottom: 3px solid #3498db;
+}
+
+.audiobook-item.status-quality-match .audiobook-poster-container {
+  border-bottom: 3px solid #2ecc71;
 }
 
 .selection-checkbox {
@@ -374,6 +496,58 @@ async function executeDelete() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.quality-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(52, 152, 219, 0.2);
+  border: 1px solid rgba(52, 152, 219, 0.4);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #3498db;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.quality-profile-badge i {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.monitored-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(46, 204, 113, 0.2);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #2ecc71;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.monitored-badge.unmonitored {
+  background-color: rgba(231, 76, 60, 0.2);
+  border-color: rgba(231, 76, 60, 0.4);
+  color: #e74c3c;
+}
+
+.monitored-badge i {
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .action-buttons {

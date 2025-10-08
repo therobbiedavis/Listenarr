@@ -65,8 +65,49 @@ namespace Listenarr.Api.Services
 
         public async Task<QualityProfile?> GetDefaultAsync()
         {
-            return await _dbContext.QualityProfiles
+            var profile = await _dbContext.QualityProfiles
                 .FirstOrDefaultAsync(p => p.IsDefault);
+
+            if (profile == null)
+            {
+                _logger.LogInformation("No default quality profile found, creating one");
+                profile = await CreateDefaultProfileAsync();
+            }
+
+            return profile;
+        }
+
+        private async Task<QualityProfile> CreateDefaultProfileAsync()
+        {
+            var defaultProfile = new QualityProfile
+            {
+                Name = "Default",
+                Description = "Default quality profile for audiobooks",
+                Qualities = new List<QualityDefinition>
+                {
+                    new QualityDefinition { Quality = "FLAC", Allowed = true, Priority = 0 },
+                    new QualityDefinition { Quality = "M4B", Allowed = true, Priority = 1 },
+                    new QualityDefinition { Quality = "MP3 320kbps", Allowed = true, Priority = 2 },
+                    new QualityDefinition { Quality = "MP3 256kbps", Allowed = true, Priority = 3 },
+                    new QualityDefinition { Quality = "MP3 192kbps", Allowed = true, Priority = 4 },
+                    new QualityDefinition { Quality = "MP3 128kbps", Allowed = true, Priority = 5 },
+                    new QualityDefinition { Quality = "MP3 64kbps", Allowed = false, Priority = 6 }
+                },
+                CutoffQuality = "MP3 128kbps",
+                MinimumSize = 50, // 50 MB minimum
+                MaximumSize = 2000, // 2 GB maximum
+                PreferredFormats = new List<string> { "m4b", "mp3", "m4a", "flac", "opus" },
+                PreferredWords = new List<string> { "unabridged", "complete" },
+                MustNotContain = new List<string> { "abridged", "sample", "excerpt" },
+                MustContain = new List<string>(),
+                PreferredLanguages = new List<string> { "English" },
+                MinimumSeeders = 1,
+                IsDefault = true,
+                PreferNewerReleases = true,
+                MaximumAge = 365 * 2 // 2 years
+            };
+
+            return await CreateAsync(defaultProfile);
         }
 
         public async Task<QualityProfile> CreateAsync(QualityProfile profile)
@@ -228,21 +269,28 @@ namespace Listenarr.Api.Services
                 }
             }
 
-            // Score quality level
-            var qualityMatch = profile.Qualities.FirstOrDefault(q => 
-                q.Allowed && 
+            // Score quality level - more flexible matching
+            var qualityMatch = profile.Qualities.FirstOrDefault(q =>
+                q.Allowed &&
                 !string.IsNullOrEmpty(searchResult.Quality) &&
-                searchResult.Quality.Contains(q.Quality, StringComparison.OrdinalIgnoreCase));
+                !string.IsNullOrEmpty(q.Quality) &&
+                (searchResult.Quality.Contains(q.Quality, StringComparison.OrdinalIgnoreCase) ||
+                 q.Quality.Contains(searchResult.Quality, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(searchResult.Quality, q.Quality, StringComparison.OrdinalIgnoreCase)));
 
             if (qualityMatch != null)
             {
                 var qualityScore = 100 - (qualityMatch.Priority * 10);
                 score.TotalScore += qualityScore;
                 score.ScoreBreakdown["Quality"] = qualityScore;
+                _logger.LogDebug("Quality match found: SearchResult.Quality='{SearchQuality}' matched Profile.Quality='{ProfileQuality}' with score {Score}",
+                    searchResult.Quality, qualityMatch.Quality, qualityScore);
             }
             else
             {
                 score.ScoreBreakdown["Quality"] = 0;
+                _logger.LogDebug("No quality match found: SearchResult.Quality='{SearchQuality}' did not match any profile qualities: {ProfileQualities}",
+                    searchResult.Quality, string.Join(", ", profile.Qualities.Where(q => q.Allowed).Select(q => q.Quality)));
             }
 
             // Score format preference

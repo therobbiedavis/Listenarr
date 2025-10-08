@@ -22,7 +22,10 @@
           <!-- Book Details -->
           <div class="book-details">
             <div class="detail-section">
-              <h3>{{ book.title }}</h3>
+              <h3>
+                {{ book.title }}
+                <span v-if="assignedProfileName" class="profile-badge">{{ assignedProfileName }}</span>
+              </h3>
               <p v-if="book.authors?.length" class="authors">
                 by {{ book.authors.join(', ') }}
               </p>
@@ -101,6 +104,25 @@
                 <span v-if="book.abridged" class="flag abridged">Abridged</span>
               </div>
             </div>
+
+            <div class="detail-section">
+              <h4><i class="ph ph-star"></i> Quality Profile</h4>
+              <div class="quality-profile-selector">
+                <select v-model="selectedQualityProfileId" class="profile-select">
+                  <option :value="null">Use Default Profile</option>
+                  <option 
+                    v-for="profile in qualityProfiles" 
+                    :key="profile.id" 
+                    :value="profile.id"
+                  >
+                    {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
+                  </option>
+                </select>
+                <small class="profile-help">
+                  Select the quality profile to use for this audiobook. The quality profile determines which releases to download and prefer.
+                </small>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -120,8 +142,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { AudibleBookMetadata } from '@/types'
+import { ref, computed, onMounted, watch } from 'vue'
+import type { AudibleBookMetadata, QualityProfile } from '@/types'
+import { getQualityProfiles } from '@/services/api'
 
 interface Props {
   visible: boolean
@@ -130,11 +153,21 @@ interface Props {
 
 interface Emits {
   (e: 'close'): void
-  (e: 'add-to-library', book: AudibleBookMetadata): void
+  (e: 'add-to-library', book: AudibleBookMetadata, qualityProfileId?: number): void
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+
+const qualityProfiles = ref<QualityProfile[]>([])
+const selectedQualityProfileId = ref<number | null>(null)
+
+const assignedProfileName = computed(() => {
+  const id = props.book?.qualityProfileId
+  if (!id) return null
+  const p = qualityProfiles.value.find(q => q.id === id)
+  return p ? p.name : 'Unknown'
+})
 
 const hasFlags = computed(() => {
   return props.book.explicit || props.book.abridged
@@ -145,9 +178,30 @@ const closeModal = () => {
 }
 
 const addToLibrary = () => {
-  emit('add-to-library', props.book)
+  emit('add-to-library', props.book, selectedQualityProfileId.value || undefined)
   closeModal()
 }
+
+const loadQualityProfiles = async () => {
+  try {
+    qualityProfiles.value = await getQualityProfiles()
+    // Select the default profile
+    const defaultProfile = qualityProfiles.value.find(p => p.isDefault)
+    if (defaultProfile) {
+      selectedQualityProfileId.value = defaultProfile.id || null
+    }
+  } catch (error) {
+    console.error('Failed to load quality profiles:', error)
+  }
+}
+
+watch(() => props.visible, async (val) => {
+  if (val) {
+    await loadQualityProfiles()
+    // If the audiobook has an assigned profile, reflect it in the selector
+    selectedQualityProfileId.value = props.book?.qualityProfileId ?? null
+  }
+})
 
 const formatRuntime = (minutes: number): string => {
   if (!minutes) return 'Unknown'
@@ -445,5 +499,45 @@ const formatRuntime = (minutes: number): string => {
   .detail-section h3 {
     font-size: 1.5rem;
   }
+}
+
+/* Quality Profile Selector */
+.quality-profile-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.profile-select {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.profile-select:hover {
+  border-color: #007acc;
+}
+
+.profile-select:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+}
+
+.profile-help {
+  color: #999;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.detail-section h4 i {
+  color: #007acc;
+  margin-right: 0.5rem;
 }
 </style>

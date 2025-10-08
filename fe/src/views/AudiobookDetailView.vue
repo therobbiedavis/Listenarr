@@ -74,6 +74,10 @@
               <i class="ph ph-bookmark-fill"></i>
               Monitored
             </span>
+            <span class="badge quality-profile" v-if="assignedProfileName">
+              <i class="ph ph-star"></i>
+              Quality: {{ assignedProfileName }}
+            </span>
             <span class="badge language">
               <i class="ph ph-chat-circle"></i>
               {{ audiobook.language || 'English' }}
@@ -337,7 +341,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
@@ -359,6 +363,15 @@ const showFullDescription = ref(false)
 const history = ref<History[]>([])
 const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
+const qualityProfiles = ref<import('@/types').QualityProfile[]>([])
+
+const assignedProfileName = computed(() => {
+  if (!audiobook.value) return null
+  const id = audiobook.value.qualityProfileId
+  if (!id) return null
+  const p = qualityProfiles.value.find(q => q.id === id)
+  return p ? p.name : null
+})
 
 // Watch for tab changes to load history when needed
 watch(activeTab, async (newTab) => {
@@ -383,6 +396,7 @@ async function loadAudiobook() {
       const book = libraryStore.audiobooks.find(b => b.id === id)
       if (book) {
         audiobook.value = book
+        await afterLoad()
       } else {
         error.value = 'Audiobook not found'
       }
@@ -392,6 +406,7 @@ async function loadAudiobook() {
       const book = libraryStore.audiobooks.find(b => b.id === id)
       if (book) {
         audiobook.value = book
+        await afterLoad()
       } else {
         error.value = 'Audiobook not found'
       }
@@ -401,6 +416,19 @@ async function loadAudiobook() {
     console.error('Failed to load audiobook:', err)
   } finally {
     loading.value = false
+  }
+}
+
+// After loading audiobook, also fetch quality profiles so we can display the assigned profile
+async function afterLoad() {
+  await loadQualityProfilesForDetail()
+}
+
+async function loadQualityProfilesForDetail() {
+  try {
+    qualityProfiles.value = await apiService.getQualityProfiles()
+  } catch (err) {
+    console.warn('Failed to load quality profiles for detail view:', err)
   }
 }
 
@@ -795,6 +823,20 @@ function openFolder() {
   background-color: rgba(46, 204, 113, 0.2);
   color: #2ecc71;
   border: 1px solid #2ecc71;
+}
+
+.badge.quality-profile {
+  background-color: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.badge.profile {
+  background-color: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.25);
 }
 
 .badge.continuing {

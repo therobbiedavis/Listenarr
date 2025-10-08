@@ -14,7 +14,7 @@
     "install:all": "cd fe && npm install",
     "test": "cd fe && npm run test:unit"
   },
-  "devDependencies": {
+  "dependencies": {
     "concurrently": "^9.2.1"
   }
 }

@@ -51,6 +51,26 @@
             <p class="result-artist">{{ result.artist }}</p>
             <p class="result-album">{{ result.album }}</p>
             
+            <!-- Quality Score Badge -->
+            <div v-if="getResultScore(result.id)" class="quality-score">
+              <span 
+                v-if="getResultScore(result.id)?.isRejected"
+                class="score-badge rejected"
+                :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
+              >
+                <i class="ph ph-x-circle"></i>
+                Rejected
+              </span>
+              <span 
+                v-else
+                :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]"
+                :title="`Total Score: ${getResultScore(result.id)?.totalScore}`"
+              >
+                <i class="ph ph-star"></i>
+                Score: {{ getResultScore(result.id)?.totalScore }}
+              </span>
+            </div>
+            
             <!-- Audiobook metadata -->
             <div v-if="result.narrator || result.runtime || result.series" class="audiobook-meta">
               <p v-if="result.narrator" class="meta-narrator">
@@ -97,11 +117,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
-import type { SearchResult, AudibleBookMetadata } from '@/types'
+import type { SearchResult, AudibleBookMetadata, QualityScore, QualityProfile } from '@/types'
 import { useNotification } from '@/composables/useNotification'
 
 const searchStore = useSearchStore()
@@ -116,6 +136,17 @@ const searchQuery = ref('')
 const selectedCategory = ref('')
 const isAddingToLibrary = ref(false)
 const addedResults = ref(new Set<string>())
+const qualityScores = ref<Map<string, QualityScore>>(new Map())
+const defaultProfile = ref<QualityProfile | null>(null)
+
+// Load default quality profile on mount
+onMounted(async () => {
+  try {
+    defaultProfile.value = await apiService.getDefaultQualityProfile()
+  } catch (error) {
+    console.warn('No default quality profile found:', error)
+  }
+})
 
 const performSearch = async () => {
   console.log('=== performSearch START ===')
@@ -126,9 +157,10 @@ const performSearch = async () => {
     return
   }
   
-  // Clear added results for new search
-  console.log('Clearing added results')
+  // Clear added results and scores for new search
+  console.log('Clearing added results and scores')
   addedResults.value.clear()
+  qualityScores.value.clear()
   
   console.log('Calling searchStore.search()')
   await searchStore.search(
@@ -142,6 +174,24 @@ const performSearch = async () => {
   console.log('Waiting for nextTick()')
   await nextTick()
   console.log('nextTick() completed')
+  
+  // Score search results if we have a default profile
+  if (defaultProfile.value?.id && searchStore.searchResults.length > 0) {
+    try {
+      console.log('Scoring search results with profile:', defaultProfile.value.name)
+      const scores = await apiService.scoreSearchResults(
+        defaultProfile.value.id,
+        searchStore.searchResults
+      )
+      // Map scores by search result ID
+      scores.forEach(score => {
+        qualityScores.value.set(score.searchResult.id, score)
+      })
+      console.log('Quality scores loaded:', scores.length)
+    } catch (error) {
+      console.warn('Failed to score search results:', error)
+    }
+  }
   
   // Check which results are already in library
   console.log('Calling checkExistingInLibrary()')
@@ -254,6 +304,17 @@ const formatRuntime = (minutes: number): string => {
   } else {
     return `${mins}m`
   }
+}
+
+const getResultScore = (resultId: string): QualityScore | undefined => {
+  return qualityScores.value.get(resultId)
+}
+
+const getScoreClass = (score: number): string => {
+  if (score >= 80) return 'excellent'
+  if (score >= 60) return 'good'
+  if (score >= 40) return 'fair'
+  return 'poor'
 }
 </script>
 
@@ -424,6 +485,50 @@ const formatRuntime = (minutes: number): string => {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   color: #666;
+}
+
+.quality-score {
+  margin: 0.5rem 0;
+}
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.score-badge.rejected {
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.score-badge.excellent {
+  background-color: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.3);
+}
+
+.score-badge.good {
+  background-color: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+.score-badge.fair {
+  background-color: rgba(241, 196, 15, 0.15);
+  color: #f39c12;
+  border: 1px solid rgba(241, 196, 15, 0.3);
+}
+
+.score-badge.poor {
+  background-color: rgba(149, 165, 166, 0.15);
+  color: #7f8c8d;
+  border: 1px solid rgba(149, 165, 166, 0.3);
 }
 
 .result-stats {

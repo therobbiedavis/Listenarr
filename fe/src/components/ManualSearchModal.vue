@@ -52,6 +52,7 @@
                   <th class="col-peers">Peers</th>
                   <th class="col-language">Languages</th>
                   <th class="col-quality">Quality</th>
+                  <th class="col-score">Score</th>
                   <th class="col-actions"></th>
                 </tr>
               </thead>
@@ -101,6 +102,26 @@
                     </span>
                     <span v-else class="quality-badge unknown">-</span>
                   </td>
+                  <td class="col-score">
+                    <div v-if="getResultScore(result.id)" class="score-cell">
+                      <span 
+                        v-if="getResultScore(result.id)?.isRejected"
+                        class="score-badge rejected"
+                        :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
+                      >
+                        <i class="ph ph-x-circle"></i>
+                        Rejected
+                      </span>
+                      <span 
+                        v-else
+                        :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]"
+                        :title="`Total Score: ${getResultScore(result.id)?.totalScore}`"
+                      >
+                        {{ getResultScore(result.id)?.totalScore }}
+                      </span>
+                    </div>
+                    <span v-else class="score-badge loading">-</span>
+                  </td>
                   <td class="col-actions">
                     <button 
                       class="btn-icon btn-download"
@@ -125,7 +146,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
-import type { Audiobook, SearchResult } from '@/types'
+import type { Audiobook, SearchResult, QualityScore, QualityProfile } from '@/types'
 
 interface Props {
   isOpen: boolean
@@ -143,6 +164,8 @@ const results = ref<SearchResult[]>([])
 const downloading = ref<Record<string, boolean>>({})
 const searchedIndexers = ref(0)
 const totalIndexers = ref(0)
+const qualityScores = ref<Map<string, QualityScore>>(new Map())
+const qualityProfile = ref<QualityProfile | null>(null)
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen && props.audiobook) {
@@ -183,10 +206,40 @@ async function search() {
     // Mark all indexers as searched when complete
     searchedIndexers.value = totalIndexers.value
     
+    // Load quality profile and score results
+    await loadQualityProfileAndScore()
+    
   } catch (err) {
     console.error('Manual search failed:', err)
   } finally {
     searching.value = false
+  }
+}
+
+async function loadQualityProfileAndScore() {
+  try {
+    // Get the audiobook's quality profile or default
+    if (props.audiobook?.qualityProfileId) {
+      qualityProfile.value = await apiService.getQualityProfileById(props.audiobook.qualityProfileId)
+    } else {
+      qualityProfile.value = await apiService.getDefaultQualityProfile()
+    }
+    
+    // Score the search results
+    if (qualityProfile.value?.id && results.value.length > 0) {
+      const scores = await apiService.scoreSearchResults(
+        qualityProfile.value.id,
+        results.value
+      )
+      
+      // Map scores by search result ID
+      qualityScores.value.clear()
+      scores.forEach(score => {
+        qualityScores.value.set(score.searchResult.id, score)
+      })
+    }
+  } catch (error) {
+    console.warn('Failed to load quality profile or score results:', error)
   }
 }
 
@@ -315,6 +368,17 @@ function formatSize(bytes: number): string {
   }
   
   return `${size.toFixed(1)} ${units[unitIndex]}`
+}
+
+function getResultScore(resultId: string): QualityScore | undefined {
+  return qualityScores.value.get(resultId)
+}
+
+function getScoreClass(score: number): string {
+  if (score >= 80) return 'excellent'
+  if (score >= 60) return 'good'
+  if (score >= 40) return 'fair'
+  return 'poor'
 }
 </script>
 
@@ -634,6 +698,67 @@ function formatSize(bytes: number): string {
   display: inline-block;
   padding: 0.25rem 0.5rem;
   background-color: #3a3a3a;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #ccc;
+}
+
+.score-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.score-badge.loading {
+  background-color: transparent;
+  color: #666;
+  border: none;
+  padding: 0;
+}
+
+.score-badge.rejected {
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.score-badge.excellent {
+  background-color: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.3);
+}
+
+.score-badge.good {
+  background-color: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+.score-badge.fair {
+  background-color: rgba(241, 196, 15, 0.15);
+  color: #f39c12;
+  border: 1px solid rgba(241, 196, 15, 0.3);
+}
+
+.score-badge.poor {
+  background-color: rgba(149, 165, 166, 0.15);
+  color: #7f8c8d;
+  border: 1px solid rgba(149, 165, 166, 0.3);
+}
+
+.language-badge.unknown,
+.quality-badge.unknown {
   border-radius: 4px;
   font-size: 0.8rem;
   color: #ddd;
