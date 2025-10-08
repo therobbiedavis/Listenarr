@@ -102,12 +102,11 @@
         }"
         @click="navigateToDetail(audiobook.id)"
       >
-        <div class="selection-checkbox">
-          <input 
-            type="checkbox" 
+        <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, $event)" @mousedown.prevent>
+          <input
+            type="checkbox"
             :checked="libraryStore.isSelected(audiobook.id)"
-            @change="libraryStore.toggleSelection(audiobook.id)"
-            @click.stop
+            readonly
           />
         </div>
         <div class="audiobook-poster-container">
@@ -129,6 +128,13 @@
             </div>
           </div>
           <div class="action-buttons">
+            <button 
+              class="action-btn edit-btn-small" 
+              @click.stop="openEditModal(audiobook)"
+              title="Edit"
+            >
+              <i class="ph ph-pencil"></i>
+            </button>
             <button 
               class="action-btn delete-btn-small" 
               @click.stop="confirmDelete(audiobook)"
@@ -180,6 +186,14 @@
       @close="closeBulkEdit"
       @saved="handleBulkEditSaved"
     />
+
+    <!-- Edit Audiobook Modal -->
+    <EditAudiobookModal
+      :is-open="showEditModal"
+      :audiobook="editAudiobook"
+      @close="closeEditModal"
+      @saved="handleEditSaved"
+    />
   </div>
 </template>
 
@@ -190,6 +204,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import BulkEditModal from '@/components/BulkEditModal.vue'
+import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import type { Audiobook, QualityProfile } from '@/types'
 
 const router = useRouter()
@@ -211,6 +226,9 @@ const bulkDeleteCount = ref(0)
 const deleting = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
+const showEditModal = ref(false)
+const editAudiobook = ref<Audiobook | null>(null)
+const lastClickedIndex = ref<number | null>(null)
 
 // Get the download status for an audiobook
 // Returns:
@@ -333,6 +351,45 @@ async function handleBulkEditSaved() {
   // Clear selection after successful bulk edit
   libraryStore.clearSelection()
 }
+
+function openEditModal(audiobook: Audiobook) {
+  editAudiobook.value = audiobook
+  showEditModal.value = true
+}
+
+function closeEditModal() {
+  showEditModal.value = false
+  editAudiobook.value = null
+}
+
+async function handleEditSaved() {
+  // Refresh library to show updated data
+  await libraryStore.fetchLibrary()
+}
+
+function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
+  event.preventDefault() // Prevent browser text selection
+  
+  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  
+  if (event.shiftKey && lastClickedIndex.value !== null) {
+    // Shift+click: select range
+    const startIndex = Math.min(lastClickedIndex.value, currentIndex)
+    const endIndex = Math.max(lastClickedIndex.value, currentIndex)
+    
+    // Clear current selection and select the range
+    libraryStore.clearSelection()
+    for (let i = startIndex; i <= endIndex; i++) {
+      libraryStore.toggleSelection(audiobooks.value[i].id)
+    }
+  } else {
+    // Regular click: toggle selection
+    libraryStore.toggleSelection(audiobook.id)
+  }
+  
+  // Update last clicked index
+  lastClickedIndex.value = currentIndex
+}
 </script>
 
 <style scoped>
@@ -413,6 +470,10 @@ async function handleBulkEditSaved() {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 20px;
   padding: 0 20px 20px;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .audiobook-item {
@@ -447,13 +508,52 @@ async function handleBulkEditSaved() {
   top: 8px;
   left: 8px;
   z-index: 10;
+  height: 20px;
+  width: 20px;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: 2px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .selection-checkbox input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+  position: absolute;
+  opacity: 0;
   cursor: pointer;
-  accent-color: #007acc;
+  height: 0;
+  width: 0;
+}
+
+.selection-checkbox:hover {
+  background-color: rgba(0, 0, 0, 0.8);
+  border-color: #777;
+}
+
+.audiobook-item.selected .selection-checkbox {
+  background-color: #007acc;
+  border-color: #007acc;
+}
+
+.selection-checkbox::after {
+  content: "";
+  position: absolute;
+  display: none;
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.audiobook-item.selected .selection-checkbox::after {
+  display: block;
 }
 
 .audiobook-poster-container {
@@ -477,7 +577,12 @@ async function handleBulkEditSaved() {
   left: 0;
   right: 0;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
-  padding: 30px 8px 8px;
+  padding: 8px;
+  transition: padding 0.2s ease;
+}
+
+.audiobook-poster-container:hover .status-overlay {
+  padding: 80px 8px 8px;
 }
 
 .audiobook-title {
@@ -488,6 +593,8 @@ async function handleBulkEditSaved() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
 .audiobook-author {
@@ -496,6 +603,13 @@ async function handleBulkEditSaved() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.audiobook-poster-container:hover .audiobook-title,
+.audiobook-poster-container:hover .audiobook-author {
+  opacity: 1;
 }
 
 .quality-profile-badge {
@@ -586,6 +700,15 @@ async function handleBulkEditSaved() {
 
 .delete-btn-small:hover {
   background-color: rgba(192, 57, 43, 1);
+}
+
+.edit-btn-small {
+  background-color: rgba(52, 152, 219, 0.9);
+  border-color: rgba(41, 128, 185, 0.5);
+}
+
+.edit-btn-small:hover {
+  background-color: rgba(41, 128, 185, 1);
 }
 
 .loading-state, .empty-state, .error-state {
