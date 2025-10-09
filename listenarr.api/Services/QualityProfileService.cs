@@ -338,100 +338,53 @@ namespace Listenarr.Api.Services
                 score.ScoreBreakdown["Size"] = sizePenalty;
             }
 
-            // Score quality level - more flexible matching
-            var qualityMatch = profile.Qualities.FirstOrDefault(q =>
-                q.Allowed &&
-                !string.IsNullOrEmpty(searchResult.Quality) &&
-                !string.IsNullOrEmpty(q.Quality) &&
-                (searchResult.Quality.Contains(q.Quality, StringComparison.OrdinalIgnoreCase) ||
-                 q.Quality.Contains(searchResult.Quality, StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(searchResult.Quality, q.Quality, StringComparison.OrdinalIgnoreCase)));
+            // Score quality using the same logic as manual search
+            int qualityScore = GetQualityScore(searchResult.Quality);
+            score.TotalScore += qualityScore;
+            score.ScoreBreakdown["Quality"] = qualityScore;
+            _logger.LogDebug("Quality scored using GetQualityScore: SearchResult.Quality='{SearchQuality}' => {Score}", searchResult.Quality, qualityScore);
 
-            if (qualityMatch != null)
+            // Optionally, you can still reject if the quality is not allowed by the profile
+            if (!string.IsNullOrEmpty(searchResult.Quality))
             {
-                var qualityScore = 100 - (qualityMatch.Priority * 10);
-                score.TotalScore += qualityScore;
-                score.ScoreBreakdown["Quality"] = qualityScore;
-                _logger.LogDebug("Quality match found: SearchResult.Quality='{SearchQuality}' matched Profile.Quality='{ProfileQuality}' with score {Score}",
-                    searchResult.Quality, qualityMatch.Quality, qualityScore);
-            }
-            else
-            {
-                score.ScoreBreakdown["Quality"] = 0;
-                _logger.LogDebug("No quality match found: SearchResult.Quality='{SearchQuality}' did not match any profile qualities: {ProfileQualities}",
-                    searchResult.Quality, string.Join(", ", profile.Qualities.Where(q => q.Allowed).Select(q => q.Quality)));
-            }
-
-            // Score format preference
-            var extension = Path.GetExtension(searchResult.Title)?.TrimStart('.').ToLower();
-            if (!string.IsNullOrEmpty(extension))
-            {
-                var formatIndex = profile.PreferredFormats.FindIndex(f => 
-                    f.Equals(extension, StringComparison.OrdinalIgnoreCase));
-                
-                if (formatIndex >= 0)
+                var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => q.Quality.ToLower()).ToList();
+                if (!allowedQualities.Any(q => searchResult.Quality.ToLower().Contains(q)))
                 {
-                    var formatScore = 50 - (formatIndex * 10);
-                    score.TotalScore += formatScore;
-                    score.ScoreBreakdown["Format"] = formatScore;
+                    score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
                 }
             }
-
-            // Score preferred words
-            var preferredWordScore = 0;
-            foreach (var preferred in profile.PreferredWords)
-            {
-                if (!string.IsNullOrEmpty(preferred) && 
-                    searchResult.Title.Contains(preferred, StringComparison.OrdinalIgnoreCase))
-                {
-                    preferredWordScore += 10;
-                }
-            }
-            if (preferredWordScore > 0)
-            {
-                score.TotalScore += preferredWordScore;
-                score.ScoreBreakdown["PreferredWords"] = preferredWordScore;
-            }
-
-            // Score language
-            if (!string.IsNullOrEmpty(searchResult.Language))
-            {
-                var langIndex = profile.PreferredLanguages.FindIndex(l => 
-                    l.Equals(searchResult.Language, StringComparison.OrdinalIgnoreCase));
-                
-                if (langIndex >= 0)
-                {
-                    var langScore = 20 - (langIndex * 5);
-                    score.TotalScore += langScore;
-                    score.ScoreBreakdown["Language"] = langScore;
-                }
-            }
-
-            // Score seeders for torrents
-            if (searchResult.DownloadType == "torrent" && searchResult.Seeders > 0)
-            {
-                var seederScore = Math.Min(searchResult.Seeders, 20);
-                score.TotalScore += seederScore;
-                score.ScoreBreakdown["Seeders"] = seederScore;
-            }
-
-            // Score age (newer is better if preference is set)
-            if (profile.PreferNewerReleases && searchResult.PublishedDate != default(DateTime))
-            {
-                var age = (DateTime.UtcNow - searchResult.PublishedDate).TotalDays;
-                var ageScore = Math.Max(0, 30 - (int)(age / 7)); // Lose 1 point per week
-                if (ageScore > 0)
-                {
-                    score.TotalScore += ageScore;
-                    score.ScoreBreakdown["Age"] = ageScore;
-                }
-            }
-
             // Ensure non-rejected results never have negative scores
             score.TotalScore = Math.Max(0, score.TotalScore);
-
             return Task.FromResult(score);
         }
+
+    // Manual search scoring logic for quality
+    private int GetQualityScore(string? quality)
+    {
+        if (string.IsNullOrEmpty(quality))
+            return 0;
+
+        var lowerQuality = quality.ToLower();
+
+        if (lowerQuality.Contains("flac"))
+            return 100;
+        else if (lowerQuality.Contains("m4b"))
+            return 90;
+        else if (lowerQuality.Contains("320"))
+            return 80;
+        else if (lowerQuality.Contains("256"))
+            return 70;
+        else if (lowerQuality.Contains("192"))
+            return 60;
+        else if (lowerQuality.Contains("128"))
+            return 50;
+        else if (lowerQuality.Contains("64"))
+            return 40;
+        else
+            return 0;
+    }
+
+
 
         public async Task<List<QualityScore>> ScoreSearchResults(List<SearchResult> searchResults, QualityProfile profile)
         {

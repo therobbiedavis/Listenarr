@@ -241,19 +241,28 @@
       @close="closeDetailsModal"
       @add-to-library="handleAddToLibrary"
     />
+
+    <!-- Add to Library Modal -->
+    <AddLibraryModal
+      :visible="showAddLibraryModal"
+      :book="selectedBookForLibrary"
+      @close="closeAddLibraryModal"
+      @added="handleLibraryAdded"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import type { AudibleBookMetadata, SearchResult } from '@/types'
+import type { AudibleBookMetadata, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import type { OpenLibraryBook } from '@/services/openlibrary'
 import { isbnService, type ISBNBook } from '@/services/isbn'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
+import AddLibraryModal from '@/components/AddLibraryModal.vue'
 import { useNotification } from '@/composables/useNotification'
 
 // Extended type for title search results that includes search metadata
@@ -352,6 +361,8 @@ const errorMessage = ref('')
 // Modal state
 const showDetailsModal = ref(false)
 const selectedBook = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
+const showAddLibraryModal = ref(false)
+const selectedBookForLibrary = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
 
 // Computed properties
 const hasResults = computed(() => {
@@ -629,38 +640,9 @@ const addToLibrary = async (book: AudibleBookMetadata) => {
     return
   }
 
-  try {
-    // Call the backend API to add the audiobook to library
-    await apiService.addToLibrary(book)
-    
-    success(`"${book.title}" has been added to your library!`)
-    
-    // Mark as added in the UI
-    if (book.asin) {
-      console.log('Marking ASIN as added:', book.asin)
-      addedAsins.value.add(book.asin)
-    }
-    
-    // Reset search if needed
-    if (searchType.value === 'asin') {
-      searchQuery.value = ''
-      audibleResult.value = null
-    }
-  } catch (error: unknown) {
-    console.error('Failed to add audiobook:', error)
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    
-    // Check if it's a conflict (already exists)
-    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
-      warning('This audiobook is already in your library.')
-      // Mark as added in the UI even for duplicates
-      if (book.asin) {
-        addedAsins.value.add(book.asin)
-      }
-    } else {
-      showError('Failed to add audiobook. Please try again.')
-    }
-  }
+  // Show the add to library modal instead of directly adding
+  selectedBookForLibrary.value = book
+  showAddLibraryModal.value = true
 }
 
 const viewDetails = (book: AudibleBookMetadata) => {
@@ -674,6 +656,24 @@ const closeDetailsModal = () => {
 
 const handleAddToLibrary = (book: AudibleBookMetadata) => {
   addToLibrary(book)
+}
+
+const closeAddLibraryModal = () => {
+  showAddLibraryModal.value = false
+}
+
+const handleLibraryAdded = (audiobook: Audiobook) => {
+  // Mark as added in the UI
+  if (audiobook.asin) {
+    console.log('Marking ASIN as added:', audiobook.asin)
+    addedAsins.value.add(audiobook.asin)
+  }
+  
+  // Reset search if needed
+  if (searchType.value === 'asin') {
+    searchQuery.value = ''
+    audibleResult.value = null
+  }
 }
 
 const retrySearch = () => {

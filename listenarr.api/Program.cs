@@ -76,7 +76,7 @@ builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 
 // Register background service for daily cache cleanup
-// builder.Services.AddHostedService<ImageCacheCleanupService>();
+builder.Services.AddHostedService<ImageCacheCleanupService>();
 
 // Register background service for temp file cleanup
 builder.Services.AddHostedService<TempFileCleanupService>();
@@ -85,7 +85,10 @@ builder.Services.AddHostedService<TempFileCleanupService>();
 builder.Services.AddHostedService<DownloadMonitorService>();
 
 // Register background service for queue monitoring (external clients) and real-time updates
-// builder.Services.AddHostedService<QueueMonitorService>();
+builder.Services.AddHostedService<QueueMonitorService>();
+
+// Register background service for automatic audiobook searching
+builder.Services.AddHostedService<AutomaticSearchService>();
 
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()

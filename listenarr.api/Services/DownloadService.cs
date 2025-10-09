@@ -31,6 +31,7 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IRemotePathMappingService _pathMappingService;
+        private readonly ISearchService _searchService;
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
@@ -39,7 +40,8 @@ namespace Listenarr.Api.Services
             ILogger<DownloadService> logger,
             HttpClient httpClient,
             IServiceScopeFactory serviceScopeFactory,
-            IRemotePathMappingService pathMappingService)
+            IRemotePathMappingService pathMappingService,
+            ISearchService searchService)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
@@ -48,6 +50,7 @@ namespace Listenarr.Api.Services
             _httpClient = httpClient;
             _serviceScopeFactory = serviceScopeFactory;
             _pathMappingService = pathMappingService;
+            _searchService = searchService;
         }
 
         // Placeholder implementations for existing interface methods
@@ -93,19 +96,13 @@ namespace Listenarr.Api.Services
                 };
             }
 
-            // Get all enabled indexers ordered by priority
-            var indexers = await _dbContext.Indexers
-                .Where(i => i.IsEnabled)
-                .OrderBy(i => i.Priority)
-                .ThenBy(i => i.Name)
-                .ToListAsync();
-
-            if (!indexers.Any())
+            if (audiobook.QualityProfile == null)
             {
+                _logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
                 return new SearchAndDownloadResult
                 {
                     Success = false,
-                    Message = "No enabled indexers configured"
+                    Message = "Audiobook has no quality profile assigned"
                 };
             }
 
@@ -113,64 +110,102 @@ namespace Listenarr.Api.Services
             var searchQuery = BuildSearchQuery(audiobook);
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
-            // Search each indexer sequentially until we find a match
-            foreach (var indexer in indexers)
+            // Search using the working search service
+            var searchResults = await _searchService.SearchAsync(searchQuery);
+
+            if (searchResults == null || !searchResults.Any())
             {
-                try
+                return new SearchAndDownloadResult
                 {
-                    _logger.LogInformation("Searching indexer: {IndexerName} (Priority: {Priority})", indexer.Name, indexer.Priority);
+                    Success = false,
+                    Message = "No search results found"
+                };
+            }
 
-                    var results = await SearchIndexerAsync(indexer, searchQuery);
-                    
-                    if (results.Any())
-                    {
-                        // Get the best result (highest seeders for torrents, newest for NZBs)
-                        var bestResult = GetBestResult(results, indexer.Type);
-                        
-                        _logger.LogInformation("Found match on indexer {IndexerName}: {Title}", indexer.Name, bestResult.Title);
+            // Score results against quality profile
+            using var scope = _serviceScopeFactory.CreateScope();
+            var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
 
-                        // Determine if this is a torrent or NZB and route to appropriate client
-                        var isTorrent = IsTorrentIndexer(indexer.Type);
-                        var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
-
-                        if (downloadClientId == null)
-                        {
-                            _logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
-                            continue;
-                        }
-
-                        // Send to download client with audiobookId for proper metadata linking
-                        var downloadId = await SendToDownloadClientAsync(bestResult, downloadClientId, audiobookId);
-
-                        // Log to history
-                        await LogDownloadHistory(audiobook, indexer.Name, bestResult);
-
-                        return new SearchAndDownloadResult
-                        {
-                            Success = true,
-                            Message = $"Successfully sent to download client",
-                            DownloadId = downloadId,
-                            IndexerUsed = indexer.Name,
-                            DownloadClientUsed = downloadClientId,
-                            SearchResult = bestResult
-                        };
-                    }
-                    else
-                    {
-                        _logger.LogInformation("No results found on indexer: {IndexerName}", indexer.Name);
-                    }
-                }
-                catch (Exception ex)
+            // Log all scored results for debugging
+            _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
+            foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
+            {
+                var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
+                _logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
+                    status, scoredResult.TotalScore, scoredResult.SearchResult.Title, scoredResult.SearchResult.Source,
+                    scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
+                if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
                 {
-                    _logger.LogError(ex, "Error searching indexer {IndexerName}", indexer.Name);
-                    // Continue to next indexer
+                    _logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
                 }
             }
 
+            // Only consider non-rejected, score > 0 results
+            var topResult = scoredResults
+                .Where(s => !s.IsRejected && s.TotalScore > 0)
+                .OrderByDescending(s => s.TotalScore)
+                .FirstOrDefault();
+
+            if (topResult == null)
+            {
+                _logger.LogWarning("No acceptable search results found for audiobook '{Title}' after quality filtering", audiobook.Title);
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = "No acceptable search results found"
+                };
+            }
+
+            // Assign score to SearchResult
+            topResult.SearchResult.Score = topResult.TotalScore;
+
+            // Handle DDL results directly
+            if (!string.IsNullOrEmpty(topResult.SearchResult.DownloadType) &&
+                topResult.SearchResult.DownloadType.Equals("DDL", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Top result is DDL, processing directly for: {Title}", topResult.SearchResult.Title);
+                var downloadId = await DownloadDirectlyAsync(topResult.SearchResult, audiobookId);
+                await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
+                return new SearchAndDownloadResult
+                {
+                    Success = true,
+                    Message = $"Successfully processed DDL download",
+                    DownloadId = downloadId,
+                    IndexerUsed = "Search",
+                    DownloadClientUsed = "DDL",
+                    SearchResult = topResult.SearchResult
+                };
+            }
+
+            // Use topResult.SearchResult for torrent/nzb download
+            var isTorrent = IsTorrentResult(topResult.SearchResult);
+            var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+
+            if (downloadClientId == null)
+            {
+                _logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = $"No suitable download client found for {(isTorrent ? "torrent" : "NZB")} results"
+                };
+            }
+
+            // Send to download client with audiobookId for proper metadata linking
+            var downloadId2 = await SendToDownloadClientAsync(topResult.SearchResult, downloadClientId, audiobookId);
+
+            // Log to history
+            await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
+
             return new SearchAndDownloadResult
             {
-                Success = false,
-                Message = $"No matches found across {indexers.Count} indexers"
+                Success = true,
+                Message = $"Successfully sent to download client",
+                DownloadId = downloadId2,
+                IndexerUsed = "Search",
+                DownloadClientUsed = downloadClientId,
+                SearchResult = topResult.SearchResult
             };
         }
 
@@ -241,18 +276,6 @@ namespace Listenarr.Api.Services
                 parts.Add(audiobook.Authors.First());
 
             return string.Join(" ", parts);
-        }
-
-        private async Task<List<SearchResult>> SearchIndexerAsync(Indexer indexer, string query)
-        {
-            // TODO: Implement actual indexer search using Jackett/Prowlarr API
-            // For now, return empty list (placeholder)
-            _logger.LogInformation("Searching indexer {Name} with query: {Query}", indexer.Name, query);
-            
-            // Placeholder: In real implementation, make HTTP request to indexer API
-            await Task.Delay(100); // Simulate network delay
-            
-            return new List<SearchResult>();
         }
 
         private SearchResult GetBestResult(List<SearchResult> results, string indexerType)
@@ -1144,7 +1167,8 @@ namespace Listenarr.Api.Services
                     {
                         { "Format", searchResult.Format ?? "Unknown" },
                         { "Source", searchResult.Source ?? "Unknown" },
-                        { "DownloadType", "DDL" }
+                        { "DownloadType", "DDL" },
+                        { "Score", searchResult.Score }
                     }
                 };
 

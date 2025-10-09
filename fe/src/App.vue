@@ -38,10 +38,11 @@
           </div>
           
           <div class="nav-section">
-            <RouterLink to="/calendar" class="nav-item">
+            <!-- Calendar temporarily hidden -->
+            <!-- <RouterLink to="/calendar" class="nav-item">
               <i class="ph ph-calendar"></i>
               <span>Calendar</span>
-            </RouterLink>
+            </RouterLink> -->
             <RouterLink to="/activity" class="nav-item">
               <i class="ph ph-activity"></i>
               <span>Activity</span>

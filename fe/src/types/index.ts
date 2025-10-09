@@ -26,6 +26,7 @@ export interface SearchResult {
   series?: string
   seriesNumber?: string
   isEnriched?: boolean
+  score?: number
 }
 
 export interface Download {

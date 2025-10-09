@@ -49,6 +49,7 @@ namespace Listenarr.Api.Models
         public string? SeriesNumber { get; set; }
         // Indicates this result had a successful full metadata enrichment pass (Audible product scrape)
         public bool IsEnriched { get; set; }
+        public int Score { get; set; }
     }
 
     public class SearchAndDownloadResult

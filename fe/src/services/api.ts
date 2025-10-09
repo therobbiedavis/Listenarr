@@ -18,7 +18,8 @@ import type {
   LogEntry,
   QualityProfile,
   SearchSortBy,
-  SearchSortDirection
+  SearchSortDirection,
+  AudibleBookMetadata
 } from '@/types'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -240,10 +241,16 @@ class ApiService {
     return this.request<Audiobook[]>('/library')
   }
 
-  async addToLibrary(audiobook: Partial<Audiobook>): Promise<{ message: string; audiobook: Audiobook }> {
+  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean }): Promise<{ message: string; audiobook: Audiobook }> {
+    const request = {
+      metadata,
+      monitored: options?.monitored ?? true,
+      qualityProfileId: options?.qualityProfileId,
+      autoSearch: options?.autoSearch ?? false
+    }
     return this.request<{ message: string; audiobook: Audiobook }>('/library/add', {
       method: 'POST',
-      body: JSON.stringify(audiobook)
+      body: JSON.stringify(request)
     })
   }
 

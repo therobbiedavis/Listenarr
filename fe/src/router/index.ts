@@ -28,11 +28,12 @@ const router = createRouter({
       name: 'library-import',
       component: () => import('../views/LibraryImportView.vue'),
     },
-    {
-      path: '/calendar',
-      name: 'calendar',
-      component: () => import('../views/CalendarView.vue'),
-    },
+    // Calendar route temporarily disabled
+    // {
+    //   path: '/calendar',
+    //   name: 'calendar',
+    //   component: () => import('../views/CalendarView.vue'),
+    // },
     {
       path: '/activity',
       name: 'activity',

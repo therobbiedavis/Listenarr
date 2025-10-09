@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings } from '@/types'
+import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, QualityProfile } from '@/types'
 import { apiService } from '@/services/api'
 
 export const useConfigurationStore = defineStore('configuration', () => {
   const apiConfigurations = ref<ApiConfiguration[]>([])
   const downloadClientConfigurations = ref<DownloadClientConfiguration[]>([])
   const applicationSettings = ref<ApplicationSettings | null>(null)
+  const qualityProfiles = ref<QualityProfile[]>([])
   const isLoading = ref(false)
   
   const loadApiConfigurations = async () => {
@@ -95,10 +96,47 @@ export const useConfigurationStore = defineStore('configuration', () => {
     }
   }
   
+  const loadQualityProfiles = async () => {
+    isLoading.value = true
+    try {
+      const profiles = await apiService.getQualityProfiles()
+      qualityProfiles.value = profiles
+    } catch (error) {
+      console.error('Failed to load quality profiles:', error)
+    } finally {
+      isLoading.value = false
+    }
+  }
+  
+  const saveQualityProfile = async (profile: QualityProfile) => {
+    try {
+      if (profile.id) {
+        await apiService.updateQualityProfile(profile.id, profile)
+      } else {
+        await apiService.createQualityProfile(profile)
+      }
+      await loadQualityProfiles() // Refresh the list
+    } catch (error) {
+      console.error('Failed to save quality profile:', error)
+      throw error
+    }
+  }
+  
+  const deleteQualityProfile = async (id: number) => {
+    try {
+      await apiService.deleteQualityProfile(id)
+      await loadQualityProfiles() // Refresh the list
+    } catch (error) {
+      console.error('Failed to delete quality profile:', error)
+      throw error
+    }
+  }
+  
   return {
     apiConfigurations,
     downloadClientConfigurations,
     applicationSettings,
+    qualityProfiles,
     isLoading,
     loadApiConfigurations,
     saveApiConfiguration,
@@ -107,6 +145,9 @@ export const useConfigurationStore = defineStore('configuration', () => {
     saveDownloadClientConfiguration,
     deleteDownloadClientConfiguration,
     loadApplicationSettings,
-    saveApplicationSettings
+    saveApplicationSettings,
+    loadQualityProfiles,
+    saveQualityProfile,
+    deleteQualityProfile
   }
 })

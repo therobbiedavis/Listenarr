@@ -21,6 +21,9 @@ using System.Threading.Tasks;
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+using System.Linq;
+using System;
 
 namespace Listenarr.Api.Controllers
 {
@@ -49,8 +52,10 @@ namespace Listenarr.Api.Controllers
         }
 
         [HttpPost("add")]
-        public async Task<IActionResult> AddToLibrary([FromBody] AudibleBookMetadata metadata)
+        public async Task<IActionResult> AddToLibrary([FromBody] AddToLibraryRequest request)
         {
+            var metadata = request.Metadata;
+            
             // Check if audiobook already exists in library
             if (!string.IsNullOrEmpty(metadata.Asin))
             {
@@ -116,23 +121,33 @@ namespace Listenarr.Api.Controllers
                 Version = metadata.Version,
                 Explicit = metadata.Explicit,
                 Abridged = metadata.Abridged,
-                Monitored = true  // Enable monitoring by default for new audiobooks
+                Monitored = request.Monitored  // Use custom monitored setting
             };
             
-            // Assign default quality profile to new audiobooks
-            using (var scope = _serviceProvider.CreateScope())
+            // Assign quality profile - use custom if provided, otherwise default
+            if (request.QualityProfileId.HasValue)
             {
-                var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
-                var defaultProfile = await qualityProfileService.GetDefaultAsync();
-                if (defaultProfile != null)
+                audiobook.QualityProfileId = request.QualityProfileId.Value;
+                _logger.LogInformation("Assigned custom quality profile ID {ProfileId} to new audiobook '{Title}'", 
+                    request.QualityProfileId.Value, audiobook.Title);
+            }
+            else
+            {
+                // Assign default quality profile to new audiobooks
+                using (var scope = _serviceProvider.CreateScope())
                 {
-                    audiobook.QualityProfileId = defaultProfile.Id;
-                    _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to new audiobook '{Title}'", 
-                        defaultProfile.Name, defaultProfile.Id, audiobook.Title);
-                }
-                else
-                {
-                    _logger.LogWarning("No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.", audiobook.Title);
+                    var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+                    var defaultProfile = await qualityProfileService.GetDefaultAsync();
+                    if (defaultProfile != null)
+                    {
+                        audiobook.QualityProfileId = defaultProfile.Id;
+                        _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to new audiobook '{Title}'", 
+                            defaultProfile.Name, defaultProfile.Id, audiobook.Title);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.", audiobook.Title);
+                    }
                 }
             }
             
@@ -152,7 +167,8 @@ namespace Listenarr.Api.Controllers
             _dbContext.History.Add(historyEntry);
             await _dbContext.SaveChangesAsync();
             
-            _logger.LogInformation("Added audiobook '{Title}' (ASIN: {Asin}) to library with history log", audiobook.Title, audiobook.Asin);
+            _logger.LogInformation("Added audiobook '{Title}' (ASIN: {Asin}) to library with Monitored={Monitored}, QualityProfileId={QualityProfileId}, AutoSearch={AutoSearch}", 
+                audiobook.Title, audiobook.Asin, request.Monitored, audiobook.QualityProfileId, request.AutoSearch);
             
             return Ok(new { message = "Audiobook added to library successfully", audiobook });
         }
@@ -338,100 +354,313 @@ namespace Listenarr.Api.Controllers
             });
         }
 
-        [HttpPost("bulk-update")]
-        public async Task<IActionResult> BulkUpdate([FromBody] BulkUpdateRequest request)
+        [HttpPost("{id}/search")]
+        public async Task<IActionResult> TriggerAutomaticSearch(int id)
         {
-            if (request.Ids == null || !request.Ids.Any())
+            var audiobook = await _repo.GetByIdAsync(id);
+            if (audiobook == null)
             {
-                return BadRequest(new { message = "No IDs provided for update" });
+                return NotFound(new { message = "Audiobook not found" });
             }
 
-            if (request.Updates == null || !request.Updates.Any())
+            if (!audiobook.Monitored)
             {
-                return BadRequest(new { message = "No updates provided" });
+                return BadRequest(new { message = "Audiobook is not monitored" });
             }
 
-            var updatedCount = 0;
-
-            foreach (var id in request.Ids)
+            if (audiobook.QualityProfile == null)
             {
-                var audiobook = await _repo.GetByIdAsync(id);
-                if (audiobook != null)
+                return BadRequest(new { message = "Audiobook has no quality profile assigned" });
+            }
+
+            try
+            {
+                // Get required services
+                using var scope = _serviceProvider.CreateScope();
+                var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
+                var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+                var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
+
+                // Process the audiobook using the same logic as AutomaticSearchService
+                var downloadsQueued = await ProcessAudiobookForSearchAsync(
+                    audiobook, searchService, qualityProfileService, downloadService, _dbContext);
+
+                // Update last search time
+                audiobook.LastSearchTime = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Manual search triggered for audiobook '{Title}' - queued {QueuedCount} downloads",
+                    audiobook.Title, downloadsQueued);
+
+                return Ok(new { 
+                    message = $"Search completed for audiobook '{audiobook.Title}'", 
+                    downloadsQueued,
+                    audiobookId = id
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during manual search for audiobook '{Title}' (ID: {Id})", audiobook.Title, id);
+                return StatusCode(500, new { message = "Error during search", error = ex.Message });
+            }
+        }
+
+        private async Task<int> ProcessAudiobookForSearchAsync(
+            Audiobook audiobook,
+            ISearchService searchService,
+            IQualityProfileService qualityProfileService,
+            IDownloadService downloadService,
+            ListenArrDbContext dbContext)
+        {
+            // Check if quality cutoff is already met
+            if (await IsQualityCutoffMetAsync(audiobook, qualityProfileService, dbContext))
+            {
+                _logger.LogInformation("Quality cutoff already met for audiobook '{Title}', skipping search", audiobook.Title);
+                return 0;
+            }
+
+            // Build search query
+            var searchQuery = BuildSearchQuery(audiobook);
+            _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
+
+            // Search for results
+            var searchResults = await searchService.SearchAsync(searchQuery);
+            _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
+            
+            if (!searchResults.Any())
+            {
+                _logger.LogInformation("No search results found for audiobook '{Title}'", audiobook.Title);
+                return 0;
+            }
+
+            // Score results against quality profile
+            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile!);
+            
+            // Log all scored results for debugging
+            _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
+            foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
+            {
+                var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
+                _logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
+                    status, scoredResult.TotalScore, scoredResult.SearchResult.Title, scoredResult.SearchResult.Source, 
+                    scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
+                
+                if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
                 {
-                    // Apply updates from the dictionary
-                    foreach (var update in request.Updates)
+                    _logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
+                }
+            }
+            
+            var topResult = scoredResults
+                .Where(s => !s.IsRejected && s.TotalScore > 0) // Only results that pass quality filters and are not rejected
+                .OrderByDescending(s => s.TotalScore)
+                .FirstOrDefault(); // Pick only the top scoring result
+
+            if (topResult == null)
+            {
+                _logger.LogInformation("No acceptable search results found for audiobook '{Title}' after quality filtering", audiobook.Title);
+                return 0;
+            }
+
+            _logger.LogInformation("Found top result for audiobook '{Title}': {ResultTitle} (Score: {Score})",
+                audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
+
+            // Add score to the search result for tracking
+            topResult.SearchResult.Score = topResult.TotalScore;
+
+            // Queue download for the top result
+            var downloadsQueued = 0;
+            try
+            {
+                // Determine appropriate download client for this result
+                var isTorrent = IsTorrentResult(topResult.SearchResult);
+                var downloadClientId = await GetAppropriateDownloadClientAsync(topResult.SearchResult, isTorrent);
+
+                if (string.IsNullOrEmpty(downloadClientId))
+                {
+                    _logger.LogWarning("No suitable download client found for result type: {Type}", isTorrent ? "torrent" : "NZB");
+                    return 0;
+                }
+
+                await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClientId, audiobook.Id);
+                downloadsQueued++;
+
+                _logger.LogInformation("Queued download for audiobook '{Title}': {ResultTitle} (Score: {Score})",
+                    audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to queue download for audiobook '{Title}': {ResultTitle}",
+                    audiobook.Title, topResult.SearchResult.Title);
+            }
+
+            return downloadsQueued;
+        }
+
+        private async Task<bool> IsQualityCutoffMetAsync(
+            Audiobook audiobook,
+            IQualityProfileService qualityProfileService,
+            ListenArrDbContext dbContext)
+        {
+            if (audiobook.QualityProfile == null)
+                return false;
+
+            // Get existing downloads for this audiobook
+            var existingDownloads = await dbContext.Downloads
+                .Where(d => d.AudiobookId == audiobook.Id &&
+                           (d.Status == DownloadStatus.Completed || d.Status == DownloadStatus.Downloading))
+                .ToListAsync();
+
+            if (!existingDownloads.Any())
+                return false;
+
+            // Check if any existing download meets or exceeds the cutoff quality
+            var cutoffQuality = audiobook.QualityProfile.Qualities
+                .FirstOrDefault(q => q.Quality == audiobook.QualityProfile.CutoffQuality);
+
+            if (cutoffQuality == null)
+                return false;
+
+            foreach (var download in existingDownloads)
+            {
+                // For completed downloads, check if the file quality meets cutoff
+                if (download.Status == DownloadStatus.Completed && !string.IsNullOrEmpty(download.Metadata?.GetValueOrDefault("Quality")?.ToString()))
+                {
+                    var downloadQuality = download.Metadata["Quality"].ToString();
+                    var downloadQualityDefinition = audiobook.QualityProfile.Qualities
+                        .FirstOrDefault(q => q.Quality == downloadQuality);
+
+                    if (downloadQualityDefinition != null && downloadQualityDefinition.Priority >= cutoffQuality.Priority)
                     {
-                        var property = typeof(Audiobook).GetProperty(
-                            update.Key, 
-                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase
-                        );
-
-                        if (property != null && property.CanWrite)
-                        {
-                            try
-                            {
-                                // Handle type conversion
-                                object? value = null;
-                                
-                                if (property.PropertyType == typeof(bool) || property.PropertyType == typeof(bool?))
-                                {
-                                    if (update.Value is System.Text.Json.JsonElement jsonElement)
-                                    {
-                                        value = jsonElement.GetBoolean();
-                                    }
-                                    else
-                                    {
-                                        value = Convert.ToBoolean(update.Value);
-                                    }
-                                }
-                                else if (property.PropertyType == typeof(int) || property.PropertyType == typeof(int?))
-                                {
-                                    if (update.Value is System.Text.Json.JsonElement jsonElement)
-                                    {
-                                        value = jsonElement.GetInt32();
-                                    }
-                                    else
-                                    {
-                                        value = Convert.ToInt32(update.Value);
-                                    }
-                                }
-                                else if (property.PropertyType == typeof(string))
-                                {
-                                    if (update.Value is System.Text.Json.JsonElement jsonElement)
-                                    {
-                                        value = jsonElement.GetString();
-                                    }
-                                    else
-                                    {
-                                        value = update.Value?.ToString();
-                                    }
-                                }
-                                else
-                                {
-                                    value = update.Value;
-                                }
-
-                                property.SetValue(audiobook, value);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to set property {Property} on audiobook {Id}", update.Key, id);
-                            }
-                        }
+                        _logger.LogDebug("Quality cutoff met for audiobook '{Title}' by completed download (Quality: {Quality})",
+                            audiobook.Title, downloadQuality);
+                        return true;
                     }
-
-                    await _repo.UpdateAsync(audiobook);
-                    updatedCount++;
+                }
+                // For active downloads, assume they will meet quality requirements
+                else if (download.Status == DownloadStatus.Downloading)
+                {
+                    _logger.LogDebug("Quality cutoff assumed met for audiobook '{Title}' due to active download", audiobook.Title);
+                    return true;
                 }
             }
 
-            _logger.LogInformation("Bulk update: {UpdatedCount} audiobooks updated", updatedCount);
-            
-            return Ok(new 
-            { 
-                message = $"Successfully updated {updatedCount} audiobook(s)", 
-                updatedCount
-            });
+            return false;
+        }
+
+        private string BuildSearchQuery(Audiobook audiobook)
+        {
+            var parts = new List<string>();
+
+            // Add title
+            if (!string.IsNullOrEmpty(audiobook.Title))
+                parts.Add(audiobook.Title);
+
+            // Add primary author
+            if (audiobook.Authors != null && audiobook.Authors.Any())
+                parts.Add(audiobook.Authors.First());
+
+            // Add series if available
+            if (!string.IsNullOrEmpty(audiobook.Series))
+                parts.Add(audiobook.Series);
+
+            return string.Join(" ", parts);
+        }
+
+        private bool IsTorrentResult(SearchResult result)
+        {
+            // Check DownloadType first if it's set
+            if (!string.IsNullOrEmpty(result.DownloadType))
+            {
+                if (result.DownloadType == "DDL")
+                {
+                    return false; // DDL is not a torrent
+                }
+                else if (result.DownloadType == "Torrent")
+                {
+                    return true;
+                }
+                else if (result.DownloadType == "Usenet")
+                {
+                    return false;
+                }
+            }
+
+            // Fallback to legacy detection logic
+            // Check for NZB first - if it has an NZB URL, it's a Usenet/NZB download
+            if (!string.IsNullOrEmpty(result.NzbUrl))
+            {
+                return false;
+            }
+
+            // Check for torrent indicators - magnet link or torrent file
+            if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
+            {
+                return true;
+            }
+
+            // If neither is set, we can't reliably determine the type
+            // Log a warning and default to false (NZB) as a safer choice
+            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
+                result.Title, result.Source);
+            return false;
+        }
+
+        private async Task<string> GetAppropriateDownloadClientAsync(SearchResult searchResult, bool isTorrent)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+
+            // Special handling for DDL downloads - they don't use external clients
+            if (searchResult.DownloadType?.Equals("DDL", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _logger.LogInformation("DDL download detected, using internal DDL client");
+                return "DDL";
+            }
+
+            // Get all configured download clients
+            var clients = await configurationService.GetDownloadClientConfigurationsAsync();
+            var enabledClients = clients.Where(c => c.IsEnabled).ToList();
+
+            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}",
+                isTorrent ? "torrent" : "NZB",
+                enabledClients.Count,
+                string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
+
+            if (isTorrent)
+            {
+                // Prefer qBittorrent, then Transmission
+                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
+
+                if (client != null)
+                {
+                    _logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
+                }
+                else
+                {
+                    _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
+                }
+
+                return client?.Id ?? string.Empty;
+            }
+            else
+            {
+                // Prefer SABnzbd, then NZBGet
+                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
+
+                if (client != null)
+                {
+                    _logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
+                }
+                else
+                {
+                    _logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
+                }
+
+                return client?.Id ?? string.Empty;
+            }
         }
     }
 
@@ -444,5 +673,13 @@ namespace Listenarr.Api.Controllers
     {
         public List<int> Ids { get; set; } = new List<int>();
         public Dictionary<string, object> Updates { get; set; } = new Dictionary<string, object>();
+    }
+
+    public class AddToLibraryRequest
+    {
+        public AudibleBookMetadata Metadata { get; set; } = new();
+        public bool Monitored { get; set; } = true;
+        public int? QualityProfileId { get; set; }
+        public bool AutoSearch { get; set; } = false;
     }
 }

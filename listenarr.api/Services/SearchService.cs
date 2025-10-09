@@ -93,6 +93,14 @@ namespace Listenarr.Api.Services
                 return ApplySorting(fallback, sortBy, sortDirection);
             }
 
+            // Also search configured indexers for additional results (including DDL downloads)
+            var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection);
+            if (indexerResults.Any())
+            {
+                results.AddRange(indexerResults);
+                _logger.LogInformation("Added {Count} indexer results (including DDL downloads) for query: {Query}", indexerResults.Count, query);
+            }
+
             return ApplySorting(results, sortBy, sortDirection);
         }
 

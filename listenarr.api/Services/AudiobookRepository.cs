@@ -49,7 +49,9 @@ namespace Listenarr.Api.Services
 
         public async Task<Audiobook?> GetByIdAsync(int id)
         {
-            return await _db.Audiobooks.FirstOrDefaultAsync(a => a.Id == id);
+            return await _db.Audiobooks
+                .Include(a => a.QualityProfile)
+                .FirstOrDefaultAsync(a => a.Id == id);
         }
 
         public async Task AddAsync(Audiobook audiobook)
