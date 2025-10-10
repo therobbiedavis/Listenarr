@@ -8,9 +8,40 @@
         <span class="version">v1.0.0</span>
       </div>
       <div class="nav-actions">
-        <button class="nav-btn" @click="toggleSearch">
-          <i class="ph ph-magnifying-glass"></i>
-        </button>
+        <div class="nav-search-inline">
+          <input
+            v-model="searchQuery"
+            @input="onSearchInput"
+            @keydown.enter="applyFirstResult"
+            ref="searchInputRef"
+            class="search-input-inline"
+            type="search"
+            placeholder="Search your library..."
+            aria-label="Search your audiobooks"
+          />
+          <i class="ph ph-magnifying-glass search-inline-icon" aria-hidden="true"></i>
+          <div class="inline-spinner" v-if="searching" aria-hidden="true"></div>
+          <!-- Results overlay: shows suggestions, or a searching/no-results state with spinner -->
+          <div class="search-results-inline" v-if="searching || suggestions.length > 0 || searchQuery.length > 0">
+            <ul v-if="suggestions.length > 0" class="search-list">
+              <li v-for="s in suggestions" :key="s.id" class="search-result" @click="selectSuggestion(s)">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <img v-if="s.imageUrl" :src="s.imageUrl" alt="cover" class="result-thumb" />
+                  <div>
+                    <div class="result-title">{{ s.title }}</div>
+                    <div class="result-sub">{{ s.author }}</div>
+                  </div>
+                </div>
+              </li>
+            </ul>
+
+            <div v-else class="search-empty-overlay">
+              <div class="overlay-spinner" v-if="searching" aria-hidden="true"></div>
+              <div class="search-empty" v-if="searching">Searching...</div>
+              <div class="search-empty" v-else-if="searchQuery.length > 0">No matches</div>
+            </div>
+          </div>
+        </div>
         <button class="nav-btn" @click="toggleNotifications">
           <i class="ph ph-bell"></i>
           <span class="badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
@@ -115,7 +146,7 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import NotificationModal from '@/components/NotificationModal.vue'
 import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -197,8 +228,68 @@ const refreshWantedBadge = async () => {
 }
 
 // Methods for nav actions
-const toggleSearch = () => {
-  console.log('Toggle search')
+// Inline search is always visible in header; focus on mount if needed
+
+// --- Header search implementation ---
+import { ref as vueRef } from 'vue'
+const router = useRouter()
+const searchQuery = vueRef('')
+const suggestions = vueRef<Array<{ id: number; title: string; author?: string; imageUrl?: string }>>([])
+const searching = vueRef(false)
+const searchInputRef = vueRef<HTMLInputElement | null>(null)
+
+let searchDebounceTimer: number | undefined
+const onSearchInput = async () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  const q = searchQuery.value.trim()
+  if (q.length === 0) {
+    suggestions.value = []
+    return
+  }
+  searchDebounceTimer = window.setTimeout(async () => {
+    searching.value = true
+    try {
+      // First try to match local library entries
+      const lib = await apiService.getLibrary()
+      const lower = q.toLowerCase()
+      const localMatches = lib.filter(b => (b.title || '').toLowerCase().includes(lower) || (Array.isArray(b.authors) ? (b.authors.join(' ').toLowerCase()) : '').includes(lower))
+      if (localMatches.length > 0) {
+        // Only show local library matches in the header search
+        suggestions.value = localMatches.slice(0, 8).map(b => ({
+          id: b.id!,
+          title: b.title || 'Unknown',
+          author: Array.isArray(b.authors) ? (b.authors[0] || '') : '',
+          imageUrl: b.imageUrl || ''
+        }))
+      } else {
+        // No fallback to indexers from header search; leave suggestions empty
+        suggestions.value = []
+      }
+    } catch (err) {
+      console.error('Header search failed', err)
+      suggestions.value = []
+    } finally {
+      searching.value = false
+    }
+  }, 250)
+}
+
+const selectSuggestion = (s: { id: number; title: string; author?: string }) => {
+  // Navigate to audiobook detail if local (id > 0), else open search view
+  if (!s) return
+  searchQuery.value = ''
+  suggestions.value = []
+  if (s.id && s.id > 0) {
+    // Navigate to audiobook detail page (router name: 'audiobook-detail')
+    void router.push({ name: 'audiobook-detail', params: { id: String(s.id) } })
+  } else {
+    // Use the general search page for indexer results
+    void router.push({ name: 'search', query: { q: s.title } })
+  }
+}
+
+const applyFirstResult = () => {
+  if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
 
 const toggleNotifications = () => {
@@ -536,4 +627,162 @@ const hideLayout = computed(() => {
     font-size: 1.2rem;
   }
 }
+/* Header search styles */
+.nav-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.nav-search .nav-btn {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+
+.nav-search-inline {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-inline-icon {
+  color: #9aa0a6;
+  font-size: 18px;
+}
+
+.inline-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.08);
+  border-top-color: #2196F3;
+  animation: spin 800ms linear infinite;
+  margin-left: 6px;
+}
+
+.search-input-inline {
+  width: 340px;
+  max-width: 50vw;
+  padding: 8px 12px 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #424242;
+  background: #222;
+  color: #fff;
+  outline: none;
+  font-size: 0.95rem;
+  position: relative;
+}
+
+.search-input::placeholder {
+  color: #9aa0a6;
+}
+
+.search-input:focus {
+  border-color: #2196F3;
+  box-shadow: 0 4px 14px rgba(33,150,243,0.12);
+}
+
+.search-results-inline {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.nav-search-inline {
+  position: relative;
+}
+
+.search-results-inline {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  right: 0;
+  background: #1f1f1f;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 6px;
+  z-index: 1400;
+}
+
+.search-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.result-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: #2a2a2a;
+}
+
+.search-empty-overlay {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  justify-content: flex-start;
+}
+
+/* Small spinner */
+.overlay-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.08);
+  border-top-color: #2196F3;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #e6eef6;
+}
+
+.search-result:hover {
+  background: rgba(255,255,255,0.03);
+}
+
+
+
+.result-title {
+  font-weight: 600;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.result-sub {
+  font-size: 0.82rem;
+  color: #bfc8cf;
+}
+
+.search-empty {
+  padding: 8px 10px;
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+
+/* Slide-left transition (popout from search button) */
+/* no transition needed for inline search */
+
 </style>
