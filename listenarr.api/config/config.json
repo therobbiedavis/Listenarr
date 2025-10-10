@@ -13,7 +13,7 @@
   "InstanceName": "Listenarr",
   "SyslogPort": 514,
   "AnalyticsEnabled": false,
-  "AuthenticationRequired": "Disabled",
+  "AuthenticationRequired": "Enabled",
   "SslCertPath": "",
   "SslCertPassword": ""
 }

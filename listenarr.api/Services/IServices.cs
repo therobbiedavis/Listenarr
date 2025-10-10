@@ -53,6 +53,9 @@ namespace Listenarr.Api.Services
         
         Task<ApplicationSettings> GetApplicationSettingsAsync();
         Task SaveApplicationSettingsAsync(ApplicationSettings settings);
+        
+        Task<StartupConfig> GetStartupConfigAsync();
+        Task SaveStartupConfigAsync(StartupConfig config);
     }
 
     public interface INotificationService

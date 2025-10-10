@@ -285,13 +285,13 @@ class ApiService {
     })
   }
 
-  // Startup configuration (read-only)
+  // Startup configuration (read + write) — backend exposes under /configuration/startupconfig
   async getStartupConfig(): Promise<import('@/types').StartupConfig> {
-    return this.request<import('@/types').StartupConfig>('/startupconfig')
+    return this.request<import('@/types').StartupConfig>('/configuration/startupconfig')
   }
 
   async saveStartupConfig(config: import('@/types').StartupConfig): Promise<import('@/types').StartupConfig> {
-    return this.request<import('@/types').StartupConfig>('/startupconfig', {
+    return this.request<import('@/types').StartupConfig>('/configuration/startupconfig', {
       method: 'POST',
       body: JSON.stringify(config)
     })
@@ -641,6 +641,11 @@ class ApiService {
 
   async logout(): Promise<void> {
     await this.request<void>('/account/logout', { method: 'POST' })
+  }
+
+  // Admin users
+  async getAdminUsers(): Promise<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>> {
+    return this.request<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>('/account/admins')
   }
 }
 

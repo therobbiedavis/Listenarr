@@ -16,9 +16,20 @@
           <span class="badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
         </button>
         <template v-if="auth.user.authenticated">
-          <div class="nav-user">
-            <span class="username">{{ auth.user.name }}</span>
-            <button class="nav-btn" @click="logout">Logout</button>
+          <div class="nav-user" ref="navUserRef">
+            <button
+              class="nav-btn nav-user-btn"
+              @click="toggleUserMenu"
+              :aria-expanded="userMenuOpen"
+              aria-haspopup="true"
+              title="Account"
+            >
+              <i class="ph ph-users nav-user-icon"></i>
+            </button>
+
+            <div v-if="userMenuOpen" class="user-menu" role="menu">
+              <button class="user-menu-item" role="menuitem" @click="logout">Logout</button>
+            </div>
           </div>
         </template>
         <template v-else>
@@ -117,6 +128,22 @@ const { notification, close: closeNotification } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
+
+// User menu (people icon) state
+const userMenuOpen = ref(false)
+const navUserRef = ref<HTMLElement | null>(null)
+const toggleUserMenu = () => {
+  userMenuOpen.value = !userMenuOpen.value
+}
+
+const handleDocumentClick = (e: MouseEvent) => {
+  const el = navUserRef.value
+  if (!el) return
+  const target = e.target as Node
+  if (!el.contains(target)) {
+    userMenuOpen.value = false
+  }
+}
 
 // Reactive state for badges and counters
 const notificationCount = ref(0)
@@ -223,6 +250,9 @@ onMounted(async () => {
   } catch {
     authEnabled.value = false
   }
+
+  // Click-outside handler for user menu
+  document.addEventListener('click', handleDocumentClick)
 })
 
 onUnmounted(() => {
@@ -233,6 +263,7 @@ onUnmounted(() => {
   if (wantedBadgeRefreshInterval) {
     clearInterval(wantedBadgeRefreshInterval)
   }
+  document.removeEventListener('click', handleDocumentClick)
 })
 
 const logout = async () => {
@@ -308,6 +339,55 @@ const hideLayout = computed(() => {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.nav-user {
+  position: relative;
+}
+
+.nav-user-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+}
+
+.nav-user-icon {
+  font-size: 20px;
+}
+
+.user-menu {
+  position: absolute;
+  right: 0;
+  top: 48px;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  min-width: 160px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  z-index: 1200;
+  padding: 0.25rem 0;
+}
+
+.user-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-menu-item.username {
+  font-weight: 600;
+  color: #fff;
+}
+
+.user-menu-item:hover {
+  background: #333;
 }
 
 .nav-btn {

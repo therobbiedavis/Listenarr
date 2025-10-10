@@ -26,12 +26,14 @@ namespace Listenarr.Api.Services
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<ConfigurationService> _logger;
         private readonly IUserService _userService;
+        private readonly IStartupConfigService _startupConfigService;
 
-        public ConfigurationService(ListenArrDbContext dbContext, ILogger<ConfigurationService> logger, IUserService userService)
+        public ConfigurationService(ListenArrDbContext dbContext, ILogger<ConfigurationService> logger, IUserService userService, IStartupConfigService startupConfigService)
         {
             _dbContext = dbContext;
             _logger = logger;
             _userService = userService;
+            _startupConfigService = startupConfigService;
         }
 
         // API Configuration methods
@@ -272,6 +274,34 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error saving application settings to database");
+                throw;
+            }
+        }
+
+        // Startup Configuration methods
+        public Task<StartupConfig> GetStartupConfigAsync()
+        {
+            try
+            {
+                var config = _startupConfigService.GetConfig();
+                return Task.FromResult(config ?? new StartupConfig());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving startup configuration");
+                return Task.FromResult(new StartupConfig());
+            }
+        }
+
+        public async Task SaveStartupConfigAsync(StartupConfig config)
+        {
+            try
+            {
+                await _startupConfigService.SaveAsync(config);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving startup configuration");
                 throw;
             }
         }

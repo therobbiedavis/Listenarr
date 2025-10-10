@@ -10,6 +10,7 @@ namespace Listenarr.Api.Services
         Task<User> CreateUserAsync(string username, string password, string? email = null, bool isAdmin = false);
         Task UpdatePasswordAsync(string username, string newPassword);
         Task<bool> ValidateCredentialsAsync(string username, string password);
+        Task<List<User>> GetAdminUsersAsync();
     }
 
     public class UserService : IUserService
@@ -61,6 +62,11 @@ namespace Listenarr.Api.Services
             user.PasswordHash = HashPassword(newPassword);
             _db.Users.Update(user);
             await _db.SaveChangesAsync();
+        }
+
+        public async Task<List<User>> GetAdminUsersAsync()
+        {
+            return await _db.Users.Where(u => u.IsAdmin).ToListAsync();
         }
 
         // PBKDF2 with HMACSHA256

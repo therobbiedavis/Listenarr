@@ -535,20 +535,28 @@
 
           <div class="form-section">
             <h4><i class="ph ph-user-circle"></i> Authentication</h4>
+            
             <div class="form-group">
               <label>Login Screen</label>
               <div class="auth-row">
                 <input type="checkbox" id="authToggle" v-model="authEnabled" />
                 <label for="authToggle">Enable login screen</label>
               </div>
-                <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
-              </div>
+              <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
+            </div>
 
-              <div class="form-group">
-                <label>Initial Admin Account</label>
-                <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" />
-                <input v-model="settings.adminPassword" type="password" placeholder="Admin password (optional)" />
-                <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
+            <div class="form-group">
+              <label>Initial Admin Account</label>
+              <div class="admin-credentials">
+                <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" class="admin-input" />
+                <div class="password-field">
+                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="Admin password (optional)" class="admin-input password-input" />
+                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="String(showPassword)" :title="showPassword ? 'Hide password' : 'Show password'">
+                    <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
+                  </button>
+                </div>
+              </div>
+              <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
             </div>
           </div>
         </div>
@@ -741,6 +749,8 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const testingIndexer = ref<number | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
+const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
+  const showPassword = ref(false)
 
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
@@ -865,8 +875,27 @@ const saveSettings = async () => {
     try {
       const original = startupConfig.value || {}
       const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'Enabled' : 'Disabled' }
-      await apiService.saveStartupConfig(newCfg)
-      success('Startup configuration saved (config.json)')
+        try {
+          await apiService.saveStartupConfig(newCfg)
+          success('Startup configuration saved (config.json)')
+        } catch {
+          // If server can't persist startup config (e.g., permission denied), offer a fallback download of the config JSON
+          info('Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.')
+          try {
+            const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = 'config.json'
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            URL.revokeObjectURL(url)
+            info('Download started. Save the file to the server config directory to persist the change.')
+          } catch {
+            info('Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.')
+          }
+        }
     } catch {
       // Not fatal - write may not be allowed in some deployments
       info('Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
@@ -964,6 +993,16 @@ const loadQualityProfiles = async () => {
     qualityProfiles.value = await getQualityProfiles()
   } catch (error) {
     console.error('Failed to load quality profiles:', error)
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
+  }
+}
+
+const loadAdminUsers = async () => {
+  try {
+    adminUsers.value = await apiService.getAdminUsers()
+  } catch (error) {
+    console.error('Failed to load admin users:', error)
     const errorMessage = formatApiError(error)
     showError(errorMessage)
   }
@@ -1076,14 +1115,24 @@ onMounted(async () => {
     configStore.loadDownloadClientConfigurations(),
     configStore.loadApplicationSettings(),
     loadIndexers(),
-    loadQualityProfiles()
+    loadQualityProfiles(),
+    loadAdminUsers()
   ])
   
   settings.value = configStore.applicationSettings
   // Load startup config (optional) to determine AuthenticationRequired
   try {
     startupConfig.value = await apiService.getStartupConfig()
-    const authVal = startupConfig.value?.authenticationRequired
+    // Accept both camelCase and PascalCase keys coming from the API JSON
+    function extractAuthRequired(obj: unknown): string | boolean | undefined {
+      if (!obj || typeof obj !== 'object') return undefined
+      const o = obj as Record<string, unknown>
+      const v = o['authenticationRequired'] ?? o['AuthenticationRequired']
+      if (typeof v === 'string' || typeof v === 'boolean') return v
+      return undefined
+    }
+
+    const authVal = extractAuthRequired(startupConfig.value)
     if (typeof authVal === 'string') {
       authEnabled.value = authVal.toLowerCase() === 'enabled' || authVal.toLowerCase() === 'true'
     } else if (typeof authVal === 'boolean') {
@@ -1091,6 +1140,16 @@ onMounted(async () => {
     }
   } catch {
     // ignore - server may not expose startup config in some deployments
+  }
+
+  // Pre-populate admin credentials from the first admin user
+  if (adminUsers.value.length > 0 && settings.value) {
+    const firstAdmin = adminUsers.value[0]
+    if (firstAdmin) {
+      settings.value.adminUsername = firstAdmin.username
+      // Note: We don't populate the password field for security reasons
+      // Users will need to enter the password when changing it
+    }
   }
 })
 </script>
@@ -1487,6 +1546,88 @@ onMounted(async () => {
   color: #999;
   font-size: 0.85rem;
   font-weight: normal;
+}
+
+/* Authentication Section Styles */
+.auth-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.auth-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #007acc;
+}
+
+.auth-row label {
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  margin: 0;
+}
+
+.admin-credentials {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.admin-input {
+  padding: 0.75rem;
+  background-color: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 1rem;
+  color: #fff;
+  transition: all 0.2s;
+}
+
+.admin-input:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+}
+
+.admin-input::placeholder {
+  color: #777;
+  font-style: italic;
+}
+
+/* Password field with inline toggle */
+.password-field {
+  position: relative;
+  width: 100%;
+}
+
+.password-input {
+  width: 100%;
+  padding-right: 3.5rem; /* space for the toggle button */
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #ccc;
+  padding: 0.35rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.password-toggle:hover {
+  color: #fff;
 }
 
 .modal-overlay {

@@ -117,6 +117,22 @@ namespace Listenarr.Api.Controllers
 
             return Ok(new { authenticated = true, name = User?.Identity?.Name ?? string.Empty });
         }
+
+        [HttpGet("admins")]
+        public async Task<IActionResult> GetAdminUsers()
+        {
+            var admins = await _userService.GetAdminUsersAsync();
+            var result = admins.Select(u => new
+            {
+                u.Id,
+                u.Username,
+                u.Email,
+                u.IsAdmin,
+                u.CreatedAt
+            }).ToList();
+            
+            return Ok(result);
+        }
     }
 
     public class LoginRequest
