@@ -137,6 +137,29 @@ export interface ApplicationSettings {
   pollingIntervalSeconds: number
   enableNotifications: boolean
   allowedFileExtensions: string[]
+  // Optional admin credentials used when saving settings to create/update an initial admin user
+  adminUsername?: string
+  adminPassword?: string
+}
+
+export interface StartupConfig {
+  logLevel?: string
+  enableSsl?: boolean
+  port?: number
+  sslPort?: number
+  urlBase?: string
+  bindAddress?: string
+  apiKey?: string
+  authenticationMethod?: string
+  updateMechanism?: string
+  launchBrowser?: boolean
+  branch?: string
+  instanceName?: string
+  syslogPort?: number
+  analyticsEnabled?: boolean
+  authenticationRequired?: string | boolean
+  sslCertPath?: string
+  sslCertPassword?: string
 }
 
 export interface AudibleBookMetadata {
@@ -160,6 +183,8 @@ export interface AudibleBookMetadata {
   explicit?: boolean
   abridged?: boolean
   source?: string
+  // Optional local mapping to a quality profile ID when viewing in the UI
+  qualityProfileId?: number
 }
 
 export interface Audiobook {

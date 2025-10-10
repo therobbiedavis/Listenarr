@@ -57,7 +57,7 @@
           <div class="wanted-quality">
             <template v-if="getQualityProfileForAudiobook(item)">
               Wanted Quality Profile:
-              <span class="profile-name">{{ getQualityProfileForAudiobook(item).name }}</span>
+              <span class="profile-name">{{ getQualityProfileForAudiobook(item)?.name ?? 'Unknown' }}</span>
             </template>
             <template v-else>
               Wanted Quality: {{ item.quality || 'Any' }}
@@ -138,7 +138,7 @@ const configurationStore = useConfigurationStore()
 
 const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
   console.log('Getting quality profile for audiobook:', audiobook.title, 'qualityProfileId:', audiobook.qualityProfileId)
-  if (!audiobook.qualityProfileId) {
+  if (!audiobook || !audiobook.qualityProfileId) {
     console.log('No qualityProfileId for audiobook:', audiobook.title)
     return null
   }

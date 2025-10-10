@@ -68,14 +68,17 @@
             </div>
           </div>
           <div class="result-info">
-            <h3>{{ audibleResult.title }}</h3>
+            <h3>
+              {{ audibleResult.title }}
+              <span v-if="audibleResult.language" class="language-badge">{{ audibleResult.language }}</span>
+            </h3>
             <p class="result-author">
               by {{ (audibleResult.authors || []).join(', ') || 'Unknown Author' }}
             </p>
             <p v-if="audibleResult.narrators?.length" class="result-narrator">
               Narrated by {{ audibleResult.narrators.join(', ') }}
             </p>
-            <div class="result-stats">
+              <div class="result-stats">
               <span v-if="audibleResult.runtime" class="stat-item">
                 <i class="ph ph-clock"></i>
                 {{ formatRuntime(audibleResult.runtime) }}
@@ -86,7 +89,7 @@
               </span>
             </div>
             <div class="result-description" v-html="audibleResult.description"></div>
-            <div class="result-meta">
+              <div class="result-meta">
               <span v-if="audibleResult.publishYear">{{ audibleResult.publishYear }}</span>
               <span v-if="audibleResult.language">{{ audibleResult.language }}</span>
               <span v-if="audibleResult.publisher">Publisher: {{ audibleResult.publisher }}</span>
@@ -136,7 +139,10 @@
               </div>
             </div>
             <div class="result-info">
-              <h3>{{ book.title }}</h3>
+              <h3>
+                {{ book.title }}
+                <span v-if="book.searchResult?.language" class="language-badge">{{ book.searchResult?.language }}</span>
+              </h3>
               <p class="result-author">by {{ formatAuthors(book) }}</p>
               
               <!-- Audiobook metadata from search results -->
@@ -271,7 +277,7 @@ type TitleSearchResult = OpenLibraryBook & { searchResult?: SearchResult }
 const router = useRouter()
 const configStore = useConfigurationStore()
 const libraryStore = useLibraryStore()
-const { success, error: showError, warning } = useNotification()
+const { error: showError, warning } = useNotification()
 
 console.log('AddNewView component loaded')
 console.log('libraryStore:', libraryStore)
@@ -1168,6 +1174,20 @@ onMounted(async () => {
   padding: 1rem;
   gap: 1rem;
   align-items: flex-start;
+}
+
+/* Language badge */
+.language-badge {
+  display: inline-block;
+  background-color: rgba(255,255,255,0.06);
+  color: #e6edf3;
+  padding: 0.15rem 0.5rem;
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  text-transform: none;
+  vertical-align: middle;
+  border: 1px solid rgba(255,255,255,0.04);
 }
 
 .title-result-card .result-info {

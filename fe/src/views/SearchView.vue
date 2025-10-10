@@ -53,22 +53,22 @@
             
             <!-- Quality Score Badge -->
             <div v-if="getResultScore(result.id)" class="quality-score">
-              <span 
-                v-if="getResultScore(result.id)?.isRejected"
-                class="score-badge rejected"
-                :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
-              >
-                <i class="ph ph-x-circle"></i>
-                Rejected
-              </span>
-              <span 
-                v-else
-                :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]"
-                :title="`Total Score: ${getResultScore(result.id)?.totalScore}`"
-              >
-                <i class="ph ph-star"></i>
-                Score: {{ getResultScore(result.id)?.totalScore }}
-              </span>
+              <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
+                <template #default>
+                  <span 
+                    v-if="getResultScore(result.id)?.isRejected"
+                    class="score-badge rejected"
+                    :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
+                  >
+                    <i class="ph ph-x-circle"></i>
+                    Rejected
+                  </span>
+                  <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
+                    <i class="ph ph-star"></i>
+                    Score: {{ getResultScore(result.id)?.totalScore }}
+                  </span>
+                </template>
+              </ScorePopover>
             </div>
             
             <!-- Audiobook metadata -->
@@ -123,6 +123,8 @@ import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
 import type { SearchResult, AudibleBookMetadata, QualityScore, QualityProfile } from '@/types'
 import { useNotification } from '@/composables/useNotification'
+import { getScoreBreakdownTooltip } from '@/composables/useScore'
+import ScorePopover from '@/components/ScorePopover.vue'
 
 const searchStore = useSearchStore()
 const libraryStore = useLibraryStore()
@@ -316,6 +318,8 @@ const getScoreClass = (score: number): string => {
   if (score >= 40) return 'fair'
   return 'poor'
 }
+
+// getScoreBreakdownTooltip is provided by the useScore composable
 </script>
 
 <style scoped>

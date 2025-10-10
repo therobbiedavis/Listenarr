@@ -28,6 +28,7 @@ namespace Listenarr.Api.Models
         public DbSet<Indexer> Indexers { get; set; }
         public DbSet<ApiConfiguration> ApiConfigurations { get; set; }
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
+    public DbSet<User> Users { get; set; }
         public DbSet<Download> Downloads { get; set; }
         public DbSet<QualityProfile> QualityProfiles { get; set; }
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
@@ -39,7 +40,8 @@ namespace Listenarr.Api.Models
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            if (optionsBuilder.IsConfigured)
+            // Only configure SQLite if no provider was configured externally (e.g. tests using InMemory)
+            if (!optionsBuilder.IsConfigured)
             {
                 // Apply PRAGMA settings when connection is configured
                 optionsBuilder.UseSqlite(options =>

@@ -676,8 +676,6 @@ function openFolder() {
 
 @media (min-width: 1200px) {
   .hero-content {
-    display: grid;
-    grid-template-columns: 350px 1fr 380px;
     gap: 40px;
   }
 }
@@ -761,25 +759,9 @@ function openFolder() {
 }
 
 .key-details {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
   gap: 12px;
   margin-bottom: 20px;
-}
-
-@media (min-width: 1200px) {
-  .key-details {
-    grid-column: 3;
-    grid-row: 1 / span 4;
-    grid-template-columns: repeat(2, 1fr);
-    align-self: start;
-  }
-}
-
-@media (max-width: 768px) {
-  .key-details {
-    grid-template-columns: 1fr;
-  }
 }
 
 .detail-item {

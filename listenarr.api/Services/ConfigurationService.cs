@@ -25,11 +25,13 @@ namespace Listenarr.Api.Services
     {
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<ConfigurationService> _logger;
+        private readonly IUserService _userService;
 
-        public ConfigurationService(ListenArrDbContext dbContext, ILogger<ConfigurationService> logger)
+        public ConfigurationService(ListenArrDbContext dbContext, ILogger<ConfigurationService> logger, IUserService userService)
         {
             _dbContext = dbContext;
             _logger = logger;
+            _userService = userService;
         }
 
         // API Configuration methods
@@ -243,6 +245,29 @@ namespace Listenarr.Api.Services
                 }
                 
                 await _dbContext.SaveChangesAsync();
+
+                // If the request included admin credentials, ensure a user exists/updated
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(settings.AdminUsername) && !string.IsNullOrWhiteSpace(settings.AdminPassword))
+                    {
+                        var existingUser = await _userService.GetByUsernameAsync(settings.AdminUsername!);
+                        if (existingUser == null)
+                        {
+                            await _userService.CreateUserAsync(settings.AdminUsername!, settings.AdminPassword!, null, true);
+                        }
+                        else
+                        {
+                            // Update password to provided value
+                            await _userService.UpdatePasswordAsync(settings.AdminUsername!, settings.AdminPassword!);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to create or update admin user from application settings");
+                    // Do not fail saving settings if user creation fails; log and continue
+                }
             }
             catch (Exception ex)
             {

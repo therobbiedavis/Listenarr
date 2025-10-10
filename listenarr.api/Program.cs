@@ -19,6 +19,8 @@
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
 using Listenarr.Api.Hubs;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Listenarr.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -62,6 +64,8 @@ builder.Services.AddDbContext<ListenArrDbContext>(options =>
     options.UseSqlite("Data Source=config/database/listenarr.db"));
 builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
 builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
+// Startup config: read config.json (optional) and expose via IStartupConfigService
+builder.Services.AddSingleton<IStartupConfigService, StartupConfigService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<IMetadataService, MetadataService>();
 builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
@@ -74,6 +78,8 @@ builder.Services.AddScoped<IFileNamingService, FileNamingService>();
 builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
 builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();
@@ -134,6 +140,26 @@ builder.Services.AddCors(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Authentication: Cookie-based (minimal default). This will be enforced by middleware when configured.
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/api/account/login";
+        options.Cookie.Name = "listenarr_auth";
+        // Harden cookie settings
+        options.SlidingExpiration = true;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always; // require HTTPS in production
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+        options.ExpireTimeSpan = TimeSpan.FromDays(7);
+    });
+
+// Antiforgery (CSRF) protection for SPA: expect token in X-XSRF-TOKEN header
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-XSRF-TOKEN";
+});
+
 var app = builder.Build();
 
 // Ensure database is created and migrations are applied
@@ -179,7 +205,13 @@ else
 {
     app.UseCors("AllowVueApp");
 }
-
+    // Enable authentication middleware
+    app.UseAuthentication();
+    // Enforce authentication based on startup config
+    app.UseMiddleware<AuthenticationEnforcerMiddleware>();
+    // Validate antiforgery tokens for unsafe methods
+    app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
+    app.UseAuthorization();
 app.UseAuthorization();
 
 app.MapControllers();

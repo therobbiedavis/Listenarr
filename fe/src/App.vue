@@ -1,7 +1,7 @@
 <template>
   <div id="app">
     <!-- Top Navigation Bar -->
-    <header class="top-nav">
+    <header v-if="!hideLayout" class="top-nav">
       <div class="nav-brand">
         <img src="/icon.png" alt="Listenarr" class="brand-logo" />
         <h1>Listenarr</h1>
@@ -15,12 +15,21 @@
           <i class="ph ph-bell"></i>
           <span class="badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
         </button>
+        <template v-if="auth.user.authenticated">
+          <div class="nav-user">
+            <span class="username">{{ auth.user.name }}</span>
+            <button class="nav-btn" @click="logout">Logout</button>
+          </div>
+        </template>
+        <template v-else>
+          <RouterLink to="/login" class="nav-btn">Login</RouterLink>
+        </template>
       </div>
     </header>
 
     <div class="app-layout">
       <!-- Sidebar Navigation -->
-      <aside class="sidebar">
+      <aside v-if="!hideLayout" class="sidebar">
         <nav class="sidebar-nav">
           <div class="nav-section">
             <RouterLink to="/" class="nav-item">
@@ -70,8 +79,13 @@
       </aside>
 
       <!-- Main Content Area -->
-      <main class="main-content">
-        <RouterView />
+      <main :class="['main-content', { 'full-page': hideLayout }]">
+        <div v-if="hideLayout" class="fullpage-wrapper">
+          <RouterView />
+        </div>
+        <div v-else>
+          <RouterView />
+        </div>
       </main>
     </div>
 
@@ -90,15 +104,19 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import NotificationModal from '@/components/NotificationModal.vue'
 import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
-import { signalRService } from '@/services/signalr'
+import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
+import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
 
 const { notification, close: closeNotification } = useNotification()
 const downloadsStore = useDownloadsStore()
+const auth = useAuthStore()
+const authEnabled = ref(false)
 
 // Reactive state for badges and counters
 const notificationCount = ref(0)
@@ -164,21 +182,29 @@ const toggleNotifications = () => {
 onMounted(async () => {
   console.log('[App] Initializing real-time updates via SignalR...')
   
-  // Load initial downloads
-  await downloadsStore.loadDownloads()
-  
-  // Subscribe to queue updates via SignalR (real-time, no polling!)
-  unsubscribeQueue = signalRService.onQueueUpdate((queue) => {
-    console.log('[App] Received queue update via SignalR:', queue.length, 'items')
-    queueItems.value = queue
-  })
-  
-  // Fetch initial queue state
-  try {
-    const initialQueue = await apiService.getQueue()
-    queueItems.value = initialQueue
-  } catch (err) {
-    console.error('[App] Failed to fetch initial queue:', err)
+  // Load current auth state before touching protected endpoints
+  await auth.loadCurrentUser()
+
+  // If authenticated, load protected resources and enable real-time updates
+  if (auth.user.authenticated) {
+    // Load initial downloads
+    await downloadsStore.loadDownloads()
+
+    // Subscribe to queue updates via SignalR (real-time, no polling!)
+    unsubscribeQueue = signalRService.onQueueUpdate((queue) => {
+      console.log('[App] Received queue update via SignalR:', queue.length, 'items')
+      queueItems.value = queue
+    })
+
+    // Fetch initial queue state
+    try {
+      const initialQueue = await apiService.getQueue()
+      queueItems.value = initialQueue
+    } catch (err) {
+      console.error('[App] Failed to fetch initial queue:', err)
+    }
+  } else {
+    console.log('[App] User not authenticated; skipping protected resource loads')
   }
   
   // Only poll "Wanted" badge (library changes infrequently)
@@ -186,6 +212,17 @@ onMounted(async () => {
   wantedBadgeRefreshInterval = window.setInterval(refreshWantedBadge, 60000) // Every minute
   
   console.log('[App] ✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
+  // Fetch startup config (do this regardless of auth so header/login visibility can be known)
+  try {
+    const cfg = await apiService.getStartupConfig()
+    const v = cfg?.authenticationRequired
+    authEnabled.value = (typeof v === 'boolean') ? v : (typeof v === 'string' ? (v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true') : false)
+    if (import.meta.env.DEV) {
+      try { console.debug('[App] startup config fetched', { authEnabled: authEnabled.value, cfg }) } catch {}
+    }
+  } catch {
+    authEnabled.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -196,6 +233,17 @@ onUnmounted(() => {
   if (wantedBadgeRefreshInterval) {
     clearInterval(wantedBadgeRefreshInterval)
   }
+})
+
+const logout = async () => {
+  await auth.logout()
+  window.location.reload()
+}
+
+const route = useRoute()
+const hideLayout = computed(() => {
+  const meta = route.meta as Record<string, unknown> | undefined
+  return !!(meta && meta.hideLayout)
 })
 </script>
 
@@ -376,6 +424,21 @@ onUnmounted(() => {
   margin-left: 200px;
   background-color: #1a1a1a;
   min-height: calc(100vh - 60px);
+}
+
+.main-content.full-page {
+  margin-left: 0;
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.fullpage-wrapper {
+  width: 100%;
+  max-width: 480px;
+  padding: 1rem;
 }
 
 /* Responsive */

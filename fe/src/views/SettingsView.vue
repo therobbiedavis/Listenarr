@@ -324,7 +324,8 @@
                 <button 
                   @click="confirmDeleteProfile(profile)" 
                   class="icon-button danger" 
-                  title="Delete Profile"
+                  :disabled="profile.isDefault"
+                  :title="profile.isDefault ? 'Cannot delete default profile' : 'Delete Profile'"
                 >
                   <i class="ph ph-trash"></i>
                 </button>
@@ -531,6 +532,25 @@
               </label>
             </div>
           </div>
+
+          <div class="form-section">
+            <h4><i class="ph ph-user-circle"></i> Authentication</h4>
+            <div class="form-group">
+              <label>Login Screen</label>
+              <div class="auth-row">
+                <input type="checkbox" id="authToggle" v-model="authEnabled" />
+                <label for="authToggle">Enable login screen</label>
+              </div>
+                <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
+              </div>
+
+              <div class="form-group">
+                <label>Initial Admin Account</label>
+                <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" />
+                <input v-model="settings.adminPassword" type="password" placeholder="Admin password (optional)" />
+                <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -666,7 +686,7 @@
         <p>Are you sure you want to delete the quality profile <strong>{{ profileToDelete.name }}</strong>?</p>
         <p v-if="profileToDelete.isDefault" class="warning-text">
           <i class="ph ph-warning"></i>
-          This is the default profile. You'll need to set a new default after deletion.
+          This is the default profile and cannot be deleted. Please set another profile as default first.
         </p>
         <p>This action cannot be undone.</p>
       </div>
@@ -674,7 +694,11 @@
         <button @click="profileToDelete = null" class="cancel-button">
           Cancel
         </button>
-        <button @click="executeDeleteProfile" class="delete-button">
+        <button 
+          @click="executeDeleteProfile" 
+          class="delete-button"
+          :disabled="profileToDelete.isDefault"
+        >
           <i class="ph ph-trash"></i>
           Delete
         </button>
@@ -685,6 +709,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile } from '@/types'
@@ -709,11 +734,64 @@ const editingClient = ref<DownloadClientConfiguration | null>(null)
 const editingIndexer = ref<Indexer | null>(null)
 const editingQualityProfile = ref<QualityProfile | null>(null)
 const settings = ref<ApplicationSettings | null>(null)
+const startupConfig = ref<import('@/types').StartupConfig | null>(null)
+const authEnabled = ref(false)
 const indexers = ref<Indexer[]>([])
 const qualityProfiles = ref<QualityProfile[]>([])
 const testingIndexer = ref<number | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
+
+const formatApiError = (error: unknown): string => {
+  // Handle axios-style errors
+  const axiosError = error as { response?: { data?: unknown; status?: number } }
+  if (axiosError.response?.data) {
+    const responseData = axiosError.response.data
+    let errorMessage = 'An unknown error occurred'
+    
+    if (typeof responseData === 'string') {
+      errorMessage = responseData
+    } else if (responseData && typeof responseData === 'object') {
+      const data = responseData as Record<string, unknown>
+      errorMessage = (data.message as string) || (data.error as string) || JSON.stringify(responseData, null, 2)
+    }
+    
+    // Capitalize first letter and ensure it ends with punctuation
+    errorMessage = errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
+    if (!errorMessage.match(/[.!?]$/)) {
+      errorMessage += '.'
+    }
+    
+    return errorMessage
+  }
+  
+  // Handle native fetch errors (from ApiService)
+  const fetchError = error as Error & { status?: number; body?: string }
+  if (fetchError.body) {
+    try {
+      const parsedBody = JSON.parse(fetchError.body)
+      if (parsedBody && typeof parsedBody === 'object') {
+        const data = parsedBody as Record<string, unknown>
+        let errorMessage = (data.message as string) || (data.error as string) || JSON.stringify(parsedBody, null, 2)
+        
+        // Capitalize first letter and ensure it ends with punctuation
+        errorMessage = errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
+        if (!errorMessage.match(/[.!?]$/)) {
+          errorMessage += '.'
+        }
+        
+        return errorMessage
+      }
+      return fetchError.body
+    } catch {
+      return fetchError.body
+    }
+  }
+  
+  // Fallback for other error types
+  const errorMessage = error instanceof Error ? error.message : String(error)
+  return errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
+}
 
 const editApiConfig = (api: ApiConfiguration) => {
   editingApi.value = api
@@ -732,7 +810,8 @@ const deleteApiConfig = async (id: string) => {
       success('API configuration deleted successfully')
     } catch (error) {
       console.error('Failed to delete API configuration:', error)
-      showError('Failed to delete API configuration')
+      const errorMessage = formatApiError(error)
+      showError(errorMessage)
     }
   }
 }
@@ -752,7 +831,8 @@ const executeDeleteClient = async (id?: string) => {
     success('Download client deleted successfully')
   } catch (error) {
     console.error('Failed to delete download client:', error)
-    showError('Failed to delete download client')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   } finally {
     clientToDelete.value = null
   }
@@ -781,9 +861,20 @@ const saveSettings = async () => {
   try {
     await configStore.saveApplicationSettings(settings.value)
     success('Settings saved successfully')
+    // If user toggled the authEnabled, attempt to save to startup config
+    try {
+      const original = startupConfig.value || {}
+      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'Enabled' : 'Disabled' }
+      await apiService.saveStartupConfig(newCfg)
+      success('Startup configuration saved (config.json)')
+    } catch {
+      // Not fatal - write may not be allowed in some deployments
+      info('Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
+    }
   } catch (error) {
     console.error('Failed to save settings:', error)
-    showError('Failed to save settings')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -793,7 +884,8 @@ const loadIndexers = async () => {
     indexers.value = await getIndexers()
   } catch (error) {
     console.error('Failed to load indexers:', error)
-    showError('Failed to load indexers')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -807,7 +899,8 @@ const toggleIndexerFunc = async (id: number) => {
     success(`Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
   } catch (error) {
     console.error('Failed to toggle indexer:', error)
-    showError('Failed to toggle indexer')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -823,7 +916,8 @@ const testIndexerFunc = async (id: number) => {
         indexers.value[index] = result.indexer
       }
     } else {
-      showError(`Indexer test failed: ${result.error || result.message}`)
+      const errorMessage = formatApiError({ response: { data: result.error || result.message } })
+      showError(errorMessage)
       // Still update to show failed test status
       const index = indexers.value.findIndex(i => i.id === id)
       if (index !== -1) {
@@ -832,7 +926,8 @@ const testIndexerFunc = async (id: number) => {
     }
   } catch (error) {
     console.error('Failed to test indexer:', error)
-    showError('Failed to test indexer')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   } finally {
     testingIndexer.value = null
   }
@@ -856,7 +951,8 @@ const executeDeleteIndexer = async () => {
     success('Indexer deleted successfully')
   } catch (error) {
     console.error('Failed to delete indexer:', error)
-    showError('Failed to delete indexer')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   } finally {
     indexerToDelete.value = null
   }
@@ -868,7 +964,8 @@ const loadQualityProfiles = async () => {
     qualityProfiles.value = await getQualityProfiles()
   } catch (error) {
     console.error('Failed to load quality profiles:', error)
-    showError('Failed to load quality profiles')
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -895,12 +992,8 @@ const executeDeleteProfile = async () => {
     success('Quality profile deleted successfully')
   } catch (error: unknown) {
     console.error('Failed to delete quality profile:', error)
-    const axiosError = error as { response?: { data?: { message?: string } } }
-    if (axiosError.response?.data?.message) {
-      showError(axiosError.response.data.message)
-    } else {
-      showError('Failed to delete quality profile')
-    }
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   } finally {
     profileToDelete.value = null
   }
@@ -926,12 +1019,8 @@ const saveQualityProfile = async (profile: QualityProfile) => {
     editingQualityProfile.value = null
   } catch (error: unknown) {
     console.error('Failed to save quality profile:', error)
-    const axiosError = error as { response?: { data?: { message?: string } } }
-    if (axiosError.response?.data?.message) {
-      showError(axiosError.response.data.message)
-    } else {
-      showError('Failed to save quality profile')
-    }
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -950,12 +1039,8 @@ const setDefaultProfile = async (profile: QualityProfile) => {
     success(`${profile.name} set as default quality profile`)
   } catch (error: unknown) {
     console.error('Failed to set default profile:', error)
-    const axiosError = error as { response?: { data?: { message?: string } } }
-    if (axiosError.response?.data?.message) {
-      showError(axiosError.response.data.message)
-    } else {
-      showError('Failed to set default profile')
-    }
+    const errorMessage = formatApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -995,6 +1080,18 @@ onMounted(async () => {
   ])
   
   settings.value = configStore.applicationSettings
+  // Load startup config (optional) to determine AuthenticationRequired
+  try {
+    startupConfig.value = await apiService.getStartupConfig()
+    const authVal = startupConfig.value?.authenticationRequired
+    if (typeof authVal === 'string') {
+      authEnabled.value = authVal.toLowerCase() === 'enabled' || authVal.toLowerCase() === 'true'
+    } else if (typeof authVal === 'boolean') {
+      authEnabled.value = authVal
+    }
+  } catch {
+    // ignore - server may not expose startup config in some deployments
+  }
 })
 </script>
 
@@ -1244,7 +1341,6 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.2rem;
 }
 
 .edit-button {

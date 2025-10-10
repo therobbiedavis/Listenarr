@@ -1062,6 +1062,13 @@ namespace Listenarr.Api.Services
                             NzbUrl = ""
                         };
 
+                        // Attempt to parse language codes from title or tags (e.g. [ENG / M4B])
+                        var detectedLang = ParseLanguageFromText(title + " " + (tags ?? ""));
+                        if (!string.IsNullOrEmpty(detectedLang))
+                        {
+                            result.Language = detectedLang;
+                        }
+
                         results.Add(result);
                     }
                     catch (Exception ex)
@@ -1250,7 +1257,7 @@ namespace Listenarr.Api.Services
                         _logger.LogDebug("Found audio file for {Title}: {FileName} ({Format}, {Size} bytes)", 
                             title, audioFile.FileName, audioFile.Format, audioFile.Size);
 
-                        results.Add(new SearchResult
+                        var iaResult = new SearchResult
                         {
                             Id = Guid.NewGuid().ToString(),
                             Title = title,
@@ -1265,7 +1272,16 @@ namespace Listenarr.Api.Services
                             Format = audioFile.Format,
                             Quality = DetectQualityFromFormat(audioFile.Format),
                             Source = $"{indexer.Name} (Internet Archive)"
-                        });
+                        };
+
+                        try
+                        {
+                            var detectedLang = ParseLanguageFromText(title ?? string.Empty);
+                            if (!string.IsNullOrEmpty(detectedLang)) iaResult.Language = detectedLang;
+                        }
+                        catch { }
+
+                        results.Add(iaResult);
                     }
                     catch (Exception ex)
                     {
@@ -1529,6 +1545,14 @@ namespace Listenarr.Api.Services
                                 result.Format = "OPUS";
                             else if (titleAndDesc.Contains("aac"))
                                 result.Format = "AAC";
+
+                            // Detect language codes present in title or description (e.g. [ENG / M4B])
+                            try
+                            {
+                                var lang = ParseLanguageFromText(result.Title + " " + (description ?? string.Empty));
+                                if (!string.IsNullOrEmpty(lang)) result.Language = lang;
+                            }
+                            catch { /* Non-critical */ }
                         }
 
                         // Extract author from title if possible (common format: "Author - Title")
@@ -1762,6 +1786,58 @@ namespace Listenarr.Api.Services
                 return "AAC";
             else
                 return "MP3"; // Default to MP3
+        }
+
+        /// <summary>
+        /// Parse common language codes from a text block and return a full language name.
+        /// Matches bracketed tokens like "[ENG / M4B]", parenthesized "(ENG)", or standalone tokens with word boundaries.
+        /// Supports both three-letter codes and common two-letter aliases (ENG|EN -> English, DUT|NL -> Dutch, GER|DE -> German, FRE|FR -> French).
+        /// Matching is case-insensitive and conservative to avoid false positives.
+        /// </summary>
+        private string? ParseLanguageFromText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+
+            // Normalize whitespace
+            var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled | RegexOptions.IgnoreCase).Trim();
+
+            // Combined pattern: look for bracketed or parenthesized tokens OR standalone word-boundary tokens
+            // Examples matched: [ENG / M4B], (EN), ENG, EN
+            var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "ENG", "English" }, { "EN", "English" },
+                { "DUT", "Dutch" },    { "NL", "Dutch" },
+                { "GER", "German" },   { "DE", "German" },
+                { "FRE", "French" },   { "FR", "French" }
+            };
+
+            // Build a joined alternation like ENG|EN|DUT|NL|...
+            var alternation = string.Join("|", codes.Keys.Select(Regex.Escape));
+
+            // Bracketed or parenthesis forms: [ ENG / ... ] or (EN)
+            // Use verbatim interpolated string and escape [ and (
+            var bracketedPattern = $@"[\[\(]\s*(?:{alternation})\b"; // starts with [ or ( then code
+
+            // Standalone word boundary pattern: \b(ENG|EN|DUT|NL|...)\b
+            var wordBoundaryPattern = $"\\b(?:{alternation})\\b";
+
+            // Try bracketed/parenthesized first (higher confidence)
+            var bracketMatch = Regex.Match(normalized, bracketedPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            if (bracketMatch.Success)
+            {
+                var code = bracketMatch.Value.TrimStart('[', '(').Trim().Split(' ', '/', ',')[0];
+                if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
+            }
+
+            // Fall back to standalone word match
+            var wordMatch = Regex.Match(normalized, wordBoundaryPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            if (wordMatch.Success)
+            {
+                var code = wordMatch.Value.Trim();
+                if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
+            }
+
+            return null;
         }
 
         private long ExtractSizeFromMyAnonamouseDescription(string? description)

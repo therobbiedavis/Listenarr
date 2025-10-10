@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Listenarr.Api.Models
 {
@@ -87,5 +88,14 @@ namespace Listenarr.Api.Models
         public int PollingIntervalSeconds { get; set; } = 30;
         public bool EnableNotifications { get; set; } = false;
         public List<string> AllowedFileExtensions { get; set; } = new() { ".mp3", ".flac", ".m4a", ".m4b", ".ogg" };
+
+        // Optional admin credentials submitted from the UI when saving settings.
+        // These are NOT mapped to the ApplicationSettings table; they are used to create/update
+        // a User record in the Users table via the ConfigurationService.
+        [NotMapped]
+        public string? AdminUsername { get; set; }
+
+        [NotMapped]
+        public string? AdminPassword { get; set; }
     }
 }

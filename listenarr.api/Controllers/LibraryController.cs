@@ -24,6 +24,8 @@ using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.Linq;
 using System;
+using System.Text.Json;
+using System.Reflection;
 
 namespace Listenarr.Api.Controllers
 {
@@ -354,6 +356,62 @@ namespace Listenarr.Api.Controllers
             });
         }
 
+    [HttpPost("bulk-update")]
+    public async Task<IActionResult> BulkUpdate([FromBody] BulkUpdateRequest request)
+        {
+            if (request.Ids == null || !request.Ids.Any())
+            {
+                return BadRequest(new { message = "No IDs provided for update" });
+            }
+            if (request.Updates == null || !request.Updates.Any())
+            {
+                return BadRequest(new { message = "No updates provided" });
+            }
+
+            var results = new List<object>();
+            foreach (var id in request.Ids)
+            {
+                var audiobook = await _repo.GetByIdAsync(id);
+                if (audiobook == null)
+                {
+                    results.Add(new { id, success = false, error = "Audiobook not found" });
+                    continue;
+                }
+
+                bool anySuccess = false;
+                var errors = new List<string>();
+                foreach (var kvp in request.Updates)
+                {
+                    var prop = typeof(Audiobook).GetProperty(kvp.Key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    if (prop == null || !prop.CanWrite)
+                    {
+                        errors.Add($"Property '{kvp.Key}' not found or not writable");
+                        continue;
+                    }
+                    try
+                    {
+                        var converted = ConvertUpdateValue(kvp.Value, prop.PropertyType);
+                        prop.SetValue(audiobook, converted);
+                        anySuccess = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        var incomingType = kvp.Value?.GetType().FullName ?? "null";
+                        var raw = kvp.Value is JsonElement j ? j.GetRawText() : kvp.Value?.ToString();
+                        var msg = $"Failed to set '{kvp.Key}': {ex.Message} (incomingType={incomingType}, raw={raw})";
+                        errors.Add(msg);
+                        _logger.LogError(ex, "Bulk update conversion error for property {Property} on audiobook {Id}: {Msg}", kvp.Key, id, msg);
+                    }
+                }
+                if (anySuccess)
+                {
+                    await _repo.UpdateAsync(audiobook);
+                }
+                results.Add(new { id, success = anySuccess, errors });
+            }
+            return Ok(new { message = "Bulk update completed", results });
+        }
+
         [HttpPost("{id}/search")]
         public async Task<IActionResult> TriggerAutomaticSearch(int id)
         {
@@ -662,7 +720,74 @@ namespace Listenarr.Api.Controllers
                 return client?.Id ?? string.Empty;
             }
         }
-    }
+
+        // Helper to convert incoming update values (possibly JsonElement or boxed types) to the target property type
+        private static object? ConvertUpdateValue(object? value, Type targetType)
+        {
+            if (value == null)
+            {
+                if (targetType == typeof(string)) return string.Empty;
+                if (targetType.IsValueType) return Activator.CreateInstance(targetType);
+                return null;
+            }
+
+            // Unwrap JsonElement if present (from System.Text.Json)
+            if (value is JsonElement je)
+            {
+                try
+                {
+                    if (je.ValueKind == JsonValueKind.Number && (targetType == typeof(int) || targetType == typeof(int?)))
+                        return je.GetInt32();
+                    if (je.ValueKind == JsonValueKind.Number && targetType == typeof(double))
+                        return je.GetDouble();
+                    if (je.ValueKind == JsonValueKind.True || je.ValueKind == JsonValueKind.False)
+                        return je.GetBoolean();
+                    if (je.ValueKind == JsonValueKind.String)
+                        return je.GetString();
+                    // Fall back to raw string
+                    return je.GetRawText();
+                }
+                catch
+                {
+                    // continue to other conversion attempts
+                }
+            }
+
+            // Handle nullable types
+            var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+            // Enums
+            if (underlying.IsEnum)
+            {
+                if (value is string s)
+                    return Enum.Parse(underlying, s, true);
+                return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying)));
+            }
+
+            // If value already matches
+            if (underlying.IsInstanceOfType(value))
+                return value;
+
+            // Try Convert.ChangeType on primitives
+            try
+            {
+                return Convert.ChangeType(value, underlying);
+            }
+            catch
+            {
+                // Final fallback: attempt parse from string
+                var str = value.ToString();
+                if (underlying == typeof(int) && int.TryParse(str, out var i)) return i;
+                if (underlying == typeof(double) && double.TryParse(str, out var d)) return d;
+                if (underlying == typeof(bool) && bool.TryParse(str, out var b)) return b;
+                if (underlying == typeof(string)) return str;
+            }
+
+            // As a last resort, return the original value
+            return value;
+        }
+
+        }
 
     public class BulkDeleteRequest
     {

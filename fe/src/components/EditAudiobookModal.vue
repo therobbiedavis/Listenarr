@@ -129,8 +129,8 @@ const formData = ref<FormData>({
 const hasChanges = computed(() => {
   if (!props.audiobook) return false
 
-  return formData.value.monitored !== props.audiobook.monitored ||
-         formData.value.qualityProfileId !== props.audiobook.qualityProfileId
+  return formData.value.monitored !== Boolean(props.audiobook.monitored) ||
+    formData.value.qualityProfileId !== (props.audiobook.qualityProfileId || 0)
 })
 
 watch(() => props.isOpen, async (isOpen) => {
@@ -160,7 +160,7 @@ function initializeForm() {
   if (!props.audiobook) return
 
   formData.value = {
-    monitored: props.audiobook.monitored,
+    monitored: Boolean(props.audiobook.monitored),
     qualityProfileId: props.audiobook.qualityProfileId || 0
   }
 }

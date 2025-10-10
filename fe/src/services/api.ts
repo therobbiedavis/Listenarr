@@ -43,7 +43,27 @@ class ApiService {
         'Content-Type': 'application/json',
         ...options.headers,
       },
+      // Include cookies for same-site auth
+      credentials: 'include',
       ...options,
+    }
+
+    // Auto-attach antiforgery token for unsafe HTTP methods when not already provided.
+    try {
+      const method = (config.method || 'GET').toString().toUpperCase()
+      if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+        // Only attach if header not already set
+        const hdrs = config.headers as Record<string, string> | undefined
+        if (!hdrs || !hdrs['X-XSRF-TOKEN']) {
+          const token = await this.fetchAntiforgeryToken()
+          if (token) {
+            config.headers = { ...(config.headers as Record<string, string>), 'X-XSRF-TOKEN': token }
+          }
+        }
+      }
+    } catch (e) {
+      // Swallow errors fetching token; the server will return a clear error if required
+      try { console.debug('[ApiService] failed to fetch CSRF token', e) } catch {}
     }
 
     try {
@@ -56,10 +76,49 @@ class ApiService {
 
       if (!response.ok) {
         const respText = await response.text().catch(() => '')
+
+        // If the server returns 401, redirect to login (don't surface raw 401 errors to the UI)
+        if (response.status === 401) {
+          // Sanitize redirect to avoid open-redirects or unsafe values
+          try {
+            const { normalizeRedirect } = await import('@/utils/redirect')
+            const current = window.location.pathname + window.location.search + window.location.hash
+            const safe = normalizeRedirect(current)
+            if (!current.startsWith('/login')) {
+              if (import.meta.env.DEV) {
+                try { console.debug('[ApiService] 401 received, redirecting to login', { current, safe }) } catch {}
+              }
+              // Try SPA navigation first (lazy import router) to keep SPA state intact
+              try {
+                const routerModule = await import('@/router')
+                // router default export is the router instance
+                const router = (routerModule && (routerModule as any).default) || (routerModule as any)
+                if (router && typeof router.push === 'function') {
+                  // Use raw safe path in query; router will encode it
+                  void router.push({ name: 'login', query: { redirect: safe } })
+                } else {
+                  // fallback to full-page navigation
+                  window.location.href = `/login?redirect=${encodeURIComponent(safe)}`
+                }
+              } catch {
+                // If router import fails for any reason, fallback to full-page navigation
+                window.location.href = `/login?redirect=${encodeURIComponent(safe)}`
+              }
+
+              // stop further processing by throwing a specific error
+              throw new Error('Redirecting to login')
+            }
+          } catch {
+            // fallback to a safe redirect to root
+            window.location.href = '/login?redirect=%2F'
+            throw new Error('Redirecting to login')
+          }
+        }
+
         const err = new Error(`HTTP error! status: ${response.status} - ${respText}`)
-  const typedErr = err as Error & { status?: number; body?: string }
-  typedErr.status = response.status
-  typedErr.body = respText
+        const typedErr = err as Error & { status?: number; body?: string }
+        typedErr.status = response.status
+        typedErr.body = respText
         throw err
       }
 
@@ -226,6 +285,18 @@ class ApiService {
     })
   }
 
+  // Startup configuration (read-only)
+  async getStartupConfig(): Promise<import('@/types').StartupConfig> {
+    return this.request<import('@/types').StartupConfig>('/startupconfig')
+  }
+
+  async saveStartupConfig(config: import('@/types').StartupConfig): Promise<import('@/types').StartupConfig> {
+    return this.request<import('@/types').StartupConfig>('/startupconfig', {
+      method: 'POST',
+      body: JSON.stringify(config)
+    })
+  }
+
   // Amazon ASIN lookup
   async getAsinFromIsbn(isbn: string): Promise<{ success: boolean; asin?: string; error?: string }> {
     return this.request<{ success: boolean; asin?: string; error?: string }>(`/amazon/asin-from-isbn/${encodeURIComponent(isbn)}`)
@@ -278,8 +349,8 @@ class ApiService {
     })
   }
 
-  async bulkUpdateAudiobooks(ids: number[], updates: Record<string, boolean | number | string>): Promise<{ message: string; updatedCount: number }> {
-    return this.request<{ message: string; updatedCount: number }>('/library/bulk-update', {
+  async bulkUpdateAudiobooks(ids: number[], updates: Record<string, boolean | number | string>): Promise<{ message: string; results: Array<{ id: number; success: boolean; errors: string[] }> }> {
+    return this.request<{ message: string; results: Array<{ id: number; success: boolean; errors: string[] }> }>('/library/bulk-update', {
       method: 'POST',
       body: JSON.stringify({ ids, updates })
     })
@@ -520,6 +591,56 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(searchResults)
     })
+  }
+
+  // Antiforgery token for SPA (calls our new /api/antiforgery/token endpoint)
+  async fetchAntiforgeryToken(): Promise<string | null> {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/antiforgery/token`, { method: 'GET', credentials: 'include' })
+      if (!resp.ok) return null
+      const json = await resp.json()
+      return json?.token ?? null
+    } catch {
+      return null
+    }
+  }
+
+  // Account login - expects server to set auth cookie
+  async login(username: string, password: string, rememberMe: boolean, csrfToken?: string): Promise<void> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (csrfToken) headers['X-XSRF-TOKEN'] = csrfToken
+
+    const resp = await fetch(`${API_BASE_URL}/account/login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ username, password, rememberMe })
+    })
+
+    if (resp.status === 429) {
+      const body = await resp.json().catch(() => ({}))
+      const retryAfter = body?.retryAfterSeconds ?? parseInt(resp.headers.get('Retry-After') || '0')
+      const err: any = new Error('Too many login attempts')
+      err.status = 429
+      err.retryAfter = retryAfter
+      throw err
+    }
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '')
+      const err = new Error(`Login failed: ${resp.status} ${txt}`)
+      ;(err as any).status = resp.status
+      throw err
+    }
+  }
+
+  // Current authenticated user (me)
+  async getCurrentUser(): Promise<{ authenticated: boolean; name?: string }> {
+    return this.request<{ authenticated: boolean; name?: string }>('/account/me')
+  }
+
+  async logout(): Promise<void> {
+    await this.request<void>('/account/logout', { method: 'POST' })
   }
 }
 

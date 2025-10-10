@@ -141,21 +141,21 @@
                   </td>
                   <td class="col-score">
                     <div v-if="getResultScore(result.id)" class="score-cell">
-                      <span 
-                        v-if="getResultScore(result.id)?.isRejected"
-                        class="score-badge rejected"
-                        :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
-                      >
-                        <i class="ph ph-x-circle"></i>
-                        Rejected
-                      </span>
-                      <span 
-                        v-else
-                        :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]"
-                        :title="getScoreBreakdownTooltip(getResultScore(result.id))"
-                      >
-                        {{ getResultScore(result.id)?.totalScore }}
-                      </span>
+                      <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
+                        <template #default>
+                          <span 
+                            v-if="getResultScore(result.id)?.isRejected"
+                            class="score-badge rejected"
+                            :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
+                          >
+                            <i class="ph ph-x-circle"></i>
+                            Rejected
+                          </span>
+                          <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
+                            {{ getResultScore(result.id)?.totalScore }}
+                          </span>
+                        </template>
+                      </ScorePopover>
                     </div>
                     <span v-else class="score-badge loading">-</span>
                   </td>
@@ -184,6 +184,8 @@
 import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
 import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
+import { getScoreBreakdownTooltip } from '@/composables/useScore'
+import ScorePopover from '@/components/ScorePopover.vue'
 
 interface Props {
   isOpen: boolean
@@ -196,8 +198,8 @@ const emit = defineEmits<{
   downloaded: [result: SearchResult]
 }>()
 
-const searching = ref(false)
 const results = ref<SearchResult[]>([])
+const searching = ref(false)
 const downloading = ref<Record<string, boolean>>({})
 const searchedIndexers = ref(0)
 const totalIndexers = ref(0)
@@ -213,8 +215,32 @@ watch(() => props.isOpen, (isOpen) => {
 })
 
 const displayResults = computed(() => {
-  // Use frontend-sorted results when sorting by Score, otherwise use backend-sorted results
-  return sortBy.value === 'Score' ? results.value : results.value
+  // When sorting by Score, return a sorted copy derived from `results` so
+  // the view always reflects the desired order even if `results` is later
+  // replaced by the search logic.
+  if (sortBy.value !== 'Score') return results.value
+
+  const asc = sortDirection.value === 'Ascending'
+  const copy = results.value.slice()
+  copy.sort((a, b) => {
+    const qa = qualityScores.value.get(a.id)
+    const qb = qualityScores.value.get(b.id)
+
+    const rejectedA = Boolean(qa?.isRejected)
+    const rejectedB = Boolean(qb?.isRejected)
+    if (rejectedA !== rejectedB) return rejectedA ? 1 : -1
+
+    const hasA = typeof qa?.totalScore === 'number'
+    const hasB = typeof qb?.totalScore === 'number'
+    if (hasA !== hasB) return hasA ? -1 : 1
+    if (!hasA && !hasB) return 0
+
+    const scoreA = qa!.totalScore
+    const scoreB = qb!.totalScore
+    if (scoreA === scoreB) return 0
+    return asc ? (scoreA - scoreB) : (scoreB - scoreA)
+  })
+  return copy
 })
 
 function setSort(column: SearchSortBy | 'Score') {
@@ -247,21 +273,32 @@ function getSortIcon(column: SearchSortBy | 'Score'): string {
 }
 
 function sortFrontendResults() {
-  const direction = sortDirection.value === 'Ascending' ? 1 : -1
-  
+  const ascending = sortDirection.value === 'Ascending'
+
   results.value.sort((a, b) => {
-    const scoreA = getResultScore(a.id)?.totalScore || 0
-    const scoreB = getResultScore(b.id)?.totalScore || 0
-    
-    // Handle rejected items (put them at the end regardless of sort direction)
-    const rejectedA = getResultScore(a.id)?.isRejected || false
-    const rejectedB = getResultScore(b.id)?.isRejected || false
-    
-    if (rejectedA && !rejectedB) return 1  // A rejected, B not → A after B
-    if (!rejectedA && rejectedB) return -1 // A not rejected, B rejected → A before B
-    
-    // Both same rejection status, sort by score
-    return (scoreA - scoreB) * direction
+    const qa = getResultScore(a.id)
+    const qb = getResultScore(b.id)
+
+    const rejectedA = Boolean(qa?.isRejected)
+    const rejectedB = Boolean(qb?.isRejected)
+
+    // Put rejected items at the end always
+    if (rejectedA && !rejectedB) return 1
+    if (!rejectedA && rejectedB) return -1
+
+    // Now handle scored vs unscored: scored items should appear before unscored
+    const hasA = typeof qa?.totalScore === 'number'
+    const hasB = typeof qb?.totalScore === 'number'
+    if (hasA && !hasB) return -1
+    if (!hasA && hasB) return 1
+    if (!hasA && !hasB) return 0
+
+    // Both have numeric scores — compare numerically
+    const scoreA = qa!.totalScore
+    const scoreB = qb!.totalScore
+
+    if (scoreA === scoreB) return 0
+    return ascending ? (scoreA - scoreB) : (scoreB - scoreA)
   })
 }
 
@@ -333,7 +370,12 @@ async function search() {
       })
     }
     
-    results.value = allResults
+    // Deduplicate results by id (multiple indexers can return the same release)
+    const seen = new Map<string, SearchResult>()
+    for (const r of allResults) {
+      if (!seen.has(r.id)) seen.set(r.id, r)
+    }
+    results.value = Array.from(seen.values())
     
     // Load quality profile and score results (always needed for Score column or display)
     await loadQualityProfileAndScore()
@@ -515,40 +557,7 @@ function getScoreClass(score: number): string {
   return 'poor'
 }
 
-function getScoreBreakdownTooltip(score: QualityScore | undefined): string {
-  if (!score) return 'Score not available'
-  
-  const breakdown = score.scoreBreakdown
-  const parts: string[] = []
-  
-  // Add total score
-  parts.push(`Total Score: ${score.totalScore}`)
-  
-  // Add breakdown details
-  if (breakdown.Quality !== undefined) {
-    parts.push(`Quality: ${breakdown.Quality}`)
-  }
-  if (breakdown.Format !== undefined) {
-    parts.push(`Format: ${breakdown.Format}`)
-  }
-  if (breakdown.PreferredWords !== undefined) {
-    parts.push(`Preferred Words: ${breakdown.PreferredWords}`)
-  }
-  if (breakdown.Language !== undefined) {
-    parts.push(`Language: ${breakdown.Language}`)
-  }
-  if (breakdown.Seeders !== undefined) {
-    parts.push(`Seeders: ${breakdown.Seeders}`)
-  }
-  if (breakdown.Age !== undefined) {
-    parts.push(`Age: ${breakdown.Age}`)
-  }
-  if (breakdown.Size !== undefined) {
-    parts.push(`Size: ${breakdown.Size}`)
-  }
-  
-  return parts.join('\n')
-}
+// useScore composable provides getScoreBreakdownTooltip
 </script>
 
 <style scoped>

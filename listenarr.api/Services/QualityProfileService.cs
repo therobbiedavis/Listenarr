@@ -226,6 +226,13 @@ namespace Listenarr.Api.Services
                 return false;
             }
 
+            // Check if this is the default profile
+            if (profile.IsDefault)
+            {
+                throw new InvalidOperationException(
+                    "Cannot delete the default quality profile. Please set another profile as default first.");
+            }
+
             // Check if any audiobooks are using this profile
             var audiobooksCount = await _dbContext.Audiobooks
                 .CountAsync(a => a.QualityProfileId == id);
@@ -263,126 +270,313 @@ namespace Listenarr.Api.Services
             var score = new QualityScore
             {
                 SearchResult = searchResult,
-                TotalScore = 0,
+                TotalScore = 100, // start at 100
                 ScoreBreakdown = new Dictionary<string, int>(),
                 RejectionReasons = new List<string>()
             };
 
-            // Check must-not-contain words (instant rejection)
+            // Instant rejection: must-not-contain (forbidden words)
             foreach (var forbidden in profile.MustNotContain)
             {
-                if (!string.IsNullOrEmpty(forbidden) && 
+                if (!string.IsNullOrEmpty(forbidden) &&
                     searchResult.Title.Contains(forbidden, StringComparison.OrdinalIgnoreCase))
                 {
-                    score.RejectionReasons.Add($"Contains forbidden word: '{forbidden}'");
-                    score.TotalScore = -99999; // Ensure rejected results always sort last
-                    return Task.FromResult(score);
+                        score.RejectionReasons.Add($"Contains forbidden word: '{forbidden}'");
+                        score.TotalScore = -1; // negative value to indicate rejection (lowest)
+                        return Task.FromResult(score);
                 }
             }
 
-            // Check must-contain words (instant rejection if not found)
+            // Instant rejection: required words not present
             foreach (var required in profile.MustContain)
             {
-                if (!string.IsNullOrEmpty(required) && 
+                if (!string.IsNullOrEmpty(required) &&
                     !searchResult.Title.Contains(required, StringComparison.OrdinalIgnoreCase))
                 {
                     score.RejectionReasons.Add($"Missing required word: '{required}'");
-                    score.TotalScore = -99999; // Ensure rejected results always sort last
+                    score.TotalScore = -1;
                     return Task.FromResult(score);
                 }
             }
 
-            // Check size limits (only if size is known)
+            // Size checks: reject if outside hard limits
             if (searchResult.Size > 0)
             {
                 if (profile.MinimumSize > 0 && searchResult.Size < profile.MinimumSize * 1024 * 1024)
                 {
                     score.RejectionReasons.Add($"File too small (< {profile.MinimumSize} MB)");
-                    score.TotalScore = -99999; // Ensure rejected results always sort last
+                    score.TotalScore = -1;
                     return Task.FromResult(score);
                 }
 
                 if (profile.MaximumSize > 0 && searchResult.Size > profile.MaximumSize * 1024 * 1024)
                 {
                     score.RejectionReasons.Add($"File too large (> {profile.MaximumSize} MB)");
-                    score.TotalScore = -99999; // Ensure rejected results always sort last
+                    score.TotalScore = -1;
                     return Task.FromResult(score);
                 }
             }
 
-            // Check seeders for torrents
+            // Seeders hard requirement for torrents
             if (searchResult.DownloadType == "torrent" && searchResult.Seeders < profile.MinimumSeeders)
             {
                 score.RejectionReasons.Add($"Not enough seeders ({searchResult.Seeders} < {profile.MinimumSeeders})");
-                score.TotalScore = -99999; // Ensure rejected results always sort last
+                score.TotalScore = -1;
                 return Task.FromResult(score);
             }
 
-            // Check age limit
-            if (profile.MaximumAge > 0 && searchResult.PublishedDate != default(DateTime))
+            // Age hard limit
+            double ageDays = 0;
+            if (searchResult.PublishedDate != default(DateTime))
             {
-                var age = (DateTime.UtcNow - searchResult.PublishedDate).TotalDays;
-                if (age > profile.MaximumAge)
+                ageDays = (DateTime.UtcNow - searchResult.PublishedDate).TotalDays;
+                if (profile.MaximumAge > 0 && ageDays > profile.MaximumAge)
                 {
-                    score.RejectionReasons.Add($"Too old ({(int)age} days > {profile.MaximumAge} days)");
-                    score.TotalScore = -99999; // Ensure rejected results always sort last
+                    score.RejectionReasons.Add($"Too old ({(int)ageDays} days > {profile.MaximumAge} days)");
+                    score.TotalScore = -1;
                     return Task.FromResult(score);
                 }
             }
 
-            // Penalize unknown size when size requirements exist
+            // Unknown size penalty (when profile has size requirements)
             if (searchResult.Size <= 0 && (profile.MinimumSize > 0 || profile.MaximumSize > 0))
             {
-                var sizePenalty = -20; // Significant penalty for unknown size
+                var sizePenalty = -20;
                 score.TotalScore += sizePenalty;
                 score.ScoreBreakdown["Size"] = sizePenalty;
             }
 
-            // Score quality using the same logic as manual search
-            int qualityScore = GetQualityScore(searchResult.Quality);
-            score.TotalScore += qualityScore;
-            score.ScoreBreakdown["Quality"] = qualityScore;
-            _logger.LogDebug("Quality scored using GetQualityScore: SearchResult.Quality='{SearchQuality}' => {Score}", searchResult.Quality, qualityScore);
-
-            // Optionally, you can still reject if the quality is not allowed by the profile
-            if (!string.IsNullOrEmpty(searchResult.Quality))
+            // Language: missing or mismatched
+            if (string.IsNullOrEmpty(searchResult.Language) && profile.PreferredLanguages != null && profile.PreferredLanguages.Count > 0)
             {
-                var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => q.Quality.ToLower()).ToList();
-                if (!allowedQualities.Any(q => searchResult.Quality.ToLower().Contains(q)))
+                var langPenalty = -10;
+                score.TotalScore += langPenalty;
+                score.ScoreBreakdown["Language"] = langPenalty;
+            }
+            else if (!string.IsNullOrEmpty(searchResult.Language) && profile.PreferredLanguages != null && profile.PreferredLanguages.Count > 0)
+            {
+                var matches = profile.PreferredLanguages.Any(l => searchResult.Language.Equals(l, StringComparison.OrdinalIgnoreCase));
+                if (!matches)
                 {
-                    score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
+                    var langMismatchPenalty = -15;
+                    score.TotalScore += langMismatchPenalty;
+                    score.ScoreBreakdown["LanguageMismatch"] = langMismatchPenalty;
                 }
             }
-            // Ensure non-rejected results never have negative scores
-            score.TotalScore = Math.Max(0, score.TotalScore);
+
+            // Format: missing or mismatched
+            if (string.IsNullOrEmpty(searchResult.Format) && profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
+            {
+                var formatPenalty = -8;
+                score.TotalScore += formatPenalty;
+                score.ScoreBreakdown["Format"] = formatPenalty;
+            }
+            else if (!string.IsNullOrEmpty(searchResult.Format) && profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
+            {
+                // Make format matching more robust:
+                // - Check if any preferred token appears in the reported format string
+                // - Or appears in the detected quality token (e.g. Quality="M4B")
+                // - Or appears as a file extension or token in the torrent/DDL URL or source
+                var formatMatches = false;
+                var formatLower = searchResult.Format.ToLower();
+                var qualityLower = (searchResult.Quality ?? string.Empty).ToLower();
+                var urlLower = (searchResult.TorrentUrl ?? searchResult.Source ?? string.Empty).ToLower();
+
+                foreach (var f in profile.PreferredFormats)
+                {
+                    if (string.IsNullOrWhiteSpace(f)) continue;
+                    var token = f.ToLower().Trim();
+
+                    if (formatLower.Contains(token) || qualityLower.Contains(token))
+                    {
+                        formatMatches = true;
+                        if (formatLower.Contains(token))
+                        {
+                            score.ScoreBreakdown["FormatMatchedInFormat"] = 1;
+                            score.TotalScore += 1; // credit for matching format
+                        }
+                        if (qualityLower.Contains(token))
+                        {
+                            score.ScoreBreakdown["FormatMatchedInQuality"] = 1;
+                            score.TotalScore += 1; // credit for matching quality token
+                        }
+                        break;
+                    }
+
+                    // check url for ".{token}" extension or token inside url (e.g., ".m4b" or "m4b")
+                    if (!string.IsNullOrEmpty(urlLower) && (urlLower.Contains("." + token) || urlLower.Contains(token)))
+                    {
+                        formatMatches = true;
+                        score.ScoreBreakdown["FormatMatchedInUrl"] = 1;
+                        score.TotalScore += 1; // credit for matching token in URL/source
+                        break;
+                    }
+                }
+
+                if (!formatMatches)
+                {
+                    var formatMismatchPenalty = -12;
+                    score.TotalScore += formatMismatchPenalty;
+                    score.ScoreBreakdown["FormatMismatch"] = formatMismatchPenalty;
+                }
+            }
+
+            // Quality: if missing, apply flat penalty; else deduct based on distance from perfect
+            if (string.IsNullOrEmpty(searchResult.Quality))
+            {
+                var missingQualityPenalty = -25;
+                score.TotalScore += missingQualityPenalty;
+                score.ScoreBreakdown["QualityMissing"] = missingQualityPenalty;
+            }
+            else
+            {
+                int qualityScore = GetQualityScore(searchResult.Quality);
+                var qualityDeduction = 100 - qualityScore; // how far from perfect
+                score.TotalScore -= qualityDeduction;
+                // Record the raw quality score (positive) so callers can reason about "what quality was detected"
+                score.ScoreBreakdown["Quality"] = qualityScore;
+                _logger.LogDebug("Quality scored using GetQualityScore: SearchResult.Quality='{SearchQuality}' => {Score}", searchResult.Quality, qualityScore);
+
+                // If quality not allowed by profile, add a deduction note (but don't auto-reject here)
+                if (profile.Qualities != null && profile.Qualities.Count > 0)
+                {
+                    var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => q.Quality.ToLower()).ToList();
+                    // Match allowed qualities robustly: either the search quality contains a known allowed token
+                    // or an allowed quality string contains the detected quality token (handles numeric-only tokens like "320").
+                    var detectedQualityLower = searchResult.Quality.ToLower();
+                    if (!allowedQualities.Any(q => detectedQualityLower.Contains(q) || q.Contains(detectedQualityLower)))
+                {
+                    var notAllowedPenalty = -20;
+                    score.TotalScore += notAllowedPenalty; // deduct further
+                    score.ScoreBreakdown["QualityNotAllowed"] = notAllowedPenalty;
+                    score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
+                }
+                }
+            }
+
+            // Preferred words: small bonus per preferred word found
+            if (profile.PreferredWords != null && profile.PreferredWords.Count > 0)
+            {
+                var bonus = 0;
+                foreach (var word in profile.PreferredWords)
+                {
+                    if (!string.IsNullOrWhiteSpace(word) && searchResult.Title.Contains(word, StringComparison.OrdinalIgnoreCase))
+                    {
+                        bonus += 5;
+                    }
+                }
+                if (bonus != 0)
+                {
+                    score.TotalScore += bonus;
+                    score.ScoreBreakdown["PreferredWords"] = bonus;
+                }
+            }
+
+            // Seeders small bonus
+            if (searchResult.Seeders > 0)
+            {
+                var seedersBonus = Math.Min(10, searchResult.Seeders);
+                if (seedersBonus > 0)
+                {
+                    score.TotalScore += seedersBonus;
+                    score.ScoreBreakdown["Seeders"] = seedersBonus;
+                }
+            }
+
+            // Age penalty: 2 points per month (30 days), capped at 60
+            if (ageDays > 0)
+            {
+                var agePenalty = (int)Math.Floor(ageDays / 30.0) * 2;
+                agePenalty = Math.Min(agePenalty, 60);
+                if (agePenalty > 0)
+                {
+                    score.TotalScore -= agePenalty;
+                    score.ScoreBreakdown["Age"] = -agePenalty;
+                }
+            }
+
+            // If the computed total is less than or equal to zero, treat this as a rejection
+            // but keep the ScoreBreakdown so the UI can still display the tooltip details.
+            if (score.TotalScore <= 0)
+            {
+                score.RejectionReasons.Add("Computed score <= 0 (rejected)");
+                // Keep the numeric TotalScore (may be <= 0) so the UI can display the computed value.
+                // Sorting will ensure rejected items appear last.
+                return Task.FromResult(score);
+            }
+
+            // Clamp final score between 0 and 100 for non-rejected results
+            // Clamp final score between 0 and 100 for non-rejected results
+            if (!score.IsRejected)
+            {
+                score.TotalScore = Math.Clamp(score.TotalScore, 0, 100);
+            }
             return Task.FromResult(score);
         }
 
     // Manual search scoring logic for quality
-    private int GetQualityScore(string? quality)
-    {
-        if (string.IsNullOrEmpty(quality))
-            return 0;
+        private int GetQualityScore(string? quality)
+        {
+            if (string.IsNullOrEmpty(quality))
+                return 0;
 
-        var lowerQuality = quality.ToLower();
+            var lowerQuality = quality.ToLower();
 
-        if (lowerQuality.Contains("flac"))
-            return 100;
-        else if (lowerQuality.Contains("m4b"))
-            return 90;
-        else if (lowerQuality.Contains("320"))
-            return 80;
-        else if (lowerQuality.Contains("256"))
-            return 70;
-        else if (lowerQuality.Contains("192"))
-            return 60;
-        else if (lowerQuality.Contains("128"))
-            return 50;
-        else if (lowerQuality.Contains("64"))
-            return 40;
-        else
+            // Highest quality
+            if (lowerQuality.Contains("flac"))
+                return 100;
+
+            // Audible format (AAX) - high quality
+            if (lowerQuality.Contains("aax"))
+                return 95;
+
+            // Container formats
+            if (lowerQuality.Contains("m4b"))
+                return 90;
+
+            // Modern efficient codecs
+            if (lowerQuality.Contains("opus"))
+                return 85;
+
+            // VBR quality presets (LAME VBR presets like V0/V1/V2)
+            if (lowerQuality.Contains("v0") || lowerQuality.Contains("-v0") || lowerQuality.Contains(" v0") )
+                return 82;
+            if (lowerQuality.Contains("v1") || lowerQuality.Contains("-v1") || lowerQuality.Contains(" v1"))
+                return 76;
+            if (lowerQuality.Contains("v2") || lowerQuality.Contains("-v2") || lowerQuality.Contains(" v2"))
+                return 70;
+
+
+            // AAC / M4A (check before numeric bitrates to prefer codec score for e.g. "AAC 256")
+            if (lowerQuality.Contains("aac") || lowerQuality.Contains("m4a"))
+                return 78;
+
+            // Explicit numeric bitrates
+            if (lowerQuality.Contains("320"))
+                return 80;
+            if (lowerQuality.Contains("256"))
+                return 74;
+            if (lowerQuality.Contains("192"))
+                return 60;
+
+            // VBR / CBR generic tokens (treat as mid-range if no numeric bitrate provided)
+            if (lowerQuality.Contains("vbr") || lowerQuality.Contains("cbr"))
+            {
+                // If there's an explicit numeric bitrate elsewhere, that will have matched above.
+                return 65;
+            }
+
+            // Generic MP3 mention without explicit bitrate -> mid-range
+            if (lowerQuality.Contains("mp3") && !lowerQuality.Contains("64") && !lowerQuality.Contains("128") && !lowerQuality.Contains("192") && !lowerQuality.Contains("256") && !lowerQuality.Contains("320"))
+                return 65;
+
+            if (lowerQuality.Contains("128"))
+                return 50;
+            if (lowerQuality.Contains("64"))
+                return 40;
+
             return 0;
-    }
+        }
 
 
 
@@ -396,7 +590,11 @@ namespace Listenarr.Api.Services
                 scores.Add(score);
             }
 
-            return scores.OrderByDescending(s => s.TotalScore).ToList();
+            // Ensure rejected results are ordered last regardless of numeric TotalScore
+            return scores
+                .OrderBy(s => s.IsRejected) // false (not rejected) first
+                .ThenByDescending(s => s.TotalScore)
+                .ToList();
         }
     }
 }

@@ -211,7 +211,7 @@ const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 
-const audiobooks = computed(() => libraryStore.audiobooks)
+  const audiobooks = computed(() => libraryStore.audiobooks || [])
 const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
@@ -284,10 +284,10 @@ async function loadQualityProfiles() {
   }
 }
 
-function getQualityProfileName(profileId?: number): string | null {
+  function getQualityProfileName(profileId?: number): string | null {
   if (!profileId) return null
   const profile = qualityProfiles.value.find(p => p.id === profileId)
-  return profile?.name || null
+  return profile?.name ?? null
 }
 
 function navigateToDetail(id: number) {
@@ -380,7 +380,9 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
     // Clear current selection and select the range
     libraryStore.clearSelection()
     for (let i = startIndex; i <= endIndex; i++) {
-      libraryStore.toggleSelection(audiobooks.value[i].id)
+      const book = audiobooks.value[i]
+      if (!book) continue
+      libraryStore.toggleSelection(book.id)
     }
   } else {
     // Regular click: toggle selection

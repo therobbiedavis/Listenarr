@@ -20,7 +20,7 @@
           </p>
         </div>
 
-        <form @submit.prevent="handleSave" class="edit-form">
+  <form @submit.prevent="handleSave" class="edit-form">
           <!-- Monitored Status -->
           <div class="form-group">
             <label class="form-label">
@@ -127,6 +127,23 @@
             </button>
           </div>
         </form>
+
+        <div v-if="showResults" class="results-section">
+          <h4>Bulk Update Results</h4>
+          <p>{{ results.filter(r => r.success).length }} succeeded, {{ results.filter(r => !r.success).length }} failed</p>
+
+          <div class="results-list">
+            <div v-for="res in results" :key="res.id" class="result-item">
+              <div class="result-header">
+                <strong>Audiobook ID {{ res.id }}</strong>
+                <span class="status" :class="{ success: res.success, error: !res.success }">{{ res.success ? 'Success' : 'Failed' }}</span>
+              </div>
+              <ul v-if="res.errors && res.errors.length > 0" class="error-list">
+                <li v-for="(err, idx) in res.errors" :key="idx">{{ err }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -135,6 +152,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
+import { useNotification } from '@/composables/useNotification'
 import type { QualityProfile } from '@/types'
 
 interface Props {
@@ -158,6 +176,8 @@ const emit = defineEmits<{
 const qualityProfiles = ref<QualityProfile[]>([])
 const rootFolders = ref<string[]>([])
 const saving = ref(false)
+const results = ref<Array<{ id: number; success: boolean; errors: string[] }>>([])
+const showResults = ref(false)
 
 const formData = ref<FormData>({
   monitored: null,
@@ -170,6 +190,8 @@ const hasChanges = computed(() => {
          formData.value.qualityProfileId !== null ||
          formData.value.rootFolder !== null
 })
+
+const { success, error: showError } = useNotification()
 
 watch(() => props.isOpen, async (isOpen) => {
   if (isOpen) {
@@ -240,11 +262,19 @@ async function handleSave() {
       // ignore logging errors in non-browser envs
     }
     
-    // Call bulk update API
-    await apiService.bulkUpdateAudiobooks(ids, updates)
-    
-    emit('saved')
-    close()
+  // Call bulk update API
+  const resp = await apiService.bulkUpdateAudiobooks(ids, updates)
+
+  // Save per-id results for display
+  results.value = resp.results || []
+  showResults.value = true
+
+  // Count successes
+  const successCount = results.value.filter(r => r.success).length
+  success(`Updated ${successCount} of ${results.value.length} audiobook(s)`)
+
+  // Notify parent and leave modal open so user can review results
+  emit('saved')
   } catch (error){
     // Enhanced error logging so browser console shows more details
     try {
@@ -260,13 +290,33 @@ async function handleSave() {
       console.error('Failed to save bulk edits (minimal):', error)
     }
 
-    alert('Failed to save changes. Please try again.')
+    // Try to extract a readable message from the API error
+    let message = 'Failed to save changes. Please try again.'
+    try {
+      const err = error as Error & { body?: string }
+      if (err.body) {
+        try {
+          const parsed = JSON.parse(err.body)
+          if (parsed && parsed.message) message = parsed.message
+        } catch {
+          message = err.body
+        }
+      } else if (err.message) {
+        message = err.message
+      }
+    } catch {
+      // fallback
+    }
+    showError(message)
   } finally {
     saving.value = false
   }
 }
 
 function close() {
+  // Reset results when closing
+  results.value = []
+  showResults.value = false
   emit('close')
 }
 </script>
@@ -337,6 +387,49 @@ function close() {
   padding: 2rem;
   overflow-y: auto;
   flex: 1;
+}
+
+.results-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+}
+
+.results-list {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.result-item {
+  padding: 0.75rem;
+  background: #1a1a1a;
+  border: 1px solid #2e2e2e;
+  border-radius: 4px;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.status.success {
+  color: #4caf50;
+}
+
+.status.error {
+  color: #f44336;
+}
+
+.error-list {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.25rem;
+  color: #f44336;
 }
 
 .info-section {
