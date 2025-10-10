@@ -160,6 +160,20 @@ builder.Services.AddAntiforgery(options =>
     options.HeaderName = "X-XSRF-TOKEN";
 });
 
+// During local development we often run the frontend on a different port via Vite
+// and use plain HTTP. Ensure antiforgery cookie can be set in that scenario by
+// relaxing the SecurePolicy and SameSite settings when running in Development.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddAntiforgery(options =>
+    {
+        options.HeaderName = "X-XSRF-TOKEN";
+        // Allow the antiforgery cookie to be sent over plain HTTP during local dev
+        options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+    });
+}
+
 var app = builder.Build();
 
 // Ensure database is created and migrations are applied
@@ -207,6 +221,8 @@ else
 }
     // Enable authentication middleware
     app.UseAuthentication();
+    // API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
+    app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
     // Enforce authentication based on startup config
     app.UseMiddleware<AuthenticationEnforcerMiddleware>();
     // Validate antiforgery tokens for unsafe methods

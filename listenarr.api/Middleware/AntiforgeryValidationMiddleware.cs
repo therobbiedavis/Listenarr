@@ -34,7 +34,7 @@ namespace Listenarr.Api.Middleware
 
                 // Allow some public endpoints without antiforgery (startup config reads, token request itself, login/register)
                 var path = context.Request.Path.Value ?? string.Empty;
-                if (path.StartsWith("/api/antiforgery") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register") || path.StartsWith("/api/startupconfig"))
+                if (path.StartsWith("/api/antiforgery") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register") || path.StartsWith("/api/account/logout") || path.StartsWith("/api/startupconfig"))
                 {
                     await _next(context);
                     return;

@@ -10,7 +10,9 @@ export let fetchCount = 0
 
 export async function getStartupConfigCached(ttlMs = 5000): Promise<StartupConfig | null> {
   const now = Date.now()
-  if (_cache && (now - _cacheTs) <= ttlMs) return _cache
+  // If we have a recent cached value (even if it's null from a previous failed fetch),
+  // return it to avoid repeated immediate retries.
+  if (_cacheTs !== 0 && (now - _cacheTs) <= ttlMs) return _cache
 
   if (!_inflight) {
     fetchCount++
@@ -21,7 +23,10 @@ export async function getStartupConfigCached(ttlMs = 5000): Promise<StartupConfi
         return cfg
       })
       .catch(() => {
-        // swallow; leave cache as-is
+        // On error (including 401 unauthorized), cache the null result for the TTL
+        // so we don't immediately hammer the backend with repeated requests.
+        _cache = null
+        _cacheTs = Date.now()
         return null
       })
       .finally(() => { _inflight = null })

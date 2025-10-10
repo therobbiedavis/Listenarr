@@ -714,7 +714,7 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting qBittorrent queue");
+                _logger.LogWarning(ex, "Error getting qBittorrent queue - client may be unreachable");
             }
 
             return items;

@@ -21,6 +21,7 @@ import type {
   SearchSortDirection,
   AudibleBookMetadata
 } from '@/types'
+import { getStartupConfigCached } from './startupConfigCache'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
 // In production, use the configured API base URL
@@ -30,6 +31,8 @@ const API_BASE_URL = import.meta.env.DEV
 const BACKEND_BASE_URL = import.meta.env.DEV
   ? ''
   : API_BASE_URL.replace('/api', '')
+
+type ErrorWithStatus = Error & { status?: number; body?: string; retryAfter?: number }
 
 class ApiService {
   private async request<T>(
@@ -47,6 +50,16 @@ class ApiService {
       credentials: 'include',
       ...options,
     }
+
+    // Attach API key from startup config if present (cached call)
+    try {
+      const sc = await getStartupConfigCached(2000)
+      const apiKey = sc?.apiKey
+      if (apiKey) {
+        const hdrs = config.headers as Record<string, string> | undefined
+        config.headers = { ...(hdrs || {}), 'X-Api-Key': apiKey }
+      }
+    } catch {}
 
     // Auto-attach antiforgery token for unsafe HTTP methods when not already provided.
     try {
@@ -79,6 +92,16 @@ class ApiService {
 
         // If the server returns 401, redirect to login (don't surface raw 401 errors to the UI)
         if (response.status === 401) {
+          // Avoid causing a SPA redirect loop when the app is trying to fetch
+          // the startup configuration during router boot. Let callers (router/auth)
+          // handle 401 for that specific endpoint instead of performing a navigation
+          // here which can trigger nested navigation during beforeEach.
+          if (endpoint && endpoint.startsWith('/configuration/startupconfig')) {
+            const err = new Error(`HTTP error! status: 401 - ${respText}`) as ErrorWithStatus
+            err.status = 401
+            err.body = respText
+            throw err
+          }
           // Sanitize redirect to avoid open-redirects or unsafe values
           try {
             const { normalizeRedirect } = await import('@/utils/redirect')
@@ -92,7 +115,8 @@ class ApiService {
               try {
                 const routerModule = await import('@/router')
                 // router default export is the router instance
-                const router = (routerModule && (routerModule as any).default) || (routerModule as any)
+                const router = (routerModule && (routerModule as unknown as { default?: { push?: (to: unknown) => Promise<void> } }).default)
+                  || (routerModule as unknown as { push?: (to: unknown) => Promise<void> })
                 if (router && typeof router.push === 'function') {
                   // Use raw safe path in query; router will encode it
                   void router.push({ name: 'login', query: { redirect: safe } })
@@ -287,7 +311,17 @@ class ApiService {
 
   // Startup configuration (read + write) — backend exposes under /configuration/startupconfig
   async getStartupConfig(): Promise<import('@/types').StartupConfig> {
-    return this.request<import('@/types').StartupConfig>('/configuration/startupconfig')
+    // Make a direct fetch here to avoid calling `request()` which itself uses
+    // `getStartupConfigCached()` (would cause a recursion / loop).
+    const resp = await fetch(`${API_BASE_URL}/configuration/startupconfig`, { method: 'GET', credentials: 'include' })
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '')
+      const err = new Error(`Startup config fetch failed: ${resp.status} ${txt}`) as ErrorWithStatus
+      err.status = resp.status
+      throw err
+    }
+    const json = await resp.json().catch(() => null)
+    return json as import('@/types').StartupConfig
   }
 
   async saveStartupConfig(config: import('@/types').StartupConfig): Promise<import('@/types').StartupConfig> {
@@ -295,6 +329,11 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(config)
     })
+  }
+
+  // Regenerate server-side API key. Returns the new API key in the response.
+  async regenerateApiKey(): Promise<{ apiKey: string }> {
+    return this.request<{ apiKey: string }>('/configuration/apikey/regenerate', { method: 'POST' })
   }
 
   // Amazon ASIN lookup
@@ -620,7 +659,7 @@ class ApiService {
     if (resp.status === 429) {
       const body = await resp.json().catch(() => ({}))
       const retryAfter = body?.retryAfterSeconds ?? parseInt(resp.headers.get('Retry-After') || '0')
-      const err: any = new Error('Too many login attempts')
+      const err: ErrorWithStatus = new Error('Too many login attempts');
       err.status = 429
       err.retryAfter = retryAfter
       throw err
@@ -628,8 +667,8 @@ class ApiService {
 
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '')
-      const err = new Error(`Login failed: ${resp.status} ${txt}`)
-      ;(err as any).status = resp.status
+      const err = new Error(`Login failed: ${resp.status} ${txt}`);
+      (err as ErrorWithStatus).status = resp.status
       throw err
     }
   }

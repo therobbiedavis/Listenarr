@@ -1,8 +1,8 @@
-﻿// See https://aka.ms/new-console-template for more information
+// See https://aka.ms/new-console-template for more information
 using System;
 using Microsoft.Data.Sqlite;
 
-partial class Program
+class QueryUsersProgram
 {
     static void Main()
     {

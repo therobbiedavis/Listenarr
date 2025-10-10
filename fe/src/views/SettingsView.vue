@@ -551,12 +551,44 @@
                 <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" class="admin-input" />
                 <div class="password-field">
                   <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="Admin password (optional)" class="admin-input password-input" />
-                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="String(showPassword)" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
                     <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
                   </button>
                 </div>
               </div>
               <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
+            </div>
+
+            <div class="form-group">
+              <label>API Key (Server)</label>
+              <div class="api-key-row input-group">
+                <input type="text" :value="startupConfig?.apiKey || ''" disabled class="api-key-input input-group-input" />
+                <div class="input-group-append">
+                  <button
+                    type="button"
+                    class="icon-button input-group-btn"
+                    :class="{ 'copied': copiedApiKey }"
+                    @click="copyApiKey"
+                    :disabled="!startupConfig?.apiKey"
+                    title="Copy API key"
+                  >
+                    <i v-if="copiedApiKey" class="ph ph-check"></i>
+                    <i v-else class="ph ph-files"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="regenerate-button input-group-btn"
+                    @click="regenerateApiKey"
+                    :disabled="loadingApiKey"
+                    title="Regenerate API key"
+                  >
+                    <i v-if="loadingApiKey" class="ph ph-spinner ph-spin"></i>
+                    <i v-else class="ph ph-arrow-counter-clockwise"></i>
+                    <span v-if="!loadingApiKey">Regenerate</span>
+                  </button>
+                </div>
+              </div>
+              <span class="form-help">An API key can be used to authenticate sensitive API calls from trusted clients. Keep it secret. Regenerating will replace the existing key.</span>
             </div>
           </div>
         </div>
@@ -743,6 +775,45 @@ const editingIndexer = ref<Indexer | null>(null)
 const editingQualityProfile = ref<QualityProfile | null>(null)
 const settings = ref<ApplicationSettings | null>(null)
 const startupConfig = ref<import('@/types').StartupConfig | null>(null)
+const loadingApiKey = ref(false)
+const copiedApiKey = ref(false)
+
+const copyApiKey = async () => {
+  const key = startupConfig.value?.apiKey
+  if (!key) return
+  try {
+    await navigator.clipboard.writeText(key)
+    copiedApiKey.value = true
+    setTimeout(() => {
+      copiedApiKey.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy API key', err)
+    // Could show error notification here if needed
+  }
+}
+
+const regenerateApiKey = async () => {
+  if (!confirm('Regenerating the API key will immediately invalidate the existing key. Continue?')) return
+  loadingApiKey.value = true
+  try {
+    const resp = await apiService.regenerateApiKey()
+    startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
+    info('API key regenerated - copied to clipboard')
+    try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
+  } catch (err) {
+    console.error('Failed to regenerate API key', err)
+    // If server returns 401/403, suggest logging in as admin
+    const status = (err && typeof err === 'object' && err !== null && 'status' in err) ? (err as { status: number }).status : 0
+    if (status === 401 || status === 403) {
+      showError('You must be logged in as an administrator to regenerate the API key. Please login and try again.')
+    } else {
+      showError('Failed to regenerate API key')
+    }
+  } finally {
+    loadingApiKey.value = false
+  }
+}
 const authEnabled = ref(false)
 const indexers = ref<Indexer[]>([])
 const qualityProfiles = ref<QualityProfile[]>([])
@@ -1628,6 +1699,97 @@ onMounted(async () => {
 
 .password-toggle:hover {
   color: #fff;
+}
+
+.api-key-row {
+  display: flex;
+  align-items: center;
+}
+
+.form-group input[type="text"].api-key-input {
+  flex: 1;
+  padding: 0.5rem;
+  background: #222;
+  border-top: 1px solid #555;
+  border-right: none;
+  border-bottom: 1px solid #555;
+  border-left: 1px solid #555;
+  color: #ddd;
+  border-radius: 4px 0 0 4px;
+}
+
+.api-key-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.input-group-btn.regenerate-button {
+  background:#e74c3c;
+  color: white;
+  border: none;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+}
+
+.input-group-btn.regenerate-button:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+/* Input group styling for API key */
+.input-group {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #333;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.input-group-input {
+  border: none;
+  border-radius: 0;
+  flex: 1;
+  background: #222;
+  color: #ddd;
+  padding: 0.5rem;
+}
+.input-group-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(0, 122, 204, 0.5);
+}
+.input-group-append {
+  display: flex;
+  background: #2a2a2a;
+  border-top: 1px solid #555;
+  border-right: 1px solid #555;
+  border-bottom: 1px solid #555;
+  border-left: none;
+  color: #ddd;
+  border-radius: 0 4px 4px 0;
+}
+.input-group-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #ddd;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.input-group-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+.input-group-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.input-group-btn.copied {
+  background: #4caf50 !important;
+  color: white;
+}
+.input-group-btn.copied:hover {
+  background: #45a049 !important;
 }
 
 .modal-overlay {
