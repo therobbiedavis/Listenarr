@@ -46,6 +46,8 @@ export interface Download {
   errorMessage?: string
   downloadClientId: string
   metadata: Record<string, unknown>
+  // Optional link to an audiobook record when the download was queued for a specific audiobook
+  audiobookId?: number
 }
 
 export interface QueueItem {
@@ -211,6 +213,18 @@ export interface Audiobook {
   monitored?: boolean
   filePath?: string
   fileSize?: number
+  files?: {
+    id: number
+    path?: string
+    size?: number
+    durationSeconds?: number
+    format?: string
+    bitrate?: number
+    sampleRate?: number
+    channels?: number
+    createdAt?: string
+    source?: string
+  }[]
   quality?: string
   qualityProfileId?: number
 }

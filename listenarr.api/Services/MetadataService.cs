@@ -25,12 +25,14 @@ namespace Listenarr.Api.Services
     {
         private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
+        private readonly IFfmpegService _ffmpegService;
         private readonly ILogger<MetadataService> _logger;
 
-        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger)
+        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
+            _ffmpegService = ffmpegService;
             _logger = logger;
         }
 
@@ -80,26 +82,109 @@ namespace Listenarr.Api.Services
             }
         }
 
-        public Task<AudioMetadata> ExtractFileMetadataAsync(string filePath)
+    public async Task<AudioMetadata> ExtractFileMetadataAsync(string filePath)
         {
             try
             {
-                // This would use a library like TagLib# to extract metadata from audio files
-                // For now, return basic metadata extracted from filename
-                var fileName = Path.GetFileNameWithoutExtension(filePath);
-                var metadata = new AudioMetadata
+                // Prefer using ffprobe (part of ffmpeg) to extract accurate file metadata if available
+                try
                 {
-                    Title = fileName,
+                    // Ask installer for a bundled ffprobe if available (and ensure installation if missing)
+                    var ffprobePath = await _ffmpegService.GetFfprobePathAsync(true);
+                    var ffprobeCmd = string.IsNullOrEmpty(ffprobePath) ? "ffprobe" : ffprobePath;
+
+                    var startInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = ffprobeCmd,
+                        Arguments = $"-v quiet -print_format json -show_format -show_streams \"{filePath}\"",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using var proc = System.Diagnostics.Process.Start(startInfo);
+                    if (proc != null)
+                    {
+                        var output = proc.StandardOutput.ReadToEnd();
+                        proc.WaitForExit(5000);
+                        if (!string.IsNullOrEmpty(output))
+                        {
+                            var doc = JsonSerializer.Deserialize<JsonElement>(output);
+                            var metadata = new AudioMetadata();
+
+                            // Try to get format info
+                            if (doc.TryGetProperty("format", out var fmt))
+                            {
+                                if (fmt.TryGetProperty("duration", out var durEl) && durEl.ValueKind == JsonValueKind.String)
+                                {
+                                    if (double.TryParse(durEl.GetString(), out var dur)) metadata.Duration = TimeSpan.FromSeconds(dur);
+                                }
+                                if (fmt.TryGetProperty("format_name", out var fmtName) && fmtName.ValueKind == JsonValueKind.String)
+                                {
+                                    metadata.Format = fmtName.GetString();
+                                }
+                                if (fmt.TryGetProperty("bit_rate", out var br) && br.ValueKind == JsonValueKind.String && int.TryParse(br.GetString(), out var bitRate))
+                                {
+                                    metadata.Bitrate = bitRate;
+                                }
+                            }
+
+                            // Streams: look for audio stream for sample rate, channels
+                            if (doc.TryGetProperty("streams", out var streams) && streams.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var s in streams.EnumerateArray())
+                                {
+                                    if (s.TryGetProperty("codec_type", out var codecType) && codecType.GetString() == "audio")
+                                    {
+                                        if (s.TryGetProperty("sample_rate", out var sr) && sr.ValueKind == JsonValueKind.String && int.TryParse(sr.GetString(), out var sampleRate))
+                                        {
+                                            metadata.SampleRate = sampleRate;
+                                        }
+                                        if (s.TryGetProperty("channels", out var ch) && ch.ValueKind == JsonValueKind.Number)
+                                        {
+                                            metadata.Channels = ch.GetInt32();
+                                        }
+                                        if (s.TryGetProperty("bit_rate", out var sbr) && sbr.ValueKind == JsonValueKind.String && int.TryParse(sbr.GetString(), out var sbit))
+                                        {
+                                            metadata.Bitrate = metadata.Bitrate == 0 ? sbit : metadata.Bitrate;
+                                        }
+                                        // Title and artist are left to existing metadata extraction (TagLib#) if implemented
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // Fallback: set title and format from filename if missing
+                            var fileName = Path.GetFileNameWithoutExtension(filePath);
+                            if (string.IsNullOrEmpty(metadata.Title)) metadata.Title = fileName;
+                            if (string.IsNullOrEmpty(metadata.Format)) metadata.Format = Path.GetExtension(filePath).TrimStart('.').ToUpper();
+
+                            _logger.LogInformation($"Extracted ffprobe metadata from file: {filePath}");
+                            return metadata;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation(ex, "ffprobe not available or failed for file: {File}", filePath);
+                }
+
+                // Fallback: basic filename-based metadata
+                var fallbackName = Path.GetFileNameWithoutExtension(filePath);
+                var fallback = new AudioMetadata
+                {
+                    Title = fallbackName,
                     Format = Path.GetExtension(filePath).TrimStart('.').ToUpper()
                 };
 
                 _logger.LogInformation($"Extracted basic metadata from file: {filePath}");
-                return Task.FromResult(metadata);
+                return fallback;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error extracting metadata from file: {filePath}");
-                return Task.FromResult(new AudioMetadata());
+                return new AudioMetadata();
             }
         }
 

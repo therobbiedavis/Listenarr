@@ -17,6 +17,21 @@ namespace Listenarr.Api.Models
         // Size in bytes
         public long? Size { get; set; }
 
+        // Duration in seconds
+        public double? DurationSeconds { get; set; }
+
+        // Format name (e.g., m4b, mp3, flac)
+        public string? Format { get; set; }
+
+        // Bitrate in bits per second
+        public int? Bitrate { get; set; }
+
+        // Sample rate in Hz
+        public int? SampleRate { get; set; }
+
+        // Number of audio channels
+        public int? Channels { get; set; }
+
         // When this file record was created
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

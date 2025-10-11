@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Download, SearchResult } from '@/types'
+import type { Download, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
+import { useLibraryStore } from '@/stores/library'
 import { signalRService } from '@/services/signalr'
 
 export const useDownloadsStore = defineStore('downloads', () => {
@@ -9,11 +10,12 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const isLoading = ref(false)
   let unsubscribeUpdate: (() => void) | null = null
   let unsubscribeList: (() => void) | null = null
+  let unsubscribeAudiobook: (() => void) | null = null
   
   // Subscribe to SignalR updates
   const initializeSignalR = () => {
     // Subscribe to individual download updates
-    unsubscribeUpdate = signalRService.onDownloadUpdate((updatedDownloads) => {
+  unsubscribeUpdate = signalRService.onDownloadUpdate(async (updatedDownloads) => {
       console.log('[Downloads Store] Received update for', updatedDownloads.length, 'downloads')
       
       updatedDownloads.forEach(updated => {
@@ -26,6 +28,34 @@ export const useDownloadsStore = defineStore('downloads', () => {
           downloads.value.unshift(updated)
         }
       })
+
+      // If any updated downloads are completed and linked to an audiobook, refresh that audiobook in the library store
+      // Refresh linked audiobooks so UI shows newly-created files. Use Promise.all to avoid unbounded concurrency.
+      const libraryStore = useLibraryStore()
+      const tasks: Promise<void>[] = []
+      for (const updated of updatedDownloads) {
+        const status = (updated.status || '').toString().toLowerCase()
+        if ((status === 'completed' || status === 'ready') && typeof updated.audiobookId === 'number') {
+          const aid = updated.audiobookId as number
+          tasks.push((async () => {
+            try {
+              const latest = await apiService.getAudiobook(aid)
+              // Find existing index
+              const idx = libraryStore.audiobooks.findIndex(b => b.id === latest.id)
+              if (idx !== -1) {
+                // Preserve the original object reference so components bound to it update reactively
+                const target = libraryStore.audiobooks[idx]!
+                Object.assign(target, latest)
+              } else {
+                libraryStore.audiobooks.unshift(latest)
+              }
+            } catch (e) {
+              console.warn('[Downloads Store] Failed to refresh audiobook after download update', e)
+            }
+          })())
+        }
+      }
+  if (tasks.length > 0) await Promise.all(tasks)
       
       // Sort by start date
       downloads.value.sort((a, b) => 
@@ -34,10 +64,27 @@ export const useDownloadsStore = defineStore('downloads', () => {
     })
     
     // Subscribe to full downloads list
-    unsubscribeList = signalRService.onDownloadsList((downloadsList) => {
+      unsubscribeList = signalRService.onDownloadsList((downloadsList) => {
       console.log('[Downloads Store] Received full list of', downloadsList.length, 'downloads')
       downloads.value = downloadsList
     })
+
+      // Subscribe to AudiobookUpdate messages so we can apply updated audiobook (with Files)
+      unsubscribeAudiobook = signalRService.onAudiobookUpdate((updatedAudiobook) => {
+        try {
+          const libraryStore = useLibraryStore()
+          const idx = libraryStore.audiobooks.findIndex(b => b.id === updatedAudiobook.id)
+          if (idx !== -1) {
+            const target = libraryStore.audiobooks[idx] as Audiobook
+            Object.assign(target, updatedAudiobook)
+          } else {
+            libraryStore.audiobooks.unshift(updatedAudiobook)
+          }
+        } catch (e) {
+          console.warn('[Downloads Store] Failed to apply AudiobookUpdate', e)
+        }
+      })
+      // audiobook unsubscribe will be cleaned up in the common cleanup below
   }
   
   // Initialize SignalR connection
@@ -116,6 +163,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const cleanup = () => {
     if (unsubscribeUpdate) unsubscribeUpdate()
     if (unsubscribeList) unsubscribeList()
+    if (unsubscribeAudiobook) unsubscribeAudiobook()
   }
   
   return {

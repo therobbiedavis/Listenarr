@@ -224,12 +224,23 @@
       <div v-if="activeTab === 'files'" class="files-content">
         <div class="files-header">
           <h3>Files</h3>
-          <button class="action-btn" v-if="audiobook.filePath" @click="openFolder">
+          <button class="action-btn" v-if="(audiobook.files && audiobook.files.length) || audiobook.filePath" @click="openFolder">
             <i class="ph ph-folder-open"></i>
             Open Folder
           </button>
         </div>
-        <div v-if="audiobook.filePath" class="file-list">
+        <div v-if="audiobook.files && audiobook.files.length" class="file-list">
+          <div v-for="f in audiobook.files" :key="f.id" class="file-item">
+            <div class="file-info">
+              <i class="ph ph-file-audio"></i>
+              <span class="file-name">{{ getFileName(f.path) }}</span>
+              <small class="file-meta">• {{ f.format ? f.format.toUpperCase() : '' }} {{ f.durationSeconds ? '• ' + formatDuration(f.durationSeconds) : '' }}</small>
+            </div>
+            <span class="file-size" v-if="f.size">{{ formatFileSize(f.size) }}</span>
+            <span class="file-size" v-else>Unknown size</span>
+          </div>
+        </div>
+        <div v-else-if="audiobook.filePath" class="file-list">
           <div class="file-item">
             <div class="file-info">
               <i class="ph ph-file-audio"></i>
@@ -585,6 +596,17 @@ function getFileName(filePath?: string): string {
   const parts = filePath.split(/[\\/]/)
   const fileName = parts[parts.length - 1]
   return fileName || 'Unknown'
+}
+
+function formatDuration(seconds?: number): string {
+  if (!seconds || seconds <= 0) return ''
+  const sec = Math.floor(seconds)
+  const hrs = Math.floor(sec / 3600)
+  const mins = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (hrs > 0) return `${hrs}h ${mins}m ${s}s`
+  if (mins > 0) return `${mins}m ${s}s`
+  return `${s}s`
 }
 
 function openFolder() {

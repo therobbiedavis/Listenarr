@@ -1547,14 +1547,33 @@ namespace Listenarr.Api.Services
                             var existing = await dbContext.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == audiobookId && f.Path == finalPath);
                             if (existing == null)
                             {
+                                // Extract rich metadata using MetadataService (ffprobe/TagLib fallback)
+                                AudioMetadata? extracted = null;
+                                try
+                                {
+                                    using var metaScope = _serviceScopeFactory.CreateScope();
+                                    var metadataService = metaScope.ServiceProvider.GetRequiredService<IMetadataService>();
+                                    extracted = await metadataService.ExtractFileMetadataAsync(finalPath);
+                                }
+                                catch (Exception mEx)
+                                {
+                                    _logger.LogWarning(mEx, "Failed to extract file metadata for {Path}", finalPath);
+                                }
+
                                 var fileRecord = new Models.AudiobookFile
                                 {
                                     AudiobookId = audiobookId,
                                     Path = finalPath,
                                     Size = finalFileInfo.Length,
                                     Source = completedDownload.DownloadClientId ?? "unknown",
-                                    CreatedAt = DateTime.UtcNow
+                                    CreatedAt = DateTime.UtcNow,
+                                    DurationSeconds = extracted?.Duration.TotalSeconds,
+                                    Format = extracted?.Format,
+                                    Bitrate = extracted?.Bitrate,
+                                    SampleRate = extracted?.SampleRate,
+                                    Channels = extracted?.Channels
                                 };
+
                                 dbContext.AudiobookFiles.Add(fileRecord);
                                 _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} ({Size} bytes)", audiobookId, finalPath, finalFileInfo.Length);
                             }
@@ -1585,6 +1604,29 @@ namespace Listenarr.Api.Services
                     catch (Exception hubEx)
                     {
                         _logger.LogWarning(hubEx, "Failed to broadcast DownloadUpdate for {DownloadId}", completedDownload.Id);
+                    }
+
+                    // Additionally, if this download was linked to an audiobook, broadcast the updated audiobook (including Files)
+                    try
+                    {
+                        if (completedDownload.AudiobookId != null)
+                        {
+                            var abId = completedDownload.AudiobookId.Value;
+                            var updatedAudiobook = await dbContext.Audiobooks
+                                .Include(a => a.QualityProfile)
+                                .Include(a => a.Files)
+                                .FirstOrDefaultAsync(a => a.Id == abId);
+
+                            if (updatedAudiobook != null)
+                            {
+                                await _hubContext.Clients.All.SendAsync("AudiobookUpdate", updatedAudiobook);
+                                _logger.LogInformation("Broadcasted AudiobookUpdate for AudiobookId {AudiobookId} via SignalR", abId);
+                            }
+                        }
+                    }
+                    catch (Exception abHubEx)
+                    {
+                        _logger.LogWarning(abHubEx, "Failed to broadcast AudiobookUpdate for download {DownloadId}", completedDownload.Id);
                     }
                 }
             }

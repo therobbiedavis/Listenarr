@@ -26,5 +26,23 @@ namespace Listenarr.Api.Models
 
         public string? SslCertPath { get; set; }
         public string? SslCertPassword { get; set; }
+
+        // FFmpeg/ffprobe installer configuration
+        public FfmpegConfig? Ffmpeg { get; set; }
+    }
+
+    public class FfmpegConfig
+    {
+        // Provider key: e.g., "johnvansickle", "gyan", "evermeet", or "github:<owner>/<repo>"
+        public string? Provider { get; set; }
+
+        // Optional explicit asset name or tag to pin a release, e.g., "ffmpeg-6.0.zip" or "6.0"
+        public string? ReleaseOverride { get; set; }
+
+        // Optional URL template for checksum file discovery (e.g., GitHub releases assets or a SHA file)
+        public string? ChecksumUrl { get; set; }
+
+        // Optional architecture hint, e.g., "x86_64", "arm64"
+        public string? Arch { get; set; }
     }
 }

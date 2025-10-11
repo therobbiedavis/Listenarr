@@ -1,85 +1,103 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
-using Listenarr.Api.Models;
-using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Moq;
+using Listenarr.Api.Models;
+using Listenarr.Api.Services;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Api.Hubs;
 
 namespace Listenarr.Api.Tests
 {
     public class DownloadProcessingTests
     {
-        private ListenArrDbContext CreateInMemoryDb(string dbName)
-        {
-            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
-                .UseInMemoryDatabase(databaseName: dbName)
-                .Options;
-            return new ListenArrDbContext(options);
-        }
-
         [Fact]
-        public async Task ProcessCompletedDownload_CreatesAudiobookFile()
+        public async Task ProcessCompletedDownload_CreatesAudiobookFileAndBroadcasts()
         {
-            var dbName = Guid.NewGuid().ToString();
-            using var context = CreateInMemoryDb(dbName);
+            // Arrange: in-memory DB
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
 
             // Seed an audiobook and a download
-            var audiobook = new Audiobook { Title = "Test Book" };
-            context.Audiobooks.Add(audiobook);
-            await context.SaveChangesAsync();
+            var book = new Audiobook { Title = "Test Book" };
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            var testPath = Path.Combine(Path.GetTempPath(), $"dl-test-{Guid.NewGuid()}.m4b");
+            await File.WriteAllTextAsync(testPath, "dummy content");
 
             var download = new Download
             {
-                Id = "dl-test-1",
-                AudiobookId = audiobook.Id,
-                Title = "DL Test",
-                DownloadPath = "/tmp/test.m4b",
-                FinalPath = "/tmp/test.m4b",
-                DownloadClientId = "DDL",
-                StartedAt = DateTime.UtcNow,
+                Id = "dl-1",
+                AudiobookId = book.Id,
+                Title = "Test Book",
                 Status = DownloadStatus.Downloading,
-                Progress = 0,
-                TotalSize = 100
+                DownloadPath = testPath,
+                FinalPath = testPath,
+                StartedAt = DateTime.UtcNow
             };
-            context.Downloads.Add(download);
-            await context.SaveChangesAsync();
+            db.Downloads.Add(download);
+            await db.SaveChangesAsync();
 
-            // Build service provider for DownloadService dependencies
+            // Mock metadata service
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
+                .ReturnsAsync(new AudioMetadata { Title = "Test Book", Duration = TimeSpan.FromSeconds(3600), Format = "m4b", Bitrate = 64000, SampleRate = 44100, Channels = 2 });
+
+            // Mock hub context
+            var hubClientsMock = new Mock<IHubClients>();
+            var clientProxyMock = new Mock<IClientProxy>();
+            hubClientsMock.Setup(h => h.All).Returns(clientProxyMock.Object);
+
+            var hubContextMock = new Mock<IHubContext<DownloadHub>>();
+            hubContextMock.SetupGet(h => h.Clients).Returns(hubClientsMock.Object);
+
+            // Build service provider for scope factory and register metadata service
             var services = new ServiceCollection();
-            services.AddSingleton<ListenArrDbContext>(context);
-            services.AddLogging();
-            services.AddHttpClient();
-            services.AddSingleton<IServiceScopeFactory>(sp => sp.GetRequiredService<IServiceScopeFactory>());
-
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+            services.AddSingleton(hubContextMock.Object);
+            services.AddSingleton(db);
             var provider = services.BuildServiceProvider();
+            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
-            // Create DownloadService with minimal dependencies (some may be null but not used)
+            // Construct DownloadService with required dependencies (use nulls/mocks where not needed)
+            var repoMock = new Mock<IAudiobookRepository>();
+            var configMock = new Mock<IConfigurationService>();
+            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<DownloadService>>();
+            var httpClient = new System.Net.Http.HttpClient();
+            var pathMappingMock = new Mock<IRemotePathMappingService>();
+            var searchMock = new Mock<ISearchService>();
+
             var downloadService = new DownloadService(
-                audiobookRepository: null!,
-                configurationService: null!,
-                dbContext: context,
-                logger: provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<DownloadService>>(),
-                httpClient: provider.GetRequiredService<System.Net.Http.HttpClient>(),
-                serviceScopeFactory: provider.GetRequiredService<IServiceScopeFactory>(),
-                pathMappingService: null!,
-                searchService: null!
-            );
+                repoMock.Object,
+                configMock.Object,
+                db,
+                loggerMock.Object,
+                httpClient,
+                scopeFactory,
+                pathMappingMock.Object,
+                searchMock.Object,
+                hubContextMock.Object);
 
-            // Ensure the file exists in the test (simulate file size)
-            var testPath = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}.bin");
-            await File.WriteAllTextAsync(testPath, "dummy");
-            var finalPath = testPath;
+            // Act
+            await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
 
-            // Call the processing method
-            await downloadService.ProcessCompletedDownloadAsync(download.Id, finalPath);
+            // Assert: audiobook file created
+            var file = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id);
+            Assert.NotNull(file);
+            Assert.Equal(download.FinalPath, file.Path);
+            Assert.NotNull(file.DurationSeconds);
+            Assert.InRange(file.DurationSeconds.Value, 3599.0, 3601.0);
+            Assert.Equal("m4b", file.Format);
 
-            // Assert that an AudiobookFile was added
-            var files = await context.AudiobookFiles.ToListAsync();
-            Assert.Single(files);
-            Assert.Equal(audiobook.Id, files[0].AudiobookId);
-            Assert.Equal(finalPath, files[0].Path);
-            Assert.True(files[0].Size > 0);
+            // Assert: broadcast called
+            clientProxyMock.Verify(c => c.SendCoreAsync("DownloadUpdate", It.IsAny<object[]>(), default), Times.AtLeastOnce);
         }
     }
 }

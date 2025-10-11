@@ -250,3 +250,4 @@ downloads/
 *.ogg
 *.opus
 *.wma
+/listenarr.api/config/ffmpeg

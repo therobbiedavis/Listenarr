@@ -206,10 +206,10 @@ namespace Listenarr.Api.Controllers
             {
                 return NotFound(new { message = "Audiobook not found" });
             }
-            // Include QualityProfile in the query if not already done in repository
-            // Assuming _context is injected; adjust if using repository method
+            // Include QualityProfile and Files in the query
             audiobook = await _dbContext.Audiobooks
                 .Include(a => a.QualityProfile)
+                .Include(a => a.Files)
                 .FirstOrDefaultAsync(a => a.Id == id);
             return Ok(audiobook);
         }

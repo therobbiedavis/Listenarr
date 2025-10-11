@@ -1,4 +1,4 @@
-import type { Download, QueueItem } from '@/types'
+import type { Download, QueueItem, Audiobook } from '@/types'
 
 // SignalR client for real-time download updates
 // Using native WebSocket with fallback to long polling
@@ -21,6 +21,7 @@ class SignalRService {
   private downloadUpdateCallbacks: Set<DownloadUpdateCallback> = new Set()
   private downloadListCallbacks: Set<DownloadListCallback> = new Set()
   private queueUpdateCallbacks: Set<QueueUpdateCallback> = new Set()
+  private audiobookUpdateCallbacks: Set<(a: Audiobook) => void> = new Set()
   private pingInterval: number | null = null
 
   async connect(): Promise<void> {
@@ -139,6 +140,13 @@ class SignalRService {
           this.queueUpdateCallbacks.forEach(cb => cb(args[0] as QueueItem[]))
         }
         break
+
+      case 'AudiobookUpdate':
+        if (args && args[0]) {
+          const ab = args[0] as Audiobook
+          this.audiobookUpdateCallbacks.forEach(cb => cb(ab))
+        }
+        break
     }
   }
 
@@ -222,6 +230,12 @@ class SignalRService {
     return () => {
       this.queueUpdateCallbacks.delete(callback)
     }
+  }
+
+  // Subscribe to audiobook updates (full audiobook object)
+  onAudiobookUpdate(callback: (a: Audiobook) => void): () => void {
+    this.audiobookUpdateCallbacks.add(callback)
+    return () => { this.audiobookUpdateCallbacks.delete(callback) }
   }
 
   // Request current downloads from server

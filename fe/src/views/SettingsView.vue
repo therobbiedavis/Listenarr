@@ -588,7 +588,7 @@
                   </button>
                 </div>
               </div>
-              <span class="form-help">An API key can be used to authenticate sensitive API calls from trusted clients. Keep it secret. Regenerating will replace the existing key.</span>
+              <span class="form-help">An API key can be used to authenticate sensitive API calls from trusted clients. Keep it secret. Keep it safe. Regenerating will replace the existing key.</span>
             </div>
           </div>
         </div>

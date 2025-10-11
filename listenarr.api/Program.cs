@@ -70,6 +70,8 @@ builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
 builder.Services.AddSingleton<IStartupConfigService, StartupConfigService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<IMetadataService, MetadataService>();
+// Ffmpeg installer: provides a bundled ffprobe binary when not present on the system
+builder.Services.AddSingleton<IFfmpegService, FfmpegInstallerService>();
 builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
 builder.Services.AddScoped<IDownloadService, DownloadService>();
 // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
@@ -199,6 +201,35 @@ using (var scope = app.Services.CreateScope())
     {
         logger.LogError(ex, "Error during database initialization");
         throw; // Re-throw to prevent app from starting
+    }
+}
+
+// Ensure ffprobe is available on first launch (best-effort). This runs after DB migrations so the app is close to ready.
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var ffsvc = scope.ServiceProvider.GetService<IFfmpegService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        if (ffsvc != null)
+        {
+            logger.LogInformation("Ensuring ffprobe is installed (auto-install enabled: {Auto})", Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE") ?? "true");
+            try
+            {
+                var path = ffsvc.GetFfprobePathAsync(true).GetAwaiter().GetResult();
+                if (!string.IsNullOrEmpty(path)) logger.LogInformation("ffprobe available at: {Path}", path);
+                else logger.LogWarning("ffprobe was not installed or not available after install attempt");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "ffprobe installer encountered an error during startup");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(ex, "Error while attempting to auto-install ffprobe at startup");
     }
 }
 
