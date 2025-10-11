@@ -174,6 +174,28 @@ export default defineComponent({
   font-size: 0.9rem;
 }
 
+/* Styled checkbox to match app theme */
+.form-remember input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  appearance: auto; /* allow native look unless accent-color supported */
+  accent-color: #2196F3; /* modern browsers: sets the checked color */
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  display: inline-block;
+}
+
+.form-remember input[type="checkbox"]:focus {
+  outline: 2px solid rgba(33,150,243,0.18);
+  outline-offset: 2px;
+}
+
+/* Fallback for older browsers: slightly enlarge the hit area via label */
+.form-remember label { cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; }
+
 .btn-primary {
   padding: 0.75rem;
   background-color: #2196F3;

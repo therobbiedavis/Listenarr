@@ -8,18 +8,26 @@
         <span class="version">v1.0.0</span>
       </div>
       <div class="nav-actions">
-        <div class="nav-search-inline">
+        <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
           <input
             v-model="searchQuery"
             @input="onSearchInput"
             @keydown.enter="applyFirstResult"
+            @keydown.escape.prevent="closeSearch"
             ref="searchInputRef"
             class="search-input-inline"
             type="search"
             placeholder="Search your library..."
             aria-label="Search your audiobooks"
           />
-          <i class="ph ph-magnifying-glass search-inline-icon" aria-hidden="true"></i>
+          <button class="nav-btn" aria-hidden="true"
+            role="button"
+            tabindex="0"
+            @click="toggleSearch"
+            @keydown.enter.prevent="toggleSearch"
+          >
+          <i class="ph ph-magnifying-glass search-inline-icon"></i>
+        </button>
           <div class="inline-spinner" v-if="searching" aria-hidden="true"></div>
           <!-- Results overlay: shows suggestions, or a searching/no-results state with spinner -->
           <div class="search-results-inline" v-if="searching || suggestions.length > 0 || searchQuery.length > 0">
@@ -69,7 +77,7 @@
       </div>
     </header>
 
-    <div class="app-layout">
+  <div :class="['app-layout', { 'no-top': hideLayout }]">
       <!-- Sidebar Navigation -->
       <aside v-if="!hideLayout" class="sidebar">
         <nav class="sidebar-nav">
@@ -145,7 +153,7 @@
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import NotificationModal from '@/components/NotificationModal.vue'
 import { useNotification } from '@/composables/useNotification'
@@ -237,6 +245,33 @@ const searchQuery = vueRef('')
 const suggestions = vueRef<Array<{ id: number; title: string; author?: string; imageUrl?: string }>>([])
 const searching = vueRef(false)
 const searchInputRef = vueRef<HTMLInputElement | null>(null)
+
+// Slide-out search state and refs
+const navSearchRef = vueRef<HTMLElement | null>(null)
+const searchOpen = vueRef(false)
+
+const toggleSearch = () => {
+  searchOpen.value = !searchOpen.value
+  if (searchOpen.value) {
+    // Wait for DOM update then focus input
+    nextTick(() => searchInputRef.value?.focus())
+  }
+}
+
+const closeSearch = () => {
+  if (searchOpen.value) {
+    searchOpen.value = false
+  }
+}
+
+const handleSearchDocumentClick = (e: MouseEvent) => {
+  const el = navSearchRef.value
+  if (!el) return
+  const target = e.target as Node
+  if (!el.contains(target)) {
+    searchOpen.value = false
+  }
+}
 
 let searchDebounceTimer: number | undefined
 const onSearchInput = async () => {
@@ -344,6 +379,8 @@ onMounted(async () => {
 
   // Click-outside handler for user menu
   document.addEventListener('click', handleDocumentClick)
+  // Click-outside handler for the header search
+  document.addEventListener('click', handleSearchDocumentClick)
 })
 
 onUnmounted(() => {
@@ -355,6 +392,7 @@ onUnmounted(() => {
     clearInterval(wantedBadgeRefreshInterval)
   }
   document.removeEventListener('click', handleDocumentClick)
+  document.removeEventListener('click', handleSearchDocumentClick)
 })
 
 const logout = async () => {
@@ -445,7 +483,7 @@ const hideLayout = computed(() => {
 }
 
 .nav-user-icon {
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .user-menu {
@@ -509,6 +547,10 @@ const hideLayout = computed(() => {
   display: flex;
   margin-top: 60px;
   min-height: calc(100vh - 60px);
+}
+
+.app-layout.no-top {
+  margin-top: 0;
 }
 
 /* Sidebar */
@@ -603,13 +645,32 @@ const hideLayout = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  /* Account for the fixed 60px top nav so content centers in remaining viewport */
+  min-height: calc(100vh - 60px);
 }
 
 .fullpage-wrapper {
   width: 100%;
   max-width: 480px;
-  padding: 1rem;
+  padding: 1.25rem 1rem;
+  box-sizing: border-box;
+}
+
+/* Responsive adjustments for login/full-page wrapper */
+@media (max-width: 768px) {
+  .fullpage-wrapper {
+    padding: 1rem 0.75rem;
+    max-width: 440px;
+    margin: 0 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .fullpage-wrapper {
+    padding: 0.75rem 0.5rem;
+    max-width: 360px;
+    margin: 0 8px;
+  }
 }
 
 /* Responsive */
@@ -651,9 +712,72 @@ const hideLayout = computed(() => {
   gap: 8px;
 }
 
+/* Collapsible slide-out search: input is absolutely positioned so it doesn't affect layout */
+.nav-search-inline {
+  min-width: 44px; /* reserve space for the icon */
+}
+
+.search-input-inline {
+  transition: transform 220ms cubic-bezier(.2,.9,.2,1), width 220ms ease, opacity 180ms ease;
+  position: absolute;
+  top: 50%;
+  right: 40px; /* leave space for the icon */
+  transform: translateX(15%);
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nav-search-inline.open .search-input-inline {
+  transform: translateX(40px);
+  width: 340px;
+  max-width: 50vw;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Keep the results dropdown aligned to the input when open */
+.search-results-inline {
+  position: absolute;
+  top: 56px; /* slightly below the input */
+  right: 40px;
+  left: auto;
+  width: 340px;
+  max-width: 50vw;
+}
+
 .search-inline-icon {
   color: #9aa0a6;
   font-size: 18px;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.search-inline-icon:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+/* Standardize header/nav icons: size, alignment, color, and hit area */
+.top-nav .ph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+  color: #c7cfd6; /* slightly brighter than default */
+  border-radius: 8px;
+}
+
+.top-nav .nav-btn {
+  padding: 4px; /* smaller padding so icon boxes are consistent */
+}
+
+.top-nav .nav-user-btn .ph,
+.top-nav .nav-btn .ph {
+  font-size: 18px; /* ensure consistent glyph size */
 }
 
 .inline-spinner {

@@ -45,10 +45,14 @@ namespace Listenarr.Api.Models
         public bool Explicit { get; set; }
         public bool Abridged { get; set; }
         
-        // Monitoring and file management
-        public bool Monitored { get; set; } = true;
-        public string? FilePath { get; set; }
-        public long? FileSize { get; set; }
+    // Monitoring and file management
+    public bool Monitored { get; set; } = true;
+    // NOTE: single-file properties are deprecated in favor of Files collection
+    public string? FilePath { get; set; }
+    public long? FileSize { get; set; }
+
+    // Multi-file support: store zero or more file records for this audiobook
+    public List<AudiobookFile>? Files { get; set; }
         public string? Quality { get; set; }
         
         // Quality Profile for automatic downloads

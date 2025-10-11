@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Api.Models;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -24,6 +26,7 @@ namespace Listenarr.Api.Services
 {
     public class DownloadService : IDownloadService
     {
+        private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAudiobookRepository _audiobookRepository;
         private readonly IConfigurationService _configurationService;
         private readonly ListenArrDbContext _dbContext;
@@ -41,7 +44,8 @@ namespace Listenarr.Api.Services
             HttpClient httpClient,
             IServiceScopeFactory serviceScopeFactory,
             IRemotePathMappingService pathMappingService,
-            ISearchService searchService)
+            ISearchService searchService,
+            IHubContext<DownloadHub> hubContext)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
@@ -51,6 +55,7 @@ namespace Listenarr.Api.Services
             _serviceScopeFactory = serviceScopeFactory;
             _pathMappingService = pathMappingService;
             _searchService = searchService;
+            _hubContext = hubContext;
         }
 
         // Placeholder implementations for existing interface methods
@@ -1405,21 +1410,8 @@ namespace Listenarr.Api.Services
                         }
                         
                         // Update database with completion status and final path
-                        using (var scope = _serviceScopeFactory.CreateScope())
-                        {
-                            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-                            var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
-                            if (completedDownload != null)
-                            {
-                                completedDownload.Status = DownloadStatus.Completed;
-                                completedDownload.Progress = 100;
-                                completedDownload.DownloadedSize = new FileInfo(finalPath).Length;
-                                completedDownload.CompletedAt = DateTime.UtcNow;
-                                completedDownload.FinalPath = finalPath;
-                                dbContext.Downloads.Update(completedDownload);
-                                await dbContext.SaveChangesAsync();
-                            }
-                        }
+                        // Defer to shared completion handler (testable)
+                        await ProcessCompletedDownloadAsync(downloadId, finalPath);
 
                         _logger.LogInformation("DDL download [{DownloadId}] finalized at: {FinalPath}", downloadId, finalPath);
                     }
@@ -1522,6 +1514,79 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during temporary file cleanup");
+            }
+        }
+
+        /// <summary>
+        /// Process a completed download by updating its Download record and creating an AudiobookFile if linked.
+        /// Exposed for reuse and unit testing.
+        /// </summary>
+        public async Task ProcessCompletedDownloadAsync(string downloadId, string finalPath)
+        {
+            using (var scope = _serviceScopeFactory.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                if (completedDownload != null)
+                {
+                    completedDownload.Status = DownloadStatus.Completed;
+                    completedDownload.Progress = 100;
+                    var finalFileInfo = new FileInfo(finalPath);
+                    completedDownload.DownloadedSize = finalFileInfo.Length;
+                    completedDownload.CompletedAt = DateTime.UtcNow;
+                    completedDownload.FinalPath = finalPath;
+                    dbContext.Downloads.Update(completedDownload);
+
+                    // If this download is linked to an audiobook, create an AudiobookFile record
+                    if (completedDownload.AudiobookId != null)
+                    {
+                        try
+                        {
+                            var audiobookId = completedDownload.AudiobookId.Value;
+                            // Avoid duplicate file records for same path
+                            var existing = await dbContext.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == audiobookId && f.Path == finalPath);
+                            if (existing == null)
+                            {
+                                var fileRecord = new Models.AudiobookFile
+                                {
+                                    AudiobookId = audiobookId,
+                                    Path = finalPath,
+                                    Size = finalFileInfo.Length,
+                                    Source = completedDownload.DownloadClientId ?? "unknown",
+                                    CreatedAt = DateTime.UtcNow
+                                };
+                                dbContext.AudiobookFiles.Add(fileRecord);
+                                _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} ({Size} bytes)", audiobookId, finalPath, finalFileInfo.Length);
+                            }
+                            else
+                            {
+                                _logger.LogInformation("AudiobookFile already exists for audiobook {AudiobookId} at path {Path}", audiobookId, finalPath);
+                            }
+                        }
+                        catch (Exception abEx)
+                        {
+                            _logger.LogWarning(abEx, "Failed to create AudiobookFile record for AudiobookId: {AudiobookId}", completedDownload.AudiobookId.Value);
+                        }
+                    }
+
+                    await dbContext.SaveChangesAsync();
+
+                    try
+                    {
+                        // Reload the download to ensure we have the latest values (detached entity may not track all fields)
+                        var updatedDownload = await dbContext.Downloads.FindAsync(completedDownload.Id);
+                        if (updatedDownload != null)
+                        {
+                            // Broadcast a single-item update so SignalR clients receive immediate notification
+                            await _hubContext.Clients.All.SendAsync("DownloadUpdate", new List<Download> { updatedDownload });
+                            _logger.LogInformation("Broadcasted DownloadUpdate for {DownloadId} via SignalR", updatedDownload.Id);
+                        }
+                    }
+                    catch (Exception hubEx)
+                    {
+                        _logger.LogWarning(hubEx, "Failed to broadcast DownloadUpdate for {DownloadId}", completedDownload.Id);
+                    }
+                }
             }
         }
     }

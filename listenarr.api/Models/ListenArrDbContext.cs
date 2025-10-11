@@ -23,6 +23,7 @@ namespace Listenarr.Api.Models
     public class ListenArrDbContext : DbContext
     {
         public DbSet<Audiobook> Audiobooks { get; set; }
+    public DbSet<AudiobookFile> AudiobookFiles { get; set; }
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; }
         public DbSet<History> History { get; set; }
         public DbSet<Indexer> Indexers { get; set; }
@@ -77,6 +78,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+
+            // Audiobook -> AudiobookFiles one-to-many
+            modelBuilder.Entity<Audiobook>()
+                .HasMany(a => a.Files)
+                .WithOne(f => f.Audiobook)
+                .HasForeignKey(f => f.AudiobookId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             // ApplicationSettings configuration
             modelBuilder.Entity<ApplicationSettings>()

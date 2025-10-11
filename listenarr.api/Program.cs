@@ -23,7 +23,9 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Listenarr.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args);
+// Check for special CLI helpers before building the web host
+// Pass a non-null args array to satisfy nullable analysis
+var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
 // Configure logging
 builder.Logging.ClearProviders();
@@ -198,6 +200,13 @@ using (var scope = app.Services.CreateScope())
         logger.LogError(ex, "Error during database initialization");
         throw; // Re-throw to prevent app from starting
     }
+}
+
+// If the user passed --query-users, run the helper now that the DB is migrated and exit.
+if (args is not null && args.Contains("--query-users"))
+{
+    QueryUsersProgram.Run();
+    return;
 }
 
 // Configure the HTTP request pipeline.

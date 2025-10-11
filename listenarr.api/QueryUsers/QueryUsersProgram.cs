@@ -2,14 +2,17 @@
 using System;
 using Microsoft.Data.Sqlite;
 
-class QueryUsersProgram
+static class QueryUsersProgram
 {
-    static void Main()
+    // Utility method for querying users. Renamed from Main to avoid emitting a second
+    // program entry point when the web project uses top-level statements.
+    public static void Run()
     {
         try
         {
-            // Path to the database file
-            string dbPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "listenarr.db");
+            // Path to the application's SQLite database (same as used by the API)
+            // The API config uses: Data Source=config/database/listenarr.db
+            string dbPath = Path.Combine(Directory.GetCurrentDirectory(), "config", "database", "listenarr.db");
             Console.WriteLine($"Database path: {dbPath}");
 
             using var connection = new SqliteConnection($"Data Source={dbPath}");

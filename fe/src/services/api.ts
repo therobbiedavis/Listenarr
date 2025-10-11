@@ -635,7 +635,15 @@ class ApiService {
   // Antiforgery token for SPA (calls our new /api/antiforgery/token endpoint)
   async fetchAntiforgeryToken(): Promise<string | null> {
     try {
-      const resp = await fetch(`${API_BASE_URL}/antiforgery/token`, { method: 'GET', credentials: 'include' })
+      // Include API key header when available to ensure token endpoints are reachable
+      const headers: Record<string, string> = {}
+      try {
+        const sc = await getStartupConfigCached(2000)
+        const apiKey = sc?.apiKey
+        if (apiKey) headers['X-Api-Key'] = apiKey
+      } catch {}
+
+      const resp = await fetch(`${API_BASE_URL}/antiforgery/token`, { method: 'GET', credentials: 'include', headers })
       if (!resp.ok) return null
       const json = await resp.json()
       return json?.token ?? null
@@ -648,6 +656,12 @@ class ApiService {
   async login(username: string, password: string, rememberMe: boolean, csrfToken?: string): Promise<void> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (csrfToken) headers['X-XSRF-TOKEN'] = csrfToken
+    // Include API key when present so login requests that bypass request() still send the token
+    try {
+      const sc = await getStartupConfigCached(2000)
+      const apiKey = sc?.apiKey
+      if (apiKey) headers['X-Api-Key'] = apiKey
+    } catch {}
 
     const resp = await fetch(`${API_BASE_URL}/account/login`, {
       method: 'POST',

@@ -4,7 +4,9 @@ using Microsoft.Data.Sqlite;
 
 partial class Program
 {
-    static void Main()
+    // Utility method for querying users. Renamed from Main to avoid emitting a second
+    // program entry point when the web project uses top-level statements.
+    public static void Run()
     {
         try
         {
