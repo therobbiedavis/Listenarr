@@ -21,7 +21,7 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 
 - **Serve up Audiobooks** from multiple sources (torrents, NZBs) with support for various formats (MP3, M4A, M4B, FLAC, AAC, OGG, OPUS)
 - **First-class responsive web interface** that works great on any device (phone, tablet, desktop)
-- **Rich metadata support** with automatic enrichment from Audible via Audnexus API
+- **Rich metadata support** with automatic enrichment from Audible and Amazon
 - **External API integration** for searching across multiple torrent and NZB indexers simultaneously
 - **Ways to organize your library**: Collections, Reading Lists, Want to Read
 - **Download management** with support for popular clients (qBittorrent, Transmission, SABnzbd, NZBGet)
@@ -131,7 +131,9 @@ Listenarr/
 │   ├── Controllers/            # API Endpoints
 │   ├── Models/                 # Data Models
 │   ├── Services/               # Business Logic
-│   └── Program.cs              # Entry Point
+│   ├── Dockerfile.runtime      # Runtime Docker image for combined API + frontend
+│   ├── Program.cs              # Entry Point
+│   └── ...
 ├── fe/                         # Vue.js Frontend
 │   ├── src/
 │   │   ├── components/         # Vue Components
@@ -140,9 +142,6 @@ Listenarr/
 │   │   └── services/           # API Services
 │   └── public/                 # Static Assets
 ├── docker-compose.yml          # Docker Configuration
-├── listenarr.api/
-│   ├── Dockerfile.runtime      # Runtime Docker image for combined API + frontend
-│   └── ...
 └── README.md
 ```
 
@@ -259,12 +258,12 @@ Bumped versions are persisted via PR to maintain branch protection.
 
 ## Roadmap
 
-- [ ] User authentication and authorization
-- [ ] Real-time WebSocket updates for downloads
+- [x] User authentication and authorization
+- [x] Real-time WebSocket updates for downloads
 - [ ] Advanced search filters and smart collections
 - [ ] Notification system (email, webhooks, Discord)
 - [ ] Mobile apps (iOS/Android)
-- [ ] Audiobook playback integration
+- [ ] Audiobookshelf integration
 - [ ] Multi-language support
 - [ ] Backup and restore functionality
 - [ ] Plugin system for extensibility
