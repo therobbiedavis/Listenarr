@@ -24,10 +24,12 @@ import type {
 import { getStartupConfigCached } from './startupConfigCache'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
-// In production, use the configured API base URL
-const API_BASE_URL = import.meta.env.DEV 
-  ? '/api' 
-  : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5146/api')
+// In production, prefer a configured VITE_API_BASE_URL but fall back to a relative '/api'
+const API_BASE_URL = import.meta.env.DEV
+  ? '/api'
+  : (import.meta.env.VITE_API_BASE_URL || '/api')
+
+// Backend base (origin) used to build absolute image URLs or websocket origins
 const BACKEND_BASE_URL = import.meta.env.DEV
   ? ''
   : API_BASE_URL.replace('/api', '')

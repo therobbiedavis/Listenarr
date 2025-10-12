@@ -17,6 +17,7 @@
  */
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Listenarr.Api.Models
 {
@@ -61,11 +62,25 @@ namespace Listenarr.Api.Models
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<Audiobook>()
+                .Property(e => e.Authors)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
+            modelBuilder.Entity<Audiobook>()
                 .Property(e => e.Genres)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<Audiobook>()
+                .Property(e => e.Genres)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
             modelBuilder.Entity<Audiobook>()
                 .Property(e => e.Tags)
                 .HasConversion(
@@ -73,11 +88,25 @@ namespace Listenarr.Api.Models
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<Audiobook>()
+                .Property(e => e.Tags)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
+            modelBuilder.Entity<Audiobook>()
                 .Property(e => e.Narrators)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<Audiobook>()
+                .Property(e => e.Narrators)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             // Audiobook -> AudiobookFiles one-to-many
             modelBuilder.Entity<Audiobook>()
@@ -93,6 +122,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<ApplicationSettings>()
+                .Property(e => e.AllowedFileExtensions)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             // ApiConfiguration - ignore computed properties
             modelBuilder.Entity<ApiConfiguration>()
@@ -114,6 +150,13 @@ namespace Listenarr.Api.Models
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
                     v => System.Text.Json.JsonSerializer.Deserialize<List<QualityDefinition>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<QualityDefinition>()
                 );
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.Qualities)
+                .Metadata.SetValueComparer(new ValueComparer<List<QualityDefinition>>(
+                    (c1, c2) => (c1 ?? new List<QualityDefinition>()).SequenceEqual(c2 ?? new List<QualityDefinition>()),
+                    c => (c ?? new List<QualityDefinition>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c == null ? new List<QualityDefinition>() : c.ToList()
+                ));
 
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.PreferredFormats)
@@ -121,6 +164,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredFormats)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.PreferredWords)
@@ -128,6 +178,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredWords)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.MustNotContain)
@@ -135,6 +192,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.MustNotContain)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.MustContain)
@@ -142,6 +206,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.MustContain)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.PreferredLanguages)
@@ -149,6 +220,13 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredLanguages)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
 
             // Ensure AudiobookFile uniqueness per audiobook path
             modelBuilder.Entity<AudiobookFile>()

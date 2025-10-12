@@ -190,6 +190,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Publish API for runtime image
+        run: |
+          dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o listenarr.api/publish
+        # Ensures Listenarr.Api.dll is at listenarr.api/publish/ for Dockerfile.runtime
+
       - name: Build and push API image (release)
         uses: docker/build-push-action@v4
         with:
@@ -201,10 +206,5 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:stable
             ${{ steps.set-tags.outputs.API_IMAGE }}:latest
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
-
-      - name: Publish API for runtime image
-        run: |
-          dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o listenarr.api/publish
-        # Ensures Listenarr.Api.dll is at listenarr.api/publish/ for Dockerfile.runtime
 
       # Skipped: separate Web image. The API image contains the frontend in wwwroot.

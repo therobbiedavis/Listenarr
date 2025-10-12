@@ -11,14 +11,14 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Api.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20251011034739_AddAudiobookFileMetadata")]
-    partial class AddAudiobookFileMetadata
+    [Migration("20251012170343_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "7.0.17");
+            modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
 
             modelBuilder.Entity("Listenarr.Api.Models.ApiConfiguration", b =>
                 {
@@ -214,6 +214,12 @@ namespace Listenarr.Api.Migrations
                     b.Property<int?>("Channels")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Codec")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Container")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -237,7 +243,8 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AudiobookId");
+                    b.HasIndex("AudiobookId", "Path")
+                        .IsUnique();
 
                     b.ToTable("AudiobookFiles");
                 });

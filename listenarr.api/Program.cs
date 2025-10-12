@@ -62,8 +62,12 @@ builder.Services.AddHttpClient<IAudibleMetadataService, AudibleMetadataService>(
 builder.Services.AddHttpClient();
 
 // Register our custom services
+// Compute an absolute path for the SQLite file based on the content root so
+// the published exe will create/use the intended config/database path even
+// when the working directory differs.
+var sqliteDbPath = Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db");
 builder.Services.AddDbContext<ListenArrDbContext>(options =>
-    options.UseSqlite("Data Source=config/database/listenarr.db"));
+    options.UseSqlite($"Data Source={sqliteDbPath}"));
 builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
 builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
 // Startup config: read config.json (optional) and expose via IStartupConfigService
@@ -168,7 +172,10 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         // Harden cookie settings
         options.SlidingExpiration = true;
         options.Cookie.HttpOnly = true;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always; // require HTTPS in production
+            // Require HTTPS in production, but allow insecure cookies during local development
+            options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+                ? CookieSecurePolicy.None
+                : CookieSecurePolicy.Always; // require HTTPS in production
         options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
         options.ExpireTimeSpan = TimeSpan.FromDays(7);
     });
@@ -201,6 +208,14 @@ using (var scope = app.Services.CreateScope())
     var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     
+    // Ensure the database directory exists (use the absolute path computed above)
+    string dbFullPath = sqliteDbPath;
+    string? dbDirectory = Path.GetDirectoryName(dbFullPath);
+    if (!string.IsNullOrEmpty(dbDirectory) && !Directory.Exists(dbDirectory))
+    {
+        Directory.CreateDirectory(dbDirectory);
+    }
+    
     try
     {
         logger.LogInformation("Applying database migrations...");
@@ -214,10 +229,38 @@ using (var scope = app.Services.CreateScope())
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Error during database initialization");
-        // During tests (WebApplicationFactory) the test host may not have access to the configured
-        // on-disk SQLite database path. Log the error but continue startup so tests can override
-        // DbContext configuration as needed. Do not re-throw here.
+        // Migrations can fail when the database file exists but is missing expected
+        // tables (for example, when an older DB file was copied into the publish
+        // folder). In that case try the cheaper EnsureCreated() path which will
+        // create tables for the current model if no __EFMigrationsHistory table
+        // exists. If EnsureCreated() succeeds, log the fact and continue. If it
+        // fails as well, log full details for debugging but continue so the host
+        // can start (tests may override DbContext configuration).
+        logger.LogError(ex, "Error during database migration attempt. Will try EnsureCreated() fallback.");
+
+        try
+        {
+            logger.LogInformation("Attempting EnsureCreated() as a fallback...");
+            var created = context.Database.EnsureCreated();
+            if (created)
+            {
+                logger.LogInformation("Database created via EnsureCreated() fallback.");
+            }
+            else
+            {
+                logger.LogWarning("EnsureCreated() did not create the database (it may already exist but be missing migrations).");
+            }
+
+            // Try applying pragmas even if EnsureCreated() didn't create the schema
+            SqlitePragmaInitializer.ApplyPragmas(context);
+            logger.LogInformation("SQLite pragmas applied successfully (fallback path)");
+        }
+        catch (Exception innerEx)
+        {
+            // Log full details. We intentionally do not rethrow to avoid breaking
+            // test harnesses that may run with an alternate DbContext.
+            logger.LogError(innerEx, "EnsureCreated() fallback also failed during database initialization");
+        }
     }
 }
 
@@ -239,6 +282,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+    // Serve frontend static files from wwwroot (index.html + assets)
+    // DefaultFiles enables serving index.html when requesting '/'
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
 
 // Enable CORS (use restrictive policy by default, allow override via environment var)
 var corsPolicy = Environment.GetEnvironmentVariable("LISTENARR_CORS_POLICY");
@@ -265,5 +313,8 @@ app.MapControllers();
 
 // Map SignalR hub for real-time download updates
 app.MapHub<DownloadHub>("/hubs/downloads");
+
+    // SPA fallback: serve index.html for non-API routes so client-side routing works
+    app.MapFallbackToFile("index.html");
 
 app.Run();

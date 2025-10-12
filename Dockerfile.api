@@ -10,6 +10,17 @@ COPY ["listenarr.api/Listenarr.Api.csproj", "listenarr.api/"]
 RUN dotnet restore "listenarr.api/Listenarr.Api.csproj"
 COPY . .
 WORKDIR "/src/listenarr.api"
+# Ensure Node.js is available in the build image so MSBuild targets that run
+# the frontend (npm/vite) can execute during `dotnet publish`.
+# Use NodeSource to install Node 20 (LTS-compatible for this project).
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+	&& curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+	&& apt-get install -y --no-install-recommends nodejs \
+	&& node --version \
+	&& npm --version \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
 RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build
 
 FROM build AS publish

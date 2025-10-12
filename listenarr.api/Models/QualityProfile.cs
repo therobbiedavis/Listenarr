@@ -107,7 +107,7 @@ namespace Listenarr.Api.Models
     /// <summary>
     /// Quality definition with priority
     /// </summary>
-    public class QualityDefinition
+    public class QualityDefinition : IEquatable<QualityDefinition>
     {
         /// <summary>
         /// Quality identifier (e.g., "320kbps", "192kbps", "64kbps", "lossless", "unknown")
@@ -124,6 +124,16 @@ namespace Listenarr.Api.Models
         /// Priority order (lower number = higher priority)
         /// </summary>
         public int Priority { get; set; } = 0;
+
+        public bool Equals(QualityDefinition? other)
+        {
+            if (other is null) return false;
+            return Quality == other.Quality && Allowed == other.Allowed && Priority == other.Priority;
+        }
+
+        public override bool Equals(object? obj) => Equals(obj as QualityDefinition);
+
+        public override int GetHashCode() => HashCode.Combine(Quality, Allowed, Priority);
     }
 
     /// <summary>

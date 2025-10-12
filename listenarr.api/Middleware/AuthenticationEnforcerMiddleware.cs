@@ -40,6 +40,15 @@ namespace Listenarr.Api.Middleware
                 return;
             }
 
+            // Serve SPA assets and client-side routes anonymously: if the request is not for an API or SignalR hub,
+            // let the static file middleware or SPA fallback handle it. This avoids returning 401 for '/'.
+            // Keep API and hub routes protected.
+            if (!path.StartsWith("/api") && !path.StartsWith("/hubs"))
+            {
+                await _next(context);
+                return;
+            }
+
             if (authRequired && !(context.User?.Identity?.IsAuthenticated ?? false))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;

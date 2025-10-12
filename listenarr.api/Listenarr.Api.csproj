@@ -51,4 +51,48 @@
     <Copy SourceFiles="@(FrontendDistFiles)" DestinationFiles="@(FrontendDistFiles-&gt;'$(MSBuildProjectDirectory)\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
+  <!--
+    Ensure frontend build artifacts are also copied into the publish output folder used by dotnet publish.
+    Some publish scenarios may not pick up recently-copied files in the project wwwroot; copying again
+    into $(PublishDir) ensures the published package contains the same SPA assets.
+  -->
+  <Target Name="CopyFrontendToPublish" AfterTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
+    <Message Importance="high" Text="Copying frontend dist to publish folder ($(PublishDir)wwwroot)" />
+    <ItemGroup>
+      <FrontendDistFilesForPublish Include="$(FrontendDist)\**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(FrontendDistFilesForPublish)"
+          DestinationFiles="@(FrontendDistFilesForPublish-&gt;'$(PublishDir)wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+  </Target>
+
+  <!-- Fallback copy: some CI environments may not set $(PublishDir); copy into project 'publish/wwwroot' as well -->
+  <Target Name="CopyFrontendToProjectPublishFolder" AfterTargets="CopyFrontendToPublish" Condition="'$(SkipFrontendBuild)'!='true'">
+    <Message Importance="high" Text="Also copying frontend dist to $(MSBuildProjectDirectory)\publish\wwwroot (fallback)" />
+    <ItemGroup>
+      <FrontendDistFilesForPublishFallback Include="$(FrontendDist)\**\*.*" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\publish\wwwroot')" />
+
+    <Copy SourceFiles="@(FrontendDistFilesForPublishFallback)"
+          DestinationFiles="@(FrontendDistFilesForPublishFallback-&gt;'$(MSBuildProjectDirectory)\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+  </Target>
+
+  <!-- Some publish runs place final output under publish\publish\; copy there as well just in case -->
+  <Target Name="CopyFrontendToNestedPublishFolder" AfterTargets="CopyFrontendToProjectPublishFolder" Condition="'$(SkipFrontendBuild)'!='true'">
+    <Message Importance="high" Text="Copying frontend dist to $(MSBuildProjectDirectory)\publish\publish\wwwroot (nested publish)" />
+    <ItemGroup>
+      <FrontendDistFilesForNestedPublish Include="$(FrontendDist)\**\*.*" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\publish\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\publish\publish\wwwroot')" />
+
+    <Copy SourceFiles="@(FrontendDistFilesForNestedPublish)"
+          DestinationFiles="@(FrontendDistFilesForNestedPublish-&gt;'$(MSBuildProjectDirectory)\\publish\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+  </Target>
+
 </Project>

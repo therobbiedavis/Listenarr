@@ -208,6 +208,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
+      - name: Publish API for runtime image
+        run: |
+          dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o listenarr.api/publish
+        # Ensures Listenarr.Api.dll is at listenarr.api/publish/ for Dockerfile.runtime
+
       - name: Build and push API image (nightly + sha)
         uses: docker/build-push-action@v4
         with:
@@ -219,11 +224,6 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:nightly
             ${{ steps.set-tags.outputs.API_IMAGE }}:nightly-${{ steps.resolve-version.outputs.VERSION }}
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ github.sha }}
-
-      - name: Publish API for runtime image
-        run: |
-          dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o listenarr.api/publish
-        # Ensures Listenarr.Api.dll is at listenarr.api/publish/ for Dockerfile.runtime
 
       # version bump was pushed via PR+auto-merge above
 
