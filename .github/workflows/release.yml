@@ -27,32 +27,6 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore & build
-        run: |
-          dotnet restore ${{ env.API_PROJECT }}
-          dotnet build listenarr.sln -c Release --no-restore
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Publish linux-x64
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64
-
-      - name: Publish win-x64
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/win-x64
-
-      - name: Publish osx-x64
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r osx-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/osx-x64
-
-      - name: Zip artifacts
-        run: |
-          mkdir -p artifacts
-          zip -r artifacts/listenarr-api-linux-x64.zip listenarr.api/publish/linux-x64/
-          zip -r artifacts/listenarr-api-win-x64.zip listenarr.api/publish/win-x64/
-          zip -r artifacts/listenarr-api-osx-x64.zip listenarr.api/publish/osx-x64/
-
       - name: Resolve and bump version (minor)
         id: resolve-version
         run: |
@@ -70,32 +44,10 @@ jobs:
           echo "Bumped release version: ${NEWVERSION}"
           echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
 
-      - name: Show resolved version
-        run: |
-          echo "Resolved version: ${{ steps.resolve-version.outputs.VERSION }}"
+      - name: Restore .NET
+        run: dotnet restore ${{ env.API_PROJECT }}
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set image name
-        id: set-tags
-        run: |
-          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr-api" >> $GITHUB_OUTPUT
-          TAG=${GITHUB_REF/refs/tags/}
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Upload release artifacts
-        uses: softprops/action-gh-release@v1
-        with:
-          files: artifacts/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Persist bumped version to csproj
+      - name: Persist bumped version to csproj (for build)
         if: steps.resolve-version.outputs.VERSION != ''
         env:
           NEW_VERSION: ${{ steps.resolve-version.outputs.VERSION }}
@@ -125,6 +77,7 @@ jobs:
           python3 update_version.py
 
       - name: Create Pull Request for version bump (release)
+        id: create_pr
         uses: peter-evans/create-pull-request@v4
         with:
           token: ${{ secrets.GH_PAT }}
@@ -136,6 +89,58 @@ jobs:
             This PR bumps the application version to ${{ steps.resolve-version.outputs.VERSION }}.
             The change was produced automatically by the CI release workflow.
           labels: automated,version-bump
+
+      - name: Auto-merge release version bump PR
+        uses: peter-evans/merge-pull-request@v3
+        with:
+          token: ${{ secrets.GH_PAT }}
+          pull-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
+          merge-method: merge
+
+      - name: Build solution
+        run: dotnet build listenarr.sln -c Release --no-restore
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Publish linux-x64
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64
+
+      - name: Publish win-x64
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/win-x64
+
+      - name: Publish osx-x64
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r osx-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/osx-x64
+
+      - name: Zip artifacts
+        run: |
+          mkdir -p artifacts
+          zip -r artifacts/listenarr-linux-x64.zip listenarr.api/publish/linux-x64/
+          zip -r artifacts/listenarr-win-x64.zip listenarr.api/publish/win-x64/
+          zip -r artifacts/listenarr-osx-x64.zip listenarr.api/publish/osx-x64/
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image name
+        id: set-tags
+        run: |
+          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
+          TAG=${GITHUB_REF/refs/tags/}
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push API image (release)
         uses: docker/build-push-action@v4

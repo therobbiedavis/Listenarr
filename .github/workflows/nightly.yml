@@ -32,34 +32,6 @@ jobs:
         with:
           node-version: 20
 
-      - name: Restore .NET
-        run: dotnet restore ${{ env.API_PROJECT }}
-
-      - name: Build solution
-        run: dotnet build listenarr.sln -c Release --no-restore
-
-      - name: Publish API (linux-x64)
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64
-
-      - name: Publish API (win-x64)
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/win-x64
-
-      - name: Zip Linux artifact
-        run: |
-          mkdir -p artifacts
-          zip -r artifacts/listenarr-api-linux-x64.zip listenarr.api/publish/linux-x64/
-
-      - name: Zip Windows artifact
-        run: |
-          mkdir -p artifacts
-          zip -r artifacts/listenarr-api-win-x64.zip listenarr.api/publish/win-x64/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-artifacts
-          path: artifacts/*.zip
-
       - name: Resolve and bump version (patch)
         id: resolve-version
         run: |
@@ -78,39 +50,10 @@ jobs:
           echo "Bumped nightly version: ${NEWVERSION}"
           echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
 
-      - name: Show resolved version
-        run: |
-          echo "Resolved version: ${{ steps.resolve-version.outputs.VERSION }}"
+      - name: Restore .NET
+        run: dotnet restore ${{ env.API_PROJECT }}
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set image name
-        id: set-tags
-        run: |
-          # Use repository owner as namespace (avoids embedding secrets into names)
-          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr-api" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Pre-Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.resolve-version.outputs.VERSION }}
-          name: Nightly ${{ steps.resolve-version.outputs.VERSION }}
-          body: |
-            Automated nightly build.
-
-            Version: ${{ steps.resolve-version.outputs.VERSION }}
-            Commit: ${{ github.sha }}
-          prerelease: true
-          files: artifacts/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Persist bumped version to csproj
+      - name: Persist bumped version to csproj (for build)
         if: steps.resolve-version.outputs.VERSION != ''
         env:
           NEW_VERSION: ${{ steps.resolve-version.outputs.VERSION }}
@@ -140,6 +83,7 @@ jobs:
           python3 update_version.py
 
       - name: Create Pull Request for version bump
+        id: create_pr
         uses: peter-evans/create-pull-request@v4
         with:
           token: ${{ secrets.GH_PAT }}
@@ -151,6 +95,69 @@ jobs:
             This PR bumps the application version to ${{ steps.resolve-version.outputs.VERSION }}.
             The change was produced automatically by the CI nightly workflow.
           labels: automated,version-bump
+
+      - name: Auto-merge version bump PR
+        uses: peter-evans/merge-pull-request@v3
+        with:
+          token: ${{ secrets.GH_PAT }}
+          pull-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
+          merge-method: merge
+
+      - name: Build solution
+        run: dotnet build listenarr.sln -c Release --no-restore
+
+      - name: Publish API (linux-x64)
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64
+
+      - name: Publish API (win-x64)
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/win-x64
+
+      - name: Zip Linux artifact
+        run: |
+          mkdir -p artifacts
+          zip -r artifacts/listenarr-linux-x64.zip listenarr.api/publish/linux-x64/
+
+      - name: Zip Windows artifact
+        run: |
+          mkdir -p artifacts
+          zip -r artifacts/listenarr-win-x64.zip listenarr.api/publish/win-x64/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-artifacts
+          path: artifacts/*.zip
+      - name: Show resolved version
+        run: |
+          echo "Resolved version: ${{ steps.resolve-version.outputs.VERSION }}"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image name
+        id: set-tags
+        run: |
+          # Use repository owner as namespace (avoids embedding secrets into names)
+          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Pre-Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.resolve-version.outputs.VERSION }}
+          name: Nightly ${{ steps.resolve-version.outputs.VERSION }}
+          body: |
+            Automated nightly build.
+
+            Version: ${{ steps.resolve-version.outputs.VERSION }}
+            Commit: ${{ github.sha }}
+          prerelease: true
+          files: artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -169,5 +176,7 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:nightly
             ${{ steps.set-tags.outputs.API_IMAGE }}:nightly-${{ steps.resolve-version.outputs.VERSION }}
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ github.sha }}
+
+      # version bump was pushed via PR+auto-merge above
 
       # Skipped: separate Web image. The API image contains the frontend in wwwroot.

@@ -32,7 +32,9 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 
 ## Support
 
-[![Discord](https://img.shields.io/badge/Discord-Join-7289DA?style=flat-square&logo=discord)](https://discord.gg/your-invite) [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-red?style=flat-square&logo=github)](https://github.com/therobbiedavis/Listenarr/issues)
+[![Discord](https://img.shields.io/badge/Discord-Join-7289DA?style=flat-square&logo=discord)](https://discord.gg/CwZ2Sqp9NF) [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-red?style=flat-square&logo=github)](https://github.com/therobbiedavis/Listenarr/issues)
+
+Join our community on Discord for help, announcements, and discussion: https://discord.gg/CwZ2Sqp9NF
 
 ## Setup
 

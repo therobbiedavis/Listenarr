@@ -58,4 +58,4 @@ jobs:
           file: listenarr.api/Dockerfile.runtime
           push: false
           tags: |
-            ${{ github.repository_owner }}/listenarr-api:ci-publish
+            ${{ github.repository_owner }}/listenarr:ci-publish
