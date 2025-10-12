@@ -2,6 +2,7 @@ name: Nightly — build executables & Docker (develop)
 
 permissions:
   contents: write
+  pull-requests: write
 
 on:
   push:
@@ -133,7 +134,7 @@ jobs:
                 await github.rest.git.deleteRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `heads/${branch}` });
               }
             } catch (err) {
-              core.info(`Branch delete skipped or failed: ${err.message}`);
+              console.log(`Branch delete skipped or failed: ${err.message}`);
             }
 
       - name: Build solution
