@@ -1,9 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <!-- Canonical application version. Update this to set the next released version. -->
-    <Version>1.0.0</Version>
+    
+    <Version>1.0.1</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
@@ -22,11 +23,11 @@
     <PackageReference Include="HtmlAgilityPack" Version="1.11.67" />
   </ItemGroup>
 
-  <!-- Build frontend (fe) as part of dotnet publish for monorepo single-artifact deployments -->
+  
   <PropertyGroup>
-    <!-- Set to true to skip frontend build during publish (useful for dev machines without Node) -->
+    
     <SkipFrontendBuild Condition="'$(SkipFrontendBuild)'==''">false</SkipFrontendBuild>
-  <!-- Parent directory of listenarr.api is the repo root; fe lives there -->
+  
   <FrontendDir>$(MSBuildProjectDirectory)\..\fe</FrontendDir>
   <FrontendDist>$(FrontendDir)\dist</FrontendDist>
   </PropertyGroup>
@@ -34,20 +35,18 @@
   <Target Name="BuildFrontend" BeforeTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
     <Message Importance="high" Text="Building frontend (fe) at $(FrontendDir)" />
 
-    <!-- Attempt to run npm commands; these will fail the publish if Node/npm is not available. You can set SkipFrontendBuild=true to skip. -->
+    
     <Exec WorkingDirectory="$(FrontendDir)" Command="npm ci" />
     <Exec WorkingDirectory="$(FrontendDir)" Command="npm run build" />
 
-    <!-- Ensure wwwroot exists then copy built files into API wwwroot so the published API contains the frontend static site -->
+    
     <MakeDir Directories="$(MSBuildProjectDirectory)\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot')" />
 
     <ItemGroup>
       <FrontendDistFiles Include="$(FrontendDist)\**\*.*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(FrontendDistFiles)"
-          DestinationFiles="@(FrontendDistFiles->'$(MSBuildProjectDirectory)\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(FrontendDistFiles)" DestinationFiles="@(FrontendDistFiles-&gt;'$(MSBuildProjectDirectory)\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>
