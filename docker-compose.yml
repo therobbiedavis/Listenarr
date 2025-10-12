@@ -10,7 +10,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:5656
     volumes:
-      - listenarr_data:/app  # Mount for SQLite database (listenarr.db) and any config
+      - listenarr_data:/app/config  # Mount for SQLite database (listenarr.db) and any config
     restart: unless-stopped
 
 volumes:
