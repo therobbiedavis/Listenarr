@@ -63,12 +63,13 @@ jobs:
       - name: Create GitHub Pre-Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: nightly-${{ steps.resolve-version.outputs.VERSION }}
+          tag_name: ${{ steps.resolve-version.outputs.VERSION }}
           name: Nightly ${{ steps.resolve-version.outputs.VERSION }}
           body: |
             Automated nightly build.
 
             Version: ${{ steps.resolve-version.outputs.VERSION }}
+            Commit: ${{ github.sha }}
           prerelease: true
           files: artifacts/*.zip
         env:
