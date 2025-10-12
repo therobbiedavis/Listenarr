@@ -62,9 +62,24 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                _logger.LogInformation("=== SendToDownloadClient RECEIVED REQUEST ===");
+                _logger.LogInformation("Title: {Title}", request.SearchResult?.Title ?? "NULL");
+                _logger.LogInformation("DownloadType: '{DownloadType}'", request.SearchResult?.DownloadType ?? "NULL");  
+                _logger.LogInformation("TorrentUrl: {TorrentUrl}", request.SearchResult?.TorrentUrl ?? "NULL");
+                _logger.LogInformation("NzbUrl: {NzbUrl}", request.SearchResult?.NzbUrl ?? "NULL");
+                _logger.LogInformation("MagnetLink: {MagnetLink}", request.SearchResult?.MagnetLink ?? "NULL");
+                _logger.LogInformation("Source: {Source}", request.SearchResult?.Source ?? "NULL");
+                _logger.LogInformation("==========================================");
+                
+                if (request.SearchResult == null)
+                {
+                    return BadRequest(new { message = "SearchResult is required" });
+                }
+                
                 var downloadId = await _downloadService.SendToDownloadClientAsync(
                     request.SearchResult, 
-                    request.DownloadClientId
+                    request.DownloadClientId,
+                    request.AudiobookId
                 );
                 return Ok(new { downloadId, message = "Sent to download client successfully" });
             }
@@ -125,5 +140,6 @@ namespace Listenarr.Api.Controllers
     {
         public SearchResult SearchResult { get; set; } = new();
         public string? DownloadClientId { get; set; }
+        public int? AudiobookId { get; set; }
     }
 }

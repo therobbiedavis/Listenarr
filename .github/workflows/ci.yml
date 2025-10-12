@@ -1,0 +1,61 @@
+name: CI - Build & Artifacts
+
+on:
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop, main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dotnet: [8.0]
+        node: [20]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Restore .NET
+        working-directory: ./listenarr.api
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build listenarr.sln -c Release --no-restore
+
+      - name: Publish API (linux-x64) (runs frontend build via MSBuild target)
+        working-directory: ./listenarr.api
+        run: dotnet publish Listenarr.Api.csproj -c Release -r linux-x64 --no-self-contained -o ./publish/linux-x64
+
+      - name: Upload API artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-publish-linux-x64
+          path: listenarr.api/publish/linux-x64
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: listenarr.api/wwwroot
+
+      - name: Build Docker images from publish output
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: listenarr.api/Dockerfile.runtime
+          push: false
+          tags: |
+            ${{ github.repository_owner }}/listenarr-api:ci-publish

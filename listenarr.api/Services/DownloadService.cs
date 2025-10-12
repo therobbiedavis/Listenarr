@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Api.Models;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -24,30 +26,42 @@ namespace Listenarr.Api.Services
 {
     public class DownloadService : IDownloadService
     {
+        private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAudiobookRepository _audiobookRepository;
         private readonly IConfigurationService _configurationService;
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<DownloadService> _logger;
         private readonly HttpClient _httpClient;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly IRemotePathMappingService _pathMappingService;
+        private readonly ISearchService _searchService;
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
             IConfigurationService configurationService,
             ListenArrDbContext dbContext,
             ILogger<DownloadService> logger,
-            HttpClient httpClient)
+            HttpClient httpClient,
+            IServiceScopeFactory serviceScopeFactory,
+            IRemotePathMappingService pathMappingService,
+            ISearchService searchService,
+            IHubContext<DownloadHub> hubContext)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
             _dbContext = dbContext;
             _logger = logger;
             _httpClient = httpClient;
+            _serviceScopeFactory = serviceScopeFactory;
+            _pathMappingService = pathMappingService;
+            _searchService = searchService;
+            _hubContext = hubContext;
         }
 
         // Placeholder implementations for existing interface methods
-        public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId)
+        public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
         {
-            return await SendToDownloadClientAsync(searchResult, downloadClientId);
+            return await SendToDownloadClientAsync(searchResult, downloadClientId, audiobookId);
         }
 
         public async Task<List<Download>> GetActiveDownloadsAsync()
@@ -87,19 +101,13 @@ namespace Listenarr.Api.Services
                 };
             }
 
-            // Get all enabled indexers ordered by priority
-            var indexers = await _dbContext.Indexers
-                .Where(i => i.IsEnabled)
-                .OrderBy(i => i.Priority)
-                .ThenBy(i => i.Name)
-                .ToListAsync();
-
-            if (!indexers.Any())
+            if (audiobook.QualityProfile == null)
             {
+                _logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
                 return new SearchAndDownloadResult
                 {
                     Success = false,
-                    Message = "No enabled indexers configured"
+                    Message = "Audiobook has no quality profile assigned"
                 };
             }
 
@@ -107,69 +115,127 @@ namespace Listenarr.Api.Services
             var searchQuery = BuildSearchQuery(audiobook);
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
-            // Search each indexer sequentially until we find a match
-            foreach (var indexer in indexers)
+            // Search using the working search service. This is an automatic search (triggered
+            // by the background/manual 'search-and-download' endpoint), so set isAutomaticSearch
+            // to true to ensure only indexers are queried (no Amazon/Audible scraping).
+            var searchResults = await _searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
+
+            if (searchResults == null || !searchResults.Any())
             {
-                try
+                return new SearchAndDownloadResult
                 {
-                    _logger.LogInformation("Searching indexer: {IndexerName} (Priority: {Priority})", indexer.Name, indexer.Priority);
+                    Success = false,
+                    Message = "No search results found"
+                };
+            }
 
-                    var results = await SearchIndexerAsync(indexer, searchQuery);
-                    
-                    if (results.Any())
-                    {
-                        // Get the best result (highest seeders for torrents, newest for NZBs)
-                        var bestResult = GetBestResult(results, indexer.Type);
-                        
-                        _logger.LogInformation("Found match on indexer {IndexerName}: {Title}", indexer.Name, bestResult.Title);
+            // Score results against quality profile
+            using var scope = _serviceScopeFactory.CreateScope();
+            var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
 
-                        // Determine if this is a torrent or NZB and route to appropriate client
-                        var isTorrent = IsTorrentIndexer(indexer.Type);
-                        var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
-
-                        if (downloadClientId == null)
-                        {
-                            _logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
-                            continue;
-                        }
-
-                        // Send to download client
-                        var downloadId = await SendToDownloadClientAsync(bestResult, downloadClientId);
-
-                        // Log to history
-                        await LogDownloadHistory(audiobook, indexer.Name, bestResult);
-
-                        return new SearchAndDownloadResult
-                        {
-                            Success = true,
-                            Message = $"Successfully sent to download client",
-                            DownloadId = downloadId,
-                            IndexerUsed = indexer.Name,
-                            DownloadClientUsed = downloadClientId,
-                            SearchResult = bestResult
-                        };
-                    }
-                    else
-                    {
-                        _logger.LogInformation("No results found on indexer: {IndexerName}", indexer.Name);
-                    }
-                }
-                catch (Exception ex)
+            // Log all scored results for debugging
+            _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
+            foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
+            {
+                var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
+                _logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
+                    status, scoredResult.TotalScore, scoredResult.SearchResult.Title, scoredResult.SearchResult.Source,
+                    scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
+                if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
                 {
-                    _logger.LogError(ex, "Error searching indexer {IndexerName}", indexer.Name);
-                    // Continue to next indexer
+                    _logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
                 }
             }
 
+            // Only consider non-rejected, score > 0 results
+            var topResult = scoredResults
+                .Where(s => !s.IsRejected && s.TotalScore > 0)
+                .OrderByDescending(s => s.TotalScore)
+                .FirstOrDefault();
+
+            if (topResult == null)
+            {
+                _logger.LogWarning("No acceptable search results found for audiobook '{Title}' after quality filtering", audiobook.Title);
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = "No acceptable search results found"
+                };
+            }
+
+            // Assign score to SearchResult
+            topResult.SearchResult.Score = topResult.TotalScore;
+
+            // Handle DDL results directly
+            if (!string.IsNullOrEmpty(topResult.SearchResult.DownloadType) &&
+                topResult.SearchResult.DownloadType.Equals("DDL", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Top result is DDL, processing directly for: {Title}", topResult.SearchResult.Title);
+                var downloadId = await DownloadDirectlyAsync(topResult.SearchResult, audiobookId);
+                await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
+                return new SearchAndDownloadResult
+                {
+                    Success = true,
+                    Message = $"Successfully processed DDL download",
+                    DownloadId = downloadId,
+                    IndexerUsed = "Search",
+                    DownloadClientUsed = "DDL",
+                    SearchResult = topResult.SearchResult
+                };
+            }
+
+            // Use topResult.SearchResult for torrent/nzb download
+            var isTorrent = IsTorrentResult(topResult.SearchResult);
+            var downloadClientId = await GetAppropriateDownloadClient(isTorrent);
+
+            if (downloadClientId == null)
+            {
+                _logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
+                return new SearchAndDownloadResult
+                {
+                    Success = false,
+                    Message = $"No suitable download client found for {(isTorrent ? "torrent" : "NZB")} results"
+                };
+            }
+
+            // Send to download client with audiobookId for proper metadata linking
+            var downloadId2 = await SendToDownloadClientAsync(topResult.SearchResult, downloadClientId, audiobookId);
+
+            // Log to history
+            await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
+
             return new SearchAndDownloadResult
             {
-                Success = false,
-                Message = $"No matches found across {indexers.Count} indexers"
+                Success = true,
+                Message = $"Successfully sent to download client",
+                DownloadId = downloadId2,
+                IndexerUsed = "Search",
+                DownloadClientUsed = downloadClientId,
+                SearchResult = topResult.SearchResult
             };
         }
 
-        public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null)
+        public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
+            _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}, AudiobookId: {AudiobookId}", 
+                searchResult.Title, 
+                searchResult.DownloadType ?? "(null)", 
+                searchResult.TorrentUrl ?? "(null)",
+                audiobookId);
+            
+            // Check if this is a DDL (Direct Download Link) - handle it differently
+            // Use case-insensitive comparison in case of serialization casing issues
+            if (!string.IsNullOrEmpty(searchResult.DownloadType) && 
+                searchResult.DownloadType.Equals("DDL", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Processing DDL for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
+                return await DownloadDirectlyAsync(searchResult, audiobookId);
+            }
+            
+            _logger.LogInformation("Not a DDL, processing as torrent/usenet. DownloadType was: '{DownloadType}'", searchResult.DownloadType);
+        
+
             // If no specific client provided, auto-select based on result type
             if (downloadClientId == null)
             {
@@ -219,18 +285,6 @@ namespace Listenarr.Api.Services
             return string.Join(" ", parts);
         }
 
-        private async Task<List<SearchResult>> SearchIndexerAsync(Indexer indexer, string query)
-        {
-            // TODO: Implement actual indexer search using Jackett/Prowlarr API
-            // For now, return empty list (placeholder)
-            _logger.LogInformation("Searching indexer {Name} with query: {Query}", indexer.Name, query);
-            
-            // Placeholder: In real implementation, make HTTP request to indexer API
-            await Task.Delay(100); // Simulate network delay
-            
-            return new List<SearchResult>();
-        }
-
         private SearchResult GetBestResult(List<SearchResult> results, string indexerType)
         {
             // For torrents, prefer highest seeders
@@ -252,6 +306,27 @@ namespace Listenarr.Api.Services
 
         private bool IsTorrentResult(SearchResult result)
         {
+            // Check DownloadType first if it's set
+            if (!string.IsNullOrEmpty(result.DownloadType))
+            {
+                if (result.DownloadType == "DDL")
+                {
+                    _logger.LogDebug("Result identified as DDL (DownloadType set): {Title}", result.Title);
+                    return false; // DDL is not a torrent
+                }
+                else if (result.DownloadType == "Torrent")
+                {
+                    _logger.LogDebug("Result identified as Torrent (DownloadType set): {Title}", result.Title);
+                    return true;
+                }
+                else if (result.DownloadType == "Usenet")
+                {
+                    _logger.LogDebug("Result identified as Usenet (DownloadType set): {Title}", result.Title);
+                    return false;
+                }
+            }
+
+            // Fallback to legacy detection logic
             // Check for NZB first - if it has an NZB URL, it's a Usenet/NZB download
             if (!string.IsNullOrEmpty(result.NzbUrl))
             {
@@ -336,17 +411,33 @@ namespace Listenarr.Api.Services
                 throw new Exception("Failed to login to qBittorrent");
             }
 
+            // Get torrent URL - prefer magnet link, fall back to torrent file URL
+            var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) 
+                ? result.MagnetLink 
+                : result.TorrentUrl;
+
+            if (string.IsNullOrEmpty(torrentUrl))
+            {
+                throw new Exception("No magnet link or torrent URL found in search result");
+            }
+
+            _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
+            _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
+
             // Add torrent
             var addData = new FormUrlEncodedContent(new[]
             {
-                new KeyValuePair<string, string>("urls", result.MagnetLink ?? ""),
+                new KeyValuePair<string, string>("urls", torrentUrl),
                 new KeyValuePair<string, string>("savepath", client.DownloadPath)
             });
 
             var addResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
             if (!addResponse.IsSuccessStatusCode)
             {
-                throw new Exception("Failed to add torrent to qBittorrent");
+                var responseContent = await addResponse.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to add torrent to qBittorrent. Status: {Status}, Response: {Response}", 
+                    addResponse.StatusCode, responseContent);
+                throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode}");
             }
 
             _logger.LogInformation("Successfully sent torrent to qBittorrent");
@@ -584,6 +675,12 @@ namespace Listenarr.Api.Services
                         var numSeeds = torrent.ContainsKey("num_seeds") ? (int?)torrent["num_seeds"].GetInt32() : null;
                         var numLeechs = torrent.ContainsKey("num_leechs") ? (int?)torrent["num_leechs"].GetInt32() : null;
                         var ratio = torrent.ContainsKey("ratio") ? (double?)torrent["ratio"].GetDouble() : null;
+                        var savePath = torrent.ContainsKey("save_path") ? torrent["save_path"].GetString() ?? "" : "";
+
+                        // Apply remote path mapping for Docker scenarios
+                        var localPath = !string.IsNullOrEmpty(savePath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, savePath)
+                            : savePath;
 
                         var status = state switch
                         {
@@ -615,14 +712,16 @@ namespace Listenarr.Api.Services
                             Leechers = numLeechs,
                             Ratio = ratio,
                             CanPause = status == "downloading" || status == "queued",
-                            CanRemove = true
+                            CanRemove = true,
+                            RemotePath = savePath,
+                            LocalPath = localPath
                         });
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting qBittorrent queue");
+                _logger.LogWarning(ex, "Error getting qBittorrent queue - client may be unreachable");
             }
 
             return items;
@@ -745,6 +844,13 @@ namespace Listenarr.Api.Services
                             _ => "queued"
                         };
 
+                        // SABnzbd queue API doesn't include path, but we can get it from client config
+                        // The complete_dir setting would be the remote path to translate
+                        var remotePath = client.DownloadPath ?? "";
+                        var localPath = !string.IsNullOrEmpty(remotePath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, remotePath)
+                            : remotePath;
+
                         items.Add(new QueueItem
                         {
                             Id = nzoId,
@@ -761,7 +867,9 @@ namespace Listenarr.Api.Services
                             DownloadClientType = "sabnzbd",
                             AddedAt = DateTime.UtcNow, // SABnzbd doesn't provide this easily
                             CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
-                            CanRemove = true
+                            CanRemove = true,
+                            RemotePath = remotePath,
+                            LocalPath = localPath
                         });
                     }
                     catch (Exception ex)
@@ -994,6 +1102,532 @@ namespace Listenarr.Api.Services
 
             _dbContext.History.Add(historyEntry);
             await _dbContext.SaveChangesAsync();
+        }
+
+        private async Task<string> DownloadDirectlyAsync(SearchResult searchResult, int? audiobookId = null)
+        {
+            var downloadId = Guid.NewGuid().ToString();
+            
+            try
+            {
+                _logger.LogInformation("Starting direct download for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
+                
+                // Create temporary download folder within the application directory
+                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "config", "temp", "downloads");
+                if (!Directory.Exists(tempDownloadFolder))
+                {
+                    _logger.LogInformation("Creating temporary download directory: {Path}", tempDownloadFolder);
+                    Directory.CreateDirectory(tempDownloadFolder);
+                }
+
+                // Get the download URL (stored in TorrentUrl field for DDL)
+                var downloadUrl = searchResult.TorrentUrl;
+                if (string.IsNullOrEmpty(downloadUrl))
+                {
+                    throw new Exception("No download URL found for DDL result");
+                }
+
+                // Extract filename from URL or use title with format extension
+                var uri = new Uri(downloadUrl);
+                var fileName = Path.GetFileName(Uri.UnescapeDataString(uri.LocalPath));
+                if (string.IsNullOrEmpty(fileName) || !fileName.Contains('.'))
+                {
+                    // Fallback: use title and format
+                    var extension = searchResult.Format?.ToLower() switch
+                    {
+                        "librivox apple audiobook" => ".m4b",
+                        "m4b" => ".m4b",
+                        "128kbps mp3" => ".mp3",
+                        "vbr mp3" => ".mp3",
+                        "mp3" => ".mp3",
+                        "flac" => ".flac",
+                        "ogg vorbis" => ".ogg",
+                        "ogg" => ".ogg",
+                        "opus" => ".opus",
+                        "64kbps mp3" => ".mp3",
+                        _ => ".audio"
+                    };
+                    fileName = $"{SanitizeFileName(searchResult.Title)}{extension}";
+                }
+
+                // Download to temporary folder first
+                var tempFilePath = Path.Combine(tempDownloadFolder, $"{downloadId}_{fileName}");
+                
+                // Create Download record in database
+                var download = new Download
+                {
+                    Id = downloadId,
+                    AudiobookId = audiobookId, // Link to audiobook for metadata
+                    Title = searchResult.Title,
+                    Artist = searchResult.Artist,
+                    Album = searchResult.Album,
+                    OriginalUrl = downloadUrl,
+                    Status = DownloadStatus.Downloading,
+                    Progress = 0,
+                    TotalSize = searchResult.Size,
+                    DownloadedSize = 0,
+                    DownloadPath = tempFilePath, // Store temp path initially
+                    FinalPath = tempFilePath, // Will be updated after processing
+                    StartedAt = DateTime.UtcNow,
+                    DownloadClientId = "DDL",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        { "Format", searchResult.Format ?? "Unknown" },
+                        { "Source", searchResult.Source ?? "Unknown" },
+                        { "DownloadType", "DDL" },
+                        { "Score", searchResult.Score }
+                    }
+                };
+
+                _dbContext.Downloads.Add(download);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Starting DDL download [{DownloadId}]: {Title} from {Url}", downloadId, searchResult.Title, downloadUrl);
+                _logger.LogInformation("Downloading to temporary location: {TempFilePath}", tempFilePath);
+
+                // Download the file with progress tracking (background task)
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Create a new HttpClient for the background task to avoid disposal issues
+                        using var httpClient = new HttpClient();
+                        httpClient.Timeout = TimeSpan.FromHours(2); // Allow up to 2 hours for large files
+                        
+                        using (var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+                        {
+                            response.EnsureSuccessStatusCode();
+
+                            var totalBytes = response.Content.Headers.ContentLength ?? searchResult.Size;
+                            var downloadedBytes = 0L;
+
+                            using (var contentStream = await response.Content.ReadAsStreamAsync())
+                            using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                            {
+                                var buffer = new byte[8192];
+                                var lastProgressUpdate = DateTime.UtcNow;
+
+                                while (true)
+                                {
+                                    var bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length);
+                                    if (bytesRead == 0) break;
+
+                                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                                    downloadedBytes += bytesRead;
+
+                                    // Update database progress every 5 seconds
+                                    if ((DateTime.UtcNow - lastProgressUpdate).TotalSeconds >= 5)
+                                    {
+                                        var progress = totalBytes > 0 ? (decimal)((downloadedBytes * 100) / totalBytes) : 0;
+                                        
+                                        // Create a new scope for database operations
+                                        using (var scope = _serviceScopeFactory.CreateScope())
+                                        {
+                                            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                                            var downloadToUpdate = await dbContext.Downloads.FindAsync(downloadId);
+                                            if (downloadToUpdate != null)
+                                            {
+                                                downloadToUpdate.DownloadedSize = downloadedBytes;
+                                                downloadToUpdate.Progress = progress;
+                                                dbContext.Downloads.Update(downloadToUpdate);
+                                                await dbContext.SaveChangesAsync();
+                                            }
+                                        }
+
+                                        _logger.LogInformation("DDL download [{DownloadId}] progress: {Progress}% ({Downloaded}/{Total} MB)", 
+                                            downloadId, (int)progress, downloadedBytes / 1024 / 1024, totalBytes / 1024 / 1024);
+                                        lastProgressUpdate = DateTime.UtcNow;
+                                    }
+                                }
+                            }
+                        }
+
+                        var fileInfo = new FileInfo(tempFilePath);
+                        
+                        _logger.LogInformation("DDL download [{DownloadId}] completed: {FileName} ({Size} MB)", 
+                            downloadId, fileName, fileInfo.Length / 1024 / 1024);
+
+                        // Apply file naming pattern and move file to final location
+                        string finalPath = tempFilePath;
+                        try
+                        {
+                            using (var scope = _serviceScopeFactory.CreateScope())
+                            {
+                                var fileNamingService = scope.ServiceProvider.GetRequiredService<IFileNamingService>();
+                                var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
+                                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                                
+                                var settings = await configService.GetApplicationSettingsAsync();
+                                
+                                _logger.LogInformation("DDL download [{DownloadId}] Settings: EnableMetadataProcessing={Enabled}, OutputPath={OutputPath}, Pattern={Pattern}", 
+                                    downloadId, settings.EnableMetadataProcessing, settings.OutputPath, settings.FileNamingPattern);
+                                
+                                // Only process if metadata processing is enabled
+                                if (settings.EnableMetadataProcessing)
+                                {
+                                    _logger.LogInformation("DDL download [{DownloadId}] processing with file naming pattern...", downloadId);
+                                    
+                                    // Try to get audiobook metadata if linked
+                                    Audiobook? audiobook = null;
+                                    using (var lookupScope = _serviceScopeFactory.CreateScope())
+                                    {
+                                        var dbContext = lookupScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                                        var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                                        if (completedDownload?.AudiobookId != null)
+                                        {
+                                            audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
+                                            if (audiobook != null)
+                                            {
+                                                _logger.LogInformation("DDL download [{DownloadId}] Found linked audiobook: {Title} by {Authors}", 
+                                                    downloadId, audiobook.Title, string.Join(", ", audiobook.Authors ?? new List<string>()));
+                                            }
+                                            else
+                                            {
+                                                _logger.LogWarning("DDL download [{DownloadId}] AudiobookId {AudiobookId} not found in database", 
+                                                    downloadId, completedDownload.AudiobookId);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            _logger.LogInformation("DDL download [{DownloadId}] No audiobook linked, using search result data", downloadId);
+                                        }
+                                    }
+                                    
+                                    // Build metadata from audiobook if available, otherwise use search result
+                                    var metadata = new AudioMetadata();
+                                    
+                                    if (audiobook != null)
+                                    {
+                                        // Use audiobook metadata (preferred source)
+                                        metadata.Title = audiobook.Title ?? searchResult.Title;
+                                        metadata.Artist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
+                                        metadata.Album = audiobook.Series ?? audiobook.Title ?? searchResult.Album ?? searchResult.Title;
+                                        metadata.AlbumArtist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
+                                        metadata.Series = audiobook.Series ?? audiobook.Title;
+                                        metadata.SeriesPosition = !string.IsNullOrEmpty(audiobook.SeriesNumber) && decimal.TryParse(audiobook.SeriesNumber, out var pos) ? pos : null;
+                                        metadata.Narrator = audiobook.Narrators?.FirstOrDefault();
+                                        metadata.Publisher = audiobook.Publisher;
+                                        metadata.Isbn = audiobook.Isbn;
+                                        metadata.Asin = audiobook.Asin;
+                                        metadata.Year = !string.IsNullOrEmpty(audiobook.PublishYear) && int.TryParse(audiobook.PublishYear, out var year) ? year : null;
+                                        metadata.Description = audiobook.Description;
+                                        metadata.Language = audiobook.Language;
+                                        
+                                        _logger.LogInformation("DDL download [{DownloadId}] Using audiobook metadata: Title='{Title}', Author='{Author}', Series='{Series}'", 
+                                            downloadId, metadata.Title, metadata.Artist, metadata.Series);
+                                    }
+                                    else
+                                    {
+                                        // Fallback to search result data
+                                        metadata.Title = searchResult.Title;
+                                        metadata.Artist = searchResult.Artist ?? "Unknown Author";
+                                        metadata.Album = searchResult.Album ?? searchResult.Title;
+                                        metadata.AlbumArtist = searchResult.Artist ?? "Unknown Author";
+                                        metadata.Series = searchResult.Album ?? searchResult.Title;
+                                        
+                                        _logger.LogInformation("DDL download [{DownloadId}] Using search result metadata: Title='{Title}', Artist='{Artist}', Series='{Series}'", 
+                                            downloadId, metadata.Title, metadata.Artist, metadata.Series);
+                                    }
+
+                                    // Try to extract existing metadata from file (only supplement missing fields)
+                                    try
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Extracting metadata from file: {FilePath}", downloadId, tempFilePath);
+                                        var existingMetadata = await metadataService.ExtractFileMetadataAsync(tempFilePath);
+                                        if (existingMetadata != null)
+                                        {
+                                            // Only use file metadata to fill in missing fields, preserve audiobook/search result data
+                                            if (audiobook == null)
+                                            {
+                                                // If no audiobook linked, use file metadata as primary source
+                                                metadata.Title = existingMetadata.Title ?? metadata.Title;
+                                                metadata.Artist = existingMetadata.Artist ?? metadata.Artist;
+                                                metadata.Album = existingMetadata.Album ?? metadata.Album;
+                                                metadata.AlbumArtist = existingMetadata.AlbumArtist ?? metadata.AlbumArtist;
+                                                metadata.Series = existingMetadata.Series ?? metadata.Series;
+                                                metadata.Year = existingMetadata.Year ?? metadata.Year;
+                                            }
+                                            // Always use file metadata for track/disc numbers (these are per-file)
+                                            metadata.TrackNumber = existingMetadata.TrackNumber;
+                                            metadata.DiscNumber = existingMetadata.DiscNumber;
+                                            
+                                            _logger.LogInformation("DDL download [{DownloadId}] File metadata extracted - Track: {Track}, Disc: {Disc}", 
+                                                downloadId, metadata.TrackNumber, metadata.DiscNumber);
+                                        }
+                                    }
+                                    catch (Exception metaEx)
+                                    {
+                                        _logger.LogWarning(metaEx, "DDL download [{DownloadId}] Failed to extract metadata from {FilePath}, using audiobook/search result data", downloadId, tempFilePath);
+                                    }
+
+                                    // Generate final path using naming pattern
+                                    _logger.LogInformation("DDL download [{DownloadId}] Generating final path with pattern: {Pattern}", downloadId, settings.FileNamingPattern);
+                                    var extension = Path.GetExtension(tempFilePath);
+                                    finalPath = await fileNamingService.GenerateFilePathAsync(
+                                        metadata, 
+                                        diskNumber: metadata.DiscNumber, 
+                                        chapterNumber: metadata.TrackNumber, 
+                                        originalExtension: extension
+                                    );
+
+                                    _logger.LogInformation("DDL download [{DownloadId}] Generated final path: {FinalPath}", downloadId, finalPath);
+
+                                    // Create directory if it doesn't exist
+                                    var finalDirectory = Path.GetDirectoryName(finalPath);
+                                    if (!string.IsNullOrEmpty(finalDirectory) && !Directory.Exists(finalDirectory))
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Creating directory: {Directory}", downloadId, finalDirectory);
+                                        Directory.CreateDirectory(finalDirectory);
+                                    }
+
+                                    // Move file to final location
+                                    if (tempFilePath != finalPath && File.Exists(tempFilePath))
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
+                                        File.Move(tempFilePath, finalPath, overwrite: true);
+                                        _logger.LogInformation("DDL download [{DownloadId}] ✅ File moved successfully to: {FinalPath}", downloadId, finalPath);
+                                        
+                                        // Clean up temp file after successful move
+                                        CleanupTempFile(tempFilePath);
+                                    }
+                                    else if (tempFilePath == finalPath)
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Source and destination paths are the same, no move needed: {Path}", downloadId, tempFilePath);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("DDL download [{DownloadId}] Source file does not exist: {FilePath}", downloadId, tempFilePath);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("DDL download [{DownloadId}] ⚠️ Metadata processing is DISABLED in settings, keeping file at: {FilePath}", downloadId, tempFilePath);
+                                }
+                            }
+                        }
+                        catch (Exception processEx)
+                        {
+                            _logger.LogError(processEx, "DDL download [{DownloadId}] ❌ Failed to process file with naming pattern, keeping original location: {FilePath}", downloadId, tempFilePath);
+                            finalPath = tempFilePath; // Keep original path if processing fails
+                        }
+                        
+                        // Update database with completion status and final path
+                        // Defer to shared completion handler (testable)
+                        await ProcessCompletedDownloadAsync(downloadId, finalPath);
+
+                        _logger.LogInformation("DDL download [{DownloadId}] finalized at: {FinalPath}", downloadId, finalPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "DDL download [{DownloadId}] failed: {Title}", downloadId, searchResult.Title);
+                        
+                        // Create a new scope for error update
+                        using (var scope = _serviceScopeFactory.CreateScope())
+                        {
+                            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                            var failedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                            if (failedDownload != null)
+                            {
+                                failedDownload.Status = DownloadStatus.Failed;
+                                failedDownload.ErrorMessage = ex.Message;
+                                dbContext.Downloads.Update(failedDownload);
+                                await dbContext.SaveChangesAsync();
+                            }
+                        }
+                    }
+                });
+
+                // Return immediately with download ID
+                return downloadId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error starting DDL download [{DownloadId}]: {Title}", downloadId, searchResult.Title);
+                throw new Exception($"Failed to start download: {ex.Message}", ex);
+            }
+        }
+
+        private string SanitizeFileName(string fileName)
+        {
+            // Remove invalid characters from filename
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var sanitized = new string(fileName.Select(c => invalidChars.Contains(c) ? '_' : c).ToArray());
+            
+            // Limit length to 200 characters
+            if (sanitized.Length > 200)
+            {
+                sanitized = sanitized.Substring(0, 200);
+            }
+            
+            return sanitized;
+        }
+
+        private void CleanupTempFile(string tempFilePath)
+        {
+            try
+            {
+                if (File.Exists(tempFilePath))
+                {
+                    File.Delete(tempFilePath);
+                    _logger.LogInformation("Cleaned up temporary file: {TempFilePath}", tempFilePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup temporary file: {TempFilePath}", tempFilePath);
+            }
+        }
+
+        /// <summary>
+        /// Clean up old temporary files that are older than the specified retention period
+        /// </summary>
+        public void CleanupOldTempFiles(int retentionHours = 24)
+        {
+            try
+            {
+                var tempDownloadFolder = Path.Combine(Directory.GetCurrentDirectory(), "config", "temp", "downloads");
+                if (!Directory.Exists(tempDownloadFolder))
+                {
+                    return;
+                }
+
+                var retentionTime = DateTime.UtcNow.AddHours(-retentionHours);
+                var tempFiles = Directory.GetFiles(tempDownloadFolder, "*.*", SearchOption.AllDirectories);
+                
+                foreach (var file in tempFiles)
+                {
+                    try
+                    {
+                        var fileInfo = new FileInfo(file);
+                        if (fileInfo.LastWriteTimeUtc < retentionTime)
+                        {
+                            fileInfo.Delete();
+                            _logger.LogInformation("Cleaned up old temporary file: {FilePath}", file);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to cleanup old temporary file: {FilePath}", file);
+                    }
+                }
+
+                _logger.LogInformation("Completed cleanup of old temporary files (retention: {RetentionHours} hours)", retentionHours);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during temporary file cleanup");
+            }
+        }
+
+        /// <summary>
+        /// Process a completed download by updating its Download record and creating an AudiobookFile if linked.
+        /// Exposed for reuse and unit testing.
+        /// </summary>
+        public async Task ProcessCompletedDownloadAsync(string downloadId, string finalPath)
+        {
+            using (var scope = _serviceScopeFactory.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                if (completedDownload != null)
+                {
+                    completedDownload.Status = DownloadStatus.Completed;
+                    completedDownload.Progress = 100;
+                    var finalFileInfo = new FileInfo(finalPath);
+                    completedDownload.DownloadedSize = finalFileInfo.Length;
+                    completedDownload.CompletedAt = DateTime.UtcNow;
+                    completedDownload.FinalPath = finalPath;
+                    dbContext.Downloads.Update(completedDownload);
+
+                    // If this download is linked to an audiobook, create an AudiobookFile record (centralized service)
+                    if (completedDownload.AudiobookId != null)
+                    {
+                        try
+                        {
+                            var audiobookId = completedDownload.AudiobookId.Value;
+                            using var afScope = _serviceScopeFactory.CreateScope();
+                            var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
+                            await audioFileService.EnsureAudiobookFileAsync(audiobookId, finalPath, completedDownload.DownloadClientId ?? "download");
+                        }
+                        catch (Exception abEx)
+                        {
+                            _logger.LogWarning(abEx, "Failed to create AudiobookFile record for AudiobookId: {AudiobookId}", completedDownload.AudiobookId.Value);
+                        }
+                    }
+
+                    await dbContext.SaveChangesAsync();
+
+                    try
+                    {
+                        // Reload the download to ensure we have the latest values (detached entity may not track all fields)
+                        var updatedDownload = await dbContext.Downloads.FindAsync(completedDownload.Id);
+                        if (updatedDownload != null)
+                        {
+                            // Broadcast a single-item update so SignalR clients receive immediate notification
+                            await _hubContext.Clients.All.SendAsync("DownloadUpdate", new List<Download> { updatedDownload });
+                            _logger.LogInformation("Broadcasted DownloadUpdate for {DownloadId} via SignalR", updatedDownload.Id);
+                        }
+                    }
+                    catch (Exception hubEx)
+                    {
+                        _logger.LogWarning(hubEx, "Failed to broadcast DownloadUpdate for {DownloadId}", completedDownload.Id);
+                    }
+
+                    // Additionally, if this download was linked to an audiobook, broadcast the updated audiobook (including Files)
+                    try
+                    {
+                        if (completedDownload.AudiobookId != null)
+                        {
+                            var abId = completedDownload.AudiobookId.Value;
+                            var updatedAudiobook = await dbContext.Audiobooks
+                                .Include(a => a.QualityProfile)
+                                .Include(a => a.Files)
+                                .FirstOrDefaultAsync(a => a.Id == abId);
+
+                            if (updatedAudiobook != null)
+                            {
+                                var audiobookDto = new
+                                {
+                                    id = updatedAudiobook.Id,
+                                    title = updatedAudiobook.Title,
+                                    authors = updatedAudiobook.Authors,
+                                    description = updatedAudiobook.Description,
+                                    imageUrl = updatedAudiobook.ImageUrl,
+                                    filePath = updatedAudiobook.FilePath,
+                                    fileSize = updatedAudiobook.FileSize,
+                                    runtime = updatedAudiobook.Runtime,
+                                    monitored = updatedAudiobook.Monitored,
+                                    quality = updatedAudiobook.Quality,
+                                    series = updatedAudiobook.Series,
+                                    seriesNumber = updatedAudiobook.SeriesNumber,
+                                    tags = updatedAudiobook.Tags,
+                                    files = updatedAudiobook.Files?.Select(f => new {
+                                        id = f.Id,
+                                        path = f.Path,
+                                        size = f.Size,
+                                        durationSeconds = f.DurationSeconds,
+                                        format = f.Format,
+                                        bitrate = f.Bitrate,
+                                        sampleRate = f.SampleRate,
+                                        channels = f.Channels,
+                                        source = f.Source,
+                                        createdAt = f.CreatedAt
+                                    }).ToList()
+                                    ,
+                                    wanted = updatedAudiobook.Monitored && (updatedAudiobook.Files == null || !updatedAudiobook.Files.Any())
+                                };
+
+                                await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);
+                                _logger.LogInformation("Broadcasted AudiobookUpdate for AudiobookId {AudiobookId} via SignalR", abId);
+                            }
+                        }
+                    }
+                    catch (Exception abHubEx)
+                    {
+                        _logger.LogWarning(abHubEx, "Failed to broadcast AudiobookUpdate for download {DownloadId}", completedDownload.Id);
+                    }
+                }
+            }
         }
     }
 }

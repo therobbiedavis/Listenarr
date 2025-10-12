@@ -52,6 +52,7 @@
       <div class="loading-spinner">
         <i class="ph ph-spinner ph-spin"></i>
         <p>Searching for audiobooks...</p>
+        <p v-if="searchStatus" class="search-status">{{ searchStatus }}</p>
       </div>
     </div>
 
@@ -68,14 +69,17 @@
             </div>
           </div>
           <div class="result-info">
-            <h3>{{ audibleResult.title }}</h3>
+            <h3>
+              {{ audibleResult.title }}
+              <span v-if="audibleResult.language" class="language-badge">{{ audibleResult.language }}</span>
+            </h3>
             <p class="result-author">
               by {{ (audibleResult.authors || []).join(', ') || 'Unknown Author' }}
             </p>
             <p v-if="audibleResult.narrators?.length" class="result-narrator">
               Narrated by {{ audibleResult.narrators.join(', ') }}
             </p>
-            <div class="result-stats">
+              <div class="result-stats">
               <span v-if="audibleResult.runtime" class="stat-item">
                 <i class="ph ph-clock"></i>
                 {{ formatRuntime(audibleResult.runtime) }}
@@ -86,10 +90,10 @@
               </span>
             </div>
             <div class="result-description" v-html="audibleResult.description"></div>
-            <div class="result-meta">
+              <div class="result-meta">
               <span v-if="audibleResult.publishYear">{{ audibleResult.publishYear }}</span>
               <span v-if="audibleResult.language">{{ audibleResult.language }}</span>
-              <span v-if="audibleResult.publisher">Publisher: {{ audibleResult.publisher }}</span>
+              <span v-if="audibleResult.publisher">Publisher: {{ decodeHtml(audibleResult.publisher) }}</span>
               <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
               <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
               <span v-if="audibleResult.series">Series: {{ audibleResult.series }}</span>
@@ -136,7 +140,10 @@
               </div>
             </div>
             <div class="result-info">
-              <h3>{{ book.title }}</h3>
+              <h3>
+                {{ book.title }}
+                <span v-if="book.searchResult?.language" class="language-badge">{{ book.searchResult?.language }}</span>
+              </h3>
               <p class="result-author">by {{ formatAuthors(book) }}</p>
               
               <!-- Audiobook metadata from search results -->
@@ -157,7 +164,7 @@
               
               <p v-if="book.first_publish_year" class="result-year">Published: {{ book.first_publish_year }}</p>
               <p v-if="book.publisher?.length" class="result-publisher">
-                Publisher: {{ book.publisher[0] }}
+                Publisher: {{ decodeHtml(book.publisher[0]) }}
               </p>
               
               <div class="result-meta">
@@ -241,25 +248,49 @@
       @close="closeDetailsModal"
       @add-to-library="handleAddToLibrary"
     />
+
+    <!-- Add to Library Modal -->
+    <AddLibraryModal
+      :visible="showAddLibraryModal"
+      :book="selectedBookForLibrary"
+      @close="closeAddLibraryModal"
+      @added="handleLibraryAdded"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import type { AudibleBookMetadata } from '@/types'
+import type { AudibleBookMetadata, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
-import { openLibraryService, type OpenLibraryBook } from '@/services/openlibrary'
+import type { OpenLibraryBook } from '@/services/openlibrary'
 import { isbnService, type ISBNBook } from '@/services/isbn'
+import { signalRService } from '@/services/signalr'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
+import AddLibraryModal from '@/components/AddLibraryModal.vue'
 import { useNotification } from '@/composables/useNotification'
+
+// Extended type for title search results that includes search metadata
+type TitleSearchResult = OpenLibraryBook & { searchResult?: SearchResult }
 
 const router = useRouter()
 const configStore = useConfigurationStore()
 const libraryStore = useLibraryStore()
-const { success, error: showError, warning } = useNotification()
+const { error: showError, warning } = useNotification()
+
+// Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
+const decodeHtml = (input?: string | null): string => {
+  if (!input) return ''
+  return input
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
 
 console.log('AddNewView component loaded')
 console.log('libraryStore:', libraryStore)
@@ -321,10 +352,11 @@ const searchType = ref<'asin' | 'title' | 'isbn' | null>(null)
 const isSearching = ref(false)
 const searchError = ref('')
 const searchDebounceTimer = ref<number | null>(null)
+const searchStatus = ref('')
 
 // Results
 const audibleResult = ref<AudibleBookMetadata | null>(null)
-const titleResults = ref<OpenLibraryBook[]>([])
+const titleResults = ref<TitleSearchResult[]>([])
 const resolvedAsins = ref<Record<string, string>>({})
 const asinFilteringApplied = ref(false)
 const isbnResult = ref<ISBNBook | null>(null) // retained for potential enrichment but not directly rendered
@@ -333,7 +365,7 @@ const isbnLookupWarning = ref(false)
 const titleResultsCount = ref(0)
 const isLoadingMore = ref(false)
 const currentPage = ref(0)
-const resultsPerPage = 10
+// const resultsPerPage = 10
 
 // Parsed search query components (for error messages)
 const asinQuery = ref('')
@@ -349,6 +381,8 @@ const errorMessage = ref('')
 // Modal state
 const showDetailsModal = ref(false)
 const selectedBook = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
+const showAddLibraryModal = ref(false)
+const selectedBookForLibrary = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
 
 // Computed properties
 const hasResults = computed(() => {
@@ -428,6 +462,7 @@ const performSearch = async () => {
 
   const detectedType = detectSearchType(query)
   searchType.value = detectedType
+  searchStatus.value = ''
 
   if (detectedType === 'asin') {
     await searchByAsin(query)
@@ -450,17 +485,27 @@ const searchByAsin = async (asin: string) => {
   isbnResult.value = null
   errorMessage.value = ''
   asinQuery.value = asin
+  searchStatus.value = `Searching Audible for ASIN: ${asin}...`
   try {
-    const result = await apiService.request<AudibleBookMetadata>(`/audible/metadata/${asin}`)
+    // Inform user that request was sent
+    searchStatus.value = `Requesting metadata for ASIN ${asin}...`
+    const result = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
+    // Server returned metadata
+    searchStatus.value = `Metadata received for ASIN ${asin}, processing...`
     audibleResult.value = result
     
-    // Check library status after getting result
-    await checkExistingInLibrary()
+  // Check library status after getting result
+  searchStatus.value = 'Checking library for existing copies...'
+  await checkExistingInLibrary()
+  // Finalize status
+  searchStatus.value = audibleResult.value ? 'ASIN metadata ready' : 'No metadata available'
   } catch (error) {
     console.error('ASIN search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
   } finally {
     isSearching.value = false
+    // Keep a brief 'done' status then clear
+    setTimeout(() => { searchStatus.value = '' }, 1200)
   }
 }
 
@@ -481,9 +526,12 @@ const searchByTitle = async (query: string) => {
   titleQuery.value = parsed.title
   authorQuery.value = parsed.author || ''
   
+  searchStatus.value = ''
   try {
     // Use backend search API which now searches Amazon/Audible directly
     const searchResults = await apiService.search(query)
+    
+    searchStatus.value = 'Processing search results...'
     
     // Convert SearchResult objects to displayable format and extract unique ASINs
     titleResults.value = []
@@ -495,13 +543,11 @@ const searchByTitle = async (query: string) => {
         resolvedAsins.value[`search-${result.asin}`] = result.asin
         
         // Create a simplified book object for display
-        const displayBook = {
+        const displayBook: TitleSearchResult = {
           key: `search-${result.asin}`,
           title: result.title,
           author_name: result.artist ? [result.artist] : [],
-          first_publish_year: null,
           isbn: [],
-          cover_i: null,
           searchResult: result // Store the full search result for metadata
         }
         titleResults.value.push(displayBook)
@@ -515,20 +561,24 @@ const searchByTitle = async (query: string) => {
       errorMessage.value = 'No audiobooks found. Try refining your search terms.'
     }
     
-    // Check library status after getting results
-    await checkExistingInLibrary()
+  // Check library status after getting results
+  searchStatus.value = 'Checking library for existing matches...'
+  await checkExistingInLibrary()
+  searchStatus.value = `Search complete — found ${titleResults.value.length} items`
   } catch (error) {
     console.error('Title search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
   } finally {
     isSearching.value = false
+    // Clear status shortly after completion so UI isn't stale
+    setTimeout(() => { searchStatus.value = '' }, 1000)
   }
 }
 
 const parseSearchQuery = (query: string): { title: string; author?: string } => {
   // Try to parse "title by author" format
   const byMatch = query.match(/^(.+?)\s+by\s+(.+)$/i)
-  if (byMatch) {
+  if (byMatch && byMatch[1] && byMatch[2]) {
     return {
       title: byMatch[1].trim(),
       author: byMatch[2].trim()
@@ -537,7 +587,7 @@ const parseSearchQuery = (query: string): { title: string; author?: string } => 
   
   // Try to parse "author - title" format
   const dashMatch = query.match(/^(.+?)\s*-\s*(.+)$/)
-  if (dashMatch) {
+  if (dashMatch && dashMatch[1] && dashMatch[2]) {
     return {
       title: dashMatch[2].trim(),
       author: dashMatch[1].trim()
@@ -555,28 +605,28 @@ const loadMoreTitleResults = async () => {
   console.log('Load more not needed - all Amazon/Audible results already loaded')
 }
 
-const clearTitleError = () => {
-  searchError.value = ''
-}
+// const clearTitleError = () => {
+//   searchError.value = ''
+// }
 
 // Helper methods for Open Library results
-const getCoverUrl = (book: any): string => {
-  const imageUrl = book.searchResult?.imageUrl || book.imageUrl || ''
+const getCoverUrl = (book: TitleSearchResult): string => {
+  const imageUrl = book.searchResult?.imageUrl || ''
   return apiService.getImageUrl(imageUrl)
 }
 
-const formatAuthors = (book: any): string => {
+const formatAuthors = (book: TitleSearchResult): string => {
   return book.author_name?.join(', ') || book.searchResult?.artist || 'Unknown Author'
 }
 
-const getAsin = (book: any): string | null => {
+const getAsin = (book: TitleSearchResult): string | null => {
   return book.searchResult?.asin || resolvedAsins.value[book.key] || null
 }
 
 // Removed manual ASIN helper methods (createAsinSearchHint, openAmazonSearch, useBookForAsinSearch)
 
 // Common methods for both search types
-const selectTitleResult = async (book: any) => {
+const selectTitleResult = async (book: TitleSearchResult) => {
   console.log('selectTitleResult called with book:', book)
   const asin = resolvedAsins.value[book.key] || book.searchResult?.asin
   
@@ -591,7 +641,7 @@ const selectTitleResult = async (book: any) => {
   try {
     // Fetch full metadata
     console.log('Fetching metadata from /api/audible/metadata/' + asin)
-    const metadata = await apiService.request<AudibleBookMetadata>(`/audible/metadata/${asin}`)
+    const metadata = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
     console.log('Metadata fetched:', metadata)
     
     // Add to library directly
@@ -602,11 +652,11 @@ const selectTitleResult = async (book: any) => {
   }
 }
 
-const viewTitleResultDetails = async (book: any) => {
+const viewTitleResultDetails = async (book: TitleSearchResult) => {
   const asin = resolvedAsins.value[book.key] || book.searchResult?.asin
   if (asin) {
     try {
-      const result = await apiService.request<AudibleBookMetadata>(`/audible/metadata/${asin}`)
+      const result = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
       selectedBook.value = result
       showDetailsModal.value = true
     } catch (error) {
@@ -628,43 +678,9 @@ const addToLibrary = async (book: AudibleBookMetadata) => {
     return
   }
 
-  try {
-    // Call the backend API to add the audiobook to library
-    await apiService.request('/library/add', {
-      method: 'POST',
-      body: JSON.stringify(book),
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    success(`"${book.title}" has been added to your library!`)
-    
-    // Mark as added in the UI
-    if (book.asin) {
-      console.log('Marking ASIN as added:', book.asin)
-      addedAsins.value.add(book.asin)
-    }
-    
-    // Reset search if needed
-    if (searchType.value === 'asin') {
-      searchQuery.value = ''
-      audibleResult.value = null
-    }
-  } catch (error: any) {
-    console.error('Failed to add audiobook:', error)
-    
-    // Check if it's a conflict (already exists)
-    if (error.message?.includes('409') || error.message?.includes('Conflict')) {
-      warning('This audiobook is already in your library.')
-      // Mark as added in the UI even for duplicates
-      if (book.asin) {
-        addedAsins.value.add(book.asin)
-      }
-    } else {
-      showError('Failed to add audiobook. Please try again.')
-    }
-  }
+  // Show the add to library modal instead of directly adding
+  selectedBookForLibrary.value = book
+  showAddLibraryModal.value = true
 }
 
 const viewDetails = (book: AudibleBookMetadata) => {
@@ -680,20 +696,39 @@ const handleAddToLibrary = (book: AudibleBookMetadata) => {
   addToLibrary(book)
 }
 
+const closeAddLibraryModal = () => {
+  showAddLibraryModal.value = false
+}
+
+const handleLibraryAdded = (audiobook: Audiobook) => {
+  // Mark as added in the UI
+  if (audiobook.asin) {
+    console.log('Marking ASIN as added:', audiobook.asin)
+    addedAsins.value.add(audiobook.asin)
+  }
+  
+  // Reset search if needed
+  if (searchType.value === 'asin') {
+    searchQuery.value = ''
+    audibleResult.value = null
+  }
+}
+
 const retrySearch = () => {
   errorMessage.value = ''
+  searchStatus.value = ''
   performSearch()
 }
 
 // Formatting helpers
-const formatDate = (dateString: string): string => {
-  try {
-    const date = new Date(dateString)
-    return date.toLocaleDateString()
-  } catch {
-    return dateString
-  }
-}
+// const formatDate = (dateString: string): string => {
+//   try {
+//     const date = new Date(dateString)
+//     return date.toLocaleDateString()
+//   } catch {
+//     return dateString
+//   }
+// }
 
 const formatRuntime = (minutes: number): string => {
   if (!minutes) return 'Unknown'
@@ -719,7 +754,7 @@ const searchByISBNChain = async (isbn: string) => {
 
   try {
     // Fetch metadata from ISBN to get title and author for search
-    isbnLookupMessage.value = 'Looking up book details from ISBN...'
+  searchStatus.value = 'Looking up book details from ISBN...'
     let searchQuery = isbn // fallback to ISBN if metadata lookup fails
     
     try {
@@ -730,17 +765,20 @@ const searchByISBNChain = async (isbn: string) => {
         const title = meta.book.title || ''
         const author = meta.book.authors?.join(', ') || ''
         searchQuery = author ? `${title} by ${author}` : title
+        searchStatus.value = `Found book details: ${title}${author ? ` by ${author}` : ''}. Searching for audiobook...`
+      } else {
+        searchStatus.value = 'No ISBN metadata found, searching with ISBN as fallback...'
       }
     } catch (error) {
       console.warn('ISBN metadata lookup failed, will search by ISBN directly:', error)
     }
 
-    isbnLookupMessage.value = 'Searching Amazon/Audible for audiobook...'
+  searchStatus.value = 'Scraping Amazon...'
     
     // Search Amazon/Audible using title/author or ISBN
-    await searchByTitle(searchQuery)
-    searchType.value = 'title' // Update search type since we're now doing title search
-    isbnLookupMessage.value = ''
+  await searchByTitle(searchQuery)
+  searchType.value = 'title' // Update search type since we're now doing title search
+  searchStatus.value = 'ISBN search completed'
     
     if (titleResults.value.length === 0) {
       isbnLookupWarning.value = true
@@ -752,12 +790,23 @@ const searchByISBNChain = async (isbn: string) => {
     isbnLookupMessage.value = 'ISBN search failed'
   } finally {
     isSearching.value = false
+    setTimeout(() => { searchStatus.value = '' }, 1000)
   }
 }
 
 // Load application settings on mount
 onMounted(async () => {
   await configStore.loadApplicationSettings()
+  // Subscribe to server-side search progress updates
+  const unsub = signalRService.onSearchProgress((payload) => {
+    if (payload && payload.message) {
+      searchStatus.value = payload.message
+    }
+  })
+  // When component is unmounted, unsubscribe
+  onUnmounted(() => {
+    try { unsub() } catch {}
+  })
 })
 </script>
 
@@ -1037,6 +1086,13 @@ onMounted(async () => {
   margin: 0;
 }
 
+.search-status {
+  font-size: 0.9rem;
+  color: #888;
+  margin: 0.5rem 0 0 0;
+  font-style: italic;
+}
+
 /* Results */
 .search-results h2 {
   color: white;
@@ -1130,6 +1186,7 @@ onMounted(async () => {
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
 }
 
@@ -1171,6 +1228,20 @@ onMounted(async () => {
   padding: 1rem;
   gap: 1rem;
   align-items: flex-start;
+}
+
+/* Language badge */
+.language-badge {
+  display: inline-block;
+  background-color: rgba(255,255,255,0.06);
+  color: #e6edf3;
+  padding: 0.15rem 0.5rem;
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  text-transform: none;
+  vertical-align: middle;
+  border: 1px solid rgba(255,255,255,0.04);
 }
 
 .title-result-card .result-info {

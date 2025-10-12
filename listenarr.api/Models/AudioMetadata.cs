@@ -31,9 +31,14 @@ namespace Listenarr.Api.Models
         public int? DiscNumber { get; set; }
         public int? DiscTotal { get; set; }
         public TimeSpan Duration { get; set; }
-        public string Format { get; set; } = string.Empty;
-        public int Bitrate { get; set; }
-        public int SampleRate { get; set; }
+    public string? Format { get; set; }
+    // Container (human-friendly): e.g., M4B, MP3, FLAC
+    public string? Container { get; set; }
+    // Audio codec: e.g., aac, mp3, opus
+    public string? Codec { get; set; }
+    public int? Bitrate { get; set; }
+    public int? SampleRate { get; set; }
+    public int? Channels { get; set; }
         public string? Isbn { get; set; }
         public string? Asin { get; set; }
         public string? Description { get; set; }

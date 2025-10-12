@@ -45,7 +45,7 @@ namespace Listenarr.Api.Services
             _httpClient = httpClientFactory.CreateClient();
             
             // Set up cache directories
-            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config");
             _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
             _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
             

@@ -23,11 +23,16 @@ namespace Listenarr.Api.Models
     public class ListenArrDbContext : DbContext
     {
         public DbSet<Audiobook> Audiobooks { get; set; }
+    public DbSet<AudiobookFile> AudiobookFiles { get; set; }
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; }
         public DbSet<History> History { get; set; }
         public DbSet<Indexer> Indexers { get; set; }
         public DbSet<ApiConfiguration> ApiConfigurations { get; set; }
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
+    public DbSet<User> Users { get; set; }
+        public DbSet<Download> Downloads { get; set; }
+        public DbSet<QualityProfile> QualityProfiles { get; set; }
+        public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
@@ -36,7 +41,8 @@ namespace Listenarr.Api.Models
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
-            if (optionsBuilder.IsConfigured)
+            // Only configure SQLite if no provider was configured externally (e.g. tests using InMemory)
+            if (!optionsBuilder.IsConfigured)
             {
                 // Apply PRAGMA settings when connection is configured
                 optionsBuilder.UseSqlite(options =>
@@ -73,6 +79,13 @@ namespace Listenarr.Api.Models
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
 
+            // Audiobook -> AudiobookFiles one-to-many
+            modelBuilder.Entity<Audiobook>()
+                .HasMany(a => a.Files)
+                .WithOne(f => f.Audiobook)
+                .HasForeignKey(f => f.AudiobookId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             // ApplicationSettings configuration
             modelBuilder.Entity<ApplicationSettings>()
                 .Property(e => e.AllowedFileExtensions)
@@ -89,6 +102,58 @@ namespace Listenarr.Api.Models
             // DownloadClientConfiguration - ignore computed properties
             modelBuilder.Entity<DownloadClientConfiguration>()
                 .Ignore(e => e.Settings);
+
+            // Download - ignore Metadata dictionary (not stored in DB for now)
+            modelBuilder.Entity<Download>()
+                .Ignore(e => e.Metadata);
+
+            // QualityProfile configuration - store complex properties as JSON
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.Qualities)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<QualityDefinition>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<QualityDefinition>()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredFormats)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredWords)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.MustNotContain)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.MustContain)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            modelBuilder.Entity<QualityProfile>()
+                .Property(e => e.PreferredLanguages)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+
+            // Ensure AudiobookFile uniqueness per audiobook path
+            modelBuilder.Entity<AudiobookFile>()
+                .HasIndex(f => new { f.AudiobookId, f.Path })
+                .IsUnique();
         }
     }
 }

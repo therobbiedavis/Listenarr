@@ -136,9 +136,6 @@ namespace Listenarr.Api.Controllers
         [HttpOptions("prefetch")]
         public IActionResult PrefetchOptions()
         {
-            Response.Headers.Add("Access-Control-Allow-Origin", "*");
-            Response.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
-            Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
             return Ok();
         }
     }

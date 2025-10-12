@@ -40,7 +40,9 @@ namespace Listenarr.Api.Controllers
             [FromQuery] string query,
             [FromQuery] string? category = null,
             [FromQuery] List<string>? apiIds = null,
-            [FromQuery] bool enrichedOnly = false)
+            [FromQuery] bool enrichedOnly = false,
+            [FromQuery] SearchSortBy sortBy = SearchSortBy.Seeders,
+            [FromQuery] SearchSortDirection sortDirection = SearchSortDirection.Descending)
         {
             try
             {
@@ -49,7 +51,7 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("Query parameter is required");
                 }
 
-                var results = await _searchService.SearchAsync(query, category, apiIds);
+                var results = await _searchService.SearchAsync(query, category, apiIds, sortBy, sortDirection);
                 if (enrichedOnly)
                 {
                     results = results.Where(r => r.IsEnriched).ToList();
@@ -63,7 +65,7 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        [HttpGet("api/{apiId}")]
+        [HttpGet("{apiId}")]
         public async Task<ActionResult<List<SearchResult>>> SearchByApi(
             string apiId,
             [FromQuery] string query,
@@ -71,12 +73,15 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                _logger.LogInformation("SearchByApi called with apiId: {ApiId}, query: {Query}", apiId, query);
+                
                 if (string.IsNullOrEmpty(query))
                 {
                     return BadRequest("Query parameter is required");
                 }
 
                 var results = await _searchService.SearchByApiAsync(apiId, query, category);
+                _logger.LogInformation("SearchByApi returning {Count} results for apiId: {ApiId}", results.Count, apiId);
                 return Ok(results);
             }
             catch (Exception ex)
@@ -101,26 +106,26 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        [HttpGet("indexers")]
-        public async Task<ActionResult<List<SearchResult>>> SearchIndexers(
-            [FromQuery] string query,
-            [FromQuery] string? category = null)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(query))
-                {
-                    return BadRequest("Query parameter is required");
-                }
+        // [HttpGet("indexers")]
+        // public async Task<ActionResult<List<SearchResult>>> SearchIndexers(
+        //     [FromQuery] string query,
+        //     [FromQuery] string? category = null)
+        // {
+        //     try
+        //     {
+        //         if (string.IsNullOrEmpty(query))
+        //         {
+        //             return BadRequest("Query parameter is required");
+        //         }
 
-                var results = await _searchService.SearchIndexersAsync(query, category);
-                return Ok(results);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
-                return StatusCode(500, "Internal server error");
-            }
-        }
+        //         var results = await _searchService.SearchIndexersAsync(query, category);
+        //         return Ok(results);
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
+        //         return StatusCode(500, "Internal server error");
+        //     }
+        // }
     }
 }

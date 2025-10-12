@@ -147,6 +147,9 @@ namespace Listenarr.Api.Migrations
                     b.Property<string>("Language")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastSearchTime")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("Monitored")
                         .HasColumnType("INTEGER");
 
@@ -161,6 +164,9 @@ namespace Listenarr.Api.Migrations
 
                     b.Property<string>("Quality")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("QualityProfileId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("Runtime")
                         .HasColumnType("INTEGER");
@@ -185,7 +191,121 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("QualityProfileId");
+
                     b.ToTable("Audiobooks");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.AudiobookFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Bitrate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Channels")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Codec")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Container")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("DurationSeconds")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Format")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SampleRate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudiobookId", "Path")
+                        .IsUnique();
+
+                    b.ToTable("AudiobookFiles");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.Download", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Album")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Artist")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClientId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DownloadedSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FinalPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalUrl")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Progress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("TotalSize")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Downloads");
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.DownloadClientConfiguration", b =>
@@ -353,6 +473,161 @@ namespace Listenarr.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Indexers");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.QualityProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CutoffQuality")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaximumAge")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaximumSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinimumSeeders")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinimumSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MustContain")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MustNotContain")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PreferNewerReleases")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PreferredFormats")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreferredLanguages")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreferredWords")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Qualities")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("QualityProfiles");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.RemotePathMapping", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DownloadClientId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LocalPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RemotePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("RemotePathMappings");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.User", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.Audiobook", b =>
+                {
+                    b.HasOne("Listenarr.Api.Models.QualityProfile", "QualityProfile")
+                        .WithMany()
+                        .HasForeignKey("QualityProfileId");
+
+                    b.Navigation("QualityProfile");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.AudiobookFile", b =>
+                {
+                    b.HasOne("Listenarr.Api.Models.Audiobook", "Audiobook")
+                        .WithMany("Files")
+                        .HasForeignKey("AudiobookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Audiobook");
+                });
+
+            modelBuilder.Entity("Listenarr.Api.Models.Audiobook", b =>
+                {
+                    b.Navigation("Files");
                 });
 #pragma warning restore 612, 618
         }

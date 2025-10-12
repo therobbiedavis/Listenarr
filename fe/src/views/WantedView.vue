@@ -6,7 +6,7 @@
         Wanted
       </h1>
       <div class="wanted-actions">
-        <button class="btn btn-primary" @click="searchMissing" :disabled="wantedAudiobooks.length === 0">
+        <button class="btn btn-primary" @click="searchMissing" :disabled="categorizedWanted.missing.length === 0">
           <i class="ph ph-robot"></i>
           Automatic Search All
         </button>
@@ -55,7 +55,13 @@
             <span v-if="item.runtime">{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span>
           </div>
           <div class="wanted-quality">
-            Wanted Quality: {{ item.quality || 'Any' }}
+            <template v-if="getQualityProfileForAudiobook(item)">
+              Wanted Quality Profile:
+              <span class="profile-name">{{ getQualityProfileForAudiobook(item)?.name ?? 'Unknown' }}</span>
+            </template>
+            <template v-else>
+              Wanted Quality: {{ item.quality || 'Any' }}
+            </template>
           </div>
           <div v-if="searchResults[item.id]" class="search-status">
             <i v-if="searching[item.id]" class="ph ph-spinner ph-spin"></i>
@@ -63,11 +69,8 @@
           </div>
         </div>
         <div class="wanted-status">
-          <span v-if="!searching[item.id]" class="status-badge missing">
-            Missing
-          </span>
-          <span v-else class="status-badge searching">
-            Searching
+          <span :class="['status-badge', getStatusClass(item)]">
+            {{ getStatusText(item) }}
           </span>
         </div>
         <div class="wanted-actions-cell">
@@ -103,9 +106,8 @@
       <div class="empty-icon">
         <i class="ph ph-check-circle"></i>
       </div>
-      <h2>No Missing Audiobooks</h2>
-      <p v-if="wantedAudiobooks.length === 0">All your monitored audiobooks have files!</p>
-      <p v-else>Switch tabs to see audiobooks in other states.</p>
+      <h2>{{ getEmptyStateTitle() }}</h2>
+      <p>{{ getEmptyStateMessage() }}</p>
     </div>
 
     <!-- Manual Search Modal -->
@@ -121,13 +123,29 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useLibraryStore } from '@/stores/library'
+import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
 
 const libraryStore = useLibraryStore()
 
-const selectedTab = ref('missing')
+const configurationStore = useConfigurationStore()
+
+const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
+  console.log('Getting quality profile for audiobook:', audiobook.title, 'qualityProfileId:', audiobook.qualityProfileId)
+  if (!audiobook || !audiobook.qualityProfileId) {
+    console.log('No qualityProfileId for audiobook:', audiobook.title)
+    return null
+  }
+  const profile = configurationStore.qualityProfiles.find(
+    (profile) => profile.id === audiobook.qualityProfileId
+  )
+  console.log('Found profile:', profile ? profile.name : 'null')
+  return profile || null
+}
+
+const selectedTab = ref('all')
 const loading = ref(false)
 const searching = ref<Record<number, boolean>>({})
 const searchResults = ref<Record<number, string>>({})
@@ -137,31 +155,123 @@ const selectedAudiobook = ref<Audiobook | null>(null)
 onMounted(async () => {
   loading.value = true
   await libraryStore.fetchLibrary()
+  await configurationStore.loadQualityProfiles()
   loading.value = false
+  
+  // Debug logging
+  console.log('Total audiobooks in library:', libraryStore.audiobooks.length)
+  console.log('Monitored audiobooks:', libraryStore.audiobooks.filter(a => a.monitored).length)
+  console.log('Audiobooks without files:', libraryStore.audiobooks.filter(a => !a.filePath || a.filePath.trim() === '').length)
+  console.log('Wanted audiobooks:', wantedAudiobooks.value.length)
+  console.log('Quality profiles loaded:', configurationStore.qualityProfiles.length)
+  
+  // Log first few audiobooks for inspection
+  if (libraryStore.audiobooks.length > 0) {
+    console.log('Sample audiobook:', libraryStore.audiobooks[0])
+  }
 })
 
 // Filter audiobooks that are monitored and missing files
 const wantedAudiobooks = computed(() => {
-  return libraryStore.audiobooks.filter(audiobook => 
-    audiobook.monitored && 
-    (!audiobook.filePath || audiobook.filePath.trim() === '')
-  )
+  // Use authoritative server-provided `wanted` flag exclusively. During
+  // migration older records may not have this field; treat missing/undefined
+  // as NOT wanted so the server is authoritative.
+  return libraryStore.audiobooks.filter(audiobook => {
+    const serverWanted = (audiobook as unknown as Record<string, unknown>)['wanted']
+    return serverWanted === true
+  })
 })
 
-// Count by status (for now all are "missing")
+// Categorize wanted audiobooks by their current search state
+const categorizedWanted = computed(() => {
+  const all = wantedAudiobooks.value
+  const searchingItems = all.filter(a => searching.value[a.id])
+  const failedItems = all.filter(a => searchResults.value[a.id] && searchResults.value[a.id] !== 'Searching...' && !searching.value[a.id])
+  const missingItems = all.filter(a => !searching.value[a.id] && !searchResults.value[a.id])
+  const skippedItems: Audiobook[] = [] // For future use, currently empty
+
+  return { all, searching: searchingItems, failed: failedItems, missing: missingItems, skipped: skippedItems }
+})
+
+// Count by status
 const filterTabs = computed(() => [
-  { label: 'Missing', value: 'missing', count: wantedAudiobooks.value.length },
-  { label: 'Searching', value: 'searching', count: 0 },
-  { label: 'Failed', value: 'failed', count: 0 },
-  { label: 'Skipped', value: 'skipped', count: 0 }
+  { label: 'All', value: 'all', count: categorizedWanted.value.all.length },
+  { label: 'Missing', value: 'missing', count: categorizedWanted.value.missing.length },
+  { label: 'Searching', value: 'searching', count: categorizedWanted.value.searching.length },
+  { label: 'Failed', value: 'failed', count: categorizedWanted.value.failed.length },
+  { label: 'Skipped', value: 'skipped', count: categorizedWanted.value.skipped.length }
 ])
 
 const filteredWanted = computed(() => {
-  if (selectedTab.value === 'missing') {
-    return wantedAudiobooks.value
+  switch (selectedTab.value) {
+    case 'all':
+      return categorizedWanted.value.all
+    case 'missing':
+      return categorizedWanted.value.missing
+    case 'searching':
+      return categorizedWanted.value.searching
+    case 'failed':
+      return categorizedWanted.value.failed
+    case 'skipped':
+      return categorizedWanted.value.skipped
+    default:
+      return categorizedWanted.value.all
   }
-  return []
 })
+
+function getStatusClass(item: Audiobook): string {
+  if (searching.value[item.id]) {
+    return 'searching'
+  }
+  if (searchResults.value[item.id] && searchResults.value[item.id] !== 'Searching...') {
+    return 'failed'
+  }
+  return 'missing'
+}
+
+function getStatusText(item: Audiobook): string {
+  if (searching.value[item.id]) {
+    return 'Searching'
+  }
+  if (searchResults.value[item.id] && searchResults.value[item.id] !== 'Searching...') {
+    return 'Failed'
+  }
+  return 'Missing'
+}
+
+function getEmptyStateTitle(): string {
+  switch (selectedTab.value) {
+    case 'all':
+      return 'No Wanted Audiobooks'
+    case 'missing':
+      return 'No Missing Audiobooks'
+    case 'searching':
+      return 'No Searching Audiobooks'
+    case 'failed':
+      return 'No Failed Audiobooks'
+    case 'skipped':
+      return 'No Skipped Audiobooks'
+    default:
+      return 'No Audiobooks'
+  }
+}
+
+function getEmptyStateMessage(): string {
+  switch (selectedTab.value) {
+    case 'all':
+      return 'All your monitored audiobooks have files!'
+    case 'missing':
+      return 'All wanted audiobooks are currently being searched or have been searched.'
+    case 'searching':
+      return 'No audiobooks are currently being searched.'
+    case 'failed':
+      return 'No audiobooks have failed searches.'
+    case 'skipped':
+      return 'No audiobooks have been skipped.'
+    default:
+      return 'No audiobooks in this category.'
+  }
+}
 
 const formatDate = (date: string | undefined): string => {
   if (!date) return 'Unknown'
@@ -175,8 +285,8 @@ const formatDate = (date: string | undefined): string => {
 const searchMissing = async () => {
   console.log('Automatic search for all missing audiobooks')
   
-  // Search all wanted audiobooks sequentially
-  for (const audiobook of wantedAudiobooks.value) {
+  // Search all missing audiobooks sequentially
+  for (const audiobook of categorizedWanted.value.missing) {
     await searchAudiobook(audiobook)
     // Add a small delay between searches to avoid overwhelming indexers
     await new Promise(resolve => setTimeout(resolve, 1000))

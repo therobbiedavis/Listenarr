@@ -15,6 +15,15 @@
           <i class="ph ph-bookmark" :class="{ 'ph-fill': audiobook.monitored }"></i>
           {{ audiobook.monitored ? 'Monitored' : 'Monitor' }}
         </button>
+        <!-- Scan button moved to top nav: enqueues a background scan and shows queued feedback -->
+        <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
+          <i v-if="scanning" class="ph ph-spinner ph-spin"></i>
+          <i v-else-if="scanQueued" class="ph ph-clock"></i>
+          <i v-else class="ph ph-magnifying-glass"></i>
+          <span v-if="scanning">Scanning...</span>
+          <span v-else-if="scanQueued">Scan queued</span>
+          <span v-else>Scan Folder</span>
+        </button>
         <button class="nav-btn delete-btn" @click="confirmDelete">
           <i class="ph ph-trash"></i>
           Delete
@@ -73,6 +82,10 @@
             <span class="badge monitored" v-if="audiobook.monitored">
               <i class="ph ph-bookmark-fill"></i>
               Monitored
+            </span>
+            <span class="badge quality-profile" v-if="assignedProfileName">
+              <i class="ph ph-star"></i>
+              Quality: {{ assignedProfileName }}
             </span>
             <span class="badge language">
               <i class="ph ph-chat-circle"></i>
@@ -142,7 +155,7 @@
     <!-- Tab Content -->
     <div class="tab-content">
       <!-- Details Tab -->
-      <div v-if="activeTab === 'details'" class="details-content">
+        <div id="details" v-if="activeTab === 'details'" class="details-content">
         <div class="details-grid">
           <div class="detail-card">
             <h3>Author Information</h3>
@@ -216,16 +229,92 @@
         </div>
       </div>
 
-      <!-- Files Tab -->
-      <div v-if="activeTab === 'files'" class="files-content">
+  <!-- Files Tab -->
+  <div id="files" v-if="activeTab === 'files'" class="files-content">
         <div class="files-header">
           <h3>Files</h3>
-          <button class="action-btn" v-if="audiobook.filePath" @click="openFolder">
-            <i class="ph ph-folder-open"></i>
-            Open Folder
-          </button>
+          <div class="files-actions">
+            <!-- Scan job status (updated via SignalR) -->
+            <div v-if="scanJobId" class="scan-job-status">
+              <div class="job-row">
+                <i class="ph ph-clock"></i>
+                <strong>Scan job:</strong>
+                <span class="job-id">{{ scanJobId }}</span>
+              </div>
+              <div class="job-status">
+                <span v-if="scanQueued" class="status queued">Queued / Processing</span>
+                <span v-else class="status completed">No active scan</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div v-if="audiobook.filePath" class="file-list">
+        <div v-if="audiobook.files && audiobook.files.length" class="file-list">
+          <div v-for="f in audiobook.files" :key="f.id" class="file-item" :class="{ 'expanded': isFileAccordionExpanded(f.id) }">
+            <div class="file-header" @click="toggleFileAccordion(f.id)">
+              <div class="file-info">
+                <i class="ph ph-file-audio"></i>
+                <span class="file-name">{{ getFileName(f.path) }}</span>
+                <small class="file-meta">• {{ f.format ? f.format.toUpperCase() : '' }} {{ f.durationSeconds ? '• ' + formatDuration(f.durationSeconds) : '' }}</small>
+              </div>
+              <div class="file-actions">
+                <span class="file-size" v-if="f.size">{{ formatFileSize(f.size) }}</span>
+                <span class="file-size" v-else>Unknown size</span>
+                <i class="ph ph-chevron-down accordion-toggle" :class="{ 'rotated': isFileAccordionExpanded(f.id) }"></i>
+              </div>
+            </div>
+            <div v-if="isFileAccordionExpanded(f.id)" class="file-accordion">
+              <table class="metadata-table">
+                <tbody>
+                  <tr v-if="f.path">
+                    <td class="metadata-label">Path:</td>
+                    <td class="metadata-value">{{ f.path }}</td>
+                  </tr>
+                  <tr v-if="f.size !== undefined">
+                    <td class="metadata-label">Size:</td>
+                    <td class="metadata-value">{{ formatFileSize(f.size) }}</td>
+                  </tr>
+                  <tr v-if="f.durationSeconds !== undefined">
+                    <td class="metadata-label">Duration:</td>
+                    <td class="metadata-value">{{ formatDuration(f.durationSeconds) }}</td>
+                  </tr>
+                  <tr v-if="f.format">
+                    <td class="metadata-label">Format:</td>
+                    <td class="metadata-value">{{ f.format.toUpperCase() }}</td>
+                  </tr>
+                  <tr v-if="f.container">
+                    <td class="metadata-label">Container:</td>
+                    <td class="metadata-value">{{ f.container }}</td>
+                  </tr>
+                  <tr v-if="f.codec">
+                    <td class="metadata-label">Codec:</td>
+                    <td class="metadata-value">{{ f.codec }}</td>
+                  </tr>
+                  <tr v-if="f.bitrate !== undefined">
+                    <td class="metadata-label">Bitrate:</td>
+                    <td class="metadata-value">{{ f.bitrate }} kbps</td>
+                  </tr>
+                  <tr v-if="f.sampleRate !== undefined">
+                    <td class="metadata-label">Sample Rate:</td>
+                    <td class="metadata-value">{{ f.sampleRate }} Hz</td>
+                  </tr>
+                  <tr v-if="f.channels !== undefined">
+                    <td class="metadata-label">Channels:</td>
+                    <td class="metadata-value">{{ f.channels }}</td>
+                  </tr>
+                  <tr v-if="f.createdAt">
+                    <td class="metadata-label">Created:</td>
+                    <td class="metadata-value">{{ formatDate(f.createdAt) }}</td>
+                  </tr>
+                  <tr v-if="f.source">
+                    <td class="metadata-label">Source:</td>
+                    <td class="metadata-value">{{ f.source }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="audiobook.filePath" class="file-list">
           <div class="file-item">
             <div class="file-info">
               <i class="ph ph-file-audio"></i>
@@ -242,11 +331,11 @@
         </div>
       </div>
 
-      <!-- History Tab -->
-      <div v-if="activeTab === 'history'" class="history-content">
+  <!-- History Tab -->
+  <div id="history" v-if="activeTab === 'history'" class="history-content">
         <div class="history-header">
           <h3>History</h3>
-          <button v-if="history.length > 0" class="refresh-btn" @click="loadHistory" :disabled="historyLoading">
+          <button v-if="historyEntries.length > 0" class="refresh-btn" @click="loadHistory" :disabled="historyLoading">
             <i class="ph ph-arrow-clockwise" :class="{ 'ph-spin': historyLoading }"></i>
             Refresh
           </button>
@@ -266,8 +355,8 @@
         </div>
         
         <!-- History List -->
-        <div v-else-if="history.length > 0" class="history-list">
-          <div v-for="entry in history" :key="entry.id" class="history-entry">
+        <div v-else-if="historyEntries.length > 0" class="history-list">
+          <div v-for="entry in historyEntries" :key="entry.id" class="history-entry">
             <div class="history-icon" :class="getEventTypeClass(entry.eventType)">
               <i :class="getEventIcon(entry.eventType)"></i>
             </div>
@@ -337,10 +426,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
+import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
+import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 
 const route = useRoute()
@@ -354,21 +445,69 @@ const activeTab = ref('details')
 const showDeleteDialog = ref(false)
 const deleting = ref(false)
 const showFullDescription = ref(false)
+const scanning = ref(false)
+const scanQueued = ref(false)
+const scanJobId = ref<string | null>(null)
 
 // History state
-const history = ref<History[]>([])
+const historyEntries = ref<History[]>([])
 const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
+const qualityProfiles = ref<import('@/types').QualityProfile[]>([])
+const expandedFileAccordions = ref<Set<number>>(new Set())
+
+const assignedProfileName = computed(() => {
+  if (!audiobook.value) return null
+  const id = audiobook.value.qualityProfileId
+  if (!id) return null
+  const p = qualityProfiles.value.find(q => q.id === id)
+  return p ? p.name : null
+})
 
 // Watch for tab changes to load history when needed
 watch(activeTab, async (newTab) => {
-  if (newTab === 'history' && audiobook.value && history.value.length === 0) {
+  if (newTab === 'history' && audiobook.value && historyEntries.value.length === 0) {
     await loadHistory()
   }
 })
 
 onMounted(async () => {
   await loadAudiobook()
+  // subscribe to scan job updates
+  signalRService.onScanJobUpdate((job) => {
+    if (!audiobook.value) return
+    if (String(job.audiobookId) !== String(audiobook.value.id)) return
+    // update local job state
+    scanJobId.value = job.jobId
+    scanQueued.value = job.status === 'Queued' || job.status === 'Processing'
+    // if completed or failed, clear queued flag when appropriate
+    if (job.status === 'Completed' || job.status === 'Failed') {
+      // small delay to allow AudiobookUpdate to arrive and merge files
+      setTimeout(() => {
+        scanQueued.value = false
+      }, 500)
+    }
+  })
+})
+
+// If the URL contains a hash (#details/#files/#history) navigate to it
+onMounted(() => {
+  const hash = (route.hash || '').replace('#', '')
+  if (hash === 'details' || hash === 'files' || hash === 'history') {
+    activeTab.value = hash
+    // small timeout to allow DOM to render
+    // setTimeout(() => scrollToAnchor(hash), 150)
+  }
+})
+
+// When the active tab changes update the hash and scroll
+watch(activeTab, (newTab) => {
+  if (!newTab) return
+  try {
+    history.replaceState(null, '', `#${newTab}`)
+  } catch {}
+  // Scroll to anchored section
+  // setTimeout(() => scrollToAnchor(newTab), 120)
 })
 
 async function loadAudiobook() {
@@ -383,6 +522,7 @@ async function loadAudiobook() {
       const book = libraryStore.audiobooks.find(b => b.id === id)
       if (book) {
         audiobook.value = book
+        await afterLoad()
       } else {
         error.value = 'Audiobook not found'
       }
@@ -392,6 +532,7 @@ async function loadAudiobook() {
       const book = libraryStore.audiobooks.find(b => b.id === id)
       if (book) {
         audiobook.value = book
+        await afterLoad()
       } else {
         error.value = 'Audiobook not found'
       }
@@ -401,6 +542,19 @@ async function loadAudiobook() {
     console.error('Failed to load audiobook:', err)
   } finally {
     loading.value = false
+  }
+}
+
+// After loading audiobook, also fetch quality profiles so we can display the assigned profile
+async function afterLoad() {
+  await loadQualityProfilesForDetail()
+}
+
+async function loadQualityProfilesForDetail() {
+  try {
+    qualityProfiles.value = await apiService.getQualityProfiles()
+  } catch (err) {
+    console.warn('Failed to load quality profiles for detail view:', err)
   }
 }
 
@@ -423,8 +577,8 @@ async function loadHistory() {
   historyError.value = null
   
   try {
-    history.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
-    console.log('Loaded history:', history.value)
+    historyEntries.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
+    console.log('Loaded history:', historyEntries.value)
   } catch (err) {
     historyError.value = err instanceof Error ? err.message : 'Failed to load history'
     console.error('Failed to load history:', err)
@@ -432,6 +586,52 @@ async function loadHistory() {
     historyLoading.value = false
   }
 }
+
+async function scanFiles() {
+  if (!audiobook.value) return
+  scanning.value = true
+  scanQueued.value = false
+  scanJobId.value = null
+  try {
+    const res = await apiService.scanAudiobook(audiobook.value.id) as { message: string; scannedPath?: string; found: number; created: number; audiobook?: AudiobookType; jobId?: string }
+    console.log('Scan result:', res)
+    // If backend enqueued the job it will return 202 Accepted with { jobId }
+    if (res?.jobId) {
+      scanQueued.value = true
+      scanJobId.value = res.jobId
+      // keep scanning spinner off - queued state shows separately
+    }
+
+    // If API returned updated audiobook (blocking fallback), apply it
+    if (res?.audiobook) {
+      audiobook.value = res.audiobook
+    } else if (!scanQueued.value) {
+      // If neither queued nor audiobook returned, refresh to pick up any changes
+      await loadAudiobook()
+    }
+  } catch (err) {
+    console.error('Scan failed:', err)
+    // Show a simple alert for now
+    alert('Scan failed: ' + (err instanceof Error ? err.message : String(err)))
+  } finally {
+    scanning.value = false
+  }
+}
+
+// Watch library store for updates (SignalR pushes) and refresh audiobook object reactively
+watch(() => libraryStore.audiobooks, () => {
+  if (!audiobook.value) return
+  const updated = libraryStore.audiobooks.find(b => b.id === audiobook.value!.id)
+  if (updated) {
+    // Merge fields to preserve reactivity where possible
+    audiobook.value = { ...audiobook.value, ...updated }
+    // If files were added, clear queued indicators
+    if (scanQueued.value && updated.files && updated.files.length > 0) {
+      scanQueued.value = false
+      scanJobId.value = null
+    }
+  }
+}, { deep: true })
 
 function toggleMonitored() {
   if (audiobook.value) {
@@ -532,7 +732,9 @@ function getEventIcon(eventType: string): string {
     'Monitored': 'ph ph-bookmark',
     'Unmonitored': 'ph ph-bookmark-simple',
     'Grabbed': 'ph ph-hand-grabbing',
-    'Failed': 'ph ph-warning-circle'
+    'Failed': 'ph ph-warning-circle',
+    'File Added': 'ph ph-file-plus',
+    'File Removed': 'ph ph-file-minus'
   }
   return icons[eventType] || 'ph ph-circle'
 }
@@ -547,7 +749,9 @@ function getEventTypeClass(eventType: string): string {
     'Monitored': 'event-info',
     'Unmonitored': 'event-warning',
     'Grabbed': 'event-info',
-    'Failed': 'event-danger'
+    'Failed': 'event-danger',
+    'File Added': 'event-success',
+    'File Removed': 'event-warning'
   }
   return classes[eventType] || 'event-default'
 }
@@ -559,10 +763,41 @@ function getFileName(filePath?: string): string {
   return fileName || 'Unknown'
 }
 
-function openFolder() {
-  if (!audiobook.value?.filePath) return
-  // This would need backend support to open the folder
-  console.log('Open folder:', audiobook.value.filePath)
+function formatDuration(seconds?: number): string {
+  if (!seconds || seconds <= 0) return ''
+  const sec = Math.floor(seconds)
+  const hrs = Math.floor(sec / 3600)
+  const mins = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (hrs > 0) return `${hrs}h ${mins}m ${s}s`
+  if (mins > 0) return `${mins}m ${s}s`
+  return `${s}s`
+}
+
+function isFileAccordionExpanded(fileId: number): boolean {
+  return expandedFileAccordions.value.has(fileId)
+}
+
+function toggleFileAccordion(fileId: number): void {
+  if (expandedFileAccordions.value.has(fileId)) {
+    expandedFileAccordions.value.delete(fileId)
+  } else {
+    expandedFileAccordions.value.add(fileId)
+  }
+}
+
+function formatDate(dateString?: string): string {
+  if (!dateString) return 'Unknown'
+  // Ensure the date is treated as UTC by appending 'Z' if not present
+  const utcDateString = dateString.endsWith('Z') ? dateString : dateString + 'Z'
+  const date = new Date(utcDateString)
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 </script>
 
@@ -648,8 +883,6 @@ function openFolder() {
 
 @media (min-width: 1200px) {
   .hero-content {
-    display: grid;
-    grid-template-columns: 350px 1fr 380px;
     gap: 40px;
   }
 }
@@ -733,25 +966,9 @@ function openFolder() {
 }
 
 .key-details {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
   gap: 12px;
   margin-bottom: 20px;
-}
-
-@media (min-width: 1200px) {
-  .key-details {
-    grid-column: 3;
-    grid-row: 1 / span 4;
-    grid-template-columns: repeat(2, 1fr);
-    align-self: start;
-  }
-}
-
-@media (max-width: 768px) {
-  .key-details {
-    grid-template-columns: 1fr;
-  }
 }
 
 .detail-item {
@@ -795,6 +1012,20 @@ function openFolder() {
   background-color: rgba(46, 204, 113, 0.2);
   color: #2ecc71;
   border: 1px solid #2ecc71;
+}
+
+.badge.quality-profile {
+  background-color: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.badge.profile {
+  background-color: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.25);
 }
 
 .badge.continuing {
@@ -1081,11 +1312,106 @@ function openFolder() {
 
 .file-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   padding: 12px;
   background-color: #333;
   border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.file-item.expanded {
+  background-color: #3a3a3a;
+}
+
+.file-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  width: 100%;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  flex: 1;
+}
+
+.file-info i {
+  font-size: 24px;
+  color: #007acc;
+}
+
+.file-name {
+  font-weight: 500;
+}
+
+.file-meta {
+  color: #999;
+}
+
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.accordion-toggle {
+  color: #999;
+  transition: transform 0.2s ease;
+  font-size: 16px;
+}
+
+.accordion-toggle.rotated {
+  transform: rotate(180deg);
+}
+
+.file-accordion {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #444;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+  }
+}
+
+.metadata-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.metadata-table tbody tr {
+  border-bottom: 1px solid #444;
+}
+
+.metadata-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.metadata-label {
+  color: #999;
+  padding: 8px 12px 8px 0;
+  font-weight: 500;
+  width: 120px;
+  vertical-align: top;
+}
+
+.metadata-value {
+  color: #fff;
+  padding: 8px 0;
+  word-break: break-word;
 }
 
 .file-info {

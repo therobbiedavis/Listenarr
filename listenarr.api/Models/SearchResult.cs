@@ -32,6 +32,7 @@ namespace Listenarr.Api.Models
         public string TorrentUrl { get; set; } = string.Empty;
         public string NzbUrl { get; set; } = string.Empty;
         public string Source { get; set; } = string.Empty;
+        public string DownloadType { get; set; } = string.Empty; // "Torrent", "Usenet", or "DDL"
         public DateTime PublishedDate { get; set; }
         public string Quality { get; set; } = string.Empty;
         public string Format { get; set; } = string.Empty;
@@ -48,6 +49,7 @@ namespace Listenarr.Api.Models
         public string? SeriesNumber { get; set; }
         // Indicates this result had a successful full metadata enrichment pass (Audible product scrape)
         public bool IsEnriched { get; set; }
+        public int Score { get; set; }
     }
 
     public class SearchAndDownloadResult

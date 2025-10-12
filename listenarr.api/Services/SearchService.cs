@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Api.Models;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Api.Hubs;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
@@ -29,8 +31,9 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SearchService> _logger;
-        private readonly IAudibleMetadataService _audibleMetadataService;
+    private readonly IAudibleMetadataService _audibleMetadataService;
         private readonly IOpenLibraryService _openLibraryService;
+    private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAmazonSearchService _amazonSearchService;
         private readonly IAudibleSearchService _audibleSearchService;
         private readonly IImageCacheService _imageCacheService;
@@ -45,7 +48,8 @@ namespace Listenarr.Api.Services
             IAmazonSearchService amazonSearchService,
             IAudibleSearchService audibleSearchService,
             IImageCacheService imageCacheService,
-            ListenArrDbContext dbContext)
+            ListenArrDbContext dbContext,
+            IHubContext<DownloadHub> hubContext)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -56,13 +60,48 @@ namespace Listenarr.Api.Services
             _audibleSearchService = audibleSearchService;
             _imageCacheService = imageCacheService;
             _dbContext = dbContext;
+            _hubContext = hubContext;
         }
 
-        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null)
+        private async Task BroadcastSearchProgressAsync(string message, string? asin = null)
+        {
+            try
+            {
+                if (_hubContext != null)
+                {
+                    await _hubContext.Clients.All.SendAsync("SearchProgress", new { message, asin });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast SearchProgress: {Message}", ex.Message);
+            }
+        }
+
+        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
         {
             var results = new List<SearchResult>();
 
-            // Only use intelligent search - no traditional API fallbacks
+            // Diagnostic log to help trace which callers invoke automatic vs interactive searches
+            _logger.LogInformation("SearchAsync called. Query='{Query}', isAutomaticSearch={IsAutomaticSearch}", query, isAutomaticSearch);
+
+            // For automatic search, only search indexers - skip Amazon/Audible entirely
+            if (isAutomaticSearch)
+            {
+                var automaticIndexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+                if (automaticIndexerResults.Any())
+                {
+                    results.AddRange(automaticIndexerResults);
+                    _logger.LogInformation("Found {Count} indexer results for automatic search query: {Query}", automaticIndexerResults.Count, query);
+                }
+                else
+                {
+                    _logger.LogInformation("No indexer results found for automatic search query: {Query}", query);
+                }
+                return ApplySorting(results, sortBy, sortDirection);
+            }
+
+            // For manual/interactive search, use intelligent search (Amazon/Audible) + indexers
             var intelligentResults = await IntelligentSearchAsync(query);
             if (intelligentResults.Any())
             {
@@ -90,17 +129,143 @@ namespace Listenarr.Api.Services
                     fallback.Add(r);
                 }
                 _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
-                return fallback.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
+                return ApplySorting(fallback, sortBy, sortDirection);
             }
 
-            return results.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
+            // Also search configured indexers for additional results (including DDL downloads)
+            var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+            if (indexerResults.Any())
+            {
+                results.AddRange(indexerResults);
+                _logger.LogInformation("Added {Count} indexer results (including DDL downloads) for query: {Query}", indexerResults.Count, query);
+            }
+
+            return ApplySorting(results, sortBy, sortDirection);
         }
 
-        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null)
+        private List<SearchResult> ApplySorting(List<SearchResult> results, SearchSortBy sortBy, SearchSortDirection sortDirection)
+        {
+            if (!results.Any())
+                return results;
+
+            IOrderedEnumerable<SearchResult> orderedResults;
+
+            // Primary sort
+            switch (sortBy)
+            {
+                case SearchSortBy.Seeders:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Seeders)
+                        : results.OrderBy(r => r.Seeders);
+                    break;
+
+                case SearchSortBy.Size:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Size)
+                        : results.OrderBy(r => r.Size);
+                    break;
+
+                case SearchSortBy.PublishedDate:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.PublishedDate)
+                        : results.OrderBy(r => r.PublishedDate);
+                    break;
+
+                case SearchSortBy.Title:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Title, StringComparer.OrdinalIgnoreCase)
+                        : results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase);
+                    break;
+
+                case SearchSortBy.Source:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Source, StringComparer.OrdinalIgnoreCase)
+                        : results.OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase);
+                    break;
+
+                case SearchSortBy.Quality:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => GetQualityScore(r.Quality))
+                        : results.OrderBy(r => GetQualityScore(r.Quality));
+                    break;
+
+                default:
+                    // Default to seeders descending
+                    orderedResults = results.OrderByDescending(r => r.Seeders);
+                    break;
+            }
+
+            return orderedResults.ToList();
+        }
+
+        private int GetQualityScore(string? quality)
+        {
+            if (string.IsNullOrEmpty(quality))
+                return 0;
+
+            var lowerQuality = quality.ToLower();
+
+            // Highest quality
+            if (lowerQuality.Contains("flac"))
+                return 100;
+
+            // Audible format (AAX) - high quality
+            if (lowerQuality.Contains("aax"))
+                return 95;
+
+            // Container formats
+            if (lowerQuality.Contains("m4b"))
+                return 90;
+
+            // Modern efficient codecs
+            if (lowerQuality.Contains("opus"))
+                return 85;
+
+            // VBR quality presets (LAME VBR presets like V0/V1/V2)
+            if (lowerQuality.Contains("v0") || lowerQuality.Contains("-v0") || lowerQuality.Contains(" v0"))
+                return 82;
+            if (lowerQuality.Contains("v1") || lowerQuality.Contains("-v1") || lowerQuality.Contains(" v1"))
+                return 76;
+            if (lowerQuality.Contains("v2") || lowerQuality.Contains("-v2") || lowerQuality.Contains(" v2"))
+                return 70;
+
+
+            // AAC / M4A (check before numeric bitrates to prefer codec score for e.g. "AAC 256")
+            if (lowerQuality.Contains("aac") || lowerQuality.Contains("m4a"))
+                return 78;
+
+            // Explicit numeric bitrates
+            if (lowerQuality.Contains("320"))
+                return 80;
+            if (lowerQuality.Contains("256"))
+                return 74;
+            if (lowerQuality.Contains("192"))
+                return 60;
+
+            // VBR / CBR generic tokens (treat as mid-range if no numeric bitrate provided)
+            if (lowerQuality.Contains("vbr") || lowerQuality.Contains("cbr"))
+            {
+                // If there's an explicit numeric bitrate elsewhere, that will have matched above.
+                return 65;
+            }
+
+            // Generic MP3 mention without explicit bitrate -> mid-range
+            if (lowerQuality.Contains("mp3") && !lowerQuality.Contains("64") && !lowerQuality.Contains("128") && !lowerQuality.Contains("192") && !lowerQuality.Contains("256") && !lowerQuality.Contains("320"))
+                return 65;
+
+            if (lowerQuality.Contains("128"))
+                return 50;
+            if (lowerQuality.Contains("64"))
+                return 40;
+
+            return 0;
+        }
+
+        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
         {
             var results = new List<SearchResult>();
             var indexers = await _dbContext.Indexers
-                .Where(i => i.IsEnabled && i.EnableInteractiveSearch)
+                .Where(i => i.IsEnabled && (isAutomaticSearch ? i.EnableAutomaticSearch : i.EnableInteractiveSearch))
                 .OrderBy(i => i.Priority)
                 .ToListAsync();
 
@@ -154,6 +319,7 @@ namespace Listenarr.Api.Services
 
                 // Step 1: Parallel search Amazon & Audible
                 _logger.LogInformation("Searching Amazon and Audible for: {Query}", query);
+                await BroadcastSearchProgressAsync("Searching Amazon and Audible for query...", null);
                 var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
                 var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
                 await Task.WhenAll(amazonTask, audibleTask);
@@ -186,6 +352,7 @@ namespace Listenarr.Api.Services
                 
                 asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList();
                 _logger.LogInformation("Unified ASIN candidate list size: {Count}", asinCandidates.Count);
+                await BroadcastSearchProgressAsync($"Found {asinCandidates.Count} ASIN candidates", null);
 
                 // If we don't have any ASIN candidates, fall back to returning raw search results
                 // (converted) so the API still returns usable items instead of an empty list.
@@ -221,6 +388,7 @@ namespace Listenarr.Api.Services
                         try
                         {
                             _logger.LogDebug("Enriching ASIN {Asin}", asin);
+                            await BroadcastSearchProgressAsync($"Enriching ASIN: {asin}", asin);
                             
                             // Get the original search results
                             asinToRawResult.TryGetValue(asin, out var rawResult);
@@ -228,6 +396,7 @@ namespace Listenarr.Api.Services
                             
                             // Scrape metadata from product page
                             var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                            await BroadcastSearchProgressAsync($"Scraped metadata for ASIN: {asin}", asin);
                             
                             // If we have an Audible search result, populate/merge that data first
                             if (audibleResult != null && metadata != null)
@@ -260,6 +429,7 @@ namespace Listenarr.Api.Services
 
                 // Only return enriched items (metadata success); skip basic fallbacks entirely
                 results.AddRange(enriched);
+                await BroadcastSearchProgressAsync($"Enrichment complete. Returning {results.Count} results", null);
 
                 // If still no enriched results, try OpenLibrary derived titles to attempt enrichment again
                 if (!results.Any())
@@ -280,7 +450,8 @@ namespace Listenarr.Api.Services
                                 {
                                     try
                                     {
-                                        var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
+                                                await BroadcastSearchProgressAsync($"Attempting metadata scrape for alternate ASIN: {altResult.Asin}", altResult.Asin);
+                                                var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
                                         if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
                                         {
                                             var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
@@ -641,27 +812,26 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var apiConfig = await _configurationService.GetApiConfigurationAsync(apiId);
-                if (apiConfig == null || !apiConfig.IsEnabled)
+                // Parse apiId as indexer ID (not API configuration ID)
+                if (!int.TryParse(apiId, out var indexerId))
                 {
+                    _logger.LogWarning("Invalid indexer ID format: {ApiId}", apiId);
                     return new List<SearchResult>();
                 }
 
-                // This is a placeholder implementation
-                // In a real implementation, you would make HTTP requests to the specific API
-                // based on the API configuration and parse the results
-                
-                _logger.LogInformation($"Searching API {apiConfig.Name} for query: {query}");
-                
-                // Simulate API call delay
-                await Task.Delay(500);
-                
-                // Return mock results for now
-                return GenerateMockResults(query, apiConfig.Name);
+                var indexer = await _dbContext.Indexers.FindAsync(indexerId);
+                if (indexer == null || !indexer.IsEnabled)
+                {
+                    _logger.LogWarning("Indexer {IndexerId} not found or not enabled", indexerId);
+                    return new List<SearchResult>();
+                }
+
+                // Search using the indexer
+                return await SearchIndexerAsync(indexer, query, category);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error searching API {apiId} for query: {query}");
+                _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
                 return new List<SearchResult>();
             }
         }
@@ -690,6 +860,31 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
+                // Route to appropriate search method based on implementation
+                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await SearchInternetArchiveAsync(indexer, query, category);
+                }
+                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await SearchMyAnonamouseAsync(indexer, query, category);
+                }
+                else
+                {
+                    return await SearchTorznabNewznabAsync(indexer, query, category);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private async Task<List<SearchResult>> SearchTorznabNewznabAsync(Indexer indexer, string query, string? category)
+        {
+            try
+            {
                 // Build Torznab/Newznab API URL
                 var url = BuildTorznabUrl(indexer, query, category);
                 _logger.LogDebug("Indexer API URL: {Url}", url);
@@ -712,9 +907,264 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
+                _logger.LogError(ex, "Error searching Torznab/Newznab indexer {Name}", indexer.Name);
                 return new List<SearchResult>();
             }
+        }
+
+        private async Task<List<SearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category)
+        {
+            try
+            {
+                _logger.LogInformation("Searching MyAnonamouse for: {Query}", query);
+
+                // Parse username and password from AdditionalSettings
+                var username = "";
+                var password = "";
+                
+                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
+                {
+                    try
+                    {
+                        var settings = JsonDocument.Parse(indexer.AdditionalSettings);
+                        if (settings.RootElement.TryGetProperty("username", out var userElem))
+                            username = userElem.GetString() ?? "";
+                        if (settings.RootElement.TryGetProperty("password", out var passElem))
+                            password = passElem.GetString() ?? "";
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to parse MyAnonamouse settings");
+                        return new List<SearchResult>();
+                    }
+                }
+
+                if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+                {
+                    _logger.LogWarning("MyAnonamouse indexer {Name} missing username or password", indexer.Name);
+                    return new List<SearchResult>();
+                }
+
+                // Build MyAnonamouse API request
+                var url = $"{indexer.Url.TrimEnd('/')}/tor/js/loadSearchJSONbasic.php";
+                
+                var requestBody = new
+                {
+                    tor = new
+                    {
+                        text = query,
+                        srchIn = new[] { "title", "author", "narrator", "series" },
+                        searchType = "all",
+                        searchIn = "torrents",
+                        cat = new[] { "0" }, // 0 = all categories
+                        main_cat = new[] { "13" }, // 13 = AudioBooks
+                        browseFlagsHideVsShow = "0",
+                        startDate = "",
+                        endDate = "",
+                        hash = "",
+                        sortType = "default",
+                        startNumber = "0",
+                        perpage = 100
+                    }
+                };
+
+                var jsonContent = new StringContent(
+                    JsonSerializer.Serialize(requestBody),
+                    System.Text.Encoding.UTF8,
+                    "application/json"
+                );
+
+                // Create request with basic auth
+                var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = jsonContent
+                };
+
+                var authBytes = System.Text.Encoding.UTF8.GetBytes($"{username}:{password}");
+                var authHeader = Convert.ToBase64String(authBytes);
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+
+                _logger.LogDebug("MyAnonamouse API URL: {Url}", url);
+
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
+                    return new List<SearchResult>();
+                }
+
+                var jsonResponse = await response.Content.ReadAsStringAsync();
+                var results = ParseMyAnonamouseResponse(jsonResponse, indexer);
+                
+                _logger.LogInformation("MyAnonamouse returned {Count} results", results.Count);
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching MyAnonamouse indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private List<SearchResult> ParseMyAnonamouseResponse(string jsonResponse, Indexer indexer)
+        {
+            var results = new List<SearchResult>();
+
+            try
+            {
+                var doc = JsonDocument.Parse(jsonResponse);
+                
+                if (!doc.RootElement.TryGetProperty("data", out var dataArray))
+                {
+                    return results;
+                }
+
+                foreach (var item in dataArray.EnumerateArray())
+                {
+                    try
+                    {
+                        var id = item.TryGetProperty("id", out var idElem) ? idElem.GetString() : "";
+                        var title = item.TryGetProperty("title", out var titleElem) ? titleElem.GetString() : "";
+                        var sizeStr = "";
+                        if (item.TryGetProperty("size", out var sizeElem))
+                        {
+                            if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                sizeStr = sizeElem.GetString() ?? "0";
+                            }
+                            else if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.Number)
+                            {
+                                sizeStr = sizeElem.GetInt64().ToString();
+                            }
+                            else
+                            {
+                                sizeStr = "0";
+                            }
+                        }
+                        var seeders = item.TryGetProperty("seeders", out var seedElem) ? seedElem.GetInt32() : 0;
+                        var leechers = item.TryGetProperty("leechers", out var leechElem) ? leechElem.GetInt32() : 0;
+                        var dlHash = item.TryGetProperty("dl", out var dlElem) ? dlElem.GetString() : "";
+                        var category = item.TryGetProperty("catname", out var catElem) ? catElem.GetString() : "";
+                        var tags = item.TryGetProperty("tags", out var tagsElem) ? tagsElem.GetString() : "";
+                        var description = item.TryGetProperty("description", out var descElem) ? descElem.GetString() : "";
+
+                        if (string.IsNullOrEmpty(title))
+                            continue;
+
+                        // Parse size - handle various formats
+                        long size = 0;
+                        if (!string.IsNullOrEmpty(sizeStr) && sizeStr != "0")
+                        {
+                            size = ParseSizeString(sizeStr);
+                            _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from size field '{SizeStr}'", title, size, sizeStr);
+                        }
+                        else
+                        {
+                            // Try to extract size from description when size field is 0
+                            size = ExtractSizeFromMyAnonamouseDescription(description);
+                            if (size > 0)
+                            {
+                                _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from description", title, size);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("MyAnonamouse result '{Title}' has no size information in size field or description", title);
+                            }
+                        }
+
+                        // Extract author from author_info JSON
+                        string? author = null;
+                        if (item.TryGetProperty("author_info", out var authorInfo))
+                        {
+                            var authorJson = authorInfo.GetString();
+                            if (!string.IsNullOrEmpty(authorJson))
+                            {
+                                try
+                                {
+                                    var authorDoc = JsonDocument.Parse(authorJson);
+                                    var authors = new List<string>();
+                                    foreach (var prop in authorDoc.RootElement.EnumerateObject())
+                                    {
+                                        authors.Add(prop.Value.GetString() ?? "");
+                                    }
+                                    author = string.Join(", ", authors.Where(a => !string.IsNullOrEmpty(a)));
+                                }
+                                catch { }
+                            }
+                        }
+
+                        // Extract narrator from narrator_info JSON
+                        string? narrator = null;
+                        if (item.TryGetProperty("narrator_info", out var narratorInfo))
+                        {
+                            var narratorJson = narratorInfo.GetString();
+                            if (!string.IsNullOrEmpty(narratorJson))
+                            {
+                                try
+                                {
+                                    var narratorDoc = JsonDocument.Parse(narratorJson);
+                                    var narrators = new List<string>();
+                                    foreach (var prop in narratorDoc.RootElement.EnumerateObject())
+                                    {
+                                        narrators.Add(prop.Value.GetString() ?? "");
+                                    }
+                                    narrator = string.Join(", ", narrators.Where(n => !string.IsNullOrEmpty(n)));
+                                }
+                                catch { }
+                            }
+                        }
+
+                        // Detect quality and format from tags
+                        var quality = DetectQualityFromTags(tags ?? "");
+                        var format = DetectFormatFromTags(tags ?? "");
+
+                        // Build download URL
+                        var downloadUrl = "";
+                        if (!string.IsNullOrEmpty(dlHash))
+                        {
+                            downloadUrl = $"https://www.myanonamouse.net/tor/download.php/{dlHash}";
+                        }
+
+                        var result = new SearchResult
+                        {
+                            Id = id ?? Guid.NewGuid().ToString(),
+                            Title = title ?? "Unknown",
+                            Artist = author ?? "Unknown Author",
+                            Album = narrator != null ? $"Narrated by {narrator}" : "Unknown",
+                            Category = category ?? "Audiobook",
+                            Size = size,
+                            Seeders = seeders,
+                            Leechers = leechers,
+                            Source = indexer.Name,
+                            PublishedDate = DateTime.UtcNow,
+                            Quality = quality,
+                            Format = format,
+                            TorrentUrl = downloadUrl,
+                            MagnetLink = "",
+                            NzbUrl = ""
+                        };
+
+                        // Attempt to parse language codes from title or tags (e.g. [ENG / M4B])
+                        var detectedLang = ParseLanguageFromText(title + " " + (tags ?? ""));
+                        if (!string.IsNullOrEmpty(detectedLang))
+                        {
+                            result.Language = detectedLang;
+                        }
+
+                        results.Add(result);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse MyAnonamouse result item");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to parse MyAnonamouse response");
+            }
+
+            return results;
         }
 
         private string BuildTorznabUrl(Indexer indexer, string query, string? category)
@@ -755,13 +1205,283 @@ namespace Listenarr.Api.Services
             return $"{url}{apiPath}?{string.Join("&", queryParams)}";
         }
 
+        private async Task<List<SearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
+        {
+            try
+            {
+                _logger.LogInformation("Searching Internet Archive for: {Query}", query);
+
+                // Parse collection from AdditionalSettings (default: librivoxaudio)
+                var collection = "librivoxaudio";
+                
+                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
+                {
+                    try
+                    {
+                        var settings = JsonDocument.Parse(indexer.AdditionalSettings);
+                        if (settings.RootElement.TryGetProperty("collection", out var collectionElem))
+                        {
+                            var parsedCollection = collectionElem.GetString();
+                            if (!string.IsNullOrEmpty(parsedCollection))
+                                collection = parsedCollection;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse Internet Archive settings, using default collection");
+                    }
+                }
+
+                _logger.LogDebug("Using Internet Archive collection: {Collection}", collection);
+
+                // Build search query - search in title and creator (author) fields
+                var searchQuery = $"collection:{collection} AND (title:({query}) OR creator:({query}))";
+                var searchUrl = $"https://archive.org/advancedsearch.php?q={Uri.EscapeDataString(searchQuery)}&fl=identifier,title,creator,date,downloads,item_size,description&rows=100&output=json";
+
+                _logger.LogInformation("Internet Archive search URL: {Url}", searchUrl);
+
+                var response = await _httpClient.GetAsync(searchUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Internet Archive returned status {Status}", response.StatusCode);
+                    return new List<SearchResult>();
+                }
+
+                var jsonResponse = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug("Internet Archive response length: {Length}", jsonResponse.Length);
+                
+                var searchResults = await ParseInternetArchiveSearchResponse(jsonResponse, indexer);
+                
+                _logger.LogInformation("Internet Archive returned {Count} results", searchResults.Count);
+                return searchResults;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching Internet Archive indexer {Name}", indexer.Name);
+                return new List<SearchResult>();
+            }
+        }
+
+        private async Task<List<SearchResult>> ParseInternetArchiveSearchResponse(string jsonResponse, Indexer indexer)
+        {
+            var results = new List<SearchResult>();
+
+            try
+            {
+                _logger.LogInformation("Parsing Internet Archive response, length: {Length}", jsonResponse.Length);
+                
+                var doc = JsonDocument.Parse(jsonResponse);
+                
+                if (!doc.RootElement.TryGetProperty("response", out var responseObj))
+                {
+                    _logger.LogWarning("Internet Archive response missing 'response' object");
+                    return results;
+                }
+
+                if (!responseObj.TryGetProperty("docs", out var docsArray))
+                {
+                    _logger.LogWarning("Internet Archive response missing 'docs' array");
+                    return results;
+                }
+
+                _logger.LogInformation("Found {Count} Internet Archive items in response", docsArray.GetArrayLength());
+
+                // Limit to first 20 results to avoid timeout
+                var itemsToProcess = Math.Min(20, docsArray.GetArrayLength());
+                _logger.LogInformation("Processing first {Count} of {Total} Internet Archive items", itemsToProcess, docsArray.GetArrayLength());
+
+                var processedCount = 0;
+                foreach (var item in docsArray.EnumerateArray())
+                {
+                    if (processedCount >= itemsToProcess)
+                    {
+                        break;
+                    }
+                    processedCount++;
+
+                    try
+                    {
+                        var identifier = item.TryGetProperty("identifier", out var idElem) ? idElem.GetString() : "";
+                        var title = item.TryGetProperty("title", out var titleElem) ? titleElem.GetString() : "";
+                        var creator = item.TryGetProperty("creator", out var creatorElem) ? creatorElem.GetString() : "";
+                        var itemSize = item.TryGetProperty("item_size", out var sizeElem) ? sizeElem.GetInt64() : 0;
+
+                        if (string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(title))
+                        {
+                            _logger.LogDebug("Skipping item with missing identifier or title");
+                            continue;
+                        }
+
+                        _logger.LogDebug("Fetching metadata for {Identifier}", identifier);
+
+                        // Fetch detailed metadata to get file information
+                        var metadataUrl = $"https://archive.org/metadata/{identifier}";
+                        var metadataResponse = await _httpClient.GetAsync(metadataUrl);
+                        
+                        if (!metadataResponse.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("Failed to fetch metadata for {Identifier}", identifier);
+                            continue;
+                        }
+
+                        var metadataJson = await metadataResponse.Content.ReadAsStringAsync();
+                        var audioFile = GetBestAudioFile(metadataJson, identifier);
+
+                        if (audioFile == null)
+                        {
+                            _logger.LogDebug("No suitable audio file found for {Identifier}", identifier);
+                            continue;
+                        }
+
+                        // Build download URL
+                        var downloadUrl = $"https://archive.org/download/{identifier}/{audioFile.FileName}";
+
+                        _logger.LogDebug("Found audio file for {Title}: {FileName} ({Format}, {Size} bytes)", 
+                            title, audioFile.FileName, audioFile.Format, audioFile.Size);
+
+                        var iaResult = new SearchResult
+                        {
+                            Id = Guid.NewGuid().ToString(),
+                            Title = title,
+                            Artist = creator ?? "Unknown",
+                            Album = title,
+                            Category = "Audiobook",
+                            Size = audioFile.Size,
+                            Seeders = 0, // N/A for direct downloads
+                            Leechers = 0, // N/A for direct downloads
+                            TorrentUrl = downloadUrl, // Using TorrentUrl field for direct download URL
+                            DownloadType = "DDL", // Direct Download Link
+                            Format = audioFile.Format,
+                            Quality = DetectQualityFromFormat(audioFile.Format),
+                            Source = $"{indexer.Name} (Internet Archive)"
+                        };
+
+                        try
+                        {
+                            var detectedLang = ParseLanguageFromText(title ?? string.Empty);
+                            if (!string.IsNullOrEmpty(detectedLang)) iaResult.Language = detectedLang;
+                        }
+                        catch { }
+
+                        results.Add(iaResult);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing Internet Archive item");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error parsing Internet Archive response");
+            }
+
+            return results;
+        }
+
+        private class AudioFileInfo
+        {
+            public string FileName { get; set; } = "";
+            public string Format { get; set; } = "";
+            public long Size { get; set; }
+            public int Priority { get; set; } // Lower = better
+        }
+
+        private AudioFileInfo? GetBestAudioFile(string metadataJson, string identifier)
+        {
+            try
+            {
+                var doc = JsonDocument.Parse(metadataJson);
+                
+                if (!doc.RootElement.TryGetProperty("files", out var filesArray))
+                {
+                    return null;
+                }
+
+                var audioFiles = new List<AudioFileInfo>();
+
+                foreach (var file in filesArray.EnumerateArray())
+                {
+                    var fileName = file.TryGetProperty("name", out var nameElem) ? nameElem.GetString() : "";
+                    var format = file.TryGetProperty("format", out var formatElem) ? formatElem.GetString() : "";
+                    
+                    // Size can be either a string or a number in Internet Archive API
+                    long size = 0;
+                    if (file.TryGetProperty("size", out var sizeElem))
+                    {
+                        if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            long.TryParse(sizeElem.GetString(), out size);
+                        }
+                        else if (sizeElem.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            size = sizeElem.GetInt64();
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(fileName) || string.IsNullOrEmpty(format))
+                        continue;
+
+                    // Assign priority based on format (lower = better)
+                    int priority = format switch
+                    {
+                        "LibriVox Apple Audiobook" => 1,  // M4B - best quality, multi-chapter
+                        "M4B" => 1,
+                        "128Kbps MP3" => 2,                // Good quality MP3
+                        "VBR MP3" => 3,                    // Variable bitrate MP3
+                        "Ogg Vorbis" => 4,                 // OGG format
+                        "64Kbps MP3" => 5,                 // Lower quality MP3
+                        _ => int.MaxValue                  // Unknown format - lowest priority
+                    };
+
+                    // Only include known audio formats
+                    if (priority < int.MaxValue)
+                    {
+                        audioFiles.Add(new AudioFileInfo
+                        {
+                            FileName = fileName,
+                            Format = format,
+                            Size = size,
+                            Priority = priority
+                        });
+                    }
+                }
+
+                // Return the highest priority (lowest priority number) audio file
+                return audioFiles.OrderBy(f => f.Priority).ThenByDescending(f => f.Size).FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error parsing Internet Archive metadata for {Identifier}", identifier);
+                return null;
+            }
+        }
+
         private List<SearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
         {
             var results = new List<SearchResult>();
 
             try
             {
-                var doc = System.Xml.Linq.XDocument.Parse(xmlContent);
+                // Log first 500 chars of XML for debugging
+                var preview = xmlContent.Length > 500 ? xmlContent.Substring(0, 500) + "..." : xmlContent;
+                _logger.LogDebug("Parsing XML from {IndexerName}: {Preview}", indexer.Name, preview);
+
+                // Parse XML with settings that are more lenient
+                var settings = new System.Xml.XmlReaderSettings
+                {
+                    DtdProcessing = System.Xml.DtdProcessing.Ignore,
+                    XmlResolver = null,
+                    IgnoreWhitespace = true,
+                    IgnoreComments = true
+                };
+
+                System.Xml.Linq.XDocument doc;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlContent), settings))
+                {
+                    doc = System.Xml.Linq.XDocument.Load(reader);
+                }
+
                 var channel = doc.Root?.Element("channel");
                 if (channel == null)
                 {
@@ -810,8 +1530,16 @@ namespace Listenarr.Api.Services
                             switch (name.ToLower())
                             {
                                 case "size":
-                                    if (long.TryParse(value, out var size))
-                                        result.Size = size;
+                                    var parsedSize = ParseSizeString(value);
+                                    if (parsedSize > 0)
+                                    {
+                                        result.Size = parsedSize;
+                                        _logger.LogDebug("Parsed size for {Title}: {Size} bytes from indexer {Indexer}", result.Title, parsedSize, indexer.Name);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("Failed to parse size value '{Value}' for result '{Title}' from indexer {Indexer}", value, result.Title, indexer.Name);
+                                    }
                                     break;
                                 case "seeders":
                                     if (int.TryParse(value, out var seeders))
@@ -899,6 +1627,14 @@ namespace Listenarr.Api.Services
                                 result.Format = "OPUS";
                             else if (titleAndDesc.Contains("aac"))
                                 result.Format = "AAC";
+
+                            // Detect language codes present in title or description (e.g. [ENG / M4B])
+                            try
+                            {
+                                var lang = ParseLanguageFromText(result.Title + " " + (description ?? string.Empty));
+                                if (!string.IsNullOrEmpty(lang)) result.Language = lang;
+                            }
+                            catch { /* Non-critical */ }
                         }
 
                         // Extract author from title if possible (common format: "Author - Title")
@@ -919,6 +1655,16 @@ namespace Listenarr.Api.Services
                             !string.IsNullOrEmpty(result.TorrentUrl) || 
                             !string.IsNullOrEmpty(result.NzbUrl))
                         {
+                            // Set download type based on what's available
+                            if (!string.IsNullOrEmpty(result.NzbUrl))
+                            {
+                                result.DownloadType = "Usenet";
+                            }
+                            else if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
+                            {
+                                result.DownloadType = "Torrent";
+                            }
+                            
                             results.Add(result);
                         }
                         else
@@ -929,6 +1675,24 @@ namespace Listenarr.Api.Services
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error parsing indexer result item");
+                    }
+                }
+            }
+            catch (System.Xml.XmlException xmlEx)
+            {
+                _logger.LogError(xmlEx, "XML parsing error from {IndexerName} at Line {Line}, Position {Position}: {Message}", 
+                    indexer.Name, xmlEx.LineNumber, xmlEx.LinePosition, xmlEx.Message);
+                
+                // Log the problematic XML content around the error
+                if (!string.IsNullOrEmpty(xmlContent))
+                {
+                    var lines = xmlContent.Split('\n');
+                    if (xmlEx.LineNumber > 0 && xmlEx.LineNumber <= lines.Length)
+                    {
+                        var startLine = Math.Max(0, xmlEx.LineNumber - 3);
+                        var endLine = Math.Min(lines.Length - 1, xmlEx.LineNumber + 2);
+                        var context = string.Join("\n", lines[startLine..(endLine + 1)]);
+                        _logger.LogError("XML context around error:\n{Context}", context);
                     }
                 }
             }
@@ -1029,6 +1793,228 @@ namespace Listenarr.Api.Services
                     Format = "MP3"
                 }
             };
+        }
+
+        private string DetectQualityFromTags(string tags)
+        {
+            var lowerTags = tags.ToLower();
+            
+            if (lowerTags.Contains("flac"))
+                return "FLAC";
+            else if (lowerTags.Contains("320") || lowerTags.Contains("320kbps"))
+                return "MP3 320kbps";
+            else if (lowerTags.Contains("256") || lowerTags.Contains("256kbps"))
+                return "MP3 256kbps";
+            else if (lowerTags.Contains("192") || lowerTags.Contains("192kbps"))
+                return "MP3 192kbps";
+            else if (lowerTags.Contains("128") || lowerTags.Contains("128kbps"))
+                return "MP3 128kbps";
+            else if (lowerTags.Contains("64") || lowerTags.Contains("64kbps"))
+                return "MP3 64kbps";
+            else if (lowerTags.Contains("m4b"))
+                return "M4B";
+            else
+                return "Unknown";
+        }
+
+        private string DetectQualityFromFormat(string format)
+        {
+            if (string.IsNullOrEmpty(format))
+                return "Unknown";
+
+            var lowerFormat = format.ToLower();
+
+            if (lowerFormat.Contains("flac"))
+                return "FLAC";
+            else if (lowerFormat.Contains("m4b") || lowerFormat.Contains("apple audiobook"))
+                return "M4B";
+            else if (lowerFormat.Contains("320kbps") || lowerFormat.Contains("320 kbps"))
+                return "MP3 320kbps";
+            else if (lowerFormat.Contains("256kbps") || lowerFormat.Contains("256 kbps"))
+                return "MP3 256kbps";
+            else if (lowerFormat.Contains("192kbps") || lowerFormat.Contains("192 kbps"))
+                return "MP3 192kbps";
+            else if (lowerFormat.Contains("128kbps") || lowerFormat.Contains("128 kbps"))
+                return "MP3 128kbps";
+            else if (lowerFormat.Contains("64kbps") || lowerFormat.Contains("64 kbps"))
+                return "MP3 64kbps";
+            else if (lowerFormat.Contains("vbr mp3") || lowerFormat.Contains("variable bitrate"))
+                return "MP3 VBR";
+            else if (lowerFormat.Contains("ogg vorbis") || lowerFormat.Contains("ogg"))
+                return "OGG Vorbis";
+            else if (lowerFormat.Contains("opus"))
+                return "OPUS";
+            else if (lowerFormat.Contains("aac"))
+                return "AAC";
+            else if (lowerFormat.Contains("mp3"))
+                return "MP3";
+            else
+                return "Unknown";
+        }
+
+        private string DetectFormatFromTags(string tags)
+        {
+            var lowerTags = tags.ToLower();
+            
+            if (lowerTags.Contains("m4b"))
+                return "M4B";
+            else if (lowerTags.Contains("flac"))
+                return "FLAC";
+            else if (lowerTags.Contains("mp3"))
+                return "MP3";
+            else if (lowerTags.Contains("opus"))
+                return "OPUS";
+            else if (lowerTags.Contains("aac"))
+                return "AAC";
+            else
+                return "MP3"; // Default to MP3
+        }
+
+        /// <summary>
+        /// Parse common language codes from a text block and return a full language name.
+        /// Matches bracketed tokens like "[ENG / M4B]", parenthesized "(ENG)", or standalone tokens with word boundaries.
+        /// Supports both three-letter codes and common two-letter aliases (ENG|EN -> English, DUT|NL -> Dutch, GER|DE -> German, FRE|FR -> French).
+        /// Matching is case-insensitive and conservative to avoid false positives.
+        /// </summary>
+        private string? ParseLanguageFromText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+
+            // Normalize whitespace
+            var normalized = Regex.Replace(text, "\\s+", " ", RegexOptions.Compiled | RegexOptions.IgnoreCase).Trim();
+
+            // Combined pattern: look for bracketed or parenthesized tokens OR standalone word-boundary tokens
+            // Examples matched: [ENG / M4B], (EN), ENG, EN
+            var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "ENG", "English" }, { "EN", "English" },
+                { "DUT", "Dutch" },    { "NL", "Dutch" },
+                { "GER", "German" },   { "DE", "German" },
+                { "FRE", "French" },   { "FR", "French" }
+            };
+
+            // Build a joined alternation like ENG|EN|DUT|NL|...
+            var alternation = string.Join("|", codes.Keys.Select(Regex.Escape));
+
+            // Bracketed or parenthesis forms: [ ENG / ... ] or (EN)
+            // Use verbatim interpolated string and escape [ and (
+            var bracketedPattern = $@"[\[\(]\s*(?:{alternation})\b"; // starts with [ or ( then code
+
+            // Standalone word boundary pattern: \b(ENG|EN|DUT|NL|...)\b
+            var wordBoundaryPattern = $"\\b(?:{alternation})\\b";
+
+            // Try bracketed/parenthesized first (higher confidence)
+            var bracketMatch = Regex.Match(normalized, bracketedPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            if (bracketMatch.Success)
+            {
+                var code = bracketMatch.Value.TrimStart('[', '(').Trim().Split(' ', '/', ',')[0];
+                if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
+            }
+
+            // Fall back to standalone word match
+            var wordMatch = Regex.Match(normalized, wordBoundaryPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            if (wordMatch.Success)
+            {
+                var code = wordMatch.Value.Trim();
+                if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
+            }
+
+            return null;
+        }
+
+        private long ExtractSizeFromMyAnonamouseDescription(string? description)
+        {
+            if (string.IsNullOrEmpty(description))
+                return 0;
+
+            // Look for patterns like "Total Size : 259MB (272 033 986 bytes)"
+            var match = Regex.Match(description, @"Total Size\s*:\s*([\d\.,]+)\s*(MB|GB|KB|B)\s*\(([\d\s,]+)\s*bytes?\)", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                // Try to parse the bytes value first (most accurate)
+                var bytesStr = match.Groups[3].Value.Replace(",", "").Replace(" ", "");
+                if (long.TryParse(bytesStr, out var bytes))
+                {
+                    _logger.LogDebug("Extracted size from MyAnonamouse description bytes: {Bytes}", bytes);
+                    return bytes;
+                }
+
+                // Fallback to parsing the formatted size
+                var sizeValue = match.Groups[1].Value.Replace(",", "");
+                var unit = match.Groups[2].Value.ToUpper();
+                if (double.TryParse(sizeValue, out var value))
+                {
+                    var result = unit switch
+                    {
+                        "B" => (long)value,
+                        "KB" => (long)(value * 1024),
+                        "MB" => (long)(value * 1024 * 1024),
+                        "GB" => (long)(value * 1024 * 1024 * 1024),
+                        _ => (long)value
+                    };
+                    _logger.LogDebug("Extracted size from MyAnonamouse description formatted: {Value} {Unit} = {Result} bytes", value, unit, result);
+                    return result;
+                }
+            }
+
+            // Alternative pattern: just "Total Size : 259MB" without bytes
+            match = Regex.Match(description, @"Total Size\s*:\s*([\d\.,]+)\s*(MB|GB|KB|B)", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                var sizeValue = match.Groups[1].Value.Replace(",", "");
+                var unit = match.Groups[2].Value.ToUpper();
+                if (double.TryParse(sizeValue, out var value))
+                {
+                    var result = unit switch
+                    {
+                        "B" => (long)value,
+                        "KB" => (long)(value * 1024),
+                        "MB" => (long)(value * 1024 * 1024),
+                        "GB" => (long)(value * 1024 * 1024 * 1024),
+                        _ => (long)value
+                    };
+                    _logger.LogDebug("Extracted size from MyAnonamouse description (no bytes): {Value} {Unit} = {Result} bytes", value, unit, result);
+                    return result;
+                }
+            }
+
+            _logger.LogDebug("No size found in MyAnonamouse description");
+            return 0;
+        }
+
+        private long ParseSizeString(string sizeStr)
+        {
+            if (string.IsNullOrEmpty(sizeStr))
+                return 0;
+
+            // Remove any commas and extra spaces
+            sizeStr = sizeStr.Replace(",", "").Trim();
+
+            // Try to parse as direct bytes first
+            if (long.TryParse(sizeStr, out var bytes))
+                return bytes;
+
+            // Handle formats like "500 MB", "1.2 GB", "1024 KB", etc.
+            var match = System.Text.RegularExpressions.Regex.Match(sizeStr, @"^([\d\.]+)\s*(KB|MB|GB|TB|B)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                if (double.TryParse(match.Groups[1].Value, out var value))
+                {
+                    var unit = match.Groups[2].Value.ToUpper();
+                    return unit switch
+                    {
+                        "B" => (long)value,
+                        "KB" => (long)(value * 1024),
+                        "MB" => (long)(value * 1024 * 1024),
+                        "GB" => (long)(value * 1024 * 1024 * 1024),
+                        "TB" => (long)(value * 1024 * 1024 * 1024 * 1024),
+                        _ => (long)value
+                    };
+                }
+            }
+
+            _logger.LogWarning("Unable to parse size string: '{SizeStr}'", sizeStr);
+            return 0;
         }
     }
 }

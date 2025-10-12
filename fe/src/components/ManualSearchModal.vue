@@ -19,10 +19,10 @@
         </div>
 
         <!-- Results Table -->
-        <div v-if="results.length > 0 || !searching" class="results-container">
+        <div v-if="displayResults.length > 0 || !searching" class="results-container">
           <div class="results-header">
             <div class="results-count">
-              {{ results.length }} result{{ results.length !== 1 ? 's' : '' }} found
+              {{ displayResults.length }} result{{ displayResults.length !== 1 ? 's' : '' }} found
             </div>
             <button 
               v-if="!searching" 
@@ -34,7 +34,7 @@
             </button>
           </div>
 
-          <div v-if="results.length === 0 && !searching" class="no-results">
+          <div v-if="displayResults.length === 0 && !searching" class="no-results">
             <i class="ph ph-magnifying-glass"></i>
             <p>No results found</p>
             <p class="hint">Try adjusting your indexer settings or search criteria</p>
@@ -44,20 +44,61 @@
             <table class="results-table">
               <thead>
                 <tr>
-                  <th class="col-source">Source</th>
-                  <th class="col-age">Age</th>
-                  <th class="col-title">Title</th>
-                  <th class="col-indexer">Indexer</th>
-                  <th class="col-size">Size</th>
-                  <th class="col-peers">Peers</th>
+                  <th class="col-source sortable" @click="setSort('Source')">
+                    <span class="header-content">
+                      Source
+                      <i :class="getSortIcon('Source')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-age sortable" @click="setSort('PublishedDate')">
+                    <span class="header-content">
+                      Age
+                      <i :class="getSortIcon('PublishedDate')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-title sortable" @click="setSort('Title')">
+                    <span class="header-content">
+                      Title
+                      <i :class="getSortIcon('Title')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-indexer sortable" @click="setSort('Source')">
+                    <span class="header-content">
+                      Indexer
+                      <i :class="getSortIcon('Source')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-size sortable" @click="setSort('Size')">
+                    <span class="header-content">
+                      Size
+                      <i :class="getSortIcon('Size')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-peers sortable" @click="setSort('Seeders')">
+                    <span class="header-content">
+                      Peers
+                      <i :class="getSortIcon('Seeders')" class="sort-icon"></i>
+                    </span>
+                  </th>
                   <th class="col-language">Languages</th>
-                  <th class="col-quality">Quality</th>
+                  <th class="col-quality sortable" @click="setSort('Quality')">
+                    <span class="header-content">
+                      Quality
+                      <i :class="getSortIcon('Quality')" class="sort-icon"></i>
+                    </span>
+                  </th>
+                  <th class="col-score sortable" @click="setSort('Score')">
+                    <span class="header-content">
+                      Score
+                      <i :class="getSortIcon('Score')" class="sort-icon"></i>
+                    </span>
+                  </th>
                   <th class="col-actions"></th>
                 </tr>
               </thead>
               <tbody>
                 <tr 
-                  v-for="result in sortedResults" 
+                  v-for="result in displayResults" 
                   :key="result.id"
                   class="result-row"
                 >
@@ -70,9 +111,6 @@
                   <td class="col-title">
                     <div class="title-cell">
                       <span class="title-text">{{ result.title }}</span>
-                      <div class="title-meta">
-                        <span v-if="result.artist">{{ result.artist }}</span>
-                      </div>
                     </div>
                   </td>
                   <td class="col-indexer">
@@ -101,6 +139,26 @@
                     </span>
                     <span v-else class="quality-badge unknown">-</span>
                   </td>
+                  <td class="col-score">
+                    <div v-if="getResultScore(result.id)" class="score-cell">
+                      <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
+                        <template #default>
+                          <span 
+                            v-if="getResultScore(result.id)?.isRejected"
+                            class="score-badge rejected"
+                            :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
+                          >
+                            <i class="ph ph-x-circle"></i>
+                            Rejected
+                          </span>
+                          <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
+                            {{ getResultScore(result.id)?.totalScore }}
+                          </span>
+                        </template>
+                      </ScorePopover>
+                    </div>
+                    <span v-else class="score-badge loading">-</span>
+                  </td>
                   <td class="col-actions">
                     <button 
                       class="btn-icon btn-download"
@@ -125,7 +183,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
-import type { Audiobook, SearchResult } from '@/types'
+import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
+import { getScoreBreakdownTooltip } from '@/composables/useScore'
+import ScorePopover from '@/components/ScorePopover.vue'
 
 interface Props {
   isOpen: boolean
@@ -138,11 +198,15 @@ const emit = defineEmits<{
   downloaded: [result: SearchResult]
 }>()
 
-const searching = ref(false)
 const results = ref<SearchResult[]>([])
+const searching = ref(false)
 const downloading = ref<Record<string, boolean>>({})
 const searchedIndexers = ref(0)
 const totalIndexers = ref(0)
+const qualityScores = ref<Map<string, QualityScore>>(new Map())
+const qualityProfile = ref<QualityProfile | null>(null)
+const sortBy = ref<SearchSortBy | 'Score'>('Score')
+const sortDirection = ref<SearchSortDirection>('Descending')
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen && props.audiobook) {
@@ -150,15 +214,93 @@ watch(() => props.isOpen, (isOpen) => {
   }
 })
 
-const sortedResults = computed(() => {
-  return [...results.value].sort((a, b) => {
-    // Sort by seeders (descending) for torrents, then by date
-    if (a.seeders !== b.seeders) {
-      return b.seeders - a.seeders
-    }
-    return new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
+const displayResults = computed(() => {
+  // When sorting by Score, return a sorted copy derived from `results` so
+  // the view always reflects the desired order even if `results` is later
+  // replaced by the search logic.
+  if (sortBy.value !== 'Score') return results.value
+
+  const asc = sortDirection.value === 'Ascending'
+  const copy = results.value.slice()
+  copy.sort((a, b) => {
+    const qa = qualityScores.value.get(a.id)
+    const qb = qualityScores.value.get(b.id)
+
+    const rejectedA = Boolean(qa?.isRejected)
+    const rejectedB = Boolean(qb?.isRejected)
+    if (rejectedA !== rejectedB) return rejectedA ? 1 : -1
+
+    const hasA = typeof qa?.totalScore === 'number'
+    const hasB = typeof qb?.totalScore === 'number'
+    if (hasA !== hasB) return hasA ? -1 : 1
+    if (!hasA && !hasB) return 0
+
+    const scoreA = qa!.totalScore
+    const scoreB = qb!.totalScore
+    if (scoreA === scoreB) return 0
+    return asc ? (scoreA - scoreB) : (scoreB - scoreA)
   })
+  return copy
 })
+
+function setSort(column: SearchSortBy | 'Score') {
+  if (sortBy.value === column) {
+    // Toggle direction if same column
+    sortDirection.value = sortDirection.value === 'Ascending' ? 'Descending' : 'Ascending'
+  } else {
+    // New column, default to descending
+    sortBy.value = column as SearchSortBy
+    sortDirection.value = 'Descending'
+  }
+  
+  // For Score sorting, sort frontend results, otherwise re-search with backend sorting
+  if (column === 'Score') {
+    // Frontend sorting for Score column
+    sortFrontendResults()
+  } else {
+    // Backend sorting for other columns
+    search()
+  }
+}
+
+function getSortIcon(column: SearchSortBy | 'Score'): string {
+  if (sortBy.value !== column) {
+    return 'ph ph-arrows-down-up sort-icon-inactive'
+  }
+  return sortDirection.value === 'Ascending' 
+    ? 'ph ph-arrow-up sort-icon-active' 
+    : 'ph ph-arrow-down sort-icon-active'
+}
+
+function sortFrontendResults() {
+  const ascending = sortDirection.value === 'Ascending'
+
+  results.value.sort((a, b) => {
+    const qa = getResultScore(a.id)
+    const qb = getResultScore(b.id)
+
+    const rejectedA = Boolean(qa?.isRejected)
+    const rejectedB = Boolean(qb?.isRejected)
+
+    // Put rejected items at the end always
+    if (rejectedA && !rejectedB) return 1
+    if (!rejectedA && rejectedB) return -1
+
+    // Now handle scored vs unscored: scored items should appear before unscored
+    const hasA = typeof qa?.totalScore === 'number'
+    const hasB = typeof qb?.totalScore === 'number'
+    if (hasA && !hasB) return -1
+    if (!hasA && hasB) return 1
+    if (!hasA && !hasB) return 0
+
+    // Both have numeric scores — compare numerically
+    const scoreA = qa!.totalScore
+    const scoreB = qb!.totalScore
+
+    if (scoreA === scoreB) return 0
+    return ascending ? (scoreA - scoreB) : (scoreB - scoreA)
+  })
+}
 
 async function search() {
   if (!props.audiobook) return
@@ -169,21 +311,111 @@ async function search() {
   totalIndexers.value = 0
 
   try {
+    // Get count of enabled indexers first
+    const enabledIndexers = await apiService.getEnabledIndexers()
+    totalIndexers.value = enabledIndexers.length
+    
     // Build search query from title and author
     const query = buildSearchQuery()
     
-    // Search all configured indexers (not Amazon/Audible)
-    const searchResults = await apiService.searchIndexers(query)
-    results.value = searchResults
+    // Search each indexer individually to show progress
+    const allResults: SearchResult[] = []
+    const searchPromises = enabledIndexers.map(async (indexer) => {
+      try {
+        const indexerResults = await apiService.searchByApi(indexer.id.toString(), query)
+        allResults.push(...indexerResults)
+        searchedIndexers.value++
+      } catch (error) {
+        console.warn(`Failed to search indexer ${indexer.name}:`, error)
+        searchedIndexers.value++ // Still count as completed even if failed
+      }
+    })
     
-    // Update progress (we don't track individual indexer progress yet)
-    totalIndexers.value = 1
-    searchedIndexers.value = 1
+    // Wait for all searches to complete
+    await Promise.all(searchPromises)
+    
+    // Apply backend sorting if needed (for non-Score columns)
+    if (sortBy.value !== 'Score') {
+      const backendSortBy = sortBy.value as SearchSortBy
+      // Sort results based on the current sort criteria
+      allResults.sort((a, b) => {
+        switch (backendSortBy) {
+          case 'Seeders':
+            return sortDirection.value === 'Ascending' 
+              ? a.seeders - b.seeders 
+              : b.seeders - a.seeders
+          case 'Size':
+            return sortDirection.value === 'Ascending' 
+              ? a.size - b.size 
+              : b.size - a.size
+          case 'PublishedDate':
+            return sortDirection.value === 'Ascending' 
+              ? new Date(a.publishedDate).getTime() - new Date(b.publishedDate).getTime()
+              : new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
+          case 'Title':
+            return sortDirection.value === 'Ascending' 
+              ? a.title.localeCompare(b.title) 
+              : b.title.localeCompare(a.title)
+          case 'Source':
+            return sortDirection.value === 'Ascending' 
+              ? a.source.localeCompare(b.source) 
+              : b.source.localeCompare(a.source)
+          case 'Quality':
+            return sortDirection.value === 'Ascending' 
+              ? a.quality.localeCompare(b.quality) 
+              : b.quality.localeCompare(a.quality)
+          default:
+            return 0
+        }
+      })
+    }
+    
+    // Deduplicate results by id (multiple indexers can return the same release)
+    const seen = new Map<string, SearchResult>()
+    for (const r of allResults) {
+      if (!seen.has(r.id)) seen.set(r.id, r)
+    }
+    results.value = Array.from(seen.values())
+    
+    // Load quality profile and score results (always needed for Score column or display)
+    await loadQualityProfileAndScore()
+    
+    // If sorting by Score, apply frontend sorting
+    if (sortBy.value === 'Score') {
+      sortFrontendResults()
+    }
     
   } catch (err) {
     console.error('Manual search failed:', err)
   } finally {
     searching.value = false
+  }
+}
+
+async function loadQualityProfileAndScore() {
+  try {
+    // Get the audiobook's quality profile or default
+    if (props.audiobook?.qualityProfileId) {
+      qualityProfile.value = await apiService.getQualityProfileById(props.audiobook.qualityProfileId)
+    } else {
+      qualityProfile.value = await apiService.getDefaultQualityProfile()
+    }
+    
+    // Score the search results
+    if (qualityProfile.value?.id && results.value.length > 0) {
+      const scores = await apiService.scoreSearchResults(
+        qualityProfile.value.id,
+        results.value
+      )
+      
+      // Map scores by search result ID
+      qualityScores.value.clear()
+      scores.forEach(score => {
+        qualityScores.value.set(score.searchResult.id, score)
+      })
+    }
+  } catch (error) {
+    console.warn('Failed to load quality profile or score results:', error)
   }
 }
 
@@ -207,18 +439,50 @@ async function downloadResult(result: SearchResult) {
   downloading.value[result.id] = true
   
   try {
-    const response = await apiService.sendToDownloadClient(result)
-    console.log('Download started:', response)
-    emit('downloaded', result)
+    // Check if this is a DDL
+    const isDDL = getSourceType(result) === 'ddl'
+    const audiobookId = props.audiobook?.id
     
-    // Show success feedback briefly, then remove
-    setTimeout(() => {
-      delete downloading.value[result.id]
-    }, 2000)
+    if (isDDL) {
+      // For DDL, start download in background and add to activity
+      console.log('Starting DDL download:', result.title)
+      console.log('Download type:', result.downloadType)
+      console.log('Download URL:', result.torrentUrl)
+      console.log('Audiobook ID:', audiobookId)
+      
+      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
+      console.log('DDL download started:', response)
+      
+      // Add to activity/downloads view (will be tracked there)
+      // Show success message
+      emit('downloaded', result)
+      
+      // Show feedback briefly
+      setTimeout(() => {
+        delete downloading.value[result.id]
+      }, 1000)
+    } else {
+      // For torrents/NZB, send to download client (also pass audiobookId for future processing)
+      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
+      console.log('Download started:', response)
+      emit('downloaded', result)
+      
+      // Show success feedback briefly, then remove
+      setTimeout(() => {
+        delete downloading.value[result.id]
+      }, 2000)
+    }
   } catch (err) {
     console.error('Download failed:', err)
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-    alert(`Download failed: ${errorMessage}`)
+    
+    // Show error in alert with more context
+    let userMessage = `Download failed: ${errorMessage}`
+    if (errorMessage.includes('Output path not configured')) {
+      userMessage = 'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
+    }
+    
+    alert(userMessage)
     delete downloading.value[result.id]
   }
 }
@@ -228,10 +492,21 @@ function close() {
 }
 
 function getSourceType(result: SearchResult): string {
+  // Check downloadType first if it's set
+  if (result.downloadType) {
+    return result.downloadType.toLowerCase()
+  }
+  
+  // Fallback to legacy detection logic
   // Check for torrent indicators
-  if (result.magnetLink) {
+  if (result.magnetLink || result.torrentUrl) {
     return 'torrent'
   }
+  // Check for NZB indicator
+  if (result.nzbUrl) {
+    return 'nzb'
+  }
+  // Check source name
   if (result.source?.toLowerCase().includes('torrent')) {
     return 'torrent'
   }
@@ -270,6 +545,19 @@ function formatSize(bytes: number): string {
   
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
+
+function getResultScore(resultId: string): QualityScore | undefined {
+  return qualityScores.value.get(resultId)
+}
+
+function getScoreClass(score: number): string {
+  if (score >= 80) return 'excellent'
+  if (score >= 60) return 'good'
+  if (score >= 40) return 'fair'
+  return 'poor'
+}
+
+// useScore composable provides getScoreBreakdownTooltip
 </script>
 
 <style scoped>
@@ -451,6 +739,39 @@ function formatSize(bytes: number): string {
   border-bottom: 2px solid #3a3a3a;
 }
 
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.sortable:hover {
+  background-color: #3a3a3a;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.sort-icon {
+  font-size: 0.8rem;
+  margin-left: 0.5rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.sort-icon-inactive {
+  opacity: 0.3;
+}
+
+.sort-icon-active {
+  opacity: 1;
+  color: #007acc;
+}
+
 .results-table tbody tr {
   border-bottom: 1px solid #2a2a2a;
   transition: background-color 0.2s;
@@ -522,6 +843,16 @@ function formatSize(bytes: number): string {
   color: white;
 }
 
+.source-badge.ddl {
+  background-color: #9b59b6;
+  color: white;
+}
+
+.source-badge.usenet {
+  background-color: #3498db;
+  color: white;
+}
+
 .title-cell {
   display: flex;
   flex-direction: column;
@@ -531,11 +862,6 @@ function formatSize(bytes: number): string {
 .title-text {
   color: white;
   font-weight: 500;
-}
-
-.title-meta {
-  font-size: 0.8rem;
-  color: #999;
 }
 
 .indexer-name {
@@ -578,6 +904,67 @@ function formatSize(bytes: number): string {
   display: inline-block;
   padding: 0.25rem 0.5rem;
   background-color: #3a3a3a;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #ccc;
+}
+
+.score-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.score-badge.loading {
+  background-color: transparent;
+  color: #666;
+  border: none;
+  padding: 0;
+}
+
+.score-badge.rejected {
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.score-badge.excellent {
+  background-color: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.3);
+}
+
+.score-badge.good {
+  background-color: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+.score-badge.fair {
+  background-color: rgba(241, 196, 15, 0.15);
+  color: #f39c12;
+  border: 1px solid rgba(241, 196, 15, 0.3);
+}
+
+.score-badge.poor {
+  background-color: rgba(149, 165, 166, 0.15);
+  color: #7f8c8d;
+  border: 1px solid rgba(149, 165, 166, 0.3);
+}
+
+.language-badge.unknown,
+.quality-badge.unknown {
   border-radius: 4px;
   font-size: 0.8rem;
   color: #ddd;

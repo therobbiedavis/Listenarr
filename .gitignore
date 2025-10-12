@@ -102,7 +102,7 @@ dist-ssr/
 build/
 
 # Package manager files
-package-lock.json
+# package-lock.json  # Allow for CI caching
 yarn.lock
 pnpm-lock.yaml
 
@@ -145,6 +145,10 @@ playwright-report/
 *.sqlite3
 
 # Application data directories
+**/config/temp/
+**/config/cache/
+**/config/logs/
+**/config/database/
 **/wwwroot/cache/
 **/wwwroot/downloads/
 **/Data/
@@ -246,3 +250,23 @@ downloads/
 *.ogg
 *.opus
 *.wma
+/listenarr.api/config/ffmpeg
+
+# CI / publish outputs
+listenarr.api/publish/
+publish/
+publish_local_test/
+publish_test*/
+artifacts/
+*.zip
+
+# Specific stray local publish/test path (ignore local machine publish artifacts)
+listenarr.api/UsersRobbieDocumentsGitHubListenarrpublish_test
+listenarr.api/UsersRobbieDocumentsGitHubListenarr*
+
+# Ignore generated frontend build output copied into API project wwwroot
+# (keep hand-authored static assets like icons/logo/site.webmanifest)
+listenarr.api/wwwroot/assets/
+listenarr.api/wwwroot/index.html
+listenarr.api/wwwroot/*.map
+listenarr.api/wwwroot/assets/**

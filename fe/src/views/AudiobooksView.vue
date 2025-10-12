@@ -12,6 +12,14 @@
         </button>
         <button 
           v-if="selectedCount > 0" 
+          class="toolbar-btn edit-btn"
+          @click="showBulkEdit"
+        >
+          <i class="ph ph-pencil"></i>
+          Edit Selected
+        </button>
+        <button 
+          v-if="selectedCount > 0" 
           class="toolbar-btn delete-btn"
           @click="confirmBulkDelete"
         >
@@ -86,15 +94,19 @@
         v-for="audiobook in audiobooks" 
         :key="audiobook.id" 
         class="audiobook-item"
-        :class="{ selected: libraryStore.isSelected(audiobook.id) }"
+        :class="{ 
+          selected: libraryStore.isSelected(audiobook.id),
+          'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+          'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+          'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
+        }"
         @click="navigateToDetail(audiobook.id)"
       >
-        <div class="selection-checkbox">
-          <input 
-            type="checkbox" 
+        <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, $event)" @mousedown.prevent>
+          <input
+            type="checkbox"
             :checked="libraryStore.isSelected(audiobook.id)"
-            @change="libraryStore.toggleSelection(audiobook.id)"
-            @click.stop
+            readonly
           />
         </div>
         <div class="audiobook-poster-container">
@@ -106,8 +118,23 @@
           <div class="status-overlay">
             <div class="audiobook-title">{{ audiobook.title }}</div>
             <div class="audiobook-author">{{ audiobook.authors?.join(', ') || 'Unknown Author' }}</div>
+            <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+              <i class="ph ph-star"></i>
+              {{ getQualityProfileName(audiobook.qualityProfileId) }}
+            </div>
+            <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+              <i :class="audiobook.monitored ? 'ph ph-eye' : 'ph ph-eye-slash'"></i>
+              {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+            </div>
           </div>
           <div class="action-buttons">
+            <button 
+              class="action-btn edit-btn-small" 
+              @click.stop="openEditModal(audiobook)"
+              title="Edit"
+            >
+              <i class="ph ph-pencil"></i>
+            </button>
             <button 
               class="action-btn delete-btn-small" 
               @click.stop="confirmDelete(audiobook)"
@@ -150,6 +177,23 @@
         </div>
       </div>
     </div>
+
+    <!-- Bulk Edit Modal -->
+    <BulkEditModal
+      :is-open="showBulkEditModal"
+      :selected-count="selectedCount"
+      :selected-ids="libraryStore.selectedIds"
+      @close="closeBulkEdit"
+      @saved="handleBulkEditSaved"
+    />
+
+    <!-- Edit Audiobook Modal -->
+    <EditAudiobookModal
+      :is-open="showEditModal"
+      :audiobook="editAudiobook"
+      @close="closeEditModal"
+      @saved="handleEditSaved"
+    />
   </div>
 </template>
 
@@ -159,13 +203,15 @@ import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
-import type { Audiobook } from '@/types'
+import BulkEditModal from '@/components/BulkEditModal.vue'
+import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
+import type { Audiobook, QualityProfile } from '@/types'
 
 const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 
-const audiobooks = computed(() => libraryStore.audiobooks)
+  const audiobooks = computed(() => libraryStore.audiobooks || [])
 const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
@@ -178,13 +224,136 @@ const showDeleteDialog = ref(false)
 const deleteTarget = ref<Audiobook | null>(null)
 const bulkDeleteCount = ref(0)
 const deleting = ref(false)
+const qualityProfiles = ref<QualityProfile[]>([])
+const showBulkEditModal = ref(false)
+const showEditModal = ref(false)
+const editAudiobook = ref<Audiobook | null>(null)
+const lastClickedIndex = ref<number | null>(null)
+
+// Get the download status for an audiobook
+// Returns:
+// - 'no-file': No file downloaded yet (red border)
+// - 'quality-mismatch': Has file but doesn't meet quality cutoff (blue border)
+// - 'quality-match': Has file and meets quality cutoff (green border)
+// TODO: Add 'downloading' status when download-audiobook linking is implemented
+function getAudiobookStatus(audiobook: Audiobook): 'no-file' | 'quality-mismatch' | 'quality-match' {
+  // If there are no files at all, treat as no-file
+  if (!audiobook.files || audiobook.files.length === 0) {
+    return 'no-file'
+  }
+
+  const profile = qualityProfiles.value.find(p => p.id === audiobook.qualityProfileId)
+
+  // If no profile or no preferredFormats defined, fall back to the simple existing behavior
+  if (!profile) {
+    const hasFile = audiobook.filePath && audiobook.fileSize && audiobook.fileSize > 0
+    return hasFile ? 'quality-match' : 'no-file'
+  }
+
+  // Helper: normalize strings
+  const normalize = (s?: string) => (s || '').toString().toLowerCase()
+
+  // Find any file that matches one of the profile's preferred formats
+  const preferredFormats = (profile.preferredFormats || []).map(f => normalize(f))
+
+  // If no preferred formats configured, treat any file as a candidate
+  const candidateFiles = audiobook.files.filter(f => {
+    if (!f) return false
+    const fileFormat = normalize(f.format) || normalize(f.container) || ''
+    if (preferredFormats.length === 0) return true
+    return preferredFormats.includes(fileFormat) || preferredFormats.some(pf => fileFormat.includes(pf))
+  })
+
+  if (candidateFiles.length === 0) {
+    // No files in preferred formats - treat as no-file (or could be considered mismatch)
+    return 'no-file'
+  }
+
+  // If no cutoff defined, assume match
+  if (!profile.cutoffQuality || !profile.qualities || profile.qualities.length === 0) {
+    return 'quality-match'
+  }
+
+  // Build a map of quality -> priority for quick lookup
+  const qualityPriority = new Map<string, number>()
+  for (const q of profile.qualities) {
+    if (!q || !q.quality) continue
+    qualityPriority.set(normalize(q.quality), q.priority)
+  }
+
+  const cutoff = normalize(profile.cutoffQuality)
+  const cutoffPriority = qualityPriority.has(cutoff) ? qualityPriority.get(cutoff)! : Number.POSITIVE_INFINITY
+
+  // Helper to derive a quality string for a given file/audiobook
+  type FileInfo = {
+    bitrate?: number | string
+    container?: string
+    codec?: string
+    format?: string
+  }
+
+  function deriveQualityLabel(file: FileInfo | undefined): string {
+    // Prefer the denormalized audiobook.quality if present
+    if (audiobook.quality) return normalize(audiobook.quality)
+
+    if (file && file.bitrate) {
+      const br = Number(file.bitrate)
+      if (!isNaN(br)) {
+        if (br >= 320) return '320kbps'
+        if (br >= 256) return '256kbps'
+        if (br >= 192) return '192kbps'
+        return `${Math.round(br)}kbps`
+      }
+    }
+
+    // If container or codec suggests lossless
+    const container = normalize(file?.container)
+    const codec = normalize(file?.codec)
+    if (container.includes('flac') || codec.includes('flac') || codec.includes('alac') || codec.includes('wav')) {
+      return 'lossless'
+    }
+
+    // Fallback: use format string
+    if (file && file.format) return normalize(file.format)
+
+    return ''
+  }
+
+  // If any candidate file meets or exceeds the cutoff (lower priority number == better), return match
+  for (const f of candidateFiles) {
+    const label = deriveQualityLabel(f)
+    if (!label) continue
+    const p = qualityPriority.has(label) ? qualityPriority.get(label)! : Number.POSITIVE_INFINITY
+    if (p <= cutoffPriority) {
+      return 'quality-match'
+    }
+  }
+
+  // Otherwise at least one preferred-format file exists but doesn't meet cutoff
+  return 'quality-mismatch'
+}
 
 onMounted(async () => {
   await Promise.all([
     libraryStore.fetchLibrary(),
-    configStore.loadApplicationSettings()
+    configStore.loadApplicationSettings(),
+    loadQualityProfiles()
   ])
 })
+
+async function loadQualityProfiles() {
+  try {
+    qualityProfiles.value = await apiService.getQualityProfiles()
+  } catch (error) {
+    console.warn('Failed to load quality profiles:', error)
+  }
+}
+
+  function getQualityProfileName(profileId?: number): string | null {
+  if (!profileId) return null
+  const profile = qualityProfiles.value.find(p => p.id === profileId)
+  return profile?.name ?? null
+}
 
 function navigateToDetail(id: number) {
   router.push(`/audiobooks/${id}`)
@@ -231,6 +400,62 @@ async function executeDelete() {
   } finally {
     deleting.value = false
   }
+}
+
+function showBulkEdit() {
+  showBulkEditModal.value = true
+}
+
+function closeBulkEdit() {
+  showBulkEditModal.value = false
+}
+
+async function handleBulkEditSaved() {
+  // Refresh library to show updated data
+  await libraryStore.fetchLibrary()
+  // Clear selection after successful bulk edit
+  libraryStore.clearSelection()
+}
+
+function openEditModal(audiobook: Audiobook) {
+  editAudiobook.value = audiobook
+  showEditModal.value = true
+}
+
+function closeEditModal() {
+  showEditModal.value = false
+  editAudiobook.value = null
+}
+
+async function handleEditSaved() {
+  // Refresh library to show updated data
+  await libraryStore.fetchLibrary()
+}
+
+function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
+  event.preventDefault() // Prevent browser text selection
+  
+  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  
+  if (event.shiftKey && lastClickedIndex.value !== null) {
+    // Shift+click: select range
+    const startIndex = Math.min(lastClickedIndex.value, currentIndex)
+    const endIndex = Math.max(lastClickedIndex.value, currentIndex)
+    
+    // Clear current selection and select the range
+    libraryStore.clearSelection()
+    for (let i = startIndex; i <= endIndex; i++) {
+      const book = audiobooks.value[i]
+      if (!book) continue
+      libraryStore.toggleSelection(book.id)
+    }
+  } else {
+    // Regular click: toggle selection
+    libraryStore.toggleSelection(audiobook.id)
+  }
+  
+  // Update last clicked index
+  lastClickedIndex.value = currentIndex
 }
 </script>
 
@@ -281,6 +506,15 @@ async function executeDelete() {
   border-color: #007acc;
 }
 
+.toolbar-btn.edit-btn {
+  background-color: #3498db;
+  border-color: #2980b9;
+}
+
+.toolbar-btn.edit-btn:hover {
+  background-color: #2980b9;
+}
+
 .toolbar-btn.delete-btn {
   background-color: #e74c3c;
   border-color: #c0392b;
@@ -303,6 +537,10 @@ async function executeDelete() {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 20px;
   padding: 0 20px 20px;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .audiobook-item {
@@ -320,18 +558,69 @@ async function executeDelete() {
   outline-offset: 2px;
 }
 
+.audiobook-item.status-no-file .audiobook-poster-container {
+  border-bottom: 3px solid #e74c3c;
+}
+
+.audiobook-item.status-quality-mismatch .audiobook-poster-container {
+  border-bottom: 3px solid #3498db;
+}
+
+.audiobook-item.status-quality-match .audiobook-poster-container {
+  border-bottom: 3px solid #2ecc71;
+}
+
 .selection-checkbox {
   position: absolute;
   top: 8px;
   left: 8px;
   z-index: 10;
+  height: 20px;
+  width: 20px;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: 2px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .selection-checkbox input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+  position: absolute;
+  opacity: 0;
   cursor: pointer;
-  accent-color: #007acc;
+  height: 0;
+  width: 0;
+}
+
+.selection-checkbox:hover {
+  background-color: rgba(0, 0, 0, 0.8);
+  border-color: #777;
+}
+
+.audiobook-item.selected .selection-checkbox {
+  background-color: #007acc;
+  border-color: #007acc;
+}
+
+.selection-checkbox::after {
+  content: "";
+  position: absolute;
+  display: none;
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.audiobook-item.selected .selection-checkbox::after {
+  display: block;
 }
 
 .audiobook-poster-container {
@@ -355,7 +644,12 @@ async function executeDelete() {
   left: 0;
   right: 0;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
-  padding: 30px 8px 8px;
+  padding: 8px;
+  transition: padding 0.2s ease;
+}
+
+.audiobook-poster-container:hover .status-overlay {
+  padding: 80px 8px 8px;
 }
 
 .audiobook-title {
@@ -366,6 +660,8 @@ async function executeDelete() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
 .audiobook-author {
@@ -374,6 +670,67 @@ async function executeDelete() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.audiobook-poster-container:hover .audiobook-title,
+.audiobook-poster-container:hover .audiobook-author {
+  opacity: 1;
+}
+
+.quality-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  margin-right: 0.5rem;
+  background-color: rgba(52, 152, 219, 0.2);
+  border: 1px solid rgba(52, 152, 219, 0.4);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #3498db;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.quality-profile-badge i {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.monitored-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  margin-left: 0.25rem;
+  background-color: rgba(46, 204, 113, 0.2);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #2ecc71;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.monitored-badge.unmonitored {
+  background-color: rgba(231, 76, 60, 0.2);
+  border-color: rgba(231, 76, 60, 0.4);
+  color: #e74c3c;
+}
+
+.monitored-badge i {
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .action-buttons {
@@ -412,6 +769,15 @@ async function executeDelete() {
 
 .delete-btn-small:hover {
   background-color: rgba(192, 57, 43, 1);
+}
+
+.edit-btn-small {
+  background-color: rgba(52, 152, 219, 0.9);
+  border-color: rgba(41, 128, 185, 0.5);
+}
+
+.edit-btn-small:hover {
+  background-color: rgba(41, 128, 185, 1);
 }
 
 .loading-state, .empty-state, .error-state {

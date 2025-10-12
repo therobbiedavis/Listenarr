@@ -197,5 +197,65 @@ namespace Listenarr.Api.Controllers
                 return StatusCode(500, "Internal server error");
             }
         }
+
+        // Startup Configuration endpoints
+        [HttpGet("startupconfig")]
+        public async Task<ActionResult<StartupConfig>> GetStartupConfig()
+        {
+            try
+            {
+                var config = await _configurationService.GetStartupConfigAsync();
+                return Ok(config);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving startup configuration");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        [HttpPost("startupconfig")]
+        public async Task<ActionResult<StartupConfig>> SaveStartupConfig([FromBody] StartupConfig config)
+        {
+            try
+            {
+                await _configurationService.SaveStartupConfigAsync(config);
+                // Return the saved config to confirm what was persisted
+                var savedConfig = await _configurationService.GetStartupConfigAsync();
+                return Ok(savedConfig);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving startup configuration");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        // Regenerate API key (requires authentication)
+    [HttpPost("apikey/regenerate")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator")]
+    public async Task<ActionResult<object>> RegenerateApiKey()
+        {
+            try
+            {
+                var cfg = await _configurationService.GetStartupConfigAsync();
+                var current = cfg ?? new StartupConfig();
+                // Generate a new API key (cryptographically secure)
+                var bytes = new byte[32];
+                using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(bytes);
+                }
+                var newKey = Convert.ToBase64String(bytes).TrimEnd('=');
+                current.ApiKey = newKey;
+                await _configurationService.SaveStartupConfigAsync(current);
+                return Ok(new { apiKey = newKey });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error regenerating API key");
+                return StatusCode(500, "Internal server error");
+            }
+        }
     }
 }

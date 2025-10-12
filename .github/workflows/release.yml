@@ -1,0 +1,152 @@
+name: Release — build executables, Docker images, and create GitHub Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-build:
+    if: github.actor != 'github-actions'
+    runs-on: ubuntu-latest
+    env:
+      API_PROJECT: listenarr.api/Listenarr.Api.csproj
+      API_OUTPUT: listenarr.api/publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore & build
+        run: |
+          dotnet restore ${{ env.API_PROJECT }}
+          dotnet build listenarr.sln -c Release --no-restore
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Publish linux-x64
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64
+
+      - name: Publish win-x64
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/win-x64
+
+      - name: Publish osx-x64
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r osx-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/osx-x64
+
+      - name: Zip artifacts
+        run: |
+          mkdir -p artifacts
+          cd listenarr.api/publish/linux-x64 && zip -r ../../artifacts/listenarr-api-linux-x64.zip .
+          cd listenarr.api/publish/win-x64 && zip -r ../../artifacts/listenarr-api-win-x64.zip .
+          cd listenarr.api/publish/osx-x64 && zip -r ../../artifacts/listenarr-api-osx-x64.zip .
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image name
+        id: set-tags
+        run: |
+          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr-api" >> $GITHUB_OUTPUT
+          TAG=${GITHUB_REF/refs/tags/}
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Resolve and bump version (minor)
+        id: resolve-version
+        run: |
+          set -euo pipefail
+          CSProj=${{ env.API_PROJECT }}
+          VERSION=$(sed -n "s:.*<Version>\(.*\)</Version>.*:\1:p" "$CSProj" 2>/dev/null || true)
+          if [ -z "${VERSION}" ]; then
+            VERSION=$(node -p "require('./fe/package.json').version" 2>/dev/null || echo "0.0.0")
+          fi
+          echo "Found base version: ${VERSION}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION}"
+          MINOR=${MINOR:-0}
+          NEWMINOR=$((MINOR + 1))
+          NEWVERSION="${MAJOR}.${NEWMINOR}.0"
+          echo "Bumped release version: ${NEWVERSION}"
+          echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
+
+      - name: Show resolved version
+        run: |
+          echo "Resolved version: ${{ steps.resolve-version.outputs.VERSION }}"
+
+      - name: Persist bumped version to csproj
+        if: steps.resolve-version.outputs.VERSION != ''
+        env:
+          NEW_VERSION: ${{ steps.resolve-version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          echo "Updating csproj to version $NEW_VERSION"
+          cat > update_version.py <<'PY'
+import os
+import xml.etree.ElementTree as ET
+path = 'listenarr.api/Listenarr.Api.csproj'
+new = os.environ['NEW_VERSION']
+tree = ET.parse(path)
+root = tree.getroot()
+found = False
+for elem in root.findall('.//Version'):
+    elem.text = new
+    found = True
+    break
+if not found:
+    pg = root.find('PropertyGroup')
+    if pg is None:
+        pg = ET.SubElement(root, 'PropertyGroup')
+    ET.SubElement(pg, 'Version').text = new
+tree.write(path, encoding='utf-8', xml_declaration=True)
+print('Wrote new version to csproj')
+PY
+          python3 update_version.py
+
+      - name: Create Pull Request for version bump (release)
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          branch: "ci/release-version-bump-${{ steps.resolve-version.outputs.VERSION }}"
+          base: main
+          title: "Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          body: |
+            This PR bumps the application version to ${{ steps.resolve-version.outputs.VERSION }}.
+            The change was produced automatically by the CI release workflow.
+          labels: automated,version-bump
+
+      - name: Build and push API image (release)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: listenarr.api/Dockerfile.runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.set-tags.outputs.API_IMAGE }}:stable
+            ${{ steps.set-tags.outputs.API_IMAGE }}:latest
+            ${{ steps.set-tags.outputs.API_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
+
+      # Skipped: separate Web image. The API image contains the frontend in wwwroot.

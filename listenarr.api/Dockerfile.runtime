@@ -1,0 +1,8 @@
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+WORKDIR /app
+EXPOSE 5656
+
+# Copy publish output (context should be the publish folder produced by CI)
+COPY . /app
+
+ENTRYPOINT ["dotnet", "Listenarr.Api.dll"]

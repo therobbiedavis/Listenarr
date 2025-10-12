@@ -22,6 +22,7 @@ namespace Listenarr.Api.Models
     {
         Queued,
         Downloading,
+        Paused,
         Completed,
         Failed,
         Processing,
@@ -31,6 +32,7 @@ namespace Listenarr.Api.Models
     public class Download
     {
         public string Id { get; set; } = Guid.NewGuid().ToString();
+        public int? AudiobookId { get; set; } // Link to Audiobook record for metadata
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
         public string Album { get; set; } = string.Empty;
@@ -76,5 +78,15 @@ namespace Listenarr.Api.Models
         public int? Seeders { get; set; }
         public int? Leechers { get; set; }
         public double? Ratio { get; set; }
+        
+        /// <summary>
+        /// The path as reported by the download client (may be in different mount point)
+        /// </summary>
+        public string? RemotePath { get; set; }
+        
+        /// <summary>
+        /// The path translated for Listenarr's filesystem (after applying remote path mapping)
+        /// </summary>
+        public string? LocalPath { get; set; }
     }
 }

@@ -1,32 +1,17 @@
 version: '3.8'
 
 services:
-  listenarr-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: listenarr-api
+  listenarr:
+    image: docker.io/therobbiedavis/listenarr-api:latest  # Or use :stable for releases, :nightly for pre-releases
+    container_name: listenarr
     ports:
-      - "5000:80"
+      - "5656:5656"  # Map host port 5656 to container port 5656
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:80
+      - ASPNETCORE_URLS=http://+:5656
     volumes:
-      - ./data:/app/data
-      - ./config:/app/config
-    restart: unless-stopped
-    
-  listenarr-fe:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-    container_name: listenarr-fe
-    ports:
-      - "8080:80"
-    depends_on:
-      - listenarr-api
+      - listenarr_data:/app  # Mount for SQLite database (listenarr.db) and any config
     restart: unless-stopped
 
 volumes:
-  data:
-  config:
+  listenarr_data:  # Persistent volume for database and app data

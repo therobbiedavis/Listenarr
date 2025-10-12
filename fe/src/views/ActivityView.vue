@@ -157,29 +157,90 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { apiService } from '@/services/api'
-import type { QueueItem } from '@/types'
+import { signalRService } from '@/services/signalr'
+import { useDownloadsStore } from '@/stores/downloads'
+import type { QueueItem, Download } from '@/types'
 
+const downloadsStore = useDownloadsStore()
 const selectedTab = ref('all')
 const queue = ref<QueueItem[]>([])
 const loading = ref(false)
 const showRemoveModal = ref(false)
 const itemToRemove = ref<QueueItem | null>(null)
 const removing = ref(false)
-let pollInterval: number | undefined
+let unsubscribeQueue: (() => void) | null = null
+
+// Convert Download to QueueItem format for unified display
+const convertDownloadToQueueItem = (download: Download): QueueItem => {
+  // Map Download status to queue status
+  let status = 'downloading'
+  if (download.status === 'Queued') status = 'queued'
+  else if (download.status === 'Paused') status = 'paused'
+  else if (download.status === 'Completed' || download.status === 'Ready') status = 'completed'
+  else if (download.status === 'Failed') status = 'failed'
+  else if (download.status === 'Downloading' || download.status === 'Processing') status = 'downloading'
+
+  return {
+    id: download.id,
+    title: download.title,
+    status: status,
+    progress: download.progress,
+    size: download.totalSize,
+    downloaded: download.downloadedSize,
+    downloadSpeed: 0, // Not tracked for DDL
+    eta: undefined, // Not available for DDL
+    quality: '',
+    downloadClient: download.downloadClientId === 'DDL' ? 'Direct Download' : download.downloadClientId,
+    downloadClientId: download.downloadClientId,
+    downloadClientType: download.downloadClientId === 'DDL' ? 'DDL' : 'external',
+    addedAt: download.startedAt,
+    canPause: false,
+    canRemove: true
+  }
+}
+
+// Merge queue items and active downloads (DDL) into unified list
+const allActivityItems = computed(() => {
+  // Get queue items from external clients
+  const queueItems = [...queue.value]
+  
+  // Get active downloads (DDL, new torrents not yet in queue)
+  const downloadItems = downloadsStore.activeDownloads
+    .filter(d => {
+      // Include DDL downloads always
+      if (d.downloadClientId === 'DDL') return true
+      
+      // For external clients, only include if not already in queue
+      // (avoid duplicates - queue is the source of truth for external clients)
+      return !queueItems.some(q => q.id === d.id)
+    })
+    .map(convertDownloadToQueueItem)
+  
+  console.log('[ActivityView] 🔍 allActivityItems computed:', {
+    totalActiveDownloads: downloadsStore.activeDownloads.length,
+    ddlDownloads: downloadsStore.activeDownloads.filter(d => d.downloadClientId === 'DDL').length,
+    downloadItemsAfterFilter: downloadItems.length,
+    queueItems: queueItems.length,
+    totalMerged: downloadItems.length + queueItems.length
+  })
+  
+  // Combine and sort by newest first
+  return [...downloadItems, ...queueItems]
+})
 
 const filterTabs = computed(() => [
-  { label: 'All', value: 'all', count: queue.value.length },
-  { label: 'Downloading', value: 'downloading', count: queue.value.filter(q => q.status === 'downloading').length },
-  { label: 'Paused', value: 'paused', count: queue.value.filter(q => q.status === 'paused').length },
-  { label: 'Queued', value: 'queued', count: queue.value.filter(q => q.status === 'queued').length },
-  { label: 'Completed', value: 'completed', count: queue.value.filter(q => q.status === 'completed').length },
+  { label: 'All', value: 'all', count: allActivityItems.value.length },
+  { label: 'Downloading', value: 'downloading', count: allActivityItems.value.filter(q => q.status === 'downloading').length },
+  { label: 'Paused', value: 'paused', count: allActivityItems.value.filter(q => q.status === 'paused').length },
+  { label: 'Queued', value: 'queued', count: allActivityItems.value.filter(q => q.status === 'queued').length },
+  { label: 'Completed', value: 'completed', count: allActivityItems.value.filter(q => q.status === 'completed').length },
 ])
 
 const filteredQueue = computed(() => {
   if (selectedTab.value === 'all') {
-    return queue.value
+    return allActivityItems.value
   }
-  return queue.value.filter(item => item.status === selectedTab.value)
+  return allActivityItems.value.filter(item => item.status === selectedTab.value)
 })
 
 const refreshQueue = async () => {
@@ -203,13 +264,28 @@ const confirmRemove = async () => {
   
   removing.value = true
   try {
-    await apiService.removeFromQueue(itemToRemove.value.id, itemToRemove.value.downloadClientId)
+    // Check if this is a DDL download (from database) or external queue item
+    if (itemToRemove.value.downloadClientId === 'DDL' || itemToRemove.value.downloadClientType === 'DDL') {
+      // DDL downloads: Cancel/delete from database
+      console.log('[ActivityView] Canceling DDL download:', itemToRemove.value.id)
+      await apiService.cancelDownload(itemToRemove.value.id)
+      
+      // Refresh downloads from store
+      await downloadsStore.loadDownloads()
+    } else {
+      // External client downloads: Remove from queue
+      console.log('[ActivityView] Removing from external client queue:', itemToRemove.value.id, itemToRemove.value.downloadClientId)
+      await apiService.removeFromQueue(itemToRemove.value.id, itemToRemove.value.downloadClientId)
+      
+      // Refresh queue
+      await refreshQueue()
+    }
+    
     showRemoveModal.value = false
     itemToRemove.value = null
-    await refreshQueue()
   } catch (err) {
-    console.error('Failed to remove from queue:', err)
-    alert('Failed to remove from queue: ' + (err as Error).message)
+    console.error('Failed to remove download:', err)
+    alert('Failed to remove download: ' + (err as Error).message)
   } finally {
     removing.value = false
   }
@@ -264,15 +340,50 @@ const formatSize = (bytes: number): string => {
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
 
-// Poll queue every 5 seconds
-onMounted(() => {
-  refreshQueue()
-  pollInterval = window.setInterval(refreshQueue, 5000)
+// Subscribe to SignalR for real-time updates (NO POLLING!)
+onMounted(async () => {
+  console.log('[ActivityView] 📱 Subscribing to real-time updates via SignalR...')
+  
+  // Load initial downloads (includes DDL)
+  console.log('[ActivityView] 📥 Loading initial downloads...')
+  await downloadsStore.loadDownloads()
+  console.log('[ActivityView] ✅ Downloads loaded:', downloadsStore.downloads.length, 'total,', downloadsStore.activeDownloads.length, 'active')
+  console.log('[ActivityView] 📋 Downloads details:', downloadsStore.downloads.map(d => ({
+    id: d.id,
+    title: d.title,
+    status: d.status,
+    clientId: d.downloadClientId,
+    progress: d.progress
+  })))
+  console.log('[ActivityView] 📊 Download status breakdown:', {
+    Queued: downloadsStore.downloads.filter(d => d.status === 'Queued').length,
+    Downloading: downloadsStore.downloads.filter(d => d.status === 'Downloading').length,
+    Paused: downloadsStore.downloads.filter(d => d.status === 'Paused').length,
+    Processing: downloadsStore.downloads.filter(d => d.status === 'Processing').length,
+    Completed: downloadsStore.downloads.filter(d => d.status === 'Completed').length,
+    Failed: downloadsStore.downloads.filter(d => d.status === 'Failed').length,
+    Ready: downloadsStore.downloads.filter(d => d.status === 'Ready').length,
+  })
+  
+  // Subscribe to queue updates (external clients)
+  unsubscribeQueue = signalRService.onQueueUpdate((updatedQueue) => {
+    console.log('[ActivityView] 📨 Received queue update:', updatedQueue.length, 'items')
+    queue.value = updatedQueue
+  })
+  
+  // Load initial queue state
+  console.log('[ActivityView] 📥 Loading initial queue...')
+  await refreshQueue()
+  console.log('[ActivityView] ✅ Queue loaded:', queue.value.length, 'items')
+  
+  console.log('[ActivityView] ✅ Real-time updates enabled! (Downloads + Queue)')
+  console.log('[ActivityView] 📊 Total activity items:', allActivityItems.value.length)
 })
 
 onUnmounted(() => {
-  if (pollInterval) {
-    clearInterval(pollInterval)
+  // Clean up subscription
+  if (unsubscribeQueue) {
+    unsubscribeQueue()
   }
 })
 </script>

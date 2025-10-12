@@ -28,10 +28,21 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="type">Type *</label>
-                <select id="type" v-model="formData.type" required>
+                <select 
+                  id="type" 
+                  v-model="formData.type" 
+                  required
+                  :disabled="formData.implementation === 'InternetArchive' || formData.implementation === 'MyAnonamouse'"
+                >
                   <option value="Torrent">Torrent</option>
-                  <option value="Usenet">Usenet</option>
+                  <option value="Usenet">{{ formData.implementation === 'InternetArchive' ? 'DDL' : 'Usenet' }}</option>
                 </select>
+                <small v-if="formData.implementation === 'InternetArchive'" class="info-text">
+                  Internet Archive uses direct downloads (DDL)
+                </small>
+                <small v-else-if="formData.implementation === 'MyAnonamouse'" class="info-text">
+                  MyAnonamouse is a torrent tracker
+                </small>
               </div>
 
               <div class="form-group">
@@ -39,6 +50,8 @@
                 <select id="implementation" v-model="formData.implementation" required>
                   <option value="Newznab">Newznab</option>
                   <option value="Torznab">Torznab</option>
+                  <option value="MyAnonamouse">MyAnonamouse</option>
+                  <option value="InternetArchive">Internet Archive</option>
                   <option value="Custom">Custom</option>
                 </select>
               </div>
@@ -51,11 +64,65 @@
                 v-model="formData.url" 
                 type="url" 
                 required 
-                placeholder="https://indexer.example.com"
+                :placeholder="
+                  formData.implementation === 'MyAnonamouse' ? 'https://www.myanonamouse.net' :
+                  formData.implementation === 'InternetArchive' ? 'https://archive.org' :
+                  'https://indexer.example.com'
+                "
               />
             </div>
 
-            <div class="form-group">
+            <!-- MyAnonamouse Authentication -->
+            <div v-if="formData.implementation === 'MyAnonamouse'" class="form-section">
+              <h4>Authentication</h4>
+              <div class="form-group">
+                <label for="mam-username">Username *</label>
+                <input 
+                  id="mam-username" 
+                  v-model="mamUsername" 
+                  type="text" 
+                  :required="formData.implementation === 'MyAnonamouse'"
+                  placeholder="Your MyAnonamouse username"
+                />
+              </div>
+              <div class="form-group">
+                <label for="mam-password">Password *</label>
+                <input 
+                  id="mam-password" 
+                  v-model="mamPassword" 
+                  type="password" 
+                  :required="formData.implementation === 'MyAnonamouse'"
+                  placeholder="Your MyAnonamouse password"
+                />
+              </div>
+              <small class="info-text">
+                <i class="ph ph-info"></i>
+                MyAnonamouse requires your username and password for authentication. These are stored securely and only used to search the indexer.
+              </small>
+            </div>
+
+            <!-- Internet Archive Collection Selection -->
+            <div v-if="formData.implementation === 'InternetArchive'" class="form-section">
+              <h4>Collection</h4>
+              <div class="form-group">
+                <label for="ia-collection">Collection *</label>
+                <select 
+                  id="ia-collection" 
+                  v-model="iaCollection" 
+                  :required="formData.implementation === 'InternetArchive'"
+                >
+                  <option value="librivoxaudio">Librivox (Free Audiobooks)</option>
+                  <option value="audio_bookspoetry">Audio Books & Poetry</option>
+                </select>
+              </div>
+              <small class="info-text">
+                <i class="ph ph-info"></i>
+                Choose which Internet Archive collection to search. Librivox contains public domain audiobooks read by volunteers.
+              </small>
+            </div>
+
+            <!-- API Key for other implementations -->
+            <div v-if="formData.implementation !== 'MyAnonamouse' && formData.implementation !== 'InternetArchive'" class="form-group">
               <label for="apiKey">API Key</label>
               <input 
                 id="apiKey" 
@@ -209,6 +276,13 @@ const { success, error: showError } = useNotification()
 const saving = ref(false)
 const testing = ref(false)
 
+// MyAnonamouse authentication fields
+const mamUsername = ref('')
+const mamPassword = ref('')
+
+// Internet Archive collection field
+const iaCollection = ref('librivoxaudio')
+
 const defaultFormData = {
   name: '',
   type: 'Torrent',
@@ -224,7 +298,8 @@ const defaultFormData = {
   priority: 25,
   minimumAge: 0,
   retention: 0,
-  maximumSize: 0
+  maximumSize: 0,
+  additionalSettings: ''
 }
 
 const formData = ref({ ...defaultFormData })
@@ -247,12 +322,60 @@ watch(() => props.editingIndexer, (newIndexer) => {
       priority: newIndexer.priority,
       minimumAge: newIndexer.minimumAge,
       retention: newIndexer.retention,
-      maximumSize: newIndexer.maximumSize
+      maximumSize: newIndexer.maximumSize,
+      additionalSettings: newIndexer.additionalSettings || ''
+    }
+    
+    // Parse MyAnonamouse credentials from additionalSettings
+    if (newIndexer.implementation === 'MyAnonamouse' && newIndexer.additionalSettings) {
+      try {
+        const settings = JSON.parse(newIndexer.additionalSettings)
+        mamUsername.value = settings.username || ''
+        mamPassword.value = settings.password || ''
+      } catch (e) {
+        console.error('Failed to parse MyAnonamouse settings:', e)
+        mamUsername.value = ''
+        mamPassword.value = ''
+      }
+    }
+
+    // Parse Internet Archive collection from additionalSettings
+    if (newIndexer.implementation === 'InternetArchive' && newIndexer.additionalSettings) {
+      try {
+        const settings = JSON.parse(newIndexer.additionalSettings)
+        iaCollection.value = settings.collection || 'librivoxaudio'
+      } catch (e) {
+        console.error('Failed to parse Internet Archive settings:', e)
+        iaCollection.value = 'librivoxaudio'
+      }
     }
   } else {
     formData.value = { ...defaultFormData }
+    mamUsername.value = ''
+    mamPassword.value = ''
+    iaCollection.value = 'librivoxaudio'
   }
 }, { immediate: true })
+
+// Watch for implementation changes to auto-set type
+watch(() => formData.value.implementation, (newImplementation) => {
+  // Internet Archive is DDL only, set type to Usenet
+  if (newImplementation === 'InternetArchive') {
+    formData.value.type = 'Usenet'
+  }
+  // MyAnonamouse is torrent only
+  else if (newImplementation === 'MyAnonamouse') {
+    formData.value.type = 'Torrent'
+  }
+  // Torznab defaults to Torrent
+  else if (newImplementation === 'Torznab') {
+    formData.value.type = 'Torrent'
+  }
+  // Newznab defaults to Usenet
+  else if (newImplementation === 'Newznab') {
+    formData.value.type = 'Usenet'
+  }
+})
 
 const closeModal = () => {
   formData.value = { ...defaultFormData }
@@ -284,13 +407,34 @@ const testConnection = async () => {
 const handleSubmit = async () => {
   saving.value = true
   try {
+    // Serialize MyAnonamouse credentials to additionalSettings
+    const submitData = { ...formData.value }
+    if (submitData.implementation === 'MyAnonamouse') {
+      submitData.additionalSettings = JSON.stringify({
+        username: mamUsername.value,
+        password: mamPassword.value
+      })
+      // Clear API key field for MyAnonamouse
+      submitData.apiKey = ''
+    } else if (submitData.implementation === 'InternetArchive') {
+      submitData.additionalSettings = JSON.stringify({
+        collection: iaCollection.value
+      })
+      // Clear API key field for Internet Archive (no auth needed)
+      submitData.apiKey = ''
+      // Set default URL for Internet Archive
+      if (!submitData.url || submitData.url === '') {
+        submitData.url = 'https://archive.org'
+      }
+    }
+    
     if (props.editingIndexer) {
       // Update existing indexer
-      await updateIndexer(props.editingIndexer.id, formData.value)
+      await updateIndexer(props.editingIndexer.id, submitData)
       success('Indexer updated successfully')
     } else {
       // Create new indexer
-      await createIndexer(formData.value)
+      await createIndexer(submitData)
       success('Indexer created successfully')
     }
     

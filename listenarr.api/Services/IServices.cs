@@ -4,21 +4,21 @@ namespace Listenarr.Api.Services
 {
     public interface ISearchService
     {
-        Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null);
+        Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
         Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null);
         Task<bool> TestApiConnectionAsync(string apiId);
-        Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null);
+        Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
     }
 
     public interface IDownloadService
     {
-        Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId);
+        Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null);
         Task<List<Download>> GetActiveDownloadsAsync();
         Task<Download?> GetDownloadAsync(string downloadId);
         Task<bool> CancelDownloadAsync(string downloadId);
         Task UpdateDownloadStatusAsync();
         Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId);
-        Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null);
+        Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null);
         Task<List<QueueItem>> GetQueueAsync();
         Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
     }
@@ -53,6 +53,9 @@ namespace Listenarr.Api.Services
         
         Task<ApplicationSettings> GetApplicationSettingsAsync();
         Task SaveApplicationSettingsAsync(ApplicationSettings settings);
+        
+        Task<StartupConfig> GetStartupConfigAsync();
+        Task SaveStartupConfigAsync(StartupConfig config);
     }
 
     public interface INotificationService
@@ -76,5 +79,32 @@ namespace Listenarr.Api.Services
     public interface IAudibleSearchService
     {
         Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query);
+    }
+
+    public interface IFileNamingService
+    {
+        /// <summary>
+        /// Apply the configured file naming pattern to generate the final file path
+        /// </summary>
+        /// <param name="metadata">Audiobook metadata</param>
+        /// <param name="diskNumber">Optional disk/part number</param>
+        /// <param name="chapterNumber">Optional chapter number</param>
+        /// <param name="originalExtension">File extension (e.g., ".m4b", ".mp3")</param>
+        /// <returns>Full file path using the naming pattern</returns>
+        Task<string> GenerateFilePathAsync(AudioMetadata metadata, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
+        
+        /// <summary>
+        /// Parse a naming pattern and replace variables with actual values
+        /// </summary>
+        string ApplyNamingPattern(string pattern, Dictionary<string, object> variables);
+    }
+
+    public interface IAudioFileService
+    {
+        /// <summary>
+        /// Ensure an AudiobookFile record exists for the given audiobook and file path. Extract metadata (ffprobe/taglib) and persist file-level metadata.
+        /// Returns true if a new record was created, false if it already existed.
+        /// </summary>
+        Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan");
     }
 }

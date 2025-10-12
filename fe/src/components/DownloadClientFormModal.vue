@@ -240,6 +240,14 @@
               <small>Whether to use qBittorrent's configured content layout. Use qBittorrent's 4.3.2 layout if the original layout from the torrent cannot be used (Default = Original layout)</small>
             </div>
           </div>
+
+          <!-- Remote Path Mappings (only for existing clients) -->
+          <div class="form-section" v-if="editingClient?.id">
+            <RemotePathMappingsManager 
+              :download-client-id="editingClient.id"
+              :download-client-name="formData.name"
+            />
+          </div>
         </form>
       </div>
       
@@ -270,6 +278,7 @@ import { ref, computed, watch } from 'vue'
 import type { DownloadClientConfiguration } from '@/types'
 import { useNotification } from '@/composables/useNotification'
 import { useConfigurationStore } from '@/stores/configuration'
+import RemotePathMappingsManager from './RemotePathMappingsManager.vue'
 
 interface Props {
   visible: boolean
@@ -330,10 +339,10 @@ const requiresApiKey = computed(() => {
 
 const getHostPlaceholder = () => {
   const placeholders: Record<string, string> = {
-    qbittorrent: 'qbittorrent.therobbiedavis.com',
-    transmission: 'transmission.therobbiedavis.com',
-    sabnzbd: 'sabnzbd.therobbiedavis.com',
-    nzbget: 'nzbget.therobbiedavis.com'
+    qbittorrent: 'qbittorrent.tld.com',
+    transmission: 'transmission.tld.com',
+    sabnzbd: 'sabnzbd.tld.com',
+    nzbget: 'nzbget.tld.com'
   }
   return placeholders[formData.value.type] || 'localhost'
 }

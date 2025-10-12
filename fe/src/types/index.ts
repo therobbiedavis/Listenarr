@@ -11,6 +11,7 @@ export interface SearchResult {
   torrentUrl: string
   nzbUrl: string
   source: string
+  downloadType: string // "Torrent", "Usenet", or "DDL"
   publishedDate: string
   quality: string
   format: string
@@ -25,6 +26,7 @@ export interface SearchResult {
   series?: string
   seriesNumber?: string
   isEnriched?: boolean
+  score?: number
 }
 
 export interface Download {
@@ -33,7 +35,7 @@ export interface Download {
   artist: string
   album: string
   originalUrl: string
-  status: 'Queued' | 'Downloading' | 'Completed' | 'Failed' | 'Processing' | 'Ready'
+  status: 'Queued' | 'Downloading' | 'Paused' | 'Completed' | 'Failed' | 'Processing' | 'Ready'
   progress: number
   totalSize: number
   downloadedSize: number
@@ -43,7 +45,9 @@ export interface Download {
   completedAt?: string
   errorMessage?: string
   downloadClientId: string
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>
+  // Optional link to an audiobook record when the download was queued for a specific audiobook
+  audiobookId?: number
 }
 
 export interface QueueItem {
@@ -70,6 +74,8 @@ export interface QueueItem {
   seeders?: number
   leechers?: number
   ratio?: number
+  remotePath?: string // Path as seen by download client
+  localPath?: string // Path translated for Listenarr
 }
 
 export interface ApiConfiguration {
@@ -98,7 +104,29 @@ export interface DownloadClientConfiguration {
   downloadPath: string
   useSSL: boolean
   isEnabled: boolean
-  settings: Record<string, any>
+  settings: Record<string, unknown>
+}
+
+export interface RemotePathMapping {
+  id: number
+  downloadClientId: string
+  name?: string
+  remotePath: string
+  localPath: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TranslatePathRequest {
+  downloadClientId: string
+  remotePath: string
+}
+
+export interface TranslatePathResponse {
+  downloadClientId: string
+  remotePath: string
+  localPath: string
+  translated: boolean
 }
 
 export interface ApplicationSettings {
@@ -111,6 +139,29 @@ export interface ApplicationSettings {
   pollingIntervalSeconds: number
   enableNotifications: boolean
   allowedFileExtensions: string[]
+  // Optional admin credentials used when saving settings to create/update an initial admin user
+  adminUsername?: string
+  adminPassword?: string
+}
+
+export interface StartupConfig {
+  logLevel?: string
+  enableSsl?: boolean
+  port?: number
+  sslPort?: number
+  urlBase?: string
+  bindAddress?: string
+  apiKey?: string
+  authenticationMethod?: string
+  updateMechanism?: string
+  launchBrowser?: boolean
+  branch?: string
+  instanceName?: string
+  syslogPort?: number
+  analyticsEnabled?: boolean
+  authenticationRequired?: string | boolean
+  sslCertPath?: string
+  sslCertPassword?: string
 }
 
 export interface AudibleBookMetadata {
@@ -134,6 +185,8 @@ export interface AudibleBookMetadata {
   explicit?: boolean
   abridged?: boolean
   source?: string
+  // Optional local mapping to a quality profile ID when viewing in the UI
+  qualityProfileId?: number
 }
 
 export interface Audiobook {
@@ -160,7 +213,22 @@ export interface Audiobook {
   monitored?: boolean
   filePath?: string
   fileSize?: number
+  files?: {
+    id: number
+    path?: string
+    size?: number
+    durationSeconds?: number
+    format?: string
+    container?: string
+    codec?: string
+    bitrate?: number
+    sampleRate?: number
+    channels?: number
+    createdAt?: string
+    source?: string
+  }[]
   quality?: string
+  qualityProfileId?: number
 }
 
 export interface History {
@@ -200,3 +268,123 @@ export interface Indexer {
   lastTestSuccessful?: boolean
   lastTestError?: string
 }
+
+export interface SystemInfo {
+  version: string
+  operatingSystem: string
+  runtime: string
+  uptime: string
+  memory: MemoryInfo
+  cpu: CpuInfo
+  startTime: string
+}
+
+export interface MemoryInfo {
+  usedBytes: number
+  totalBytes: number
+  freeBytes: number
+  usedPercentage: number
+  usedFormatted: string
+  totalFormatted: string
+  freeFormatted: string
+}
+
+export interface CpuInfo {
+  usagePercentage: number
+  processorCount: number
+}
+
+export interface StorageInfo {
+  usedBytes: number
+  totalBytes: number
+  freeBytes: number
+  usedPercentage: number
+  usedFormatted: string
+  totalFormatted: string
+  freeFormatted: string
+  driveName: string
+  status: string
+}
+
+export interface ServiceHealth {
+  status: string // "healthy", "warning", "error", "unknown"
+  version: string
+  uptime: string
+  downloadClients: DownloadClientHealth
+  externalApis: ExternalApiHealth
+}
+
+export interface DownloadClientHealth {
+  status: string
+  connected: number
+  total: number
+  clients: ClientStatus[]
+}
+
+export interface ExternalApiHealth {
+  status: string
+  connected: number
+  total: number
+  apis: ApiStatus[]
+}
+
+export interface ClientStatus {
+  name: string
+  status: string // "connected", "disconnected", "unknown"
+  type?: string
+}
+
+export interface ApiStatus {
+  name: string
+  status: string // "connected", "disconnected", "unknown"
+  enabled: boolean
+}
+
+export interface LogEntry {
+  id: string
+  timestamp: string // ISO date string
+  level: string // "Info", "Warning", "Error", "Debug"
+  message: string
+  exception?: string
+  source?: string
+}
+
+export interface QualityProfile {
+  id?: number
+  name: string
+  description?: string
+  qualities: QualityDefinition[]
+  cutoffQuality?: string
+  minimumSize?: number // MB (optional - no minimum if not set)
+  maximumSize?: number // MB (optional - no maximum if not set)
+  preferredFormats?: string[] // e.g., ["m4b", "mp3", "m4a", "flac", "opus"]
+  preferredWords?: string[] // Words that increase score
+  mustNotContain?: string[] // Instant rejection
+  mustContain?: string[] // Must be present
+  preferredLanguages?: string[] // e.g., ["English", "Spanish"]
+  minimumSeeders?: number
+  isDefault?: boolean
+  preferNewerReleases?: boolean
+  maximumAge?: number // days (0 = no limit)
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface QualityDefinition {
+  quality: string // e.g., "320kbps", "192kbps", "lossless"
+  allowed: boolean
+  priority: number // Lower = higher priority
+}
+
+export interface QualityScore {
+  searchResult: SearchResult
+  totalScore: number
+  scoreBreakdown: Record<string, number>
+  rejectionReasons: string[]
+  isRejected: boolean
+}
+
+export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Source' | 'Quality'
+
+export type SearchSortDirection = 'Ascending' | 'Descending'
+

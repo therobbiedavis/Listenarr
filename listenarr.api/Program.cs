@@ -18,12 +18,35 @@
 
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
+using Listenarr.Api.Hubs;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Listenarr.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args);
+// Check for special CLI helpers before building the web host
+// Pass a non-null args array to satisfy nullable analysis
+var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+
+// Configure logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Serialize enums as strings instead of integers for better frontend compatibility
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+
+// Add SignalR for real-time updates
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        // Serialize enums as strings for SignalR messages too
+        options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 
 // Add in-memory cache for metadata prefetch / reuse
 builder.Services.AddMemoryCache();
@@ -40,20 +63,58 @@ builder.Services.AddHttpClient();
 
 // Register our custom services
 builder.Services.AddDbContext<ListenArrDbContext>(options =>
-    options.UseSqlite("Data Source=listenarr.db"));
+    options.UseSqlite("Data Source=config/database/listenarr.db"));
 builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
 builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
+// Startup config: read config.json (optional) and expose via IStartupConfigService
+builder.Services.AddSingleton<IStartupConfigService, StartupConfigService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<IMetadataService, MetadataService>();
+builder.Services.AddScoped<IAudioFileService, AudioFileService>();
+// Metadata extraction limiter to bound concurrent ffprobe calls
+builder.Services.AddSingleton<MetadataExtractionLimiter>();
+// Ffmpeg installer: provides a bundled ffprobe binary when not present on the system
+builder.Services.AddSingleton<IFfmpegService, FfmpegInstallerService>();
+// Service to accept client-pushed download updates and maintain recent-push cache
+builder.Services.AddSingleton<Listenarr.Api.Services.DownloadPushService>();
 builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
 builder.Services.AddScoped<IDownloadService, DownloadService>();
 // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
 // Removing duplicate scoped registration to avoid overriding the typed client configuration.
 builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
 builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
+builder.Services.AddScoped<IFileNamingService, FileNamingService>();
+builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
+builder.Services.AddScoped<ISystemService, SystemService>();
+builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
+
+// Scan queue: enqueue folder scans to be processed in the background
+builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
+// Background worker to consume scan jobs and persist audiobook files
+builder.Services.AddHostedService<ScanBackgroundService>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();
+
+// Register background service for temp file cleanup
+builder.Services.AddHostedService<TempFileCleanupService>();
+
+// Register background service for download monitoring and real-time updates
+builder.Services.AddHostedService<DownloadMonitorService>();
+
+// Register background service for queue monitoring (external clients) and real-time updates
+builder.Services.AddHostedService<QueueMonitorService>();
+
+// Register background service for automatic audiobook searching
+builder.Services.AddHostedService<AutomaticSearchService>();
+// Background installer for ffprobe - run in background so startup isn't blocked
+builder.Services.AddHostedService<FfmpegInstallBackgroundService>();
+
+// Background service to rescan files missing metadata
+builder.Services.AddHostedService<MetadataRescanService>();
+
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -84,7 +145,7 @@ builder.Services.AddCors(options =>
                 )
                 .AllowAnyHeader()
                 .AllowAnyMethod()
-                .AllowCredentials();
+                .AllowCredentials(); // Required for SignalR
         });
 
     // Development fallback (use cautiously). This can help diagnose unexpected origin mismatches.
@@ -98,18 +159,76 @@ builder.Services.AddCors(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Authentication: Cookie-based (minimal default). This will be enforced by middleware when configured.
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/api/account/login";
+        options.Cookie.Name = "listenarr_auth";
+        // Harden cookie settings
+        options.SlidingExpiration = true;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always; // require HTTPS in production
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+        options.ExpireTimeSpan = TimeSpan.FromDays(7);
+    });
+
+// Antiforgery (CSRF) protection for SPA: expect token in X-XSRF-TOKEN header
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-XSRF-TOKEN";
+});
+
+// During local development we often run the frontend on a different port via Vite
+// and use plain HTTP. Ensure antiforgery cookie can be set in that scenario by
+// relaxing the SecurePolicy and SameSite settings when running in Development.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddAntiforgery(options =>
+    {
+        options.HeaderName = "X-XSRF-TOKEN";
+        // Allow the antiforgery cookie to be sent over plain HTTP during local dev
+        options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+    });
+}
+
 var app = builder.Build();
 
 // Ensure database is created and migrations are applied
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     
-    // Apply any pending migrations
-    context.Database.Migrate();
-    
-    // Apply SQLite PRAGMA settings after database is created
-    SqlitePragmaInitializer.ApplyPragmas(context);
+    try
+    {
+        logger.LogInformation("Applying database migrations...");
+        // Apply any pending migrations
+        context.Database.Migrate();
+        logger.LogInformation("Database migrations applied successfully");
+        
+        // Apply SQLite PRAGMA settings after database is created
+        SqlitePragmaInitializer.ApplyPragmas(context);
+        logger.LogInformation("SQLite pragmas applied successfully");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error during database initialization");
+        // During tests (WebApplicationFactory) the test host may not have access to the configured
+        // on-disk SQLite database path. Log the error but continue startup so tests can override
+        // DbContext configuration as needed. Do not re-throw here.
+    }
+}
+
+// Ensure ffprobe is available on first launch (best-effort). Installation runs in background via
+// the registered hosted service so the app can serve requests immediately.
+
+// If the user passed --query-users, run the helper now that the DB is migrated and exit.
+if (args is not null && args.Contains("--query-users"))
+{
+    QueryUsersProgram.Run();
+    return;
 }
 
 // Configure the HTTP request pipeline.
@@ -131,9 +250,20 @@ else
 {
     app.UseCors("AllowVueApp");
 }
-
+    // Enable authentication middleware
+    app.UseAuthentication();
+    // API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
+    app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
+    // Enforce authentication based on startup config
+    app.UseMiddleware<AuthenticationEnforcerMiddleware>();
+    // Validate antiforgery tokens for unsafe methods
+    app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
+    app.UseAuthorization();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Map SignalR hub for real-time download updates
+app.MapHub<DownloadHub>("/hubs/downloads");
 
 app.Run();

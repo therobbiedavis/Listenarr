@@ -34,7 +34,11 @@ namespace Listenarr.Api.Services
 
         public async Task<List<Audiobook>> GetAllAsync()
         {
-            return await _db.Audiobooks.OrderBy(a => a.Title).ToListAsync();
+            // Include Files so callers that fetch the full library will receive file records
+            return await _db.Audiobooks
+                .Include(a => a.Files)
+                .OrderBy(a => a.Title)
+                .ToListAsync();
         }
 
         public async Task<Audiobook?> GetByAsinAsync(string asin)
@@ -49,7 +53,11 @@ namespace Listenarr.Api.Services
 
         public async Task<Audiobook?> GetByIdAsync(int id)
         {
-            return await _db.Audiobooks.FirstOrDefaultAsync(a => a.Id == id);
+            // Include QualityProfile and Files for callers that need full audiobook details
+            return await _db.Audiobooks
+                .Include(a => a.QualityProfile)
+                .Include(a => a.Files)
+                .FirstOrDefaultAsync(a => a.Id == id);
         }
 
         public async Task AddAsync(Audiobook audiobook)

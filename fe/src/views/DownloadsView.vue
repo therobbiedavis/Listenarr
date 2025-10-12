@@ -145,6 +145,7 @@ const cancelDownload = async (downloadId: string) => {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const retryDownload = async (download: Download) => {
   // For now, just show a message. In a real implementation, 
   // you would restart the download
@@ -183,17 +184,11 @@ const formatDate = (dateString: string): string => {
 }
 
 onMounted(() => {
+  // Load initial downloads from API
   refreshDownloads()
   
-  // Set up automatic refresh every 30 seconds for active downloads
-  const interval = setInterval(() => {
-    if (activeTab.value === 'active' && downloadsStore.activeDownloads.length > 0) {
-      refreshDownloads()
-    }
-  }, 30000)
-  
-  // Clean up interval on component unmount
-  return () => clearInterval(interval)
+  // No polling needed - SignalR pushes updates in real-time!
+  // The downloads store automatically receives updates via WebSocket
 })
 </script>
 
