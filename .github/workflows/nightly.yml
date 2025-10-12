@@ -60,21 +60,6 @@ jobs:
           name: nightly-artifacts
           path: artifacts/*.zip
 
-      - name: Create GitHub Pre-Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.resolve-version.outputs.VERSION }}
-          name: Nightly ${{ steps.resolve-version.outputs.VERSION }}
-          body: |
-            Automated nightly build.
-
-            Version: ${{ steps.resolve-version.outputs.VERSION }}
-            Commit: ${{ github.sha }}
-          prerelease: true
-          files: artifacts/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
@@ -109,6 +94,21 @@ jobs:
       - name: Show resolved version
         run: |
           echo "Resolved version: ${{ steps.resolve-version.outputs.VERSION }}"
+
+      - name: Create GitHub Pre-Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.resolve-version.outputs.VERSION }}
+          name: Nightly ${{ steps.resolve-version.outputs.VERSION }}
+          body: |
+            Automated nightly build.
+
+            Version: ${{ steps.resolve-version.outputs.VERSION }}
+            Commit: ${{ github.sha }}
+          prerelease: true
+          files: artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Persist bumped version to csproj
         if: steps.resolve-version.outputs.VERSION != ''
