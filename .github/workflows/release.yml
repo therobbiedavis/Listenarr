@@ -49,9 +49,9 @@ jobs:
       - name: Zip artifacts
         run: |
           mkdir -p artifacts
-          cd listenarr.api/publish/linux-x64 && zip -r ../../artifacts/listenarr-api-linux-x64.zip .
-          cd listenarr.api/publish/win-x64 && zip -r ../../artifacts/listenarr-api-win-x64.zip .
-          cd listenarr.api/publish/osx-x64 && zip -r ../../artifacts/listenarr-api-osx-x64.zip .
+          zip -r artifacts/listenarr-api-linux-x64.zip listenarr.api/publish/linux-x64/
+          zip -r artifacts/listenarr-api-win-x64.zip listenarr.api/publish/win-x64/
+          zip -r artifacts/listenarr-api-osx-x64.zip listenarr.api/publish/osx-x64/
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v1

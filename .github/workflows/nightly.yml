@@ -47,14 +47,12 @@ jobs:
       - name: Zip Linux artifact
         run: |
           mkdir -p artifacts
-          cd listenarr.api/publish/linux-x64
-          zip -r ../../../../artifacts/listenarr-api-linux-x64.zip .
+          zip -r artifacts/listenarr-api-linux-x64.zip listenarr.api/publish/linux-x64/
 
       - name: Zip Windows artifact
         run: |
           mkdir -p artifacts
-          cd listenarr.api/publish/win-x64
-          zip -r ../../../../artifacts/listenarr-api-win-x64.zip .
+          zip -r artifacts/listenarr-api-win-x64.zip listenarr.api/publish/win-x64/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
