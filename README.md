@@ -107,7 +107,7 @@ Got a great idea? Throw it up on [Discussions](https://github.com/therobbiedavis
 ### Backend
 - **ASP.NET Core** - Web API framework
 - **Entity Framework Core** - Database ORM with SQLite
-- **C# 12** with .NET 7.0+
+- **C# 12** with .NET 8.0+
 
 ### Frontend
 - **Vue 3** - Progressive JavaScript framework
@@ -195,7 +195,7 @@ For complete API documentation, see our [API Reference](https://github.com/thero
 
 ### Prerequisites
 
-- .NET 7.0 SDK or later
+- .NET 8.0 SDK or later
 - Node.js 20.x or later
 - npm (comes with Node.js)
 
