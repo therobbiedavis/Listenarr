@@ -65,14 +65,34 @@ npm run dev
 ### Docker
 
 ```bash
-docker-compose up --build
+docker-compose up -d
 ```
 
-**Services will be available at:**
-- Backend API: http://localhost:5146
-- Frontend Web: http://localhost:5173
+**Service will be available at:**
+- Web App: http://localhost:5656
+
+The Docker image includes both the backend API and frontend in a single container. For production, use the latest stable image from Docker Hub.
+
+**Available Tags:**
+- `latest` / `stable` - Latest stable release
+- `nightly` - Latest nightly build (pre-release)
+- `nightly-X.Y.Z` - Specific nightly version
+- `X.Y.Z` - Specific release version
 
 For detailed installation instructions, see our [Wiki](https://github.com/therobbiedavis/Listenarr/wiki) (coming soon).
+
+## CI/CD
+
+Listenarr uses GitHub Actions for automated building and deployment:
+
+- **Nightly Builds** (on `develop` pushes): Builds self-contained executables (Linux x64, Windows x64) and Docker images. Creates GitHub pre-releases with downloadable zips and pushes Docker images tagged as `nightly` and `nightly-X.Y.Z`.
+- **Release Builds** (on version tags): Builds executables for Linux x64, Windows x64, and macOS x64. Creates GitHub releases with artifacts and pushes Docker images tagged as `stable`, `latest`, and `X.Y.Z`.
+
+Version numbers are automatically incremented:
+- Nightly: Patch version +1
+- Release: Minor version +1, patch reset to 0
+
+All builds are CI-first: `dotnet publish` automatically builds the frontend and includes it in the API's `wwwroot`.
 
 ## Feature Requests
 
@@ -119,6 +139,9 @@ Listenarr/
 │   │   └── services/           # API Services
 │   └── public/                 # Static Assets
 ├── docker-compose.yml          # Docker Configuration
+├── listenarr.api/
+│   ├── Dockerfile.runtime      # Runtime Docker image for combined API + frontend
+│   └── ...
 └── README.md
 ```
 
@@ -199,6 +222,39 @@ dotnet publish -c Release
 cd fe
 npm run build
 ```
+
+### CI-first monorepo build
+
+The repository is configured so the API publish will build the frontend and copy the `fe/dist` output into the API `wwwroot`. This produces a single publish artifact that serves both backend and frontend.
+
+To build locally (requires Node + npm):
+
+```bash
+# from repo root
+dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o ./publish/local
+```
+
+If you want to skip the frontend build (no Node on host):
+
+```bash
+dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o ./publish/local /p:SkipFrontendBuild=true
+```
+
+To build a runtime Docker image from the publish output (CI-first):
+
+```bash
+# context: listenarr.api/publish/<rid>
+docker build -f listenarr.api/Dockerfile.runtime -t <your-image> listenarr.api/publish/linux-x64
+```
+
+### Version Management
+
+Application versions are managed in `listenarr.api/Listenarr.Api.csproj` with a `<Version>` element. CI automatically bumps versions on builds:
+- Nightly: Increments patch (e.g., 1.2.3 → 1.2.4)
+- Release: Increments minor and resets patch (e.g., 1.2.3 → 1.3.0)
+
+Bumped versions are persisted via PR to maintain branch protection.
+
 
 ## Roadmap
 
