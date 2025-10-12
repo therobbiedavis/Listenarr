@@ -144,16 +144,23 @@ jobs:
           # Use repository owner as namespace (avoids embedding secrets into names)
           echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
 
+      - name: Get PR body
+        id: pr_body
+        run: |
+          PR_BODY=$(gh api repos/${{ github.repository }}/pulls/${{ steps.create_pr.outputs['pull-request-number'] }} --jq .body)
+          FULL_BODY=$(printf '%s\n\n---\n\nAutomated nightly build.\n\nVersion: ${{ steps.resolve-version.outputs.VERSION }}\nCommit: ${{ github.sha }}' "$PR_BODY")
+          echo "FULL_BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "$FULL_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Pre-Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.resolve-version.outputs.VERSION }}
           name: Nightly ${{ steps.resolve-version.outputs.VERSION }}
-          body: |
-            Automated nightly build.
-
-            Version: ${{ steps.resolve-version.outputs.VERSION }}
-            Commit: ${{ github.sha }}
+          body: ${{ steps.pr_body.outputs.FULL_BODY }}
           prerelease: true
           files: artifacts/*.zip
         env:

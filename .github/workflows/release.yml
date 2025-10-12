@@ -97,6 +97,17 @@ jobs:
           pull-request-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
           merge-method: merge
 
+      - name: Get PR body
+        id: pr_body
+        run: |
+          PR_BODY=$(gh api repos/${{ github.repository }}/pulls/${{ steps.create_pr.outputs['pull-request-number'] }} --jq .body)
+          FULL_BODY=$(printf '%s\n\n---\n\nAutomated release build.\n\nVersion: ${{ steps.resolve-version.outputs.VERSION }}\nCommit: ${{ github.sha }}' "$PR_BODY")
+          echo "FULL_BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "$FULL_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build solution
         run: dotnet build listenarr.sln -c Release --no-restore
 
@@ -138,6 +149,7 @@ jobs:
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v1
         with:
+          body: ${{ steps.pr_body.outputs.FULL_BODY }}
           files: artifacts/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
