@@ -142,7 +142,7 @@ jobs:
       - name: Create Pull Request for version bump
         uses: peter-evans/create-pull-request@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
           commit-message: "Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
           branch: "ci/version-bump-${{ steps.resolve-version.outputs.VERSION }}"
           base: develop
