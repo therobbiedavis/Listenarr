@@ -109,14 +109,32 @@ jobs:
           labels: automated,version-bump
 
       - name: Merge version bump PR (skip CI)
-        uses: peter-evans/merge-pull-request@v3
+        uses: actions/github-script@v6
+        env:
+          PR_NUMBER: ${{ steps.create_pr.outputs['pull-request-number'] }}
+          NEW_VERSION: ${{ steps.resolve-version.outputs.VERSION }}
         with:
-          token: ${{ secrets.GH_PAT }}
-          pull-request-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
-          merge-method: merge
-          commit-title: "[skip ci] Merge pull request ${{ steps.create_pr.outputs['pull-request-number'] }} - Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
-          commit-message: "[skip ci] Merge: Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
-          delete-branch: true
+          script: |
+            const pr = parseInt(process.env.PR_NUMBER, 10);
+            if (!pr) throw new Error('PR number missing');
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr,
+              merge_method: 'merge',
+              commit_title: `[skip ci] Merge pull request ${pr} - Bump version to ${process.env.NEW_VERSION}`,
+              commit_message: `[skip ci] Merge: Bump version to ${process.env.NEW_VERSION}`
+            });
+            // Optionally delete the branch
+            try {
+              const prInfo = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+              const branch = prInfo.data.head.ref;
+              if (branch && branch.startsWith('ci/')) {
+                await github.rest.git.deleteRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `heads/${branch}` });
+              }
+            } catch (err) {
+              core.info(`Branch delete skipped or failed: ${err.message}`);
+            }
 
       - name: Build solution
         run: dotnet build listenarr.sln -c Release --no-restore
