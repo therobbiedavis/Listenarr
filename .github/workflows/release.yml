@@ -90,12 +90,15 @@ jobs:
             The change was produced automatically by the CI release workflow.
           labels: automated,version-bump
 
-      - name: Enable auto-merge for release version bump PR
-        uses: peter-evans/enable-pull-request-automerge@v3
+      - name: Merge release version bump PR (skip CI)
+        uses: peter-evans/merge-pull-request@v3
         with:
           token: ${{ secrets.GH_PAT }}
           pull-request-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
           merge-method: merge
+          commit-title: "Merge pull request ${{ steps.create_pr.outputs['pull-request-number'] }} - Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          commit-message: "[skip ci] Merge: Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          delete-branch: true
 
       - name: Get PR body
         id: pr_body
