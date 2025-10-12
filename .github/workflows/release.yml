@@ -90,11 +90,11 @@ jobs:
             The change was produced automatically by the CI release workflow.
           labels: automated,version-bump
 
-      - name: Auto-merge release version bump PR
-        uses: peter-evans/merge-pull-request@v3
+      - name: Enable auto-merge for release version bump PR
+        uses: peter-evans/enable-pull-request-automerge@v3
         with:
           token: ${{ secrets.GH_PAT }}
-          pull-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
+          pull-request-number: ${{ steps.create_pr.outputs['pull-request-number'] }}
           merge-method: merge
 
       - name: Build solution
