@@ -161,9 +161,12 @@ jobs:
       - name: Zip artifacts
         run: |
           mkdir -p artifacts
-          zip -r artifacts/listenarr-linux-x64.zip listenarr.api/publish/linux-x64/
-          zip -r artifacts/listenarr-win-x64.zip listenarr.api/publish/win-x64/
-          zip -r artifacts/listenarr-osx-x64.zip listenarr.api/publish/osx-x64/
+          cd listenarr.api/publish/linux-x64
+          zip -r ../../../artifacts/listenarr-linux-x64.zip .
+          cd ../win-x64
+          zip -r ../../../artifacts/listenarr-win-x64.zip .
+          cd ../osx-x64
+          zip -r ../../../artifacts/listenarr-osx-x64.zip .
 
       - name: Login to Docker Hub
         uses: docker/login-action@v2
