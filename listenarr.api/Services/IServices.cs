@@ -98,4 +98,13 @@ namespace Listenarr.Api.Services
         /// </summary>
         string ApplyNamingPattern(string pattern, Dictionary<string, object> variables);
     }
+
+    public interface IAudioFileService
+    {
+        /// <summary>
+        /// Ensure an AudiobookFile record exists for the given audiobook and file path. Extract metadata (ffprobe/taglib) and persist file-level metadata.
+        /// Returns true if a new record was created, false if it already existed.
+        /// </summary>
+        Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan");
+    }
 }

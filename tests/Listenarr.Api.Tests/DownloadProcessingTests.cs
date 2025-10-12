@@ -63,6 +63,12 @@ namespace Listenarr.Api.Tests
             services.AddSingleton<IMetadataService>(metadataMock.Object);
             services.AddSingleton(hubContextMock.Object);
             services.AddSingleton(db);
+            // AudioFileService and dependencies (for creating AudiobookFile records)
+            services.AddMemoryCache();
+            services.AddSingleton<MetadataExtractionLimiter>();
+            var loggerAfMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
+            services.AddScoped<IAudioFileService, Listenarr.Api.Services.AudioFileService>();
+            services.AddSingleton(loggerAfMock.Object);
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 

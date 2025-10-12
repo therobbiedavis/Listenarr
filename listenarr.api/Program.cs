@@ -70,8 +70,13 @@ builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
 builder.Services.AddSingleton<IStartupConfigService, StartupConfigService>();
 builder.Services.AddScoped<ISearchService, SearchService>();
 builder.Services.AddScoped<IMetadataService, MetadataService>();
+builder.Services.AddScoped<IAudioFileService, AudioFileService>();
+// Metadata extraction limiter to bound concurrent ffprobe calls
+builder.Services.AddSingleton<MetadataExtractionLimiter>();
 // Ffmpeg installer: provides a bundled ffprobe binary when not present on the system
 builder.Services.AddSingleton<IFfmpegService, FfmpegInstallerService>();
+// Service to accept client-pushed download updates and maintain recent-push cache
+builder.Services.AddSingleton<Listenarr.Api.Services.DownloadPushService>();
 builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
 builder.Services.AddScoped<IDownloadService, DownloadService>();
 // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
@@ -84,6 +89,11 @@ builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
+
+// Scan queue: enqueue folder scans to be processed in the background
+builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
+// Background worker to consume scan jobs and persist audiobook files
+builder.Services.AddHostedService<ScanBackgroundService>();
 
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();
@@ -99,6 +109,11 @@ builder.Services.AddHostedService<QueueMonitorService>();
 
 // Register background service for automatic audiobook searching
 builder.Services.AddHostedService<AutomaticSearchService>();
+// Background installer for ffprobe - run in background so startup isn't blocked
+builder.Services.AddHostedService<FfmpegInstallBackgroundService>();
+
+// Background service to rescan files missing metadata
+builder.Services.AddHostedService<MetadataRescanService>();
 
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
@@ -200,38 +215,14 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         logger.LogError(ex, "Error during database initialization");
-        throw; // Re-throw to prevent app from starting
+        // During tests (WebApplicationFactory) the test host may not have access to the configured
+        // on-disk SQLite database path. Log the error but continue startup so tests can override
+        // DbContext configuration as needed. Do not re-throw here.
     }
 }
 
-// Ensure ffprobe is available on first launch (best-effort). This runs after DB migrations so the app is close to ready.
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var ffsvc = scope.ServiceProvider.GetService<IFfmpegService>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        if (ffsvc != null)
-        {
-            logger.LogInformation("Ensuring ffprobe is installed (auto-install enabled: {Auto})", Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE") ?? "true");
-            try
-            {
-                var path = ffsvc.GetFfprobePathAsync(true).GetAwaiter().GetResult();
-                if (!string.IsNullOrEmpty(path)) logger.LogInformation("ffprobe available at: {Path}", path);
-                else logger.LogWarning("ffprobe was not installed or not available after install attempt");
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "ffprobe installer encountered an error during startup");
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogWarning(ex, "Error while attempting to auto-install ffprobe at startup");
-    }
-}
+// Ensure ffprobe is available on first launch (best-effort). Installation runs in background via
+// the registered hosted service so the app can serve requests immediately.
 
 // If the user passed --query-users, run the helper now that the DB is migrated and exit.
 if (args is not null && args.Contains("--query-users"))

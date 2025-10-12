@@ -10,6 +10,7 @@ const API_BASE_URL = import.meta.env.DEV
 type DownloadUpdateCallback = (downloads: Download[]) => void
 type DownloadListCallback = (downloads: Download[]) => void
 type QueueUpdateCallback = (queue: QueueItem[]) => void
+type ScanJobCallback = (job: { jobId: string; audiobookId: number; status: string; found?: number; created?: number; error?: string }) => void
 
 class SignalRService {
   private connection: WebSocket | null = null
@@ -22,6 +23,8 @@ class SignalRService {
   private downloadListCallbacks: Set<DownloadListCallback> = new Set()
   private queueUpdateCallbacks: Set<QueueUpdateCallback> = new Set()
   private audiobookUpdateCallbacks: Set<(a: Audiobook) => void> = new Set()
+  private scanJobCallbacks: Set<ScanJobCallback> = new Set()
+  private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
   private pingInterval: number | null = null
 
   async connect(): Promise<void> {
@@ -147,6 +150,18 @@ class SignalRService {
           this.audiobookUpdateCallbacks.forEach(cb => cb(ab))
         }
         break
+      case 'ScanJobUpdate':
+        if (args && args[0]) {
+          const job = args[0] as unknown as { jobId: string; audiobookId: number; status: string; found?: number; created?: number; error?: string }
+          this.scanJobCallbacks.forEach(cb => cb(job))
+        }
+        break
+      case 'FilesRemoved':
+        if (args && args[0]) {
+          const payload = args[0] as unknown as { audiobookId: number; removed: Array<{ id: number; path: string }> }
+          this.filesRemovedCallbacks.forEach(cb => cb(payload))
+        }
+        break
     }
   }
 
@@ -236,6 +251,18 @@ class SignalRService {
   onAudiobookUpdate(callback: (a: Audiobook) => void): () => void {
     this.audiobookUpdateCallbacks.add(callback)
     return () => { this.audiobookUpdateCallbacks.delete(callback) }
+  }
+
+  // Subscribe to scan job updates
+  onScanJobUpdate(callback: ScanJobCallback): () => void {
+    this.scanJobCallbacks.add(callback)
+    return () => { this.scanJobCallbacks.delete(callback) }
+  }
+
+  // Subscribe to files removed notifications
+  onFilesRemoved(callback: (payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void): () => void {
+    this.filesRemovedCallbacks.add(callback)
+    return () => { this.filesRemovedCallbacks.delete(callback) }
   }
 
   // Request current downloads from server

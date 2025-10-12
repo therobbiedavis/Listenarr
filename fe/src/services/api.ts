@@ -368,6 +368,13 @@ class ApiService {
     return this.request<Audiobook>(`/library/${id}`)
   }
 
+  async scanAudiobook(id: number, path?: string): Promise<{ message: string; scannedPath?: string; found: number; created: number; audiobook?: Audiobook; jobId?: string }> {
+    return this.request(`/library/${id}/scan`, {
+      method: 'POST',
+      body: JSON.stringify({ path })
+    })
+  }
+
   async updateAudiobook(id: number, audiobook: Partial<Audiobook>): Promise<{ message: string; audiobook: Audiobook }> {
     return this.request<{ message: string; audiobook: Audiobook }>(`/library/${id}`, {
       method: 'PUT',

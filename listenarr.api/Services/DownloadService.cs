@@ -1537,50 +1537,15 @@ namespace Listenarr.Api.Services
                     completedDownload.FinalPath = finalPath;
                     dbContext.Downloads.Update(completedDownload);
 
-                    // If this download is linked to an audiobook, create an AudiobookFile record
+                    // If this download is linked to an audiobook, create an AudiobookFile record (centralized service)
                     if (completedDownload.AudiobookId != null)
                     {
                         try
                         {
                             var audiobookId = completedDownload.AudiobookId.Value;
-                            // Avoid duplicate file records for same path
-                            var existing = await dbContext.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == audiobookId && f.Path == finalPath);
-                            if (existing == null)
-                            {
-                                // Extract rich metadata using MetadataService (ffprobe/TagLib fallback)
-                                AudioMetadata? extracted = null;
-                                try
-                                {
-                                    using var metaScope = _serviceScopeFactory.CreateScope();
-                                    var metadataService = metaScope.ServiceProvider.GetRequiredService<IMetadataService>();
-                                    extracted = await metadataService.ExtractFileMetadataAsync(finalPath);
-                                }
-                                catch (Exception mEx)
-                                {
-                                    _logger.LogWarning(mEx, "Failed to extract file metadata for {Path}", finalPath);
-                                }
-
-                                var fileRecord = new Models.AudiobookFile
-                                {
-                                    AudiobookId = audiobookId,
-                                    Path = finalPath,
-                                    Size = finalFileInfo.Length,
-                                    Source = completedDownload.DownloadClientId ?? "unknown",
-                                    CreatedAt = DateTime.UtcNow,
-                                    DurationSeconds = extracted?.Duration.TotalSeconds,
-                                    Format = extracted?.Format,
-                                    Bitrate = extracted?.Bitrate,
-                                    SampleRate = extracted?.SampleRate,
-                                    Channels = extracted?.Channels
-                                };
-
-                                dbContext.AudiobookFiles.Add(fileRecord);
-                                _logger.LogInformation("Created AudiobookFile for audiobook {AudiobookId}: {Path} ({Size} bytes)", audiobookId, finalPath, finalFileInfo.Length);
-                            }
-                            else
-                            {
-                                _logger.LogInformation("AudiobookFile already exists for audiobook {AudiobookId} at path {Path}", audiobookId, finalPath);
-                            }
+                            using var afScope = _serviceScopeFactory.CreateScope();
+                            var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
+                            await audioFileService.EnsureAudiobookFileAsync(audiobookId, finalPath, completedDownload.DownloadClientId ?? "download");
                         }
                         catch (Exception abEx)
                         {
@@ -1619,7 +1584,36 @@ namespace Listenarr.Api.Services
 
                             if (updatedAudiobook != null)
                             {
-                                await _hubContext.Clients.All.SendAsync("AudiobookUpdate", updatedAudiobook);
+                                var audiobookDto = new
+                                {
+                                    id = updatedAudiobook.Id,
+                                    title = updatedAudiobook.Title,
+                                    authors = updatedAudiobook.Authors,
+                                    description = updatedAudiobook.Description,
+                                    imageUrl = updatedAudiobook.ImageUrl,
+                                    filePath = updatedAudiobook.FilePath,
+                                    fileSize = updatedAudiobook.FileSize,
+                                    runtime = updatedAudiobook.Runtime,
+                                    monitored = updatedAudiobook.Monitored,
+                                    quality = updatedAudiobook.Quality,
+                                    series = updatedAudiobook.Series,
+                                    seriesNumber = updatedAudiobook.SeriesNumber,
+                                    tags = updatedAudiobook.Tags,
+                                    files = updatedAudiobook.Files?.Select(f => new {
+                                        id = f.Id,
+                                        path = f.Path,
+                                        size = f.Size,
+                                        durationSeconds = f.DurationSeconds,
+                                        format = f.Format,
+                                        bitrate = f.Bitrate,
+                                        sampleRate = f.SampleRate,
+                                        channels = f.Channels,
+                                        source = f.Source,
+                                        createdAt = f.CreatedAt
+                                    }).ToList()
+                                };
+
+                                await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);
                                 _logger.LogInformation("Broadcasted AudiobookUpdate for AudiobookId {AudiobookId} via SignalR", abId);
                             }
                         }

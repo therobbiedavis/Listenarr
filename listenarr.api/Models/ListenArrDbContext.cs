@@ -149,6 +149,11 @@ namespace Listenarr.Api.Models
                     v => string.Join("|", v ?? new List<string>()),
                     v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+
+            // Ensure AudiobookFile uniqueness per audiobook path
+            modelBuilder.Entity<AudiobookFile>()
+                .HasIndex(f => new { f.AudiobookId, f.Path })
+                .IsUnique();
         }
     }
 }

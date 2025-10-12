@@ -18,6 +18,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
@@ -38,19 +39,27 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<LibraryController> _logger;
         private readonly ListenArrDbContext _dbContext;
         private readonly IServiceProvider _serviceProvider;
+            private readonly IScanQueueService? _scanQueueService;
         
         public LibraryController(
             IAudiobookRepository repo, 
             IImageCacheService imageCacheService, 
             ILogger<LibraryController> logger,
             ListenArrDbContext dbContext,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            IScanQueueService? scanQueueService = null)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
             _logger = logger;
             _dbContext = dbContext;
             _serviceProvider = serviceProvider;
+            _scanQueueService = scanQueueService;
+        }
+
+        public class ScanRequest
+        {
+            public string? Path { get; set; }
         }
 
         [HttpPost("add")]
@@ -212,6 +221,14 @@ namespace Listenarr.Api.Controllers
                 .Include(a => a.Files)
                 .FirstOrDefaultAsync(a => a.Id == id);
             return Ok(audiobook);
+        }
+
+        // DEBUG: Return raw AudiobookFile rows for an audiobook. Not intended for production use.
+        [HttpGet("{id}/files-debug")]
+        public async Task<IActionResult> GetAudiobookFilesDebug(int id)
+        {
+            var files = await _dbContext.AudiobookFiles.Where(f => f.AudiobookId == id).ToListAsync();
+            return Ok(files);
         }
 
         [HttpPut("{id}")]
@@ -461,6 +478,274 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error during manual search for audiobook '{Title}' (ID: {Id})", audiobook.Title, id);
                 return StatusCode(500, new { message = "Error during search", error = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Scan the filesystem for files belonging to this audiobook, extract metadata (ffprobe) and persist AudiobookFile records.
+        /// Optional body: { path: "C:\\some\\folder" } to scan a specific folder instead of the configured output path.
+        /// </summary>
+        [HttpPost("{id}/scan")]
+        public async Task<IActionResult> ScanAudiobookFiles(int id, [FromBody] ScanRequest? request)
+        {
+            var audiobook = await _repo.GetByIdAsync(id);
+            if (audiobook == null) return NotFound(new { message = "Audiobook not found" });
+
+            // If a background scan queue is available, enqueue the job and return Accepted
+            if (_scanQueueService != null)
+            {
+                try
+                {
+                    var jobId = await _scanQueueService.EnqueueScanAsync(id, request?.Path);
+                    _logger.LogInformation("Enqueued scan job {JobId} for audiobook {AudiobookId}", jobId, id);
+
+                    // Broadcast initial job status via SignalR so clients can show queued state
+                    try
+                    {
+                        using var scope = _serviceProvider.CreateScope();
+                        var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                        var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
+                        await hub.Clients.All.SendAsync("ScanJobUpdate", job);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for job {JobId}", jobId);
+                    }
+
+                    return Accepted(new { message = "Scan enqueued", jobId });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to enqueue scan job for audiobook {AudiobookId}", id);
+                    return StatusCode(500, new { message = "Failed to enqueue scan job", error = ex.Message });
+                }
+            }
+
+            // Determine scan root: request.Path or application settings output path
+            string? scanRoot = null;
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = await configService.GetApplicationSettingsAsync();
+                scanRoot = request?.Path ?? settings.OutputPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to read application settings for scan; falling back to request path");
+                scanRoot = request?.Path;
+            }
+
+            if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
+            {
+                return BadRequest(new { message = "Scan path not provided or does not exist", path = scanRoot });
+            }
+
+            _logger.LogInformation("Scanning for audiobook files for '{Title}' under: {Path}", audiobook.Title, scanRoot);
+
+            // Build a simple matching predicate based on title and first author
+            var titleToken = (audiobook.Title ?? string.Empty).Replace("\"", string.Empty).Trim();
+            var authorToken = audiobook.Authors?.FirstOrDefault() ?? string.Empty;
+
+            var foundFiles = new List<string>();
+            try
+            {
+                // Search recursively but limit to common audio file extensions
+                var exts = new[] { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
+
+                // Iterative safe directory traversal to avoid unhandled IO/Access exceptions and handle special characters
+                var dirs = new Stack<string>();
+                dirs.Push(scanRoot);
+
+                while (dirs.Count > 0)
+                {
+                    var dir = dirs.Pop();
+                    try
+                    {
+                        var normalizedDir = Path.GetFullPath(dir);
+
+                        foreach (var file in Directory.EnumerateFiles(normalizedDir))
+                        {
+                            try
+                            {
+                                var ext = Path.GetExtension(file);
+                                if (!exts.Contains(ext, StringComparer.OrdinalIgnoreCase)) continue;
+                                var fname = Path.GetFileNameWithoutExtension(file);
+                                if (!string.IsNullOrEmpty(titleToken) && fname.IndexOf(titleToken, StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    foundFiles.Add(file);
+                                    continue;
+                                }
+                                if (!string.IsNullOrEmpty(authorToken) && file.IndexOf(authorToken, StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    foundFiles.Add(file);
+                                    continue;
+                                }
+                            }
+                            catch (Exception innerFileEx)
+                            {
+                                _logger.LogDebug(innerFileEx, "Skipped file while scanning {Dir}", normalizedDir);
+                                continue;
+                            }
+                        }
+
+                        foreach (var sub in Directory.EnumerateDirectories(normalizedDir))
+                        {
+                            dirs.Push(sub);
+                        }
+                    }
+                    catch (System.IO.IOException ioEx)
+                    {
+                        _logger.LogWarning(ioEx, "IO error while enumerating directory during scan: {Dir}", dir);
+                        continue;
+                    }
+                    catch (UnauthorizedAccessException uaEx)
+                    {
+                        _logger.LogWarning(uaEx, "Access denied while enumerating directory during scan: {Dir}", dir);
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Unexpected error while enumerating directory during scan: {Dir}", dir);
+                        continue;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while scanning filesystem for audiobook files");
+                return StatusCode(500, new { message = "Error scanning filesystem", error = ex.Message });
+            }
+
+            if (!foundFiles.Any())
+            {
+                return Ok(new { message = "No files found during scan", scannedPath = scanRoot, found = 0 });
+            }
+
+            var created = new List<AudiobookFile>();
+
+            // Extract metadata and persist
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+
+                foreach (var filePath in foundFiles)
+                {
+                    try
+                    {
+                        var existing = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == audiobook.Id && f.Path == filePath);
+                        if (existing != null)
+                        {
+                            _logger.LogInformation("Skipping existing AudiobookFile for audiobook {AudiobookId}: {Path}", audiobook.Id, filePath);
+                            continue;
+                        }
+
+                        AudioMetadata? meta = null;
+                        try
+                        {
+                            meta = await metadataService.ExtractFileMetadataAsync(filePath);
+                        }
+                        catch (Exception mex)
+                        {
+                            _logger.LogWarning(mex, "Failed to extract metadata for file {File}", filePath);
+                        }
+
+                        var fi = new FileInfo(filePath);
+                        var fileRecord = new AudiobookFile
+                        {
+                            AudiobookId = audiobook.Id,
+                            Path = filePath,
+                            Size = fi.Length,
+                            Source = "scan",
+                            CreatedAt = DateTime.UtcNow,
+                            DurationSeconds = meta?.Duration.TotalSeconds,
+                            Format = meta?.Format,
+                            Bitrate = meta?.Bitrate,
+                            SampleRate = meta?.SampleRate,
+                            Channels = meta?.Channels
+                        };
+
+                        db.AudiobookFiles.Add(fileRecord);
+                        created.Add(fileRecord);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to create AudiobookFile for {File}", filePath);
+                    }
+                }
+
+                await db.SaveChangesAsync();
+
+                // Add history entries for newly scanned files
+                foreach (var fileRecord in created)
+                {
+                    var historyEntry = new History
+                    {
+                        AudiobookId = audiobook.Id,
+                        AudiobookTitle = audiobook.Title ?? "Unknown",
+                        EventType = "File Added",
+                        Message = $"File scanned and added: {Path.GetFileName(fileRecord.Path)}",
+                        Source = "Scan",
+                        Data = JsonSerializer.Serialize(new
+                        {
+                            FilePath = fileRecord.Path,
+                            FileSize = fileRecord.Size,
+                            Format = fileRecord.Format,
+                            Source = fileRecord.Source
+                        }),
+                        Timestamp = DateTime.UtcNow
+                    };
+                    db.History.Add(historyEntry);
+                }
+                await db.SaveChangesAsync();
+
+                // Reload audiobook with files to return
+                var updated = await db.Audiobooks.Include(a => a.Files).FirstOrDefaultAsync(a => a.Id == audiobook.Id);
+                return Ok(new { message = "Scan complete", scannedPath = scanRoot, found = foundFiles.Count, created = created.Count, audiobook = updated });
+            }
+        }
+
+        /// <summary>
+        /// Get in-memory scan job status by jobId (debugging/admin helper).
+        /// </summary>
+        [HttpGet("scan/{jobId}")]
+        public IActionResult GetScanJobStatus(string jobId)
+        {
+            if (_scanQueueService == null) return NotFound(new { message = "Scan queue not available" });
+            if (!Guid.TryParse(jobId, out var gid)) return BadRequest(new { message = "Invalid jobId" });
+            if (_scanQueueService.TryGetJob(gid, out var job))
+            {
+                _logger.LogInformation("Queried scan job {JobId} status: {Status}", gid, job!.Status);
+                return Ok(job);
+            }
+            return NotFound(new { message = "Job not found" });
+        }
+
+        [HttpPost("scan/requeue/{jobId}")]
+        public async Task<IActionResult> RequeueScanJob(string jobId)
+        {
+            if (_scanQueueService == null) return NotFound(new { message = "Scan queue not available" });
+            if (!Guid.TryParse(jobId, out var gid)) return BadRequest(new { message = "Invalid jobId" });
+
+            var newJobId = await _scanQueueService.RequeueScanAsync(gid);
+            if (newJobId == null)
+            {
+                return BadRequest(new { message = "Unable to requeue job (not found or invalid status)" });
+            }
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
+                await hub.Clients.All.SendAsync("ScanJobUpdate", job);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast ScanJobUpdate for requeued job {JobId}", newJobId);
+            }
+
+            return Accepted(new { message = "Requeued scan job", jobId = newJobId });
         }
 
         private async Task<int> ProcessAudiobookForSearchAsync(

@@ -237,35 +237,100 @@ const lastClickedIndex = ref<number | null>(null)
 // - 'quality-match': Has file and meets quality cutoff (green border)
 // TODO: Add 'downloading' status when download-audiobook linking is implemented
 function getAudiobookStatus(audiobook: Audiobook): 'no-file' | 'quality-mismatch' | 'quality-match' {
-  // Check if audiobook has a file
-  const hasFile = audiobook.filePath && audiobook.fileSize && audiobook.fileSize > 0
-  if (!hasFile) {
+  // If there are no files at all, treat as no-file
+  if (!audiobook.files || audiobook.files.length === 0) {
     return 'no-file'
   }
-  
-  // Check quality against profile cutoff
+
   const profile = qualityProfiles.value.find(p => p.id === audiobook.qualityProfileId)
-  if (!profile || !profile.cutoffQuality) {
-    // No quality profile or no cutoff defined - assume it matches
+
+  // If no profile or no preferredFormats defined, fall back to the simple existing behavior
+  if (!profile) {
+    const hasFile = audiobook.filePath && audiobook.fileSize && audiobook.fileSize > 0
+    return hasFile ? 'quality-match' : 'no-file'
+  }
+
+  // Helper: normalize strings
+  const normalize = (s?: string) => (s || '').toString().toLowerCase()
+
+  // Find any file that matches one of the profile's preferred formats
+  const preferredFormats = (profile.preferredFormats || []).map(f => normalize(f))
+
+  // If no preferred formats configured, treat any file as a candidate
+  const candidateFiles = audiobook.files.filter(f => {
+    if (!f) return false
+    const fileFormat = normalize(f.format) || normalize(f.container) || ''
+    if (preferredFormats.length === 0) return true
+    return preferredFormats.includes(fileFormat) || preferredFormats.some(pf => fileFormat.includes(pf))
+  })
+
+  if (candidateFiles.length === 0) {
+    // No files in preferred formats - treat as no-file (or could be considered mismatch)
+    return 'no-file'
+  }
+
+  // If no cutoff defined, assume match
+  if (!profile.cutoffQuality || !profile.qualities || profile.qualities.length === 0) {
     return 'quality-match'
   }
-  
-  // Simple quality comparison (this could be enhanced with a more sophisticated comparison)
-  const currentQuality = audiobook.quality?.toLowerCase() || ''
-  const cutoffQuality = profile.cutoffQuality.toLowerCase()
-  
-  // For now, assume higher quality numbers are better
-  // This is a simplified comparison - you might want to implement a more robust quality comparison
-  if (currentQuality.includes('320') && cutoffQuality.includes('192')) {
-    return 'quality-match'
-  } else if (currentQuality.includes('192') && cutoffQuality.includes('320')) {
-    return 'quality-mismatch'
-  } else if (currentQuality === cutoffQuality) {
-    return 'quality-match'
+
+  // Build a map of quality -> priority for quick lookup
+  const qualityPriority = new Map<string, number>()
+  for (const q of profile.qualities) {
+    if (!q || !q.quality) continue
+    qualityPriority.set(normalize(q.quality), q.priority)
   }
-  
-  // Default to match if we can't determine
-  return 'quality-match'
+
+  const cutoff = normalize(profile.cutoffQuality)
+  const cutoffPriority = qualityPriority.has(cutoff) ? qualityPriority.get(cutoff)! : Number.POSITIVE_INFINITY
+
+  // Helper to derive a quality string for a given file/audiobook
+  type FileInfo = {
+    bitrate?: number | string
+    container?: string
+    codec?: string
+    format?: string
+  }
+
+  function deriveQualityLabel(file: FileInfo | undefined): string {
+    // Prefer the denormalized audiobook.quality if present
+    if (audiobook.quality) return normalize(audiobook.quality)
+
+    if (file && file.bitrate) {
+      const br = Number(file.bitrate)
+      if (!isNaN(br)) {
+        if (br >= 320) return '320kbps'
+        if (br >= 256) return '256kbps'
+        if (br >= 192) return '192kbps'
+        return `${Math.round(br)}kbps`
+      }
+    }
+
+    // If container or codec suggests lossless
+    const container = normalize(file?.container)
+    const codec = normalize(file?.codec)
+    if (container.includes('flac') || codec.includes('flac') || codec.includes('alac') || codec.includes('wav')) {
+      return 'lossless'
+    }
+
+    // Fallback: use format string
+    if (file && file.format) return normalize(file.format)
+
+    return ''
+  }
+
+  // If any candidate file meets or exceeds the cutoff (lower priority number == better), return match
+  for (const f of candidateFiles) {
+    const label = deriveQualityLabel(f)
+    if (!label) continue
+    const p = qualityPriority.has(label) ? qualityPriority.get(label)! : Number.POSITIVE_INFINITY
+    if (p <= cutoffPriority) {
+      return 'quality-match'
+    }
+  }
+
+  // Otherwise at least one preferred-format file exists but doesn't meet cutoff
+  return 'quality-mismatch'
 }
 
 onMounted(async () => {
@@ -620,6 +685,7 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
   gap: 0.25rem;
   margin-top: 0.5rem;
   padding: 0.25rem 0.5rem;
+  margin-right: 0.5rem;
   background-color: rgba(52, 152, 219, 0.2);
   border: 1px solid rgba(52, 152, 219, 0.4);
   border-radius: 8px;
@@ -643,6 +709,7 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
   gap: 0.25rem;
   margin-top: 0.5rem;
   padding: 0.25rem 0.5rem;
+  margin-left: 0.25rem;
   background-color: rgba(46, 204, 113, 0.2);
   border: 1px solid rgba(46, 204, 113, 0.4);
   border-radius: 8px;

@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Listenarr.Api.Models
 {
@@ -9,6 +10,7 @@ namespace Listenarr.Api.Models
         public int Id { get; set; }
 
         public int AudiobookId { get; set; }
+        [JsonIgnore]
         public Audiobook? Audiobook { get; set; }
 
         // Full path to the file on disk
@@ -22,6 +24,10 @@ namespace Listenarr.Api.Models
 
         // Format name (e.g., m4b, mp3, flac)
         public string? Format { get; set; }
+    // Extracted container (e.g., M4B, MP4)
+    public string? Container { get; set; }
+    // Audio codec (e.g., aac, mp3, opus)
+    public string? Codec { get; set; }
 
         // Bitrate in bits per second
         public int? Bitrate { get; set; }

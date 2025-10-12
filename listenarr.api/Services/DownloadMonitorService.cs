@@ -207,6 +207,19 @@ namespace Listenarr.Api.Services
         {
             var changedDownloads = new List<Download>();
 
+            // Try to get DownloadPushService from DI so we can avoid re-broadcasting
+            // downloads that were recently pushed by clients.
+            Listenarr.Api.Services.DownloadPushService? pushService = null;
+            try
+            {
+                using var scope = _serviceScopeFactory.CreateScope();
+                pushService = scope.ServiceProvider.GetService<Listenarr.Api.Services.DownloadPushService>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Unable to resolve DownloadPushService (non-fatal)");
+            }
+
             foreach (var download in currentDownloads)
             {
                 // Check if this download has changed
@@ -214,7 +227,16 @@ namespace Listenarr.Api.Services
                 {
                     if (HasDownloadChanged(lastState, download))
                     {
-                        changedDownloads.Add(download);
+                        // If this download was recently pushed by a client, skip re-broadcasting
+                        if (pushService != null && pushService.WasRecentlyPushed(download.Id))
+                        {
+                            _logger.LogDebug("Skipping broadcast for download {DownloadId} because it was recently pushed", download.Id);
+                        }
+                        else
+                        {
+                            changedDownloads.Add(download);
+                        }
+
                         _lastDownloadStates[download.Id] = CloneDownload(download);
                     }
                 }
@@ -238,10 +260,10 @@ namespace Listenarr.Api.Services
             if (changedDownloads.Any())
             {
                 _logger.LogDebug("Broadcasting {Count} download updates", changedDownloads.Count);
-                
+
                 await _hubContext.Clients.All.SendAsync(
-                    "DownloadUpdate", 
-                    changedDownloads, 
+                    "DownloadUpdate",
+                    changedDownloads,
                     cancellationToken);
             }
 

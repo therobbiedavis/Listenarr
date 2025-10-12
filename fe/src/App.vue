@@ -50,10 +50,37 @@
             </div>
           </div>
         </div>
-        <button class="nav-btn" @click="toggleNotifications">
-          <i class="ph ph-bell"></i>
-          <span class="badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
-        </button>
+        <div class="notification-wrapper" ref="notificationRef">
+          <button class="nav-btn" @click="toggleNotifications" aria-haspopup="true" :aria-expanded="notificationsOpen">
+            <i class="ph ph-bell"></i>
+            <span class="notification-badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
+          </button>
+          <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
+            <div class="dropdown-header">
+              <strong>Recent Activity</strong>
+              <button class="clear-btn" @click.stop="clearNotifications" title="Clear">Clear</button>
+            </div>
+            <ul class="notification-list">
+              <li v-for="item in recentNotifications.filter(n => !n.dismissed)" :key="item.id" class="notification-item">
+                <div class="notif-icon"><i :class="item.icon"></i></div>
+                <div class="notif-content">
+                  <div class="notif-title">{{ item.title }}</div>
+                  <div class="notif-message">{{ item.message }}</div>
+                  <div class="notif-time">{{ formatTime(item.timestamp) }}</div>
+                </div>
+                <div class="notif-actions">
+                  <button class="dismiss-btn" @click.stop="dismissNotification(item.id)" title="Dismiss">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+              </li>
+              <li v-if="recentNotifications.filter(n => !n.dismissed).length === 0" class="notification-empty">No recent activity</li>
+            </ul>
+            <div class="dropdown-footer">
+              <RouterLink to="/activity" class="view-all-link" @click="notificationsOpen = false">View all activity</RouterLink>
+            </div>
+          </div>
+        </div>
         <template v-if="auth.user.authenticated">
           <div class="nav-user" ref="navUserRef">
             <button
@@ -90,10 +117,10 @@
               <i class="ph ph-plus"></i>
               <span>Add New</span>
             </RouterLink>
-            <RouterLink to="/library-import" class="nav-item">
+            <!-- <RouterLink to="/library-import" class="nav-item">
               <i class="ph ph-folder-open"></i>
               <span>Library Import</span>
-            </RouterLink>
+            </RouterLink> -->
           </div>
           
           <div class="nav-section">
@@ -162,8 +189,9 @@ import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
+import { ref as vueRef2, reactive } from 'vue'
 
-const { notification, close: closeNotification } = useNotification()
+const { notification, close: closeNotification, info } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
@@ -185,7 +213,7 @@ const handleDocumentClick = (e: MouseEvent) => {
 }
 
 // Reactive state for badges and counters
-const notificationCount = ref(0)
+const notificationCount = computed(() => recentNotifications.filter(n => !n.dismissed).length)
 const queueItems = ref<QueueItem[]>([])
 const wantedCount = ref(0)
 const systemIssues = ref(0)
@@ -219,8 +247,65 @@ const activityCount = computed(() => {
   return count
 })
 
+// Notification dropdown state
+const notificationsOpen = vueRef2(false)
+const notificationRef = vueRef<HTMLElement | null>(null)
+const handleNotificationDocumentClick = (e: MouseEvent) => {
+  const el = notificationRef.value
+  if (!el) return
+  const target = e.target as Node
+  if (!el.contains(target)) {
+    notificationsOpen.value = false
+  }
+}
+
+type HistoryNotification = {
+  id: string
+  title: string
+  message: string
+  icon?: string
+  timestamp: string
+  dismissed?: boolean
+}
+
+const recentNotifications = reactive<HistoryNotification[]>([])
+
+function pushNotification(n: HistoryNotification) {
+  // Ensure new notifications are not dismissed
+  const notification = { ...n, dismissed: false }
+  // Keep a max of 10 items
+  recentNotifications.unshift(notification)
+  if (recentNotifications.length > 10) recentNotifications.pop()
+}
+
+function clearNotifications() {
+  recentNotifications.length = 0
+}
+
+function dismissNotification(id: string) {
+  const notification = recentNotifications.find(n => n.id === id)
+  if (notification) {
+    notification.dismissed = true
+  }
+}
+
+function toggleNotifications() {
+  notificationsOpen.value = !notificationsOpen.value
+}
+
+// Format timestamp for display - reuse the same formatTime helper used elsewhere
+function formatTime(ts: string) {
+  try {
+    const d = new Date(ts)
+    return d.toLocaleString()
+  } catch {
+    return ts
+  }
+}
+
 let wantedBadgeRefreshInterval: number | undefined
 let unsubscribeQueue: (() => void) | null = null
+let unsubscribeFilesRemoved: (() => void) | null = null
 
 // Fetch wanted badge count (library changes less frequently - minimal polling)
 const refreshWantedBadge = async () => {
@@ -327,9 +412,7 @@ const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
 
-const toggleNotifications = () => {
-  console.log('Toggle notifications')
-}
+// (notificationRef and click-outside handler are declared earlier)
 
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
@@ -339,7 +422,7 @@ onMounted(async () => {
   await auth.loadCurrentUser()
 
   // If authenticated, load protected resources and enable real-time updates
-  if (auth.user.authenticated) {
+    if (auth.user.authenticated) {
     // Load initial downloads
     await downloadsStore.loadDownloads()
 
@@ -347,6 +430,57 @@ onMounted(async () => {
     unsubscribeQueue = signalRService.onQueueUpdate((queue) => {
       console.log('[App] Received queue update via SignalR:', queue.length, 'items')
       queueItems.value = queue
+    })
+
+    // Subscribe to files-removed notifications so we can inform the user
+    unsubscribeFilesRemoved = signalRService.onFilesRemoved((payload) => {
+      try {
+        const removed = Array.isArray(payload?.removed) ? payload.removed.map(r => r.path) : []
+        const display = removed.length > 0 ? removed.join(', ') : 'Files were removed from a library item.'
+        info(display, 'Files removed', 6000)
+        // Refresh wanted badge in case monitored items lost files
+        refreshWantedBadge()
+        // Push into recent notifications
+        pushNotification({
+          id: `files-removed-${Date.now()}`,
+          title: 'Files removed',
+          message: display,
+          icon: 'ph ph-file-remove',
+          timestamp: new Date().toISOString()
+        })
+      } catch (err) {
+        console.error('Error handling FilesRemoved payload', err)
+      }
+    })
+
+    // Subscribe to audiobook updates and convert into notifications
+    signalRService.onAudiobookUpdate((ab) => {
+      try {
+        if (!ab) return
+        pushNotification({
+          id: `ab-${ab.id}-${Date.now()}`,
+          title: ab.title || 'Audiobook updated',
+          message: `Library item updated: ${ab.title}`,
+          icon: 'ph ph-book',
+          timestamp: new Date().toISOString()
+        })
+      } catch (err) { console.error('AudiobookUpdate notif error', err) }
+    })
+
+    // Subscribe to download updates for notification purposes
+    signalRService.onDownloadUpdate((downloads) => {
+      try {
+        if (!downloads || downloads.length === 0) return
+        for (const d of downloads) {
+          pushNotification({
+            id: `dl-${d.id}-${Date.now()}`,
+            title: d.title || 'Download update',
+            message: `${d.status} — ${Math.round((d.progress || 0))}%`,
+            icon: 'ph ph-download',
+            timestamp: new Date().toISOString()
+          })
+        }
+      } catch (err) { console.error('DownloadUpdate notif error', err) }
     })
 
     // Fetch initial queue state
@@ -381,6 +515,8 @@ onMounted(async () => {
   document.addEventListener('click', handleDocumentClick)
   // Click-outside handler for the header search
   document.addEventListener('click', handleSearchDocumentClick)
+  // Click-outside handler for notifications
+  document.addEventListener('click', handleNotificationDocumentClick)
 })
 
 onUnmounted(() => {
@@ -388,11 +524,15 @@ onUnmounted(() => {
   if (unsubscribeQueue) {
     unsubscribeQueue()
   }
+    if (unsubscribeFilesRemoved) {
+      unsubscribeFilesRemoved()
+    }
   if (wantedBadgeRefreshInterval) {
     clearInterval(wantedBadgeRefreshInterval)
   }
   document.removeEventListener('click', handleDocumentClick)
   document.removeEventListener('click', handleSearchDocumentClick)
+  document.removeEventListener('click', handleNotificationDocumentClick)
 })
 
 const logout = async () => {
@@ -625,6 +765,24 @@ const hideLayout = computed(() => {
   font-size: 0.75rem;
   font-weight: bold;
   margin-left: auto;
+}
+
+.notification-badge {
+  background-color: #f39c12;
+  color: white;
+  border-radius: 8px;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.65rem;
+  font-weight: bold;
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
 }
 
 .badge.error {
@@ -909,4 +1067,180 @@ const hideLayout = computed(() => {
 /* Slide-left transition (popout from search button) */
 /* no transition needed for inline search */
 
+/* Notification dropdown styles */
+.notification-wrapper {
+  position: relative;
+}
+
+.notification-dropdown {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  min-width: 320px;
+  max-width: 400px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  z-index: 1300;
+  max-height: 400px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3a3a3a;
+  background: #2a2a2a;
+}
+
+.dropdown-header strong {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.clear-btn {
+  background: none;
+  border: none;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.clear-btn:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+.notification-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #333;
+  transition: background-color 0.2s;
+}
+
+.notification-item:hover {
+  background-color: #2a2a2a;
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notif-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2196F3;
+  font-size: 16px;
+}
+
+.notif-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-message {
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.notif-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dismiss-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 2px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.dismiss-btn:hover {
+  background-color: #3a3a3a;
+  color: #ccc;
+}
+
+.notif-time {
+  font-size: 10px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+.notification-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.dropdown-footer {
+  border-top: 1px solid #3a3a3a;
+  background: #2a2a2a;
+  padding: 8px 16px;
+}
+
+.view-all-link {
+  display: inline-block;
+  color: #2196F3;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.view-all-link:hover {
+  color: #42a5f5;
+  text-decoration: underline;
+}
 </style>

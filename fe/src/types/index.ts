@@ -219,6 +219,8 @@ export interface Audiobook {
     size?: number
     durationSeconds?: number
     format?: string
+    container?: string
+    codec?: string
     bitrate?: number
     sampleRate?: number
     channels?: number

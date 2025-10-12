@@ -27,7 +27,6 @@ namespace Listenarr.Api.Hubs
     public class DownloadHub : Hub
     {
         private readonly ILogger<DownloadHub> _logger;
-
         public DownloadHub(ILogger<DownloadHub> logger)
         {
             _logger = logger;
@@ -53,6 +52,35 @@ namespace Listenarr.Api.Hubs
             _logger.LogDebug("Client {ConnectionId} requested downloads update", Context.ConnectionId);
             // The background service will handle sending updates
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Client pushes a download update to the server. The server will broadcast
+        /// to other clients and cache the push so the poller avoids re-broadcasting.
+        /// </summary>
+        public async Task PushDownloadUpdate(Download download)
+        {
+            _logger.LogDebug("Received PushDownloadUpdate from {ConnectionId} for download {DownloadId}", Context.ConnectionId, download?.Id);
+
+            try
+            {
+                // Resolve service from Context.GetHttpContext().RequestServices to avoid changing constructor signature
+                var pushService = Context.GetHttpContext()?.RequestServices?.GetService(typeof(Listenarr.Api.Services.DownloadPushService)) as Listenarr.Api.Services.DownloadPushService;
+                if (pushService == null)
+                {
+                    _logger.LogWarning("DownloadPushService not available to handle push");
+                    return;
+                }
+
+                if (download != null)
+                {
+                    await pushService.HandlePushAsync(download);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing PushDownloadUpdate");
+            }
         }
     }
 }

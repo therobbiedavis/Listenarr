@@ -10,6 +10,7 @@ using SharpCompress.Readers;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.Threading;
 
 namespace Listenarr.Api.Services
 {
@@ -18,7 +19,6 @@ namespace Listenarr.Api.Services
         private readonly ILogger<FfmpegInstallerService> _logger;
     private readonly HttpClient _httpClient;
     private readonly IStartupConfigService _startupConfigService;
-
         // Allow disabling auto-download via environment variable
         private readonly bool _autoInstall;
 
@@ -30,7 +30,51 @@ namespace Listenarr.Api.Services
             _startupConfigService = startupConfigService;
         }
 
-        public async Task<string?> GetFfprobePathAsync(bool ensureInstalled = true)
+        private static void TryDeleteFile(string path, int retries = 3, int delayMs = 100)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            for (int i = 0; i < retries; i++)
+            {
+                try
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                    return;
+                }
+                catch
+                {
+                    if (i == retries - 1) return;
+                    try { Thread.Sleep(delayMs); } catch { }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Return the ffprobe path if it exists in the configured bundled directory. This method
+        /// does NOT attempt to download or install ffprobe.
+        /// </summary>
+        public Task<string?> GetFfprobePathAsync(bool ensureInstalled = false)
+        {
+            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config", "ffmpeg");
+            Directory.CreateDirectory(baseDir);
+
+            var ffprobeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffprobe.exe" : "ffprobe";
+            var ffprobePath = Path.Combine(baseDir, ffprobeName);
+
+            if (File.Exists(ffprobePath))
+            {
+                _logger.LogInformation("Found bundled ffprobe at {Path}", ffprobePath);
+                return Task.FromResult<string?>(ffprobePath);
+            }
+
+            _logger.LogInformation("No bundled ffprobe found at {Path}", ffprobePath);
+            return Task.FromResult<string?>(null);
+        }
+
+        /// <summary>
+        /// Ensure ffprobe is installed into the bundled directory. This performs the download
+        /// and extraction flow when no bundled binary exists. Intended to be called once at startup.
+        /// </summary>
+        public async Task<string?> EnsureFfprobeInstalledAsync()
         {
             var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config", "ffmpeg");
             Directory.CreateDirectory(baseDir);
@@ -44,16 +88,16 @@ namespace Listenarr.Api.Services
                 return ffprobePath;
             }
 
-            if (!ensureInstalled || !_autoInstall)
+            if (!_autoInstall)
             {
-                _logger.LogInformation("Auto-install of ffprobe is disabled or not requested");
+                _logger.LogInformation("Auto-install of ffprobe is disabled via LISTENARR_AUTO_INSTALL_FFPROBE");
                 return null;
             }
 
             try
             {
-                // Select platform-specific URL (prebuilt minimal ffprobe). These URLs may be updated over time.
-                // Allow startup config to override provider/release
+                // The original installation logic has been preserved here. It will only run when
+                // EnsureFfprobeInstalledAsync is called (e.g., at program startup).
                 string? downloadUrl = GetDownloadUrlForPlatform();
                 string? discoveredChecksum = null;
                 try
@@ -61,12 +105,10 @@ namespace Listenarr.Api.Services
                     var cfg = _startupConfigService.GetConfig();
                     if (cfg?.Ffmpeg?.Provider != null && cfg.Ffmpeg.Provider.StartsWith("github:", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Format: github:owner/repo
                         var parts = cfg.Ffmpeg.Provider.Split(':', 2);
                         if (parts.Length == 2)
                         {
                             var repo = parts[1];
-                            // Try to discover an asset matching platform/arch and optional release override
                             var assetInfo = await TryDiscoverGithubAssetAsync(repo, cfg.Ffmpeg.ReleaseOverride, cfg.Ffmpeg.Arch);
                             if (!string.IsNullOrEmpty(assetInfo.assetUrl))
                             {
@@ -83,6 +125,7 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogWarning(ex, "Error while reading startup ffmpeg provider config");
                 }
+
                 if (string.IsNullOrEmpty(downloadUrl))
                 {
                     _logger.LogWarning("No ffprobe download URL configured for this platform");
@@ -113,16 +156,13 @@ namespace Listenarr.Api.Services
                 }
                 catch { /* non-fatal */ }
 
-                // If a known checksum is available for this platform (either pinned or discovered), verify it
                 var expected = GetChecksumForPlatform();
-                // Prefer discovered checksum content from GitHub release discovery
                 if (string.IsNullOrEmpty(expected) && !string.IsNullOrEmpty(discoveredChecksum))
                 {
                     var parsed = ParseChecksumFileForAsset(discoveredChecksum, Path.GetFileName(downloadUrl));
                     if (!string.IsNullOrEmpty(parsed)) expected = parsed;
                 }
 
-                // Try to discover checksum files downloaded alongside the archive as a fallback
                 if (string.IsNullOrEmpty(expected))
                 {
                     try
@@ -146,11 +186,10 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrEmpty(expected) && !string.IsNullOrEmpty(computedHash) && !string.Equals(expected, computedHash, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning("Downloaded ffprobe checksum mismatch (expected {Expected} != actual {Actual}). Aborting install.", expected, computedHash);
-                    try { File.Delete(tmpFile); } catch { }
+                    TryDeleteFile(tmpFile);
                     return null;
                 }
 
-                // If it's an archive, attempt to extract using SharpCompress; otherwise move as executable
                 if (downloadUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".ffmpeg.zip", StringComparison.OrdinalIgnoreCase))
                 {
                     using var archive = SharpCompress.Archives.Zip.ZipArchive.Open(tmpFile);
@@ -160,12 +199,12 @@ namespace Listenarr.Api.Services
                         var outPath = Path.Combine(baseDir, key);
                         Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? baseDir);
                         entry.WriteToFile(outPath, new ExtractionOptions() { ExtractFullPath = true, Overwrite = true });
+                        _logger.LogDebug("Extracted archive entry to {OutPath}", outPath);
                     }
-                    File.Delete(tmpFile);
+                    TryDeleteFile(tmpFile);
                 }
                 else if (downloadUrl.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Use SharpCompress to extract tar(.xz) in managed code
                     try
                     {
                         using var stream = File.OpenRead(tmpFile);
@@ -180,9 +219,10 @@ namespace Listenarr.Api.Services
                                 using var entryStream = reader.OpenEntryStream();
                                 await using var outFs = File.Create(outPath);
                                 await entryStream.CopyToAsync(outFs);
+                                _logger.LogDebug("Extracted archive entry to {OutPath}", outPath);
                             }
                         }
-                        File.Delete(tmpFile);
+                        TryDeleteFile(tmpFile);
                     }
                     catch (Exception ex)
                     {
@@ -200,14 +240,13 @@ namespace Listenarr.Api.Services
                             };
                             using var p = System.Diagnostics.Process.Start(psi);
                             p?.WaitForExit(30000);
-                            File.Delete(tmpFile);
+                            TryDeleteFile(tmpFile);
                         }
                         catch { /* best-effort */ }
                     }
                 }
                 else
                 {
-                    // assume raw binary
                     File.Move(tmpFile, ffprobePath);
                 }
 
@@ -215,7 +254,6 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
-                        // ensure any ffprobe under baseDir is executable
                         var candidates = Directory.GetFiles(baseDir, "ffprobe*", SearchOption.AllDirectories);
                         foreach (var cand in candidates)
                         {
@@ -239,30 +277,114 @@ namespace Listenarr.Api.Services
                     catch { /* best effort */ }
                 }
 
-                // Try to locate the ffprobe binary in the extracted files
-                    try
+                try
+                {
+                    // Find any extracted ffprobe candidates under the baseDir
+                    var candidates = new List<string>();
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                     {
-                        var found = new List<string>();
-                        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                        {
-                            found.AddRange(Directory.GetFiles(baseDir, "ffprobe.exe", SearchOption.AllDirectories));
-                        }
-                        else
-                        {
-                            found.AddRange(Directory.GetFiles(baseDir, "ffprobe", SearchOption.AllDirectories));
-                            found.AddRange(Directory.EnumerateFiles(baseDir, "*ffprobe*", SearchOption.AllDirectories));
-                        }
+                        candidates.AddRange(Directory.GetFiles(baseDir, "ffprobe.exe", SearchOption.AllDirectories));
+                    }
+                    else
+                    {
+                        candidates.AddRange(Directory.GetFiles(baseDir, "ffprobe", SearchOption.AllDirectories));
+                        // include any file names that contain ffprobe (fallback)
+                        candidates.AddRange(Directory.EnumerateFiles(baseDir, "*ffprobe*", SearchOption.AllDirectories));
+                    }
 
-                        if (found.Any())
+                    // Prefer exact filename matches, and prefer those located in a 'bin' directory
+                    string? chosen = null;
+                    var ffprobeFileName = ffprobeName; // ffprobe.exe or ffprobe
+                    var exactMatches = candidates.Where(p => string.Equals(Path.GetFileName(p), ffprobeFileName, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (exactMatches.Any())
+                    {
+                        // Prefer candidates with '/bin/' in the path (common for ffmpeg archives)
+                        chosen = exactMatches.FirstOrDefault(p => p.IndexOf(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
+                                 ?? exactMatches.OrderBy(p => p.Length).FirstOrDefault();
+                    }
+                    else if (candidates.Any())
+                    {
+                        chosen = candidates.OrderBy(p => p.Length).First();
+                    }
+
+                    if (!string.IsNullOrEmpty(chosen))
+                    {
+                        var dest = ffprobePath;
+                        try
                         {
-                            var chosen = found.OrderBy(f => f.Length).First();
-                            var dest = ffprobePath;
-                            try { File.Copy(chosen, dest, overwrite: true); } catch { /* best effort */ }
+                            // Ensure destination directory exists
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest) ?? baseDir);
+
+                            var chosenFull = Path.GetFullPath(chosen);
+                            var destFull = Path.GetFullPath(dest);
+
+                            if (string.Equals(chosenFull, destFull, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogInformation("ffprobe already extracted at destination {Dest}", destFull);
+                            }
+                            else
+                            {
+                                // If destination already exists, remove to allow move
+                                if (File.Exists(dest))
+                                {
+                                    try { File.Delete(dest); } catch { /* best-effort */ }
+                                }
+
+                                // Attempt to move the file into the baseDir root. If move fails (cross-volume), fall back to copy.
+                                try
+                                {
+                                    File.Move(chosen, dest);
+                                    _logger.LogInformation("Moved ffprobe from {Src} to {Dest}", chosen, dest);
+                                }
+                                catch (Exception mvEx)
+                                {
+                                    try
+                                    {
+                                        File.Copy(chosen, dest, overwrite: true);
+                                        _logger.LogInformation("Copied ffprobe from {Src} to {Dest} (move failed: {Err})", chosen, dest, mvEx.Message);
+                                    }
+                                    catch (Exception cpEx)
+                                    {
+                                        _logger.LogWarning(cpEx, "Failed to copy ffprobe from {Src} to {Dest}", chosen, dest);
+                                    }
+                                }
+                            }
+
+                            // Ensure executable bit on non-Windows
+                            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && File.Exists(dest))
+                            {
+                                try
+                                {
+                                    var psiCh = new System.Diagnostics.ProcessStartInfo
+                                    {
+                                        FileName = "chmod",
+                                        Arguments = $"+x \"{dest}\"",
+                                        RedirectStandardOutput = true,
+                                        RedirectStandardError = true,
+                                        UseShellExecute = false,
+                                        CreateNoWindow = true
+                                    };
+                                    using var p3 = System.Diagnostics.Process.Start(psiCh);
+                                    p3?.WaitForExit(3000);
+                                }
+                                catch { /* best effort */ }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to move or copy ffprobe candidate {Src} to {Dest}", chosen, ffprobePath);
                         }
                     }
-                catch { /* non-fatal */ }
+                    else
+                    {
+                        _logger.LogInformation("No ffprobe binary found in extracted files under {BaseDir}", baseDir);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Non-fatal error while locating/copying ffprobe from extracted files");
+                }
 
-                // Write a license notice file
                 var licensePath = Path.Combine(baseDir, "LICENSE_NOTICE.txt");
                 await File.WriteAllTextAsync(licensePath, "ffprobe binaries downloaded. Review FFmpeg licensing (LGPL/GPL) at https://ffmpeg.org/legal.html\nSource: " + downloadUrl + "\n");
 
