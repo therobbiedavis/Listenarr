@@ -5,7 +5,7 @@
       <div class="nav-brand">
         <img src="/icon.png" alt="Listenarr" class="brand-logo" />
         <h1>Listenarr</h1>
-        <span class="version">v1.0.0</span>
+        <span v-if="version && version.length > 0" class="version">v{{ version }}</span>
       </div>
       <div class="nav-actions">
         <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
@@ -195,6 +195,9 @@ const { notification, close: closeNotification, info } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
+
+// Version from API
+const version = ref('')
 
 // User menu (people icon) state
 const userMenuOpen = ref(false)
@@ -544,6 +547,14 @@ onMounted(async () => {
     }
   } catch {
     authEnabled.value = false
+  }
+
+  // Fetch version from API
+  try {
+    const health = await apiService.getServiceHealth()
+    version.value = health.version
+  } catch (err) {
+    console.warn('[App] Failed to fetch version from API:', err)
   }
 
   // Click-outside handler for user menu

@@ -19,6 +19,7 @@
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Listenarr.Api.Controllers
 {
@@ -75,6 +76,7 @@ namespace Listenarr.Api.Controllers
         /// Get health status of all services including download clients and external APIs
         /// </summary>
         [HttpGet("health")]
+        [AllowAnonymous]
         public async Task<ActionResult<ServiceHealth>> GetServiceHealth()
         {
             try
