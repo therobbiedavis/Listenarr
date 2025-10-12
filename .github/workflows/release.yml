@@ -81,7 +81,7 @@ jobs:
         uses: peter-evans/create-pull-request@v4
         with:
           token: ${{ secrets.GH_PAT }}
-          commit-message: "Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          commit-message: "[skip ci] Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
           branch: "ci/release-version-bump-${{ steps.resolve-version.outputs.VERSION }}"
           base: main
           title: "Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
