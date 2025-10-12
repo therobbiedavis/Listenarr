@@ -218,6 +218,11 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:nightly-${{ steps.resolve-version.outputs.VERSION }}
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ github.sha }}
 
+      - name: Publish API for runtime image
+        run: |
+          dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o listenarr.api/publish
+        # Ensures Listenarr.Api.dll is at listenarr.api/publish/ for Dockerfile.runtime
+
       # version bump was pushed via PR+auto-merge above
 
       # Skipped: separate Web image. The API image contains the frontend in wwwroot.

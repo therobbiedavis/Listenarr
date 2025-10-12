@@ -2,7 +2,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 5656
 
-# Copy publish output (context should be the publish folder produced by CI)
-COPY . /app
+# Copy publish output produced by the CI pipeline or local `dotnet publish`
+# The workflows publish into listenarr.api/publish, so copy that directory into the image root.
+COPY listenarr.api/publish/ /app/
 
 ENTRYPOINT ["dotnet", "Listenarr.Api.dll"]
