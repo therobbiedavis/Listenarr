@@ -36,31 +36,7 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 
 ## Setup
 
-The easiest way to get started is to use one of our startup scripts or Docker:
-
-### Quick Start Scripts
-
-**Windows (PowerShell):**
-```powershell
-.\start-dev.ps1
-```
-
-**Windows (Command Prompt):**
-```cmd
-start-dev.bat
-```
-
-**Linux/macOS:**
-```bash
-chmod +x start-dev.sh
-./start-dev.sh
-```
-
-**Cross-platform (npm):**
-```bash
-npm install
-npm run dev
-```
+The easiest way to get started is to use Docker or npm scripts:
 
 ### Docker
 
@@ -79,7 +55,30 @@ The Docker image includes both the backend API and frontend in a single containe
 - `nightly-X.Y.Z` - Specific nightly version
 - `X.Y.Z` - Specific release version
 
-For detailed installation instructions, see our [Wiki](https://github.com/therobbiedavis/Listenarr/wiki) (coming soon).
+### Manual Setup
+
+If you prefer to run the services separately:
+
+**Prerequisites:**
+- .NET 8.0 SDK or later
+- Node.js 20.x or later
+
+**Install dependencies:**
+```bash
+npm run install:all  # Install frontend dependencies
+```
+
+**Start development servers:**
+```bash
+npm run dev          # Start both API and Web (recommended)
+# OR run separately:
+npm run dev:api      # Start only backend API
+npm run dev:web      # Start only frontend web
+```
+
+**Services will be available at:**
+- Backend API: http://localhost:5146
+- Frontend Web: http://localhost:5173
 
 ## CI/CD
 
