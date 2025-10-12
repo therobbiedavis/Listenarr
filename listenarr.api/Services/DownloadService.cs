@@ -115,8 +115,10 @@ namespace Listenarr.Api.Services
             var searchQuery = BuildSearchQuery(audiobook);
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
-            // Search using the working search service
-            var searchResults = await _searchService.SearchAsync(searchQuery);
+            // Search using the working search service. This is an automatic search (triggered
+            // by the background/manual 'search-and-download' endpoint), so set isAutomaticSearch
+            // to true to ensure only indexers are queried (no Amazon/Audible scraping).
+            var searchResults = await _searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
 
             if (searchResults == null || !searchResults.Any())
             {
@@ -1611,6 +1613,8 @@ namespace Listenarr.Api.Services
                                         source = f.Source,
                                         createdAt = f.CreatedAt
                                     }).ToList()
+                                    ,
+                                    wanted = updatedAudiobook.Monitored && (updatedAudiobook.Files == null || !updatedAudiobook.Files.Any())
                                 };
 
                                 await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);

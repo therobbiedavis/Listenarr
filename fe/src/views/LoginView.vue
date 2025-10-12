@@ -70,11 +70,24 @@ export default defineComponent({
         await auth.login(username.value, password.value, rememberMe.value, token ?? undefined)
 
         // On success, prefer query param redirect (survives reload); fallback to store, then home
-        const queryRedirect = (router.currentRoute.value.query?.redirect as string | undefined) ?? undefined
-        // Sanitize the redirect so only internal paths are used
+        // Prefer explicit query param redirect (survives reload). If missing, try the
+        // fallback stored in sessionStorage by the ApiService when it had to perform
+        // a full-page redirect. Always sanitize the redirect target.
+        const rawQueryRedirect = (router.currentRoute.value.query?.redirect as string | undefined) ?? undefined
         const { normalizeRedirect } = await import('@/utils/redirect')
-        const safeRedirect = normalizeRedirect(queryRedirect)
-        const dest = queryRedirect ? { path: safeRedirect } : (auth.redirectTo ?? { name: 'home' })
+        let queryRedirect = normalizeRedirect(rawQueryRedirect)
+
+        if (!queryRedirect || queryRedirect === '/') {
+          try {
+            const pending = sessionStorage.getItem('listenarr_pending_redirect') ?? undefined
+            const normalizedPending = normalizeRedirect(pending)
+            if (normalizedPending && normalizedPending !== '/') {
+              queryRedirect = normalizedPending
+            }
+          } catch {}
+        }
+
+        const dest = queryRedirect && queryRedirect !== '/' ? { path: queryRedirect } : (auth.redirectTo ?? { name: 'home' })
         auth.redirectTo = null
         await router.push(dest)
       } catch (err) {

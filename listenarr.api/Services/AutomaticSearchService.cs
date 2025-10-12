@@ -18,6 +18,7 @@
 
 using Listenarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.IO;
 
 namespace Listenarr.Api.Services
 {
@@ -154,8 +155,31 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
             // Search for results
-            var searchResults = await searchService.SearchAsync(searchQuery);
+            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
+
+            // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
+            try
+            {
+                // Build a concise summary of up to 10 raw results
+                var rawSummaries = searchResults.Take(10).Select(r => new {
+                    title = r.Title,
+                    asin = r.Asin,
+                    source = r.Source,
+                    sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
+                    seeders = r.Seeders,
+                    format = r.Format,
+                    downloadType = r.DownloadType
+                }).ToList();
+
+                using var scope = _serviceScopeFactory.CreateScope();
+                var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries } } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
+            }
             
             if (!searchResults.Any())
             {
@@ -168,6 +192,30 @@ namespace Listenarr.Api.Services
             
             // Log all scored results for debugging
             _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
+            
+            // Broadcast scored result summaries (score + rejection reasons) to aid debugging
+            try
+            {
+                var scoredSummaries = scoredResults.Select(s => new {
+                    title = s.SearchResult.Title,
+                    asin = s.SearchResult.Asin,
+                    totalScore = s.TotalScore,
+                    isRejected = s.IsRejected,
+                    rejectionReasons = s.RejectionReasons,
+                    source = s.SearchResult.Source,
+                    sizeMB = s.SearchResult.Size > 0 ? (s.SearchResult.Size / 1024 / 1024) : -1,
+                    seeders = s.SearchResult.Seeders,
+                    format = s.SearchResult.Format
+                }).ToList();
+
+                using var scope2 = _serviceScopeFactory.CreateScope();
+                var hub2 = scope2.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                await hub2.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Scored results for '{audiobook.Title}'", details = new { scoredCount = scoredResults.Count, scoredSamples = scoredSummaries } } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast scored search results for audiobook {Id}", audiobook.Id);
+            }
             foreach (var scoredResult in scoredResults.OrderByDescending(s => s.TotalScore))
             {
                 var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
@@ -241,7 +289,12 @@ namespace Listenarr.Api.Services
                            (d.Status == DownloadStatus.Completed || d.Status == DownloadStatus.Downloading))
                 .ToListAsync();
 
-            if (!existingDownloads.Any())
+            // Get existing files for this audiobook
+            var existingFiles = await dbContext.AudiobookFiles
+                .Where(f => f.AudiobookId == audiobook.Id)
+                .ToListAsync();
+
+            if (!existingDownloads.Any() && !existingFiles.Any())
                 return false;
 
             // Check if any existing download meets or exceeds the cutoff quality
@@ -251,6 +304,7 @@ namespace Listenarr.Api.Services
             if (cutoffQuality == null)
                 return false;
 
+            // Check downloads first
             foreach (var download in existingDownloads)
             {
                 // For completed downloads, check if the file quality meets cutoff
@@ -275,7 +329,97 @@ namespace Listenarr.Api.Services
                 }
             }
 
+            // Check existing files
+            foreach (var file in existingFiles)
+            {
+                var fileQuality = DetermineFileQuality(file);
+                if (!string.IsNullOrEmpty(fileQuality))
+                {
+                    var fileQualityDefinition = audiobook.QualityProfile.Qualities
+                        .FirstOrDefault(q => q.Quality == fileQuality);
+
+                    if (fileQualityDefinition != null && fileQualityDefinition.Priority >= cutoffQuality.Priority)
+                    {
+                        _logger.LogDebug("Quality cutoff met for audiobook '{Title}' by existing file (Quality: {Quality}, File: {FileName})",
+                            audiobook.Title, fileQuality, Path.GetFileName(file.Path));
+                        return true;
+                    }
+                }
+            }
+
             return false;
+        }
+
+        private string? DetermineFileQuality(AudiobookFile file)
+        {
+            // Determine quality based on file properties
+            // This mirrors the logic in QualityProfileService.GetQualityScore but works with file metadata
+
+            // Check format/container first
+            if (!string.IsNullOrEmpty(file.Container))
+            {
+                var container = file.Container.ToLower();
+                if (container.Contains("flac")) return "FLAC";
+                if (container.Contains("m4b") || container.Contains("m4a")) return "M4B";
+            }
+
+            if (!string.IsNullOrEmpty(file.Format))
+            {
+                var format = file.Format.ToLower();
+                if (format.Contains("flac")) return "FLAC";
+                if (format.Contains("m4b") || format.Contains("m4a")) return "M4B";
+                if (format.Contains("aac")) return "M4B"; // AAC in M4B container
+            }
+
+            // Check bitrate for MP3 quality determination
+            if (file.Bitrate.HasValue)
+            {
+                var bitrate = file.Bitrate.Value;
+
+                // Convert bits per second to kilobits per second for easier comparison
+                var kbps = bitrate / 1000;
+
+                if (kbps >= 320) return "MP3 320kbps";
+                if (kbps >= 256) return "MP3 256kbps";
+                if (kbps >= 192) return "MP3 192kbps";
+                if (kbps >= 128) return "MP3 128kbps";
+                if (kbps >= 64) return "MP3 64kbps";
+
+                // For very low bitrates, still classify as MP3
+                return "MP3 64kbps";
+            }
+
+            // Check codec
+            if (!string.IsNullOrEmpty(file.Codec))
+            {
+                var codec = file.Codec.ToLower();
+                if (codec.Contains("flac")) return "FLAC";
+                if (codec.Contains("aac")) return "M4B";
+                if (codec.Contains("mp3")) return "MP3 128kbps"; // Default MP3 quality if no bitrate info
+                if (codec.Contains("opus")) return "M4B"; // Opus is often in M4B containers
+            }
+
+            // If we can't determine quality from metadata, try to infer from file extension
+            if (!string.IsNullOrEmpty(file.Path))
+            {
+                var extension = Path.GetExtension(file.Path).ToLower();
+                switch (extension)
+                {
+                    case ".flac":
+                        return "FLAC";
+                    case ".m4b":
+                    case ".m4a":
+                        return "M4B";
+                    case ".mp3":
+                        return "MP3 128kbps"; // Conservative default for MP3
+                    case ".aac":
+                        return "M4B";
+                    case ".opus":
+                        return "M4B";
+                }
+            }
+
+            return null; // Unable to determine quality
         }
 
         private string BuildSearchQuery(Audiobook audiobook)

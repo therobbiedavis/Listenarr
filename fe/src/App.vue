@@ -269,6 +269,7 @@ type HistoryNotification = {
 }
 
 const recentNotifications = reactive<HistoryNotification[]>([])
+const recentDownloadTitles = ref<Set<string>>(new Set()) // Track recent download titles to avoid spam
 
 function pushNotification(n: HistoryNotification) {
   // Ensure new notifications are not dismissed
@@ -280,6 +281,7 @@ function pushNotification(n: HistoryNotification) {
 
 function clearNotifications() {
   recentNotifications.length = 0
+  recentDownloadTitles.value.clear()
 }
 
 function dismissNotification(id: string) {
@@ -310,11 +312,13 @@ let unsubscribeFilesRemoved: (() => void) | null = null
 // Fetch wanted badge count (library changes less frequently - minimal polling)
 const refreshWantedBadge = async () => {
   try {
-    // Wanted badge: count monitored audiobooks without files
+    // Wanted badge: rely exclusively on the server-provided `wanted` flag.
+    // Treat only audiobooks where server returns wanted === true as wanted.
     const library = await apiService.getLibrary()
-    wantedCount.value = library.filter(book => 
-      book.monitored && (!book.filePath || book.filePath.trim() === '')
-    ).length
+    wantedCount.value = library.filter(book => {
+      const serverWanted = (book as unknown as Record<string, unknown>)['wanted']
+      return serverWanted === true
+    }).length
   } catch (err) {
     console.error('Failed to refresh wanted badge:', err)
   }
@@ -453,32 +457,63 @@ onMounted(async () => {
       }
     })
 
-    // Subscribe to audiobook updates and convert into notifications
+    // Subscribe to audiobook updates (for wanted badge refresh only, no notifications)
     signalRService.onAudiobookUpdate((ab) => {
       try {
         if (!ab) return
-        pushNotification({
-          id: `ab-${ab.id}-${Date.now()}`,
-          title: ab.title || 'Audiobook updated',
-          message: `Library item updated: ${ab.title}`,
-          icon: 'ph ph-book',
-          timestamp: new Date().toISOString()
-        })
-      } catch (err) { console.error('AudiobookUpdate notif error', err) }
+
+        // If server provided a wanted flag, refresh the wanted badge using the authoritative value
+        try {
+          const serverWanted = (ab as unknown as Record<string, unknown>)['wanted']
+          if (typeof serverWanted === 'boolean') {
+            // Recompute wantedCount by fetching library DTOs and trusting server 'wanted'
+            // This is a targeted refresh to avoid stale counts; call refreshWantedBadge()
+            refreshWantedBadge()
+          }
+        } catch {}
+      } catch (err) { console.error('AudiobookUpdate error', err) }
     })
 
-    // Subscribe to download updates for notification purposes
+    // Subscribe to download updates for notification purposes.
+    // Only create notifications for meaningful lifecycle events: start (Queued)
+    // and completion (Completed). Do not create notifications for continuous
+    // progress updates to avoid flooding the notification list.
     signalRService.onDownloadUpdate((downloads) => {
       try {
         if (!downloads || downloads.length === 0) return
         for (const d of downloads) {
-          pushNotification({
-            id: `dl-${d.id}-${Date.now()}`,
-            title: d.title || 'Download update',
-            message: `${d.status} — ${Math.round((d.progress || 0))}%`,
-            icon: 'ph ph-download',
-            timestamp: new Date().toISOString()
-          })
+          // Normalize status (some backends may use different casing)
+          const status = (d.status || '').toString().toLowerCase()
+          const title = d.title || 'Unknown'
+          
+          if (status === 'queued' || status === 'queued' /* start */) {
+            pushNotification({
+              id: `dl-start-${d.id}-${Date.now()}`,
+              title: title || 'Download started',
+              message: `Download started: ${title}`,
+              icon: 'ph ph-download',
+              timestamp: new Date().toISOString()
+            })
+          } else if (status === 'completed' || status === 'ready') {
+            // Avoid spamming notifications for the same title
+            // Only notify if we haven't notified about this title recently
+            if (!recentDownloadTitles.value.has(title)) {
+              pushNotification({
+                id: `dl-complete-${d.id}-${Date.now()}`,
+                title: title || 'Download complete',
+                message: `Download completed: ${title}`,
+                icon: 'ph ph-check-circle',
+                timestamp: new Date().toISOString()
+              })
+              // Track this title and clear it after 30 seconds
+              recentDownloadTitles.value.add(title)
+              setTimeout(() => {
+                recentDownloadTitles.value.delete(title)
+              }, 30000)
+            }
+          } else {
+            // Ignore progress/other transient updates
+          }
         }
       } catch (err) { console.error('DownloadUpdate notif error', err) }
     })

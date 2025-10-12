@@ -25,6 +25,7 @@ class SignalRService {
   private audiobookUpdateCallbacks: Set<(a: Audiobook) => void> = new Set()
   private scanJobCallbacks: Set<ScanJobCallback> = new Set()
   private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
+  private searchProgressCallbacks: Set<(payload: { message: string; asin?: string | null }) => void> = new Set()
   private pingInterval: number | null = null
 
   async connect(): Promise<void> {
@@ -162,6 +163,12 @@ class SignalRService {
           this.filesRemovedCallbacks.forEach(cb => cb(payload))
         }
         break
+      case 'SearchProgress':
+        if (args && args[0]) {
+          const payload = args[0] as { message: string; asin?: string | null }
+          this.searchProgressCallbacks.forEach(cb => cb(payload))
+        }
+        break
     }
   }
 
@@ -257,6 +264,12 @@ class SignalRService {
   onScanJobUpdate(callback: ScanJobCallback): () => void {
     this.scanJobCallbacks.add(callback)
     return () => { this.scanJobCallbacks.delete(callback) }
+  }
+
+  // Subscribe to search progress messages (from server-side search operations)
+  onSearchProgress(callback: (payload: { message: string; asin?: string | null }) => void): () => void {
+    this.searchProgressCallbacks.add(callback)
+    return () => { this.searchProgressCallbacks.delete(callback) }
   }
 
   // Subscribe to files removed notifications

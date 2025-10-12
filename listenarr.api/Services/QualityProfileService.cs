@@ -440,17 +440,31 @@ namespace Listenarr.Api.Services
                 // If quality not allowed by profile, add a deduction note (but don't auto-reject here)
                 if (profile.Qualities != null && profile.Qualities.Count > 0)
                 {
+                    // Build allowed qualities from explicit Quality definitions
                     var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => q.Quality.ToLower()).ToList();
+
+                    // Also include any PreferredFormats (e.g., "m4b") as allowed tokens so formats configured
+                    // in PreferredFormats are not incorrectly rejected when they aren't present in Qualities.
+                    if (profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
+                    {
+                        foreach (var fmt in profile.PreferredFormats)
+                        {
+                            var f = (fmt ?? string.Empty).Trim().ToLower();
+                            if (!string.IsNullOrEmpty(f) && !allowedQualities.Contains(f))
+                                allowedQualities.Add(f);
+                        }
+                    }
+
                     // Match allowed qualities robustly: either the search quality contains a known allowed token
                     // or an allowed quality string contains the detected quality token (handles numeric-only tokens like "320").
                     var detectedQualityLower = searchResult.Quality.ToLower();
                     if (!allowedQualities.Any(q => detectedQualityLower.Contains(q) || q.Contains(detectedQualityLower)))
-                {
-                    var notAllowedPenalty = -20;
-                    score.TotalScore += notAllowedPenalty; // deduct further
-                    score.ScoreBreakdown["QualityNotAllowed"] = notAllowedPenalty;
-                    score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
-                }
+                    {
+                        var notAllowedPenalty = -20;
+                        score.TotalScore += notAllowedPenalty; // deduct further
+                        score.ScoreBreakdown["QualityNotAllowed"] = notAllowedPenalty;
+                        score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
+                    }
                 }
             }
 

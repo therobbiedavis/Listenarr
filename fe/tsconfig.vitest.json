@@ -6,6 +6,11 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.vitest.tsbuildinfo",
 
     "lib": [],
-    "types": ["node", "jsdom"]
+    // Include vitest globals so test files can use describe/test/expect without
+    // requiring additional @types packages during build-time typechecking.
+    "types": ["vitest/globals", "node", "jsdom"],
+    // Tests often use non-null assertions and rely on runtime values; relax
+    // strict checks for the test compilation scope to avoid build-time errors.
+    "strict": false
   }
 }

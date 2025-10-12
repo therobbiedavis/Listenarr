@@ -175,6 +175,35 @@ namespace Listenarr.Api.Services
                             };
                             db.History.Add(historyEntry);
                             await db.SaveChangesAsync();
+
+                            // Update audiobook single-file fields so the frontend recognizes the
+                            // audiobook as having a file (the UI currently checks `filePath`).
+                            //
+                            // NOTE: `FilePath`/`FileSize` are kept for backward compatibility with
+                            // the existing frontend and older DTOs. The canonical representation
+                            // is the `Files` collection (multi-file support). We populate the
+                            // single-file fields here to avoid regressions in the Wanted view
+                            // and other UI consumers which still rely on `filePath`. When the
+                            // frontend is updated to prefer `Files` this compatibility layer can
+                            // be removed.
+                            try
+                            {
+                                var audiobookToUpdate = await db.Audiobooks.FindAsync(audiobookId);
+                                if (audiobookToUpdate != null)
+                                {
+                                    // Prefer to populate FilePath/FileSize for backward compatibility
+                                    audiobookToUpdate.FilePath = fileRecord.Path;
+                                    audiobookToUpdate.FileSize = fileRecord.Size;
+
+                                    // Persist change; keep it quiet on errors
+                                    db.Audiobooks.Update(audiobookToUpdate);
+                                    await db.SaveChangesAsync();
+                                }
+                            }
+                            catch (Exception aubEx)
+                            {
+                                _logger.LogDebug(aubEx, "Failed to update Audiobook file summary fields for AudiobookId {AudiobookId}", audiobookId);
+                            }
                         }
                         catch (Exception hx)
                         {

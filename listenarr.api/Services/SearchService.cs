@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Api.Models;
+using Microsoft.AspNetCore.SignalR;
+using Listenarr.Api.Hubs;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
@@ -29,8 +31,9 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SearchService> _logger;
-        private readonly IAudibleMetadataService _audibleMetadataService;
+    private readonly IAudibleMetadataService _audibleMetadataService;
         private readonly IOpenLibraryService _openLibraryService;
+    private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAmazonSearchService _amazonSearchService;
         private readonly IAudibleSearchService _audibleSearchService;
         private readonly IImageCacheService _imageCacheService;
@@ -45,7 +48,8 @@ namespace Listenarr.Api.Services
             IAmazonSearchService amazonSearchService,
             IAudibleSearchService audibleSearchService,
             IImageCacheService imageCacheService,
-            ListenArrDbContext dbContext)
+            ListenArrDbContext dbContext,
+            IHubContext<DownloadHub> hubContext)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -56,13 +60,48 @@ namespace Listenarr.Api.Services
             _audibleSearchService = audibleSearchService;
             _imageCacheService = imageCacheService;
             _dbContext = dbContext;
+            _hubContext = hubContext;
         }
 
-        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending)
+        private async Task BroadcastSearchProgressAsync(string message, string? asin = null)
+        {
+            try
+            {
+                if (_hubContext != null)
+                {
+                    await _hubContext.Clients.All.SendAsync("SearchProgress", new { message, asin });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast SearchProgress: {Message}", ex.Message);
+            }
+        }
+
+        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
         {
             var results = new List<SearchResult>();
 
-            // Only use intelligent search - no traditional API fallbacks
+            // Diagnostic log to help trace which callers invoke automatic vs interactive searches
+            _logger.LogInformation("SearchAsync called. Query='{Query}', isAutomaticSearch={IsAutomaticSearch}", query, isAutomaticSearch);
+
+            // For automatic search, only search indexers - skip Amazon/Audible entirely
+            if (isAutomaticSearch)
+            {
+                var automaticIndexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+                if (automaticIndexerResults.Any())
+                {
+                    results.AddRange(automaticIndexerResults);
+                    _logger.LogInformation("Found {Count} indexer results for automatic search query: {Query}", automaticIndexerResults.Count, query);
+                }
+                else
+                {
+                    _logger.LogInformation("No indexer results found for automatic search query: {Query}", query);
+                }
+                return ApplySorting(results, sortBy, sortDirection);
+            }
+
+            // For manual/interactive search, use intelligent search (Amazon/Audible) + indexers
             var intelligentResults = await IntelligentSearchAsync(query);
             if (intelligentResults.Any())
             {
@@ -94,7 +133,7 @@ namespace Listenarr.Api.Services
             }
 
             // Also search configured indexers for additional results (including DDL downloads)
-            var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection);
+            var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
             if (indexerResults.Any())
             {
                 results.AddRange(indexerResults);
@@ -166,30 +205,67 @@ namespace Listenarr.Api.Services
 
             var lowerQuality = quality.ToLower();
 
-            // Higher scores = better quality
+            // Highest quality
             if (lowerQuality.Contains("flac"))
                 return 100;
-            else if (lowerQuality.Contains("m4b"))
+
+            // Audible format (AAX) - high quality
+            if (lowerQuality.Contains("aax"))
+                return 95;
+
+            // Container formats
+            if (lowerQuality.Contains("m4b"))
                 return 90;
-            else if (lowerQuality.Contains("320"))
-                return 80;
-            else if (lowerQuality.Contains("256"))
+
+            // Modern efficient codecs
+            if (lowerQuality.Contains("opus"))
+                return 85;
+
+            // VBR quality presets (LAME VBR presets like V0/V1/V2)
+            if (lowerQuality.Contains("v0") || lowerQuality.Contains("-v0") || lowerQuality.Contains(" v0"))
+                return 82;
+            if (lowerQuality.Contains("v1") || lowerQuality.Contains("-v1") || lowerQuality.Contains(" v1"))
+                return 76;
+            if (lowerQuality.Contains("v2") || lowerQuality.Contains("-v2") || lowerQuality.Contains(" v2"))
                 return 70;
-            else if (lowerQuality.Contains("192"))
+
+
+            // AAC / M4A (check before numeric bitrates to prefer codec score for e.g. "AAC 256")
+            if (lowerQuality.Contains("aac") || lowerQuality.Contains("m4a"))
+                return 78;
+
+            // Explicit numeric bitrates
+            if (lowerQuality.Contains("320"))
+                return 80;
+            if (lowerQuality.Contains("256"))
+                return 74;
+            if (lowerQuality.Contains("192"))
                 return 60;
-            else if (lowerQuality.Contains("128"))
+
+            // VBR / CBR generic tokens (treat as mid-range if no numeric bitrate provided)
+            if (lowerQuality.Contains("vbr") || lowerQuality.Contains("cbr"))
+            {
+                // If there's an explicit numeric bitrate elsewhere, that will have matched above.
+                return 65;
+            }
+
+            // Generic MP3 mention without explicit bitrate -> mid-range
+            if (lowerQuality.Contains("mp3") && !lowerQuality.Contains("64") && !lowerQuality.Contains("128") && !lowerQuality.Contains("192") && !lowerQuality.Contains("256") && !lowerQuality.Contains("320"))
+                return 65;
+
+            if (lowerQuality.Contains("128"))
                 return 50;
-            else if (lowerQuality.Contains("64"))
+            if (lowerQuality.Contains("64"))
                 return 40;
-            else
-                return 0; // Unknown quality
+
+            return 0;
         }
 
-        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending)
+        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
         {
             var results = new List<SearchResult>();
             var indexers = await _dbContext.Indexers
-                .Where(i => i.IsEnabled && i.EnableInteractiveSearch)
+                .Where(i => i.IsEnabled && (isAutomaticSearch ? i.EnableAutomaticSearch : i.EnableInteractiveSearch))
                 .OrderBy(i => i.Priority)
                 .ToListAsync();
 
@@ -243,6 +319,7 @@ namespace Listenarr.Api.Services
 
                 // Step 1: Parallel search Amazon & Audible
                 _logger.LogInformation("Searching Amazon and Audible for: {Query}", query);
+                await BroadcastSearchProgressAsync("Searching Amazon and Audible for query...", null);
                 var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
                 var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
                 await Task.WhenAll(amazonTask, audibleTask);
@@ -275,6 +352,7 @@ namespace Listenarr.Api.Services
                 
                 asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList();
                 _logger.LogInformation("Unified ASIN candidate list size: {Count}", asinCandidates.Count);
+                await BroadcastSearchProgressAsync($"Found {asinCandidates.Count} ASIN candidates", null);
 
                 // If we don't have any ASIN candidates, fall back to returning raw search results
                 // (converted) so the API still returns usable items instead of an empty list.
@@ -310,6 +388,7 @@ namespace Listenarr.Api.Services
                         try
                         {
                             _logger.LogDebug("Enriching ASIN {Asin}", asin);
+                            await BroadcastSearchProgressAsync($"Enriching ASIN: {asin}", asin);
                             
                             // Get the original search results
                             asinToRawResult.TryGetValue(asin, out var rawResult);
@@ -317,6 +396,7 @@ namespace Listenarr.Api.Services
                             
                             // Scrape metadata from product page
                             var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                            await BroadcastSearchProgressAsync($"Scraped metadata for ASIN: {asin}", asin);
                             
                             // If we have an Audible search result, populate/merge that data first
                             if (audibleResult != null && metadata != null)
@@ -349,6 +429,7 @@ namespace Listenarr.Api.Services
 
                 // Only return enriched items (metadata success); skip basic fallbacks entirely
                 results.AddRange(enriched);
+                await BroadcastSearchProgressAsync($"Enrichment complete. Returning {results.Count} results", null);
 
                 // If still no enriched results, try OpenLibrary derived titles to attempt enrichment again
                 if (!results.Any())
@@ -369,7 +450,8 @@ namespace Listenarr.Api.Services
                                 {
                                     try
                                     {
-                                        var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
+                                                await BroadcastSearchProgressAsync($"Attempting metadata scrape for alternate ASIN: {altResult.Asin}", altResult.Asin);
+                                                var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
                                         if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
                                         {
                                             var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);

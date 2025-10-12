@@ -27,6 +27,7 @@ using System.Linq;
 using System;
 using System.Text.Json;
 using System.Reflection;
+using System.IO;
 
 namespace Listenarr.Api.Controllers
 {
@@ -187,8 +188,43 @@ namespace Listenarr.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var audiobooks = await _repo.GetAllAsync();
-            return Ok(audiobooks);
+            // Return audiobooks including files and an explicit 'wanted' flag
+            var audiobooks = await _dbContext.Audiobooks
+                .Include(a => a.QualityProfile)
+                .Include(a => a.Files)
+                .ToListAsync();
+
+            var dto = audiobooks.Select(a => new
+            {
+                id = a.Id,
+                title = a.Title,
+                authors = a.Authors,
+                description = a.Description,
+                imageUrl = a.ImageUrl,
+                filePath = a.FilePath,
+                fileSize = a.FileSize,
+                runtime = a.Runtime,
+                monitored = a.Monitored,
+                quality = a.Quality,
+                series = a.Series,
+                seriesNumber = a.SeriesNumber,
+                tags = a.Tags,
+                files = a.Files?.Select(f => new {
+                    id = f.Id,
+                    path = f.Path,
+                    size = f.Size,
+                    durationSeconds = f.DurationSeconds,
+                    format = f.Format,
+                    bitrate = f.Bitrate,
+                    sampleRate = f.SampleRate,
+                    channels = f.Channels,
+                    source = f.Source,
+                    createdAt = f.CreatedAt
+                }).ToList(),
+                wanted = a.Monitored && (a.Files == null || !a.Files.Any())
+            });
+
+            return Ok(dto);
         }
 
         [HttpGet("by-asin/{asin}")]
@@ -216,11 +252,45 @@ namespace Listenarr.Api.Controllers
                 return NotFound(new { message = "Audiobook not found" });
             }
             // Include QualityProfile and Files in the query
-            audiobook = await _dbContext.Audiobooks
+            var updated = await _dbContext.Audiobooks
                 .Include(a => a.QualityProfile)
                 .Include(a => a.Files)
                 .FirstOrDefaultAsync(a => a.Id == id);
-            return Ok(audiobook);
+
+            if (updated == null)
+                return NotFound(new { message = "Audiobook not found" });
+
+            var audiobookDto = new
+            {
+                id = updated.Id,
+                title = updated.Title,
+                authors = updated.Authors,
+                description = updated.Description,
+                imageUrl = updated.ImageUrl,
+                filePath = updated.FilePath,
+                fileSize = updated.FileSize,
+                runtime = updated.Runtime,
+                monitored = updated.Monitored,
+                quality = updated.Quality,
+                series = updated.Series,
+                seriesNumber = updated.SeriesNumber,
+                tags = updated.Tags,
+                files = updated.Files?.Select(f => new {
+                    id = f.Id,
+                    path = f.Path,
+                    size = f.Size,
+                    durationSeconds = f.DurationSeconds,
+                    format = f.Format,
+                    bitrate = f.Bitrate,
+                    sampleRate = f.SampleRate,
+                    channels = f.Channels,
+                    source = f.Source,
+                    createdAt = f.CreatedAt
+                }).ToList(),
+                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any())
+            };
+
+            return Ok(audiobookDto);
         }
 
         // DEBUG: Return raw AudiobookFile rows for an audiobook. Not intended for production use.
@@ -769,6 +839,28 @@ namespace Listenarr.Api.Controllers
             // Search for results
             var searchResults = await searchService.SearchAsync(searchQuery);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
+
+            // Broadcast raw search result summary for manual-triggered searches (helpful for debugging)
+            try
+            {
+                var rawSummaries = searchResults.Take(10).Select(r => new {
+                    title = r.Title,
+                    asin = r.Asin,
+                    source = r.Source,
+                    sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
+                    seeders = r.Seeders,
+                    format = r.Format,
+                    downloadType = r.DownloadType
+                }).ToList();
+
+                using var scope = _serviceProvider.CreateScope();
+                var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries } } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast raw search results summary for manual search audiobook {Id}", audiobook.Id);
+            }
             
             if (!searchResults.Any())
             {
@@ -854,7 +946,12 @@ namespace Listenarr.Api.Controllers
                            (d.Status == DownloadStatus.Completed || d.Status == DownloadStatus.Downloading))
                 .ToListAsync();
 
-            if (!existingDownloads.Any())
+            // Get existing files for this audiobook
+            var existingFiles = await dbContext.AudiobookFiles
+                .Where(f => f.AudiobookId == audiobook.Id)
+                .ToListAsync();
+
+            if (!existingDownloads.Any() && !existingFiles.Any())
                 return false;
 
             // Check if any existing download meets or exceeds the cutoff quality
@@ -864,6 +961,7 @@ namespace Listenarr.Api.Controllers
             if (cutoffQuality == null)
                 return false;
 
+            // Check downloads first
             foreach (var download in existingDownloads)
             {
                 // For completed downloads, check if the file quality meets cutoff
@@ -888,7 +986,97 @@ namespace Listenarr.Api.Controllers
                 }
             }
 
+            // Check existing files
+            foreach (var file in existingFiles)
+            {
+                var fileQuality = DetermineFileQuality(file);
+                if (!string.IsNullOrEmpty(fileQuality))
+                {
+                    var fileQualityDefinition = audiobook.QualityProfile.Qualities
+                        .FirstOrDefault(q => q.Quality == fileQuality);
+
+                    if (fileQualityDefinition != null && fileQualityDefinition.Priority >= cutoffQuality.Priority)
+                    {
+                        _logger.LogDebug("Quality cutoff met for audiobook '{Title}' by existing file (Quality: {Quality}, File: {FileName})",
+                            audiobook.Title, fileQuality, Path.GetFileName(file.Path));
+                        return true;
+                    }
+                }
+            }
+
             return false;
+        }
+
+        private string? DetermineFileQuality(AudiobookFile file)
+        {
+            // Determine quality based on file properties
+            // This mirrors the logic in QualityProfileService.GetQualityScore but works with file metadata
+
+            // Check format/container first
+            if (!string.IsNullOrEmpty(file.Container))
+            {
+                var container = file.Container.ToLower();
+                if (container.Contains("flac")) return "FLAC";
+                if (container.Contains("m4b") || container.Contains("m4a")) return "M4B";
+            }
+
+            if (!string.IsNullOrEmpty(file.Format))
+            {
+                var format = file.Format.ToLower();
+                if (format.Contains("flac")) return "FLAC";
+                if (format.Contains("m4b") || format.Contains("m4a")) return "M4B";
+                if (format.Contains("aac")) return "M4B"; // AAC in M4B container
+            }
+
+            // Check bitrate for MP3 quality determination
+            if (file.Bitrate.HasValue)
+            {
+                var bitrate = file.Bitrate.Value;
+
+                // Convert bits per second to kilobits per second for easier comparison
+                var kbps = bitrate / 1000;
+
+                if (kbps >= 320) return "MP3 320kbps";
+                if (kbps >= 256) return "MP3 256kbps";
+                if (kbps >= 192) return "MP3 192kbps";
+                if (kbps >= 128) return "MP3 128kbps";
+                if (kbps >= 64) return "MP3 64kbps";
+
+                // For very low bitrates, still classify as MP3
+                return "MP3 64kbps";
+            }
+
+            // Check codec
+            if (!string.IsNullOrEmpty(file.Codec))
+            {
+                var codec = file.Codec.ToLower();
+                if (codec.Contains("flac")) return "FLAC";
+                if (codec.Contains("aac")) return "M4B";
+                if (codec.Contains("mp3")) return "MP3 128kbps"; // Default MP3 quality if no bitrate info
+                if (codec.Contains("opus")) return "M4B"; // Opus is often in M4B containers
+            }
+
+            // If we can't determine quality from metadata, try to infer from file extension
+            if (!string.IsNullOrEmpty(file.Path))
+            {
+                var extension = Path.GetExtension(file.Path).ToLower();
+                switch (extension)
+                {
+                    case ".flac":
+                        return "FLAC";
+                    case ".m4b":
+                    case ".m4a":
+                        return "M4B";
+                    case ".mp3":
+                        return "MP3 128kbps"; // Conservative default for MP3
+                    case ".aac":
+                        return "M4B";
+                    case ".opus":
+                        return "M4B";
+                }
+            }
+
+            return null; // Unable to determine quality
         }
 
         private string BuildSearchQuery(Audiobook audiobook)

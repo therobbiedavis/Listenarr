@@ -270,6 +270,76 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning(ex, "Failed to reconcile audiobook files after scan job {JobId}", job.Id);
                         }
 
+                        // Handle legacy filePath field migration
+                        try
+                        {
+                            var needsUpdate = false;
+                            if (!string.IsNullOrEmpty(audiobook.FilePath))
+                            {
+                                // Check if the legacy filePath exists
+                                if (System.IO.File.Exists(audiobook.FilePath))
+                                {
+                                    // File exists - check if we already have an AudiobookFile record for it
+                                    var existingFileRecord = await db.AudiobookFiles
+                                        .FirstOrDefaultAsync(f => f.AudiobookId == audiobook.Id && f.Path == audiobook.FilePath);
+
+                                    if (existingFileRecord == null)
+                                    {
+                                        // Create AudiobookFile record for the legacy filePath
+                                        try
+                                        {
+                                            using var afScope = _scopeFactory.CreateScope();
+                                            var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
+                                            var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, audiobook.FilePath, "scan-legacy");
+                                            if (created)
+                                            {
+                                                _logger.LogInformation("Migrated legacy filePath to AudiobookFile record for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
+                                                createdFiles++;
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogWarning(ex, "Failed to migrate legacy filePath for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // File doesn't exist - clear the legacy filePath and related fields
+                                    audiobook.FilePath = null;
+                                    audiobook.FileSize = null;
+                                    needsUpdate = true;
+                                    _logger.LogInformation("Cleared missing legacy filePath for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
+
+                                    // Add history entry for cleared filePath
+                                    var historyEntry = new History
+                                    {
+                                        AudiobookId = audiobook.Id,
+                                        AudiobookTitle = audiobook.Title ?? "Unknown",
+                                        EventType = "File Removed",
+                                        Message = $"Legacy file path cleared (file no longer exists)",
+                                        Source = "Scan",
+                                        Data = JsonSerializer.Serialize(new
+                                        {
+                                            FilePath = audiobook.FilePath,
+                                            Source = "legacy-migration"
+                                        }),
+                                        Timestamp = DateTime.UtcNow
+                                    };
+                                    db.History.Add(historyEntry);
+                                }
+                            }
+
+                            if (needsUpdate)
+                            {
+                                await db.SaveChangesAsync();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to handle legacy filePath migration for audiobook {AudiobookId}", audiobook.Id);
+                        }
+
                         // update job status and broadcast completion
                         try { _queue.UpdateJobStatus(job.Id, "Completed"); } catch { }
 
@@ -306,6 +376,8 @@ namespace Listenarr.Api.Services
                                     source = f.Source,
                                     createdAt = f.CreatedAt
                                 }).ToList()
+                                ,
+                                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any())
                             };
 
                             await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);

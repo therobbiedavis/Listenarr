@@ -52,6 +52,7 @@
       <div class="loading-spinner">
         <i class="ph ph-spinner ph-spin"></i>
         <p>Searching for audiobooks...</p>
+        <p v-if="searchStatus" class="search-status">{{ searchStatus }}</p>
       </div>
     </div>
 
@@ -92,7 +93,7 @@
               <div class="result-meta">
               <span v-if="audibleResult.publishYear">{{ audibleResult.publishYear }}</span>
               <span v-if="audibleResult.language">{{ audibleResult.language }}</span>
-              <span v-if="audibleResult.publisher">Publisher: {{ audibleResult.publisher }}</span>
+              <span v-if="audibleResult.publisher">Publisher: {{ decodeHtml(audibleResult.publisher) }}</span>
               <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
               <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
               <span v-if="audibleResult.series">Series: {{ audibleResult.series }}</span>
@@ -163,7 +164,7 @@
               
               <p v-if="book.first_publish_year" class="result-year">Published: {{ book.first_publish_year }}</p>
               <p v-if="book.publisher?.length" class="result-publisher">
-                Publisher: {{ book.publisher[0] }}
+                Publisher: {{ decodeHtml(book.publisher[0]) }}
               </p>
               
               <div class="result-meta">
@@ -259,12 +260,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import type { OpenLibraryBook } from '@/services/openlibrary'
 import { isbnService, type ISBNBook } from '@/services/isbn'
+import { signalRService } from '@/services/signalr'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
@@ -278,6 +280,17 @@ const router = useRouter()
 const configStore = useConfigurationStore()
 const libraryStore = useLibraryStore()
 const { error: showError, warning } = useNotification()
+
+// Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
+const decodeHtml = (input?: string | null): string => {
+  if (!input) return ''
+  return input
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
 
 console.log('AddNewView component loaded')
 console.log('libraryStore:', libraryStore)
@@ -339,6 +352,7 @@ const searchType = ref<'asin' | 'title' | 'isbn' | null>(null)
 const isSearching = ref(false)
 const searchError = ref('')
 const searchDebounceTimer = ref<number | null>(null)
+const searchStatus = ref('')
 
 // Results
 const audibleResult = ref<AudibleBookMetadata | null>(null)
@@ -448,6 +462,7 @@ const performSearch = async () => {
 
   const detectedType = detectSearchType(query)
   searchType.value = detectedType
+  searchStatus.value = ''
 
   if (detectedType === 'asin') {
     await searchByAsin(query)
@@ -470,17 +485,27 @@ const searchByAsin = async (asin: string) => {
   isbnResult.value = null
   errorMessage.value = ''
   asinQuery.value = asin
+  searchStatus.value = `Searching Audible for ASIN: ${asin}...`
   try {
+    // Inform user that request was sent
+    searchStatus.value = `Requesting metadata for ASIN ${asin}...`
     const result = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
+    // Server returned metadata
+    searchStatus.value = `Metadata received for ASIN ${asin}, processing...`
     audibleResult.value = result
     
-    // Check library status after getting result
-    await checkExistingInLibrary()
+  // Check library status after getting result
+  searchStatus.value = 'Checking library for existing copies...'
+  await checkExistingInLibrary()
+  // Finalize status
+  searchStatus.value = audibleResult.value ? 'ASIN metadata ready' : 'No metadata available'
   } catch (error) {
     console.error('ASIN search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
   } finally {
     isSearching.value = false
+    // Keep a brief 'done' status then clear
+    setTimeout(() => { searchStatus.value = '' }, 1200)
   }
 }
 
@@ -501,9 +526,12 @@ const searchByTitle = async (query: string) => {
   titleQuery.value = parsed.title
   authorQuery.value = parsed.author || ''
   
+  searchStatus.value = ''
   try {
     // Use backend search API which now searches Amazon/Audible directly
     const searchResults = await apiService.search(query)
+    
+    searchStatus.value = 'Processing search results...'
     
     // Convert SearchResult objects to displayable format and extract unique ASINs
     titleResults.value = []
@@ -533,13 +561,17 @@ const searchByTitle = async (query: string) => {
       errorMessage.value = 'No audiobooks found. Try refining your search terms.'
     }
     
-    // Check library status after getting results
-    await checkExistingInLibrary()
+  // Check library status after getting results
+  searchStatus.value = 'Checking library for existing matches...'
+  await checkExistingInLibrary()
+  searchStatus.value = `Search complete — found ${titleResults.value.length} items`
   } catch (error) {
     console.error('Title search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
   } finally {
     isSearching.value = false
+    // Clear status shortly after completion so UI isn't stale
+    setTimeout(() => { searchStatus.value = '' }, 1000)
   }
 }
 
@@ -684,6 +716,7 @@ const handleLibraryAdded = (audiobook: Audiobook) => {
 
 const retrySearch = () => {
   errorMessage.value = ''
+  searchStatus.value = ''
   performSearch()
 }
 
@@ -721,7 +754,7 @@ const searchByISBNChain = async (isbn: string) => {
 
   try {
     // Fetch metadata from ISBN to get title and author for search
-    isbnLookupMessage.value = 'Looking up book details from ISBN...'
+  searchStatus.value = 'Looking up book details from ISBN...'
     let searchQuery = isbn // fallback to ISBN if metadata lookup fails
     
     try {
@@ -732,17 +765,20 @@ const searchByISBNChain = async (isbn: string) => {
         const title = meta.book.title || ''
         const author = meta.book.authors?.join(', ') || ''
         searchQuery = author ? `${title} by ${author}` : title
+        searchStatus.value = `Found book details: ${title}${author ? ` by ${author}` : ''}. Searching for audiobook...`
+      } else {
+        searchStatus.value = 'No ISBN metadata found, searching with ISBN as fallback...'
       }
     } catch (error) {
       console.warn('ISBN metadata lookup failed, will search by ISBN directly:', error)
     }
 
-    isbnLookupMessage.value = 'Searching Amazon/Audible for audiobook...'
+  searchStatus.value = 'Scraping Amazon...'
     
     // Search Amazon/Audible using title/author or ISBN
-    await searchByTitle(searchQuery)
-    searchType.value = 'title' // Update search type since we're now doing title search
-    isbnLookupMessage.value = ''
+  await searchByTitle(searchQuery)
+  searchType.value = 'title' // Update search type since we're now doing title search
+  searchStatus.value = 'ISBN search completed'
     
     if (titleResults.value.length === 0) {
       isbnLookupWarning.value = true
@@ -754,12 +790,23 @@ const searchByISBNChain = async (isbn: string) => {
     isbnLookupMessage.value = 'ISBN search failed'
   } finally {
     isSearching.value = false
+    setTimeout(() => { searchStatus.value = '' }, 1000)
   }
 }
 
 // Load application settings on mount
 onMounted(async () => {
   await configStore.loadApplicationSettings()
+  // Subscribe to server-side search progress updates
+  const unsub = signalRService.onSearchProgress((payload) => {
+    if (payload && payload.message) {
+      searchStatus.value = payload.message
+    }
+  })
+  // When component is unmounted, unsubscribe
+  onUnmounted(() => {
+    try { unsub() } catch {}
+  })
 })
 </script>
 
@@ -1037,6 +1084,13 @@ onMounted(async () => {
 .loading-spinner p {
   font-size: 1.1rem;
   margin: 0;
+}
+
+.search-status {
+  font-size: 0.9rem;
+  color: #888;
+  margin: 0.5rem 0 0 0;
+  font-style: italic;
 }
 
 /* Results */

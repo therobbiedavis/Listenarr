@@ -103,40 +103,36 @@ class ApiService {
             throw err
           }
           // Sanitize redirect to avoid open-redirects or unsafe values
-          try {
-            const { normalizeRedirect } = await import('@/utils/redirect')
-            const current = window.location.pathname + window.location.search + window.location.hash
-            const safe = normalizeRedirect(current)
-            if (!current.startsWith('/login')) {
-              if (import.meta.env.DEV) {
-                try { console.debug('[ApiService] 401 received, redirecting to login', { current, safe }) } catch {}
-              }
-              // Try SPA navigation first (lazy import router) to keep SPA state intact
               try {
-                const routerModule = await import('@/router')
-                // router default export is the router instance
-                const router = (routerModule && (routerModule as unknown as { default?: { push?: (to: unknown) => Promise<void> } }).default)
-                  || (routerModule as unknown as { push?: (to: unknown) => Promise<void> })
-                if (router && typeof router.push === 'function') {
-                  // Use raw safe path in query; router will encode it
-                  void router.push({ name: 'login', query: { redirect: safe } })
-                } else {
-                  // fallback to full-page navigation
+                const { normalizeRedirect } = await import('@/utils/redirect')
+                const current = window.location.pathname + window.location.search + window.location.hash
+                const safe = normalizeRedirect(current)
+                if (!current.startsWith('/login')) {
+                  if (import.meta.env.DEV) {
+                    try { console.debug('[ApiService] 401 received, redirecting to login', { current, safe }) } catch {}
+                  }
+
+                  // Persist the safe redirect in sessionStorage as a fallback in case the
+                  // query parameter gets lost or sanitized during navigation. This helps
+                  // recover the intended SPA destination after login.
+                  try {
+                    sessionStorage.setItem('listenarr_pending_redirect', safe)
+                  } catch {}
+
+                  // Perform a full-page redirect to the login route with a safe redirect query.
+                  // Avoid dynamic importing the router here to prevent circular imports and
+                  // Vite chunking warnings. SPA navigation will still work after login via the
+                  // redirect query parameter.
                   window.location.href = `/login?redirect=${encodeURIComponent(safe)}`
+
+                  // stop further processing by throwing a specific error
+                  throw new Error('Redirecting to login')
                 }
               } catch {
-                // If router import fails for any reason, fallback to full-page navigation
-                window.location.href = `/login?redirect=${encodeURIComponent(safe)}`
+                // fallback to a safe redirect to root
+                window.location.href = '/login?redirect=%2F'
+                throw new Error('Redirecting to login')
               }
-
-              // stop further processing by throwing a specific error
-              throw new Error('Redirecting to login')
-            }
-          } catch {
-            // fallback to a safe redirect to root
-            window.location.href = '/login?redirect=%2F'
-            throw new Error('Redirecting to login')
-          }
         }
 
         const err = new Error(`HTTP error! status: ${response.status} - ${respText}`)
