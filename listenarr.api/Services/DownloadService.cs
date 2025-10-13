@@ -20,6 +20,7 @@ using Listenarr.Api.Models;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
 using System.Text.Json;
 
 namespace Listenarr.Api.Services
@@ -424,12 +425,37 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
             _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
 
-            // Add torrent
-            var addData = new FormUrlEncodedContent(new[]
+            // Prepare torrent add data
+            var formData = new List<KeyValuePair<string, string>>
             {
                 new KeyValuePair<string, string>("urls", torrentUrl),
                 new KeyValuePair<string, string>("savepath", client.DownloadPath)
-            });
+            };
+
+            // Add category if configured
+            if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
+            {
+                var category = categoryObj?.ToString();
+                if (!string.IsNullOrEmpty(category))
+                {
+                    formData.Add(new KeyValuePair<string, string>("category", category));
+                    _logger.LogInformation("Adding torrent to qBittorrent with category: {Category}", category);
+                }
+            }
+
+            // Add tags if configured
+            if (client.Settings != null && client.Settings.TryGetValue("tags", out var tagsObj))
+            {
+                var tags = tagsObj?.ToString();
+                if (!string.IsNullOrEmpty(tags))
+                {
+                    formData.Add(new KeyValuePair<string, string>("tags", tags));
+                    _logger.LogInformation("Adding torrent to qBittorrent with tags: {Tags}", tags);
+                }
+            }
+
+            // Add torrent
+            var addData = new FormUrlEncodedContent(formData);
 
             var addResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
             if (!addResponse.IsSuccessStatusCode)
@@ -448,11 +474,187 @@ namespace Listenarr.Api.Services
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
             
-            // TODO: Implement Transmission RPC API
-            _logger.LogInformation("Sending to Transmission (not yet implemented)");
-            await Task.Delay(100);
-            
-            return Guid.NewGuid().ToString();
+            try
+            {
+                // Get torrent URL - prefer magnet link, fall back to torrent file URL
+                var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) 
+                    ? result.MagnetLink 
+                    : result.TorrentUrl;
+
+                if (string.IsNullOrEmpty(torrentUrl))
+                {
+                    throw new Exception("No magnet link or torrent URL found in search result");
+                }
+
+                _logger.LogInformation("Adding torrent to Transmission: {Title}", result.Title);
+                _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
+
+                // First, get session ID (required for authentication)
+                string sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
+
+                // Prepare torrent-add arguments
+                var arguments = new Dictionary<string, object>
+                {
+                    { "filename", torrentUrl },
+                    { "download-dir", client.DownloadPath }
+                };
+
+                // Add labels (Transmission's equivalent to categories/tags)
+                var labels = new List<string>();
+                
+                // Add category as a label if configured
+                if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
+                {
+                    var category = categoryObj?.ToString();
+                    if (!string.IsNullOrEmpty(category))
+                    {
+                        labels.Add(category);
+                        _logger.LogInformation("Adding torrent to Transmission with category: {Category}", category);
+                    }
+                }
+
+                // Add tags as labels if configured
+                if (client.Settings != null && client.Settings.TryGetValue("tags", out var tagsObj))
+                {
+                    var tags = tagsObj?.ToString();
+                    if (!string.IsNullOrEmpty(tags))
+                    {
+                        // Split tags by comma and add each as a label
+                        var tagList = tags.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                         .Select(t => t.Trim())
+                                         .Where(t => !string.IsNullOrEmpty(t));
+                        labels.AddRange(tagList);
+                        _logger.LogInformation("Adding torrent to Transmission with tags: {Tags}", tags);
+                    }
+                }
+
+                // Add labels to arguments if we have any
+                if (labels.Any())
+                {
+                    arguments["labels"] = labels;
+                }
+
+                // Create RPC request
+                var rpcRequest = new
+                {
+                    method = "torrent-add",
+                    arguments = arguments,
+                    tag = 1
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Set required headers
+                httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
+                
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Failed to add torrent to Transmission. Status: {Status}, Response: {Response}", 
+                        response.StatusCode, responseContent);
+                    throw new Exception($"Failed to add torrent to Transmission: {response.StatusCode}");
+                }
+
+                // Parse response to get torrent ID
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (rpcResponse.TryGetProperty("result", out var result_prop) && result_prop.GetString() == "success")
+                {
+                    string torrentId = Guid.NewGuid().ToString(); // Default fallback
+                    
+                    // Try to get the actual torrent ID from response
+                    if (rpcResponse.TryGetProperty("arguments", out var args) && 
+                        args.TryGetProperty("torrent-added", out var torrentAdded) &&
+                        torrentAdded.TryGetProperty("id", out var id))
+                    {
+                        torrentId = id.GetInt32().ToString();
+                    }
+                    else if (args.TryGetProperty("torrent-duplicate", out var torrentDuplicate) &&
+                             torrentDuplicate.TryGetProperty("id", out var dupId))
+                    {
+                        torrentId = dupId.GetInt32().ToString();
+                        _logger.LogInformation("Torrent already exists in Transmission with ID: {TorrentId}", torrentId);
+                    }
+
+                    _logger.LogInformation("Successfully added torrent to Transmission with ID: {TorrentId}", torrentId);
+                    return torrentId;
+                }
+                else
+                {
+                    var errorMsg = "Unknown error";
+                    if (rpcResponse.TryGetProperty("result", out var resultMsg))
+                    {
+                        errorMsg = resultMsg.GetString() ?? "Unknown error";
+                    }
+                    throw new Exception($"Transmission RPC error: {errorMsg}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send torrent to Transmission");
+                throw;
+            }
+        }
+
+        private async Task<string> GetTransmissionSessionId(string baseUrl, string username, string password)
+        {
+            try
+            {
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{username}:{password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                // Make a dummy request to get the session ID from the 409 response
+                var dummyRequest = new { method = "session-get", tag = 0 };
+                var jsonContent = JsonSerializer.Serialize(dummyRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                // Transmission returns 409 with X-Transmission-Session-Id header on first request
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    if (response.Headers.TryGetValues("X-Transmission-Session-Id", out var sessionIds))
+                    {
+                        var sessionId = sessionIds.First();
+                        _logger.LogDebug("Got Transmission session ID: {SessionId}", sessionId);
+                        return sessionId;
+                    }
+                }
+                else if (response.IsSuccessStatusCode)
+                {
+                    // If we get a success response, we might not need a session ID (older versions)
+                    return string.Empty;
+                }
+
+                throw new Exception($"Failed to get Transmission session ID: {response.StatusCode}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get Transmission session ID");
+                throw;
+            }
         }
 
         private async Task<string> SendToSABnzbd(DownloadClientConfiguration client, SearchResult result)
@@ -510,8 +712,18 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                // Add category for audiobooks
-                queryParams["cat"] = "audiobooks";
+                // Add category if configured
+                var category = "audiobooks"; // default fallback
+                if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
+                {
+                    var configuredCategory = categoryObj?.ToString();
+                    if (!string.IsNullOrEmpty(configuredCategory))
+                    {
+                        category = configuredCategory;
+                    }
+                }
+                queryParams["cat"] = category;
+                _logger.LogInformation("Adding NZB to SABnzbd with category: {Category}", category);
 
                 var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
                 var requestUrl = $"{baseUrl}?{queryString}";
@@ -567,11 +779,120 @@ namespace Listenarr.Api.Services
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
             
-            // TODO: Implement NZBGet JSON-RPC API
-            _logger.LogInformation("Sending to NZBGet (not yet implemented)");
-            await Task.Delay(100);
-            
-            return Guid.NewGuid().ToString();
+            try
+            {
+                // Get NZB URL
+                var nzbUrl = result.NzbUrl;
+                if (string.IsNullOrEmpty(nzbUrl))
+                {
+                    throw new Exception("No NZB URL found in search result");
+                }
+
+                _logger.LogInformation("Sending NZB to NZBGet: {Title} from {Source}", result.Title, result.Source);
+                _logger.LogDebug("NZB URL: {Url}", nzbUrl);
+
+                // Get category if configured
+                var category = "audiobooks"; // default fallback
+                if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
+                {
+                    var configuredCategory = categoryObj?.ToString();
+                    if (!string.IsNullOrEmpty(configuredCategory))
+                    {
+                        category = configuredCategory;
+                    }
+                }
+                _logger.LogInformation("Adding NZB to NZBGet with category: {Category}", category);
+
+                // Get priority if configured  
+                int priority = 0; // normal priority
+                if (client.Settings != null && client.Settings.TryGetValue("recentPriority", out var priorityObj))
+                {
+                    var priorityStr = priorityObj?.ToString();
+                    if (!string.IsNullOrEmpty(priorityStr) && priorityStr != "default")
+                    {
+                        priority = priorityStr switch
+                        {
+                            "force" => 100,
+                            "high" => 50,
+                            "normal" => 0,
+                            "low" => -50,
+                            _ => 0
+                        };
+                    }
+                }
+
+                // Create JSON-RPC request for append method
+                var rpcRequest = new
+                {
+                    method = "append",
+                    @params = new object[]
+                    {
+                        result.Title,        // NZBFilename
+                        nzbUrl,             // NZBContent (URL in this case)
+                        category,           // Category
+                        priority,           // Priority
+                        false,              // AddToTop
+                        false,              // AddPaused
+                        "",                 // DupeKey (empty)
+                        0,                  // DupeScore
+                        "SCORE",            // DupeMode
+                        new object[0]       // PPParameters (empty array)
+                    },
+                    id = 1
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Failed to add NZB to NZBGet. Status: {Status}, Response: {Response}", 
+                        response.StatusCode, responseContent);
+                    throw new Exception($"Failed to add NZB to NZBGet: {response.StatusCode}");
+                }
+
+                // Parse JSON-RPC response
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (rpcResponse.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
+                {
+                    var errorMsg = "Unknown error";
+                    if (error.TryGetProperty("message", out var errorMessage))
+                    {
+                        errorMsg = errorMessage.GetString() ?? "Unknown error";
+                    }
+                    throw new Exception($"NZBGet RPC error: {errorMsg}");
+                }
+
+                // Get the NZB ID from the result
+                string nzbId = Guid.NewGuid().ToString(); // Default fallback
+                if (rpcResponse.TryGetProperty("result", out var resultProp) && resultProp.ValueKind == JsonValueKind.Number)
+                {
+                    nzbId = resultProp.GetInt32().ToString();
+                }
+
+                _logger.LogInformation("Successfully added NZB to NZBGet with ID: {NzbId}", nzbId);
+                return nzbId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send NZB to NZBGet");
+                throw;
+            }
         }
 
         public async Task<List<QueueItem>> GetQueueAsync()
@@ -729,10 +1050,157 @@ namespace Listenarr.Api.Services
 
         private async Task<List<QueueItem>> GetTransmissionQueueAsync(DownloadClientConfiguration client)
         {
-            // TODO: Implement Transmission queue retrieval
-            _logger.LogInformation("Transmission queue retrieval not yet implemented");
-            await Task.Delay(1);
-            return new List<QueueItem>();
+            var items = new List<QueueItem>();
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
+
+            try
+            {
+                // Get session ID
+                string sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
+
+                // Create torrent-get RPC request
+                var rpcRequest = new
+                {
+                    method = "torrent-get",
+                    arguments = new
+                    {
+                        fields = new[]
+                        {
+                            "id", "name", "status", "percentDone", "totalSize", "downloadedEver",
+                            "rateDownload", "eta", "addedDate", "labels", "downloadDir",
+                            "peersSendingToUs", "peersGettingFromUs", "uploadRatio"
+                        }
+                    },
+                    tag = 2
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Set required headers
+                httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
+                
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Transmission queue request failed with status {Status}", response.StatusCode);
+                    return items;
+                }
+
+                // Parse response
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (!rpcResponse.TryGetProperty("result", out var result) || result.GetString() != "success")
+                {
+                    _logger.LogWarning("Transmission returned non-success result");
+                    return items;
+                }
+
+                if (!rpcResponse.TryGetProperty("arguments", out var args) ||
+                    !args.TryGetProperty("torrents", out var torrents) ||
+                    torrents.ValueKind != JsonValueKind.Array)
+                {
+                    return items;
+                }
+
+                foreach (var torrent in torrents.EnumerateArray())
+                {
+                    try
+                    {
+                        var id = torrent.TryGetProperty("id", out var idProp) ? idProp.GetInt32().ToString() : "";
+                        var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "Unknown" : "Unknown";
+                        var status = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
+                        var percentDone = torrent.TryGetProperty("percentDone", out var percentProp) ? percentProp.GetDouble() * 100 : 0;
+                        var totalSize = torrent.TryGetProperty("totalSize", out var sizeProp) ? sizeProp.GetInt64() : 0;
+                        var downloadedEver = torrent.TryGetProperty("downloadedEver", out var downloadedProp) ? downloadedProp.GetInt64() : 0;
+                        var rateDownload = torrent.TryGetProperty("rateDownload", out var rateProp) ? rateProp.GetDouble() : 0;
+                        var eta = torrent.TryGetProperty("eta", out var etaProp) ? etaProp.GetInt32() : -1;
+                        var addedDate = torrent.TryGetProperty("addedDate", out var addedProp) ? addedProp.GetInt64() : 0;
+                        var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() ?? "" : "";
+                        var seeders = torrent.TryGetProperty("peersSendingToUs", out var seedersProp) ? (int?)seedersProp.GetInt32() : null;
+                        var leechers = torrent.TryGetProperty("peersGettingFromUs", out var leechersProp) ? (int?)leechersProp.GetInt32() : null;
+                        var ratio = torrent.TryGetProperty("uploadRatio", out var ratioProp) ? (double?)ratioProp.GetDouble() : null;
+
+                        // Get labels/category
+                        var quality = "Unknown";
+                        if (torrent.TryGetProperty("labels", out var labelsProp) && labelsProp.ValueKind == JsonValueKind.Array)
+                        {
+                            var labelList = labelsProp.EnumerateArray().Select(l => l.GetString()).Where(l => !string.IsNullOrEmpty(l)).ToList();
+                            if (labelList.Any())
+                            {
+                                quality = string.Join(", ", labelList);
+                            }
+                        }
+
+                        // Apply remote path mapping
+                        var localPath = !string.IsNullOrEmpty(downloadDir)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, downloadDir)
+                            : downloadDir;
+
+                        // Map Transmission status to our status
+                        var mappedStatus = status switch
+                        {
+                            0 => "paused",      // TR_STATUS_STOPPED
+                            1 => "queued",      // TR_STATUS_CHECK_WAIT
+                            2 => "downloading", // TR_STATUS_CHECK
+                            3 => "queued",      // TR_STATUS_DOWNLOAD_WAIT
+                            4 => "downloading", // TR_STATUS_DOWNLOAD
+                            5 => "queued",      // TR_STATUS_SEED_WAIT
+                            6 => "seeding",     // TR_STATUS_SEED
+                            _ => "queued"
+                        };
+
+                        items.Add(new QueueItem
+                        {
+                            Id = id,
+                            Title = name,
+                            Quality = quality,
+                            Status = mappedStatus,
+                            Progress = percentDone,
+                            Size = totalSize,
+                            Downloaded = downloadedEver,
+                            DownloadSpeed = rateDownload,
+                            Eta = eta > 0 ? eta : null,
+                            DownloadClient = client.Name,
+                            DownloadClientId = client.Id,
+                            DownloadClientType = "transmission",
+                            AddedAt = DateTimeOffset.FromUnixTimeSeconds(addedDate).DateTime,
+                            Seeders = seeders,
+                            Leechers = leechers,
+                            Ratio = ratio,
+                            CanPause = mappedStatus == "downloading" || mappedStatus == "seeding",
+                            CanRemove = true,
+                            RemotePath = downloadDir,
+                            LocalPath = localPath
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error parsing Transmission torrent item");
+                    }
+                }
+
+                _logger.LogInformation("Retrieved {Count} items from Transmission queue", items.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Transmission queue");
+            }
+
+            return items;
         }
 
         private async Task<List<QueueItem>> GetSABnzbdQueueAsync(DownloadClientConfiguration client)
@@ -954,10 +1422,154 @@ namespace Listenarr.Api.Services
 
         private async Task<List<QueueItem>> GetNZBGetQueueAsync(DownloadClientConfiguration client)
         {
-            // TODO: Implement NZBGet queue retrieval
-            _logger.LogInformation("NZBGet queue retrieval not yet implemented");
-            await Task.Delay(1);
-            return new List<QueueItem>();
+            var items = new List<QueueItem>();
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
+
+            try
+            {
+                // Create JSON-RPC request for listgroups method
+                var rpcRequest = new
+                {
+                    method = "listgroups",
+                    @params = new object[0],
+                    id = 1
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("NZBGet queue request failed with status {Status}", response.StatusCode);
+                    return items;
+                }
+
+                // Parse JSON-RPC response
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (rpcResponse.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
+                {
+                    var errorMsg = "Unknown error";
+                    if (error.TryGetProperty("message", out var errorMessage))
+                    {
+                        errorMsg = errorMessage.GetString() ?? "Unknown error";
+                    }
+                    _logger.LogWarning("NZBGet returned error: {Error}", errorMsg);
+                    return items;
+                }
+
+                if (!rpcResponse.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+                {
+                    return items;
+                }
+
+                foreach (var group in result.EnumerateArray())
+                {
+                    try
+                    {
+                        var nzbId = group.TryGetProperty("NZBID", out var nzbIdProp) ? nzbIdProp.GetInt32().ToString() : "";
+                        var nzbName = group.TryGetProperty("NZBName", out var nameProp) ? nameProp.GetString() ?? "Unknown" : "Unknown";
+                        var category = group.TryGetProperty("Category", out var catProp) ? catProp.GetString() ?? "" : "";
+                        var status = group.TryGetProperty("Status", out var statusProp) ? statusProp.GetString() ?? "" : "";
+                        var fileSizeMB = group.TryGetProperty("FileSizeMB", out var sizeProp) ? sizeProp.GetInt64() : 0;
+                        var remainingFileSizeMB = group.TryGetProperty("RemainingSizeMB", out var remainProp) ? remainProp.GetInt64() : 0;
+                        var downloadedSizeMB = fileSizeMB - remainingFileSizeMB;
+                        var downloadRate = group.TryGetProperty("DownloadRate", out var rateProp) ? rateProp.GetDouble() : 0;
+                        var postTotalTimeSec = group.TryGetProperty("PostTotalTimeSec", out var postTimeProp) ? postTimeProp.GetInt32() : 0;
+                        var downloadTimeSec = group.TryGetProperty("DownloadTimeSec", out var dlTimeProp) ? dlTimeProp.GetInt32() : 0;
+
+                        // Calculate progress percentage
+                        var progress = fileSizeMB > 0 ? ((double)(fileSizeMB - remainingFileSizeMB) / fileSizeMB) * 100 : 0;
+
+                        // Estimate ETA based on download rate and remaining size
+                        int? eta = null;
+                        if (downloadRate > 0 && remainingFileSizeMB > 0)
+                        {
+                            eta = (int)((remainingFileSizeMB * 1024 * 1024) / downloadRate);
+                        }
+
+                        // Convert MB to bytes
+                        var sizeBytes = fileSizeMB * 1024 * 1024;
+                        var downloadedBytes = downloadedSizeMB * 1024 * 1024;
+
+                        // Map NZBGet status to our status
+                        var mappedStatus = status.ToUpper() switch
+                        {
+                            "DOWNLOADING" => "downloading",
+                            "QUEUED" => "queued",
+                            "PAUSED" => "paused",
+                            "PP_QUEUED" => "downloading",
+                            "LOADING_PARS" => "downloading",
+                            "VERIFYING_SOURCES" => "downloading",
+                            "REPAIRING" => "downloading",
+                            "VERIFYING_REPAIRED" => "downloading",
+                            "RENAMING" => "downloading",
+                            "UNPACKING" => "downloading",
+                            "MOVING" => "downloading",
+                            "EXECUTING_SCRIPT" => "downloading",
+                            "PP_FINISHED" => "completed",
+                            "SUCCESS" => "completed",
+                            "WARNING" => "completed",
+                            "FAILURE" => "failed",
+                            "DELETED" => "failed",
+                            _ => "queued"
+                        };
+
+                        // NZBGet doesn't provide download path in queue, use client config
+                        var remotePath = client.DownloadPath ?? "";
+                        var localPath = !string.IsNullOrEmpty(remotePath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, remotePath)
+                            : remotePath;
+
+                        items.Add(new QueueItem
+                        {
+                            Id = nzbId,
+                            Title = nzbName,
+                            Quality = category,
+                            Status = mappedStatus,
+                            Progress = progress,
+                            Size = sizeBytes,
+                            Downloaded = downloadedBytes,
+                            DownloadSpeed = downloadRate,
+                            Eta = eta,
+                            DownloadClient = client.Name,
+                            DownloadClientId = client.Id,
+                            DownloadClientType = "nzbget",
+                            AddedAt = DateTime.UtcNow, // NZBGet doesn't provide timestamp in queue
+                            CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
+                            CanRemove = true,
+                            RemotePath = remotePath,
+                            LocalPath = localPath
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error parsing NZBGet queue item");
+                    }
+                }
+
+                _logger.LogInformation("Retrieved {Count} items from NZBGet queue", items.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting NZBGet queue");
+            }
+
+            return items;
         }
 
         private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, string downloadId)
@@ -1005,11 +1617,85 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<bool> RemoveFromTransmissionAsync(DownloadClientConfiguration client, string downloadId)
+        private async Task<bool> RemoveFromTransmissionAsync(DownloadClientConfiguration client, string torrentId)
         {
-            // TODO: Implement
-            await Task.Delay(1);
-            return false;
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
+
+            try
+            {
+                // Get session ID
+                string sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
+
+                // Parse torrent ID
+                if (!int.TryParse(torrentId, out var id))
+                {
+                    _logger.LogWarning("Invalid Transmission torrent ID: {TorrentId}", torrentId);
+                    return false;
+                }
+
+                // Create torrent-remove RPC request
+                var rpcRequest = new
+                {
+                    method = "torrent-remove",
+                    arguments = new
+                    {
+                        ids = new[] { id },
+                        deleteLocalData = true  // Remove files as well
+                    },
+                    tag = 3
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Set required headers
+                httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
+                
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to remove from Transmission: Status {Status}, Response: {Response}", 
+                        response.StatusCode, responseContent);
+                    return false;
+                }
+
+                // Parse response
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (rpcResponse.TryGetProperty("result", out var result) && result.GetString() == "success")
+                {
+                    _logger.LogInformation("Successfully removed torrent {TorrentId} from Transmission", torrentId);
+                    return true;
+                }
+                else
+                {
+                    var errorMsg = "Unknown error";
+                    if (rpcResponse.TryGetProperty("result", out var resultMsg))
+                    {
+                        errorMsg = resultMsg.GetString() ?? "Unknown error";
+                    }
+                    _logger.LogWarning("Transmission removal failed: {Error}", errorMsg);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing torrent from Transmission: {TorrentId}", torrentId);
+                return false;
+            }
         }
 
         private async Task<bool> RemoveFromSABnzbdAsync(DownloadClientConfiguration client, string downloadId)
@@ -1074,11 +1760,82 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<bool> RemoveFromNZBGetAsync(DownloadClientConfiguration client, string downloadId)
+        private async Task<bool> RemoveFromNZBGetAsync(DownloadClientConfiguration client, string nzbId)
         {
-            // TODO: Implement
-            await Task.Delay(1);
-            return false;
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
+
+            try
+            {
+                // Parse NZB ID
+                if (!int.TryParse(nzbId, out var id))
+                {
+                    _logger.LogWarning("Invalid NZBGet NZB ID: {NzbId}", nzbId);
+                    return false;
+                }
+
+                // Create JSON-RPC request for groupdelete method
+                var rpcRequest = new
+                {
+                    method = "groupdelete",
+                    @params = new object[] { id, true }, // id, deleteFiles
+                    id = 1
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Add basic auth if credentials provided
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                // Clear auth header after request
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to remove from NZBGet: Status {Status}, Response: {Response}", 
+                        response.StatusCode, responseContent);
+                    return false;
+                }
+
+                // Parse JSON-RPC response
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (rpcResponse.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
+                {
+                    var errorMsg = "Unknown error";
+                    if (error.TryGetProperty("message", out var errorMessage))
+                    {
+                        errorMsg = errorMessage.GetString() ?? "Unknown error";
+                    }
+                    _logger.LogWarning("NZBGet removal failed: {Error}", errorMsg);
+                    return false;
+                }
+
+                // Check if removal was successful
+                if (rpcResponse.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.True)
+                {
+                    _logger.LogInformation("Successfully removed NZB {NzbId} from NZBGet", nzbId);
+                    return true;
+                }
+                else
+                {
+                    _logger.LogWarning("NZBGet removal returned false result for NZB {NzbId}", nzbId);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing NZB from NZBGet: {NzbId}", nzbId);
+                return false;
+            }
         }
 
         private async Task LogDownloadHistory(Audiobook audiobook, string indexerName, SearchResult result)
