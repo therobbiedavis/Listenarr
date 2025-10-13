@@ -104,18 +104,38 @@ namespace Listenarr.Api.Controllers
         [HttpPost("logout")]
         public async Task<IActionResult> Logout()
         {
-            _logger.LogInformation("Logout request received for user: {Username}", User?.Identity?.Name ?? "Anonymous");
+            var username = User?.Identity?.Name ?? "Anonymous";
+            var authType = User?.Identity?.AuthenticationType ?? "Unknown";
+            
+            _logger.LogInformation("Logout request received for user: {Username} (AuthType: {AuthType})", username, authType);
             
             try
             {
-                await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                _logger.LogInformation("User {Username} logged out successfully", User?.Identity?.Name ?? "Anonymous");
-                return Ok(new { message = "Logged out" });
+                // Check if user is authenticated via cookie
+                if (User?.Identity?.AuthenticationType == CookieAuthenticationDefaults.AuthenticationScheme)
+                {
+                    await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    _logger.LogInformation("Cookie-authenticated user {Username} logged out successfully", username);
+                }
+                else if (User?.Identity?.AuthenticationType == "ApiKey" || username == "ApiKey")
+                {
+                    // API key authentication doesn't have a server-side session to clear
+                    // The client should stop sending the API key header
+                    _logger.LogInformation("API key authenticated user logged out (client should stop sending API key)");
+                }
+                else
+                {
+                    // Fallback: try to sign out anyway
+                    await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    _logger.LogInformation("User {Username} with auth type {AuthType} logged out", username, authType);
+                }
+                
+                return Ok(new { message = "Logged out successfully", authType = authType });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during logout for user: {Username}", User?.Identity?.Name ?? "Anonymous");
-                return StatusCode(500, new { message = "Error during logout" });
+                _logger.LogError(ex, "Error during logout for user: {Username} (AuthType: {AuthType})", username, authType);
+                return StatusCode(500, new { message = "Error during logout", error = ex.Message });
             }
         }
 
