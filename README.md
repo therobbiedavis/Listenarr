@@ -38,7 +38,38 @@ Join our community on Discord for help, announcements, and discussion: https://d
 
 ## Setup
 
-The easiest way to get started is to use Docker or npm scripts:
+The easiest way to get started is to use Docker/Executables or npm scripts:
+
+### Executables
+While Listenarr provides executables for Windows, Linux, and MacOS, only Windows is tested due to hardware access limitations.
+
+- Download and extract the release that matches your system
+
+ #### Windows
+ ```cmd
+cd .\publish\win-x64
+.\Listenarr.Api.exe
+```
+
+#### MacOS (port 5000 is used by Airplay, please disable or override port)
+```terminal
+cd ./publish/osx-x64  # or osx-arm64 for Apple Silicon
+chmod +x Listenarr.Api
+./Listenarr.Api
+```
+
+#### Linux
+```terminal
+cd ./publish/linux-x64
+chmod +x Listenarr.Api
+./Listenarr.Api
+```
+
+**Service will be available at:**
+- Web App: http://localhost:5000
+
+**Note**:
+If you need to override the port, use `--urls "http://localhost:5656"` when running the executable
 
 ### Docker
 
@@ -47,7 +78,7 @@ docker-compose up -d
 ```
 
 **Service will be available at:**
-- Web App: http://localhost:5656
+- Web App: http://localhost:5000
 
 The Docker image includes both the backend API and frontend in a single container. For production, use the latest stable image from Docker Hub.
 
