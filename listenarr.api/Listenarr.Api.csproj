@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.1.7</Version>
-    <AssemblyVersion>0.1.7</AssemblyVersion>
+    <Version>0.1.8</Version>
+    <AssemblyVersion>0.1.8</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -85,7 +85,7 @@
     <Copy SourceFiles="@(FrontendDistFilesForNestedPublish)" DestinationFiles="@(FrontendDistFilesForNestedPublish-&gt;'$(MSBuildProjectDirectory)\\publish\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
-  <!-- Exclude config.json from publish since it's now generated at runtime -->
+  
   <ItemGroup>
     <Content Remove="config\config.json" />
     <None Remove="config\config.json" />
