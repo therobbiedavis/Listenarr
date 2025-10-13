@@ -179,20 +179,31 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
             options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
                 ? CookieSecurePolicy.None
                 : CookieSecurePolicy.Always; // require HTTPS in production
-        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+        // When running behind a reverse proxy and the frontend is on a different origin,
+        // browsers require SameSite=None and Secure to allow cookies across origins.
+        // Use Lax in development for local convenience.
+        options.Cookie.SameSite = builder.Environment.IsDevelopment()
+            ? Microsoft.AspNetCore.Http.SameSiteMode.Lax
+            : Microsoft.AspNetCore.Http.SameSiteMode.None;
         options.ExpireTimeSpan = TimeSpan.FromDays(7);
         // Configure events to handle logout properly behind reverse proxy
         options.Events.OnSigningOut = context =>
         {
-            // Ensure the cookie is properly cleared by setting it to expire
-            context.Response.Cookies.Delete(options.Cookie.Name!, new Microsoft.AspNetCore.Http.CookieOptions
+            // Explicitly overwrite the authentication cookie with an expired one matching
+            // the same attributes so browsers will remove it even when behind a proxy.
+            var cookieName = options.Cookie.Name ?? "listenarr_auth";
+            var cookieOptions = new Microsoft.AspNetCore.Http.CookieOptions
             {
                 Path = options.Cookie.Path,
                 Domain = options.Cookie.Domain,
                 SameSite = options.Cookie.SameSite,
                 HttpOnly = options.Cookie.HttpOnly,
-                Secure = options.Cookie.SecurePolicy == CookieSecurePolicy.Always
-            });
+                Secure = options.Cookie.SecurePolicy == CookieSecurePolicy.Always,
+                Expires = DateTimeOffset.UtcNow.AddDays(-1)
+            };
+
+            context.Response.Cookies.Append(cookieName, string.Empty, cookieOptions);
+            context.Response.Cookies.Delete(cookieName, cookieOptions);
             return Task.CompletedTask;
         };
     });

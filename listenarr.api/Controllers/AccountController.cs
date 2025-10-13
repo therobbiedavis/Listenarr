@@ -101,8 +101,9 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        [HttpPost("logout")]
-        public async Task<IActionResult> Logout()
+    [HttpPost("logout")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Logout()
         {
             var username = User?.Identity?.Name ?? "Anonymous";
             var authType = User?.Identity?.AuthenticationType ?? "Unknown";
