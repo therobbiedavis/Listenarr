@@ -104,8 +104,19 @@ namespace Listenarr.Api.Controllers
         [HttpPost("logout")]
         public async Task<IActionResult> Logout()
         {
-            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Ok(new { message = "Logged out" });
+            _logger.LogInformation("Logout request received for user: {Username}", User?.Identity?.Name ?? "Anonymous");
+            
+            try
+            {
+                await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                _logger.LogInformation("User {Username} logged out successfully", User?.Identity?.Name ?? "Anonymous");
+                return Ok(new { message = "Logged out" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during logout for user: {Username}", User?.Identity?.Name ?? "Anonymous");
+                return StatusCode(500, new { message = "Error during logout" });
+            }
         }
 
     [HttpGet("me")]
