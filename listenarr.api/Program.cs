@@ -136,29 +136,29 @@ builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
 // Register Playwright page fetcher for JS-rendered pages and bot-workarounds
 // Playwright-based page fetcher removed; AudibleMetadataService will create Playwright on-demand if needed.
 
-// Add CORS support for frontend
-builder.Services.AddCors(options =>
+// CORS is handled by reverse proxy (nginx, Traefik, Caddy, etc.)
+// Only add CORS support for local development
+if (builder.Environment.IsDevelopment())
 {
-    options.AddPolicy("AllowVueApp",
-        policy =>
-        {
-            policy.WithOrigins(
-                    "http://localhost:5173",
-                    "https://localhost:5173",
-                    "http://localhost:3000",
-                    "https://localhost:3000"
-                )
-                .AllowAnyHeader()
-                .AllowAnyMethod()
-                .AllowCredentials(); // Required for SignalR
-        });
-
-    // Development fallback (use cautiously). This can help diagnose unexpected origin mismatches.
-    options.AddPolicy("DevAll", p => p
-    .AllowAnyOrigin()
-    .AllowAnyHeader()
-    .AllowAnyMethod());
-});
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy("DevOnly",
+            policy =>
+            {
+                policy.WithOrigins(
+                        "http://localhost:5173",
+                        "https://localhost:5173",
+                        "http://localhost:3000",
+                        "https://localhost:3000",
+                        "http://127.0.0.1:5173",
+                        "https://127.0.0.1:5173"
+                    )
+                    .AllowAnyHeader()
+                    .AllowAnyMethod()
+                    .AllowCredentials(); // Required for SignalR
+            });
+    });
+}
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -197,11 +197,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         };
     });
 
-// Configure forwarded headers for reverse proxy support
+// Configure forwarded headers - required for apps behind reverse proxy
+// This allows the app to see the real client IP and original protocol (HTTP/HTTPS)
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
-    // Clear the known networks and proxies lists to allow any proxy
+    // Only forward the essential headers needed for proper operation
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    
+    // Trust any proxy since this app runs in a controlled Docker/reverse proxy environment
+    // Users are responsible for configuring their reverse proxy securely
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
@@ -308,24 +312,20 @@ if (app.Environment.IsDevelopment())
 }
 
 // Use forwarded headers middleware (must be early in pipeline)
+// This processes X-Forwarded-For and X-Forwarded-Proto headers from the reverse proxy
 app.UseForwardedHeaders();
 
-app.UseHttpsRedirection();
+// Note: HTTPS redirection is handled by the reverse proxy, not by this application
 
     // Serve frontend static files from wwwroot (index.html + assets)
     // DefaultFiles enables serving index.html when requesting '/'
     app.UseDefaultFiles();
     app.UseStaticFiles();
 
-// Enable CORS (use restrictive policy by default, allow override via environment var)
-var corsPolicy = Environment.GetEnvironmentVariable("LISTENARR_CORS_POLICY");
-if (!string.IsNullOrWhiteSpace(corsPolicy) && corsPolicy == "DevAll")
+// Enable CORS only in development (production should use reverse proxy for CORS)
+if (app.Environment.IsDevelopment())
 {
-    app.UseCors("DevAll");
-}
-else
-{
-    app.UseCors("AllowVueApp");
+    app.UseCors("DevOnly");
 }
     // Enable authentication middleware
     app.UseAuthentication();
@@ -336,7 +336,6 @@ else
     // Validate antiforgery tokens for unsafe methods
     app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
     app.UseAuthorization();
-app.UseAuthorization();
 
 app.MapControllers();
 
