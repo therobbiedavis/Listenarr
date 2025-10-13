@@ -130,16 +130,32 @@ jobs:
               console.log(`Branch delete skipped or failed: ${err.message}`);
             }
 
-      - name: Get PR body
-        id: pr_body
+      - name: Find Current Pull Request
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+        with:
+          state: all
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Parse PR body
+        id: parse-body
         run: |
-          PR_BODY=$(gh api repos/${{ github.repository }}/pulls/${{ steps.create_pr.outputs['pull-request-number'] }} --jq .body)
-          FULL_BODY=$(printf '%s\n\n---\n\nAutomated release build.\n\nVersion: ${{ steps.resolve-version.outputs.VERSION }}\nCommit: ${{ github.sha }}' "$PR_BODY")
-          echo "FULL_BODY<<EOF" >> $GITHUB_OUTPUT
-          echo "$FULL_BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          body="${{ steps.findPr.outputs.body }}"
+          if [[ ${#body} -gt 1870 ]] ; then
+            body=${body:0:1870}
+            body="${body}...and much more.
+
+            Read full changelog: https://github.com/therobbiedavis/Listenarr/pull/${{ steps.findPr.outputs.pr }}"
+          fi
+
+          body=${body//\'/}
+          body=${body//'%'/'%25'}
+          body=${body//$'\n'/'%0A'}
+          body=${body//$'\r'/'%0D'}
+          body=${body//$'`'/'%60'}
+          body=${body//$'>'/'%3E'}
+          echo $body
+          echo "BODY=$body" >> $GITHUB_OUTPUT
 
       - name: Build solution
         run: dotnet build listenarr.sln -c Release --no-restore
@@ -185,7 +201,7 @@ jobs:
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v1
         with:
-          body: ${{ steps.pr_body.outputs.FULL_BODY }}
+          body: ${{ steps.findPr.outputs.body }}
           files: artifacts/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -206,5 +222,15 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:stable
             ${{ steps.set-tags.outputs.API_IMAGE }}:latest
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
+
+      - name: Notify Discord
+        uses: rjstone/discord-webhook-notify@v1
+        if: ${{ github.repository_owner == 'Kareadita' }}
+        with:
+            severity: info
+            description: v${{steps.resolve-version.outputs.VERSION}} - ${{ steps.findPr.outputs.title }}
+            details: '${{ steps.findPr.outputs.body }}'
+            text: A new stable build has been released for docker.
+            webhookUrl: ${{ secrets.DISCORD_DOCKER_UPDATE_URL }}
 
       # Skipped: separate Web image. The API image contains the frontend in wwwroot.
