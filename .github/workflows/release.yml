@@ -168,18 +168,18 @@ jobs:
           
           # Filter out version bump PRs and find the first non-version-bump PR
           FILTERED_PR=$(echo "$PR_DATA" | jq -r '
-            .data.repository.pullRequests.edges[] |
+            [.data.repository.pullRequests.edges[] |
             select(
               (.node.title | test("[Bb]ump version|[Vv]ersion bump|\\[skip ci\\]"; "i") | not) and
               (.node.labels.nodes | map(.name) | any(. == "version-bump" or . == "automated") | not)
             ) |
             .node | 
-            {number, title, body, baseRefName}
-          ' | head -n 1)
+            {number, title, body, baseRefName}][0] // null
+          ')
           
           # Debug: Show what PRs we found
           echo "Recent PRs found:"
-          echo "$PR_DATA" | jq -r '.data.repository.pullRequests.edges[] | "PR #\(.node.number): \(.node.title)"' | head -5
+          echo "$PR_DATA" | jq -r '.data.repository.pullRequests.edges[:5][] | "PR #\(.node.number): \(.node.title)"'
           
           # Extract PR details from the filtered result
           if [ "$FILTERED_PR" != "" ] && [ "$FILTERED_PR" != "null" ]; then
