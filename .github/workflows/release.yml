@@ -177,6 +177,10 @@ jobs:
             {number, title, body, baseRefName}
           ' | head -n 1)
           
+          # Debug: Show what PRs we found
+          echo "Recent PRs found:"
+          echo "$PR_DATA" | jq -r '.data.repository.pullRequests.edges[] | "PR #\(.node.number): \(.node.title)"' | head -5
+          
           # Extract PR details from the filtered result
           if [ "$FILTERED_PR" != "" ] && [ "$FILTERED_PR" != "null" ]; then
             PR_NUMBER=$(echo "$FILTERED_PR" | jq -r '.number // ""')
@@ -184,9 +188,9 @@ jobs:
             PR_BODY_RAW=$(echo "$FILTERED_PR" | jq -r '.body // ""')
             PR_BASE_REF=$(echo "$FILTERED_PR" | jq -r '.baseRefName // ""')
             
-            echo "Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
+            echo "✅ Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
           else
-            echo "No non-version-bump PR found, using fallback"
+            echo "⚠️ No non-version-bump PR found, using fallback"
             PR_NUMBER=""
             PR_TITLE="Release changes"
             PR_BODY_RAW="Changes included in this release."
