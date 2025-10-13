@@ -334,6 +334,11 @@ class ApiService {
     return this.request<{ apiKey: string }>('/configuration/apikey/regenerate', { method: 'POST' })
   }
 
+  // Generate initial API key for first-time setup. Returns the new API key in the response.
+  async generateInitialApiKey(): Promise<{ apiKey: string; message?: string }> {
+    return this.request<{ apiKey: string; message?: string }>('/configuration/apikey/generate-initial', { method: 'POST' })
+  }
+
   // Amazon ASIN lookup
   async getAsinFromIsbn(isbn: string): Promise<{ success: boolean; asin?: string; error?: string }> {
     return this.request<{ success: boolean; asin?: string; error?: string }>(`/amazon/asin-from-isbn/${encodeURIComponent(isbn)}`)

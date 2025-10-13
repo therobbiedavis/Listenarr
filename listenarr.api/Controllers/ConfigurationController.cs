@@ -19,6 +19,7 @@
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using System.Linq;
 
 namespace Listenarr.Api.Controllers
 {
@@ -28,11 +29,13 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<ConfigurationController> _logger;
+        private readonly IUserService _userService;
 
-        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger)
+        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger, IUserService userService)
         {
             _configurationService = configurationService;
             _logger = logger;
+            _userService = userService;
         }
 
         // API Configuration endpoints
@@ -232,9 +235,9 @@ namespace Listenarr.Api.Controllers
         }
 
         // Regenerate API key (requires authentication)
-    [HttpPost("apikey/regenerate")]
-    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator")]
-    public async Task<ActionResult<object>> RegenerateApiKey()
+        [HttpPost("apikey/regenerate")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator")]
+        public async Task<ActionResult<object>> RegenerateApiKey()
         {
             try
             {
@@ -254,6 +257,48 @@ namespace Listenarr.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error regenerating API key");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        // Generate API key for initial setup (when no API key exists and no users exist)
+        [HttpPost("apikey/generate-initial")]
+        public async Task<ActionResult<object>> GenerateInitialApiKey()
+        {
+            try
+            {
+                // Only allow this endpoint when there are no users in the system
+                // This prevents bypassing authentication after initial setup
+                var userCount = await _userService.GetUsersCountAsync();
+                if (userCount > 0)
+                {
+                    return StatusCode(403, "Initial API key generation is only allowed when no users exist");
+                }
+
+                var cfg = await _configurationService.GetStartupConfigAsync();
+                var current = cfg ?? new StartupConfig();
+                
+                // Only generate if no API key exists
+                if (!string.IsNullOrWhiteSpace(current.ApiKey))
+                {
+                    return Ok(new { apiKey = current.ApiKey, message = "API key already exists" });
+                }
+
+                // Generate a new API key (cryptographically secure)
+                var bytes = new byte[32];
+                using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(bytes);
+                }
+                var newKey = Convert.ToBase64String(bytes).TrimEnd('=');
+                current.ApiKey = newKey;
+                await _configurationService.SaveStartupConfigAsync(current);
+                _logger.LogInformation("Initial API key generated successfully");
+                return Ok(new { apiKey = newKey });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating initial API key");
                 return StatusCode(500, "Internal server error");
             }
         }

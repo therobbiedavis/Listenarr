@@ -580,11 +580,12 @@
                     class="regenerate-button input-group-btn"
                     @click="regenerateApiKey"
                     :disabled="loadingApiKey"
-                    title="Regenerate API key"
+                    :title="startupConfig?.apiKey ? 'Regenerate API key' : 'Generate API key'"
                   >
                     <i v-if="loadingApiKey" class="ph ph-spinner ph-spin"></i>
-                    <i v-else class="ph ph-arrow-counter-clockwise"></i>
-                    <span v-if="!loadingApiKey">Regenerate</span>
+                    <i v-else-if="startupConfig?.apiKey" class="ph ph-arrow-counter-clockwise"></i>
+                    <i v-else class="ph ph-plus"></i>
+                    <span v-if="!loadingApiKey">{{ startupConfig?.apiKey ? 'Regenerate' : 'Generate' }}</span>
                   </button>
                 </div>
               </div>
@@ -794,21 +795,46 @@ const copyApiKey = async () => {
 }
 
 const regenerateApiKey = async () => {
-  if (!confirm('Regenerating the API key will immediately invalidate the existing key. Continue?')) return
+  const hasExistingKey = !!(startupConfig.value?.apiKey)
+  
+  // Different confirmation messages based on whether an API key exists
+  const confirmMessage = hasExistingKey 
+    ? 'Regenerating the API key will immediately invalidate the existing key. Continue?'
+    : 'Generate a new API key for this server instance?'
+    
+  if (!confirm(confirmMessage)) return
+  
   loadingApiKey.value = true
   try {
-    const resp = await apiService.regenerateApiKey()
+    let resp: { apiKey: string; message?: string }
+    
+    // Try initial generation first (for setup scenarios or if no key exists)
+    if (!hasExistingKey) {
+      try {
+        resp = await apiService.generateInitialApiKey()
+        startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
+        info(resp.message || 'API key generated - copied to clipboard')
+        try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
+        return
+      } catch (initialErr) {
+        // If initial generation fails (e.g., users exist), try authenticated regeneration
+        console.debug('Initial API key generation failed, trying authenticated regeneration', initialErr)
+      }
+    }
+    
+    // Fall back to authenticated regeneration
+    resp = await apiService.regenerateApiKey()
     startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
     info('API key regenerated - copied to clipboard')
     try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
   } catch (err) {
-    console.error('Failed to regenerate API key', err)
+    console.error('Failed to generate/regenerate API key', err)
     // If server returns 401/403, suggest logging in as admin
     const status = (err && typeof err === 'object' && err !== null && 'status' in err) ? (err as { status: number }).status : 0
     if (status === 401 || status === 403) {
       showError('You must be logged in as an administrator to regenerate the API key. Please login and try again.')
     } else {
-      showError('Failed to regenerate API key')
+      showError('Failed to generate/regenerate API key')
     }
   } finally {
     loadingApiKey.value = false
