@@ -25,7 +25,6 @@ using Microsoft.EntityFrameworkCore;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
-Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:5656");
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
 // Configure logging
