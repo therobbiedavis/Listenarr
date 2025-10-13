@@ -11,6 +11,7 @@ namespace Listenarr.Api.Services
         Task UpdatePasswordAsync(string username, string newPassword);
         Task<bool> ValidateCredentialsAsync(string username, string password);
         Task<List<User>> GetAdminUsersAsync();
+        Task<int> GetUsersCountAsync();
     }
 
     public class UserService : IUserService
@@ -67,6 +68,11 @@ namespace Listenarr.Api.Services
         public async Task<List<User>> GetAdminUsersAsync()
         {
             return await _db.Users.Where(u => u.IsAdmin).ToListAsync();
+        }
+
+        public async Task<int> GetUsersCountAsync()
+        {
+            return await _db.Users.CountAsync();
         }
 
         // PBKDF2 with HMACSHA256

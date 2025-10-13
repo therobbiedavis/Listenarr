@@ -130,23 +130,140 @@ jobs:
               console.log(`Branch delete skipped or failed: ${err.message}`);
             }
 
-      - name: Find Current Pull Request
-        uses: jwalton/gh-find-current-pr@v1
-        id: findPr
-        with:
-          state: all
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get PR body
-        id: pr_body
+      - name: Find triggering Pull Request
+        id: find_triggering_pr
         run: |
-          PR_BODY=$(gh api repos/${{ github.repository }}/pulls/${{ steps.create_pr.outputs['pull-request-number'] }} --jq .body)
-          FULL_BODY=$(printf '%s\n\n---\n\nAutomated nightly build.\n\nVersion: ${{ steps.resolve-version.outputs.VERSION }}\nCommit: ${{ github.sha }}' "$PR_BODY")
-          echo "FULL_BODY<<EOF" >> $GITHUB_OUTPUT
-          echo "$FULL_BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # For release workflow, we need to find the PR that was merged to main
+          # which resulted in this tag being created, excluding version bump PRs
+          
+          # First, get the tag information and find the commit it points to
+          TAG_COMMIT=$(git rev-list -n 1 ${{ github.ref }})
+          echo "Tag ${{ github.ref }} points to commit: $TAG_COMMIT"
+          
+          # Find recent merged PRs to main, including labels for filtering
+          PR_DATA=$(gh api graphql -f query='
+            query($owner: String!, $repo: String!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequests(first: 20, states: MERGED, baseRefName: "main", orderBy: {field: UPDATED_AT, direction: DESC}) {
+                  edges {
+                    node {
+                      number
+                      title
+                      body
+                      mergeCommit {
+                        oid
+                      }
+                      baseRefName
+                      updatedAt
+                      labels(first: 10) {
+                        nodes {
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' -f owner='${{ github.repository_owner }}' -f repo='${{ github.event.repository.name }}')
+          
+          # Filter out version bump PRs and find the first non-version-bump PR
+          FILTERED_PR=$(echo "$PR_DATA" | jq -r '
+            .data.repository.pullRequests.edges[] |
+            select(
+              (.node.title | test("[Bb]ump version|[Vv]ersion bump|\\[skip ci\\]"; "i") | not) and
+              (.node.labels.nodes | map(.name) | any(. == "version-bump" or . == "automated") | not)
+            ) |
+            .node | 
+            {number, title, body, baseRefName}
+          ' | head -n 1)
+          
+          # Extract PR details from the filtered result
+          if [ "$FILTERED_PR" != "" ] && [ "$FILTERED_PR" != "null" ]; then
+            PR_NUMBER=$(echo "$FILTERED_PR" | jq -r '.number // ""')
+            PR_TITLE=$(echo "$FILTERED_PR" | jq -r '.title // ""')
+            PR_BODY_RAW=$(echo "$FILTERED_PR" | jq -r '.body // ""')
+            PR_BASE_REF=$(echo "$FILTERED_PR" | jq -r '.baseRefName // ""')
+            
+            echo "Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
+          else
+            echo "No non-version-bump PR found, using fallback"
+            PR_NUMBER=""
+            PR_TITLE="Release changes"
+            PR_BODY_RAW="Changes included in this release."
+            PR_BASE_REF="main"
+          fi
+          
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "PR_TITLE=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "PR_BASE_REF=$PR_BASE_REF" >> $GITHUB_OUTPUT
+          
+          # Store raw PR body for sanitization
+          echo "PR_BODY_RAW<<EOF_PR_BODY" >> $GITHUB_OUTPUT
+          echo "$PR_BODY_RAW" >> $GITHUB_OUTPUT
+          echo "EOF_PR_BODY" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sanitize PR body and create release notes
+        id: sanitize_pr_body
+        run: |
+          # Sanitize PR body - remove potential malicious content, limit length
+          python3 << 'PYTHON_SCRIPT'
+          import os
+          import re
+          import html
+          
+          # Get the raw PR body
+          pr_body_raw = os.environ.get('PR_BODY_RAW', '')
+          
+          # Basic sanitization
+          # 1. HTML escape to prevent injection
+          sanitized = html.escape(pr_body_raw)
+          
+          # 2. Remove script tags and other potentially dangerous content
+          sanitized = re.sub(r'<script[^>]*>.*?</script>', '', sanitized, flags=re.IGNORECASE | re.DOTALL)
+          sanitized = re.sub(r'<iframe[^>]*>.*?</iframe>', '', sanitized, flags=re.IGNORECASE | re.DOTALL)
+          sanitized = re.sub(r'javascript:', '', sanitized, flags=re.IGNORECASE)
+          
+          # 3. Limit length to prevent overly long descriptions (max 2000 chars)
+          if len(sanitized) > 2000:
+              sanitized = sanitized[:1997] + '...'
+          
+          # 4. Clean up excessive whitespace
+          sanitized = re.sub(r'\n\s*\n\s*\n', '\n\n', sanitized)
+          sanitized = sanitized.strip()
+          
+          # If empty after sanitization, provide a default
+          if not sanitized:
+              sanitized = "No description provided."
+          
+          print(f"Sanitized PR body (length: {len(sanitized)} chars)")
+          
+          # Create the full body for the release
+          version = os.environ.get('VERSION', 'unknown')
+          tag = os.environ.get('GITHUB_REF', '').replace('refs/tags/', '')
+          full_body = f"""{sanitized}
+          
+          ---
+          
+          **Release {tag}**
+          
+          - Version: {version}
+          - Commit: {os.environ.get('GITHUB_SHA', 'unknown')}
+          - Original PR: #{os.environ.get('PR_NUMBER', 'unknown')}"""
+          
+          # Output the sanitized content
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"SANITIZED_PR_BODY<<EOF_SANITIZED\n{sanitized}\nEOF_SANITIZED\n")
+              f.write(f"FULL_RELEASE_BODY<<EOF_FULL\n{full_body}\nEOF_FULL\n")
+          
+          PYTHON_SCRIPT
+        env:
+          PR_BODY_RAW: ${{ steps.find_triggering_pr.outputs.PR_BODY_RAW }}
+          VERSION: ${{ steps.resolve-version.outputs.VERSION }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+          PR_NUMBER: ${{ steps.find_triggering_pr.outputs.PR_NUMBER }}
 
       - name: Build solution
         run: dotnet build listenarr.sln -c Release --no-restore
@@ -192,7 +309,7 @@ jobs:
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v1
         with:
-          body: ${{ steps.findPr.outputs.body }}
+          body: ${{ steps.sanitize_pr_body.outputs.FULL_RELEASE_BODY }}
           files: artifacts/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -219,8 +336,8 @@ jobs:
         if: ${{ github.repository_owner == 'therobbiedavis' }}
         with:
             severity: info
-            description: v${{steps.resolve-version.outputs.VERSION}} - ${{ steps.findPr.outputs.title }}
-            details: '${{ steps.findPr.outputs.body }}'
+            description: v${{steps.resolve-version.outputs.VERSION}} - ${{ steps.find_triggering_pr.outputs.PR_TITLE }}
+            details: '${{ steps.sanitize_pr_body.outputs.SANITIZED_PR_BODY }}'
             text: A new stable build has been released for docker.
             webhookUrl: ${{ secrets.DISCORD_DOCKER_UPDATE_URL }}
 
