@@ -22,6 +22,7 @@ using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Listenarr.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
@@ -168,7 +169,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     .AddCookie(options =>
     {
         options.LoginPath = "/api/account/login";
+        options.LogoutPath = "/api/account/logout";
         options.Cookie.Name = "listenarr_auth";
+        options.Cookie.Path = "/";
         // Harden cookie settings
         options.SlidingExpiration = true;
         options.Cookie.HttpOnly = true;
@@ -178,7 +181,30 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
                 : CookieSecurePolicy.Always; // require HTTPS in production
         options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
         options.ExpireTimeSpan = TimeSpan.FromDays(7);
+        // Configure events to handle logout properly behind reverse proxy
+        options.Events.OnSigningOut = context =>
+        {
+            // Ensure the cookie is properly cleared by setting it to expire
+            context.Response.Cookies.Delete(options.Cookie.Name!, new Microsoft.AspNetCore.Http.CookieOptions
+            {
+                Path = options.Cookie.Path,
+                Domain = options.Cookie.Domain,
+                SameSite = options.Cookie.SameSite,
+                HttpOnly = options.Cookie.HttpOnly,
+                Secure = options.Cookie.SecurePolicy == CookieSecurePolicy.Always
+            });
+            return Task.CompletedTask;
+        };
     });
+
+// Configure forwarded headers for reverse proxy support
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    // Clear the known networks and proxies lists to allow any proxy
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 // Antiforgery (CSRF) protection for SPA: expect token in X-XSRF-TOKEN header
 builder.Services.AddAntiforgery(options =>
@@ -280,6 +306,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+// Use forwarded headers middleware (must be early in pipeline)
+app.UseForwardedHeaders();
 
 app.UseHttpsRedirection();
 
