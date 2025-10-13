@@ -184,34 +184,34 @@ jobs:
         id: find_triggering_pr
         run: |
           # Find merged PRs associated with this commit, excluding version bump PRs
+          # Use a simpler approach: get recent merged PRs to develop and find the right one
           PR_DATA=$(gh api graphql -f query='
-            query($owner: String!, $repo: String!, $sha: String!) {
+            query($owner: String!, $repo: String!) {
               repository(owner: $owner, name: $repo) {
-                object(oid: $sha) {
-                  ... on Commit {
-                    associatedPullRequests(first: 10, states: MERGED) {
-                      edges {
-                        node {
-                          number
-                          title
-                          body
-                          baseRefName
-                          labels(first: 10) {
-                            nodes {
-                              name
-                            }
-                          }
+                pullRequests(first: 20, states: MERGED, baseRefName: "develop", orderBy: {field: UPDATED_AT, direction: DESC}) {
+                  edges {
+                    node {
+                      number
+                      title
+                      body
+                      baseRefName
+                      mergeCommit {
+                        oid
+                      }
+                      labels(first: 10) {
+                        nodes {
+                          name
                         }
                       }
                     }
                   }
                 }
               }
-            }' -f owner='${{ github.repository_owner }}' -f repo='${{ github.event.repository.name }}' -f sha='${{ github.sha }}')
+            }' -f owner='${{ github.repository_owner }}' -f repo='${{ github.event.repository.name }}')
           
           # Filter out version bump PRs and find the first non-version-bump PR
           FILTERED_PR=$(echo "$PR_DATA" | jq -r '
-            .data.repository.object.associatedPullRequests.edges[] |
+            .data.repository.pullRequests.edges[] |
             select(
               (.node.title | test("[Bb]ump version|[Vv]ersion bump|\\[skip ci\\]"; "i") | not) and
               (.node.labels.nodes | map(.name) | any(. == "version-bump" or . == "automated") | not)
@@ -220,6 +220,10 @@ jobs:
             {number, title, body, baseRefName}
           ' | head -n 1)
           
+          # Debug: Show what PRs we found
+          echo "Recent PRs found:"
+          echo "$PR_DATA" | jq -r '.data.repository.pullRequests.edges[] | "PR #\(.node.number): \(.node.title)"' | head -5
+          
           # Extract PR details from the filtered result
           if [ "$FILTERED_PR" != "" ] && [ "$FILTERED_PR" != "null" ]; then
             PR_NUMBER=$(echo "$FILTERED_PR" | jq -r '.number // ""')
@@ -227,9 +231,9 @@ jobs:
             PR_BODY_RAW=$(echo "$FILTERED_PR" | jq -r '.body // ""')
             PR_BASE_REF=$(echo "$FILTERED_PR" | jq -r '.baseRefName // ""')
             
-            echo "Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
+            echo "✅ Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
           else
-            echo "No non-version-bump PR found, using fallback"
+            echo "⚠️ No non-version-bump PR found, using fallback"
             PR_NUMBER=""
             PR_TITLE="Development changes"
             PR_BODY_RAW="Recent development changes merged to develop branch."
