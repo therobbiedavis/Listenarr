@@ -703,7 +703,14 @@ class ApiService {
   }
 
   async logout(): Promise<void> {
-    await this.request<void>('/account/logout', { method: 'POST' })
+    console.log('[ApiService] Making logout request to /account/logout')
+    try {
+      await this.request<void>('/account/logout', { method: 'POST' })
+      console.log('[ApiService] Logout request completed successfully')
+    } catch (error) {
+      console.error('[ApiService] Logout request failed:', error)
+      throw error
+    }
   }
 
   // Admin users

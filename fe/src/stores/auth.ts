@@ -26,9 +26,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   const logout = async () => {
     try {
+      console.log('[AuthStore] Starting logout...')
       await apiService.logout()
+      console.log('[AuthStore] Logout API call successful')
+    } catch (error) {
+      console.error('[AuthStore] Logout API call failed:', error)
+      // Continue with local logout even if API call fails
     } finally {
       user.value = { authenticated: false }
+      console.log('[AuthStore] Local user state cleared')
     }
   }
 

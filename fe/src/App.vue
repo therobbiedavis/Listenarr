@@ -582,8 +582,16 @@ onUnmounted(() => {
 })
 
 const logout = async () => {
-  await auth.logout()
-  window.location.reload()
+  try {
+    console.log('[App] Logout button clicked')
+    await auth.logout()
+    console.log('[App] Auth logout completed, reloading page')
+    window.location.reload()
+  } catch (error) {
+    console.error('[App] Error during logout:', error)
+    // Force reload even if logout fails to clear frontend state
+    window.location.reload()
+  }
 }
 
 const route = useRoute()
