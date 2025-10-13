@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Automated Audiobook Management and Downloading</strong>
+  <strong>Automated Audiobook Collection Management</strong>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
 
 ---
 
-Listenarr is a fast, feature-rich, cross-platform audiobook management server. Built with a focus on being a complete solution for all your audiobook needs. Set up your own server and share your audiobook collection with your friends and family!
+Listenarr is a fast, feature-rich, cross-platform audiobook management server. Built with a focus on being a complete solution for all your audiobook downloading needs. Set up your own server and get ready to streamline your audiobook listening!
 
 ## What Listenarr Provides
 
