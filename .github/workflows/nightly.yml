@@ -242,7 +242,7 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ github.sha }}
 
       - name: Notify Discord
-        uses: rjstone/discord-webhook-notify@v1
+        uses: rjstone/discord-webhook-notify@v2.2.1
         if: ${{ github.repository_owner == 'therobbiedavis' }}
         with:
             severity: info

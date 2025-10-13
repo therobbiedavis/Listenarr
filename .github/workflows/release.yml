@@ -224,8 +224,8 @@ jobs:
             ${{ steps.set-tags.outputs.API_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
 
       - name: Notify Discord
-        uses: rjstone/discord-webhook-notify@v1
-        if: ${{ github.repository_owner == 'Kareadita' }}
+        uses: rjstone/discord-webhook-notify@v2.2.1
+        if: ${{ github.repository_owner == 'therobbiedavis' }}
         with:
             severity: info
             description: v${{steps.resolve-version.outputs.VERSION}} - ${{ steps.findPr.outputs.title }}
