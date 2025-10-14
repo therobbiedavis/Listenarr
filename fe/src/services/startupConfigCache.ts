@@ -41,3 +41,8 @@ export function resetCache() {
   _inflight = null
   fetchCount = 0
 }
+
+// Synchronous access to the cached startup config (may be null)
+export function getCachedStartupConfig(): StartupConfig | null {
+  return _cache
+}

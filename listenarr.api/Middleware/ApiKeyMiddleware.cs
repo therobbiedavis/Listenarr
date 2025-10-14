@@ -40,6 +40,22 @@ namespace Listenarr.Api.Middleware
                             provided = s.Substring("ApiKey ".Length).Trim();
                     }
 
+                    // If headers didn't supply the key, accept query string tokens for browser-driven requests
+                    // (e.g. SignalR access_token or image URLs containing ?access_token=... or ?apikey=...)
+                    if (string.IsNullOrWhiteSpace(provided))
+                    {
+                        try
+                        {
+                            var qs = context.Request.Query;
+                            if (qs.ContainsKey("access_token")) provided = qs["access_token"].FirstOrDefault();
+                            if (string.IsNullOrWhiteSpace(provided) && qs.ContainsKey("apikey")) provided = qs["apikey"].FirstOrDefault();
+                        }
+                        catch
+                        {
+                            // ignore any query parsing errors
+                        }
+                    }
+
                     if (!string.IsNullOrWhiteSpace(provided) && provided == configuredKey)
                     {
                         // Create a minimal authenticated principal for downstream checks
