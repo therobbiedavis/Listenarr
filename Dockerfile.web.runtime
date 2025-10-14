@@ -1,9 +1,0 @@
-FROM nginx:alpine AS production
-
-# Copy built frontend from CI publish (wwwroot) into nginx html
-WORKDIR /usr/share/nginx/html
-COPY ./wwwroot/ ./
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]

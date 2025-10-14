@@ -109,15 +109,14 @@ namespace Listenarr.Api.Controllers
             
             try
             {
+                // Extract session token from request headers directly
+                var sessionToken = ExtractSessionToken(HttpContext);
+                
                 // Handle session-based authentication logout
-                if (User?.Identity?.AuthenticationType == "Session")
+                if (!string.IsNullOrEmpty(sessionToken))
                 {
-                    var sessionTokenClaim = User?.FindFirst("session_token")?.Value;
-                    if (!string.IsNullOrEmpty(sessionTokenClaim))
-                    {
-                        await _sessionService.InvalidateSessionAsync(sessionTokenClaim);
-                        _logger.LogInformation("Session-authenticated user {Username} logged out successfully", username);
-                    }
+                    await _sessionService.InvalidateSessionAsync(sessionToken);
+                    _logger.LogInformation("Session invalidated for token: {TokenPrefix}...", sessionToken[..8]);
                 }
                 else if (User?.Identity?.AuthenticationType == "ApiKey" || username == "ApiKey")
                 {
@@ -127,7 +126,7 @@ namespace Listenarr.Api.Controllers
                 }
                 else
                 {
-                    _logger.LogInformation("User {Username} with auth type {AuthType} logged out", username, authType);
+                    _logger.LogInformation("No session token found in logout request");
                 }
                 
                 // Determine response auth type based on configuration
@@ -141,6 +140,25 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error during logout for user: {Username} (AuthType: {AuthType})", username, authType);
                 return StatusCode(500, new { message = "Error during logout", error = ex.Message });
             }
+        }
+
+        private static string? ExtractSessionToken(HttpContext context)
+        {
+            // Try Authorization header first (Bearer token)
+            var authHeader = context.Request.Headers.Authorization.FirstOrDefault();
+            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                return authHeader[7..]; // Remove "Bearer " prefix
+            }
+
+            // Try X-Session-Token header
+            var sessionHeader = context.Request.Headers["X-Session-Token"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(sessionHeader))
+            {
+                return sessionHeader;
+            }
+
+            return null;
         }
 
     [HttpGet("me")]

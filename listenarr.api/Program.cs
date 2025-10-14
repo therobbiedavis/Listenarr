@@ -28,6 +28,11 @@ using Microsoft.AspNetCore.HttpOverrides;
 // Pass a non-null args array to satisfy nullable analysis
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
+// Configure URLs to listen on port 5000 (standard ASP.NET Core port)
+builder.WebHost.UseUrls("http://*:5000");
+
+// Configure logging
+
 // Configure logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
