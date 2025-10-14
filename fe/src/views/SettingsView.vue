@@ -554,18 +554,18 @@
               <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
             </div>
 
-            <div class="form-group">
-              <label>Initial Admin Account</label>
+            <div v-if="authEnabled" class="form-group">
+              <label>Admin Account Management</label>
               <div class="admin-credentials">
-                <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" class="admin-input" />
+                <input v-model="settings.adminUsername" type="text" placeholder="Admin username" class="admin-input" />
                 <div class="password-field">
-                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="Admin password (optional)" class="admin-input password-input" />
+                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
                   <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
                     <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
                   </button>
                 </div>
               </div>
-              <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
+              <span class="form-help">Manage the admin account. Enter a new password to update the admin user's password when you save settings. The username field shows the current admin username. This section is only available when authentication is enabled.</span>
             </div>
 
             <div class="form-group">
@@ -975,7 +975,20 @@ const saveSettings = async () => {
   if (!settings.value) return
   
   try {
-    await configStore.saveApplicationSettings(settings.value)
+    // Create a copy of settings, excluding empty admin fields
+    const settingsToSave = { ...settings.value }
+    
+    // Only include adminUsername if it's not empty
+    if (!settingsToSave.adminUsername || settingsToSave.adminUsername.trim() === '') {
+      delete settingsToSave.adminUsername
+    }
+    
+    // Only include adminPassword if it's not empty
+    if (!settingsToSave.adminPassword || settingsToSave.adminPassword.trim() === '') {
+      delete settingsToSave.adminPassword
+    }
+    
+    await configStore.saveApplicationSettings(settingsToSave)
     success('Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
