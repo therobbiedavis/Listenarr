@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Xunit;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -24,11 +25,16 @@ namespace Listenarr.Api.Tests
             db.Audiobooks.Add(audiobook);
             await db.SaveChangesAsync();
 
-            // Build service provider with required services
+            // Build service provider with required services (including a mock metadata service)
             var services = new ServiceCollection();
             services.AddSingleton<ListenArrDbContext>(db);
             services.AddSingleton<MetadataExtractionLimiter>();
             services.AddMemoryCache();
+            // Minimal metadata service mock so File metadata lookup doesn't throw
+            var metadataMock = new Moq.Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
+                .ReturnsAsync(new AudioMetadata { Title = "Test Book", Duration = TimeSpan.FromSeconds(1), Format = "m4b", Bitrate = 64000, SampleRate = 44100, Channels = 2 });
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 

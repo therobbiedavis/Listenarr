@@ -139,6 +139,8 @@ export interface ApplicationSettings {
   pollingIntervalSeconds: number
   enableNotifications: boolean
   allowedFileExtensions: string[]
+  // Action to perform for completed downloads: 'Move' or 'Copy'
+  completedFileAction?: 'Move' | 'Copy'
   // Optional admin credentials used when saving settings to create/update an initial admin user
   adminUsername?: string
   adminPassword?: string

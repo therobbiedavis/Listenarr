@@ -471,6 +471,15 @@
                 <code>{Quality}</code> - Audio quality
               </span>
             </div>
+
+            <div class="form-group">
+              <label>Completed File Action</label>
+              <select v-model="settings.completedFileAction">
+                <option value="Move">Move (default)</option>
+                <option value="Copy">Copy</option>
+              </select>
+              <span class="form-help">Choose whether completed downloads should be moved into the library output path or copied and left in the client's folder.</span>
+            </div>
           </div>
 
           <div class="form-section">
@@ -1224,6 +1233,10 @@ onMounted(async () => {
   ])
   
   settings.value = configStore.applicationSettings
+  // Ensure completedFileAction has a sensible default
+  if (settings.value && !settings.value.completedFileAction) {
+    settings.value.completedFileAction = 'Move'
+  }
   // Load startup config (optional) to determine AuthenticationRequired
   try {
     startupConfig.value = await apiService.getStartupConfig()
