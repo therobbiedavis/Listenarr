@@ -21,7 +21,7 @@ import type {
   SearchSortDirection,
   AudibleBookMetadata
 } from '@/types'
-import { getStartupConfigCached } from './startupConfigCache'
+import { getStartupConfigCached, getCachedStartupConfig } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
@@ -444,8 +444,22 @@ class ApiService {
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       return imageUrl
     }
-    // Convert relative URL to absolute
-    return `${BACKEND_BASE_URL}${imageUrl}`
+      // Convert relative URL to absolute and append access_token if an API key is present
+      const absolute = `${BACKEND_BASE_URL}${imageUrl}`
+
+      // Use synchronous cached startup config getter to avoid async/await here
+      try {
+        const cfg = getCachedStartupConfig()
+        const apiKey = cfg?.apiKey
+        if (apiKey) {
+          const sep = absolute.includes('?') ? '&' : '?'
+          return `${absolute}${sep}access_token=${encodeURIComponent(apiKey)}`
+        }
+      } catch {
+        // ignore and return plain absolute URL
+      }
+
+      return absolute
   }
 
   // History API
