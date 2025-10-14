@@ -81,25 +81,27 @@
             </div>
           </div>
         </div>
-        <template v-if="auth.user.authenticated">
-          <div class="nav-user" ref="navUserRef">
-            <button
-              class="nav-btn nav-user-btn"
-              @click="toggleUserMenu"
-              :aria-expanded="userMenuOpen"
-              aria-haspopup="true"
-              title="Account"
-            >
-              <i class="ph ph-users nav-user-icon"></i>
-            </button>
+        <template v-if="authEnabled">
+          <template v-if="auth.user.authenticated">
+            <div class="nav-user" ref="navUserRef">
+              <button
+                class="nav-btn nav-user-btn"
+                @click="toggleUserMenu"
+                :aria-expanded="userMenuOpen"
+                aria-haspopup="true"
+                title="Account"
+              >
+                <i class="ph ph-users nav-user-icon"></i>
+              </button>
 
-            <div v-if="userMenuOpen" class="user-menu" role="menu">
-              <button class="user-menu-item" role="menuitem" @click="logout">Logout</button>
+              <div v-if="userMenuOpen" class="user-menu" role="menu">
+                <button class="user-menu-item" role="menuitem" @click="logout">Logout</button>
+              </div>
             </div>
-          </div>
-        </template>
-        <template v-else>
-          <RouterLink to="/login" class="nav-btn">Login</RouterLink>
+          </template>
+          <template v-else>
+            <RouterLink to="/login" class="nav-btn">Login</RouterLink>
+          </template>
         </template>
       </div>
     </header>
@@ -585,12 +587,13 @@ const logout = async () => {
   try {
     console.log('[App] Logout button clicked')
     await auth.logout()
-    console.log('[App] Auth logout completed, reloading page')
-    window.location.reload()
+    console.log('[App] Auth logout completed, redirecting to login')
+    // Instead of reloading, redirect to login - the router guard will handle authentication
+    await router.push({ name: 'login' })
   } catch (error) {
     console.error('[App] Error during logout:', error)
-    // Force reload even if logout fails to clear frontend state
-    window.location.reload()
+    // Force redirect to login even if logout fails
+    await router.push({ name: 'login' })
   }
 }
 
