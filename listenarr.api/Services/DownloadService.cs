@@ -1003,16 +1003,50 @@ namespace Listenarr.Api.Services
                             ? await _pathMappingService.TranslatePathAsync(client.Id, savePath)
                             : savePath;
 
+                        // Map qBittorrent states to unified status
+                        // Note: qBittorrent doesn't have explicit "completed" states
+                        // Completion is determined by progress >= 100% + uploading/seeding state
                         var status = state switch
                         {
+                            // Active downloading states
                             "downloading" => "downloading",
-                            "pausedDL" => "paused",
-                            "queuedDL" => "queued",
-                            "uploading" or "stalledUP" => "seeding",
-                            "completedUP" or "completedDL" => "completed",
-                            "error" or "missingFiles" => "failed",
-                            _ => "queued"
+                            "metaDL" => "downloading",              // downloading metadata
+                            "forcedDL" => "downloading",            // forced downloading
+                            "forcedMetaDL" => "downloading",        // forced metadata downloading
+                            "stalledDL" => "downloading",           // stalled downloading
+                            "checkingDL" => "downloading",          // checking downloading
+                            
+                            // Paused/Stopped states
+                            "stoppedDL" => "paused",                // paused downloading (was "pausedDL")
+                            "stoppedUP" => "paused",                // paused uploading
+                            
+                            // Queued states  
+                            "queuedDL" => "queued",                 // queued downloading
+                            "queuedUP" => "queued",                 // queued uploading
+                            
+                            // Seeding/Uploading states
+                            "uploading" => "seeding",               // actively uploading
+                            "stalledUP" => "seeding",               // stalled uploading
+                            "checkingUP" => "seeding",              // checking uploading
+                            "forcedUP" => "seeding",                // forced uploading
+                            
+                            // Processing states
+                            "checkingResumeData" => "downloading",  // checking resume data
+                            "moving" => "downloading",              // moving files
+                            
+                            // Error states
+                            "error" => "failed",
+                            "missingFiles" => "failed",
+                            
+                            _ => "unknown"
                         };
+                        
+                        // Determine completion: progress >= 100% AND in seeding state
+                        // This is the correct way since qBittorrent doesn't have explicit completed states
+                        if (progress >= 100.0 && (status == "seeding" || state == "uploading" || state == "stalledUP" || state == "checkingUP" || state == "forcedUP" || state == "stoppedUP"))
+                        {
+                            status = "completed";
+                        }
 
                         items.Add(new QueueItem
                         {
