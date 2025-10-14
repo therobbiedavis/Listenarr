@@ -19,8 +19,8 @@
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
 using Listenarr.Api.Hubs;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Listenarr.Api.Middleware;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 
@@ -95,6 +95,23 @@ builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
 
+// Conditionally register session service based on authentication requirement
+builder.Services.AddScoped(serviceProvider =>
+{
+    var startupConfig = serviceProvider.GetRequiredService<IStartupConfigService>();
+    var config = startupConfig.GetConfig();
+    
+    // Only provide session service if authentication is required
+    if (config?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1")
+    {
+        var cache = serviceProvider.GetRequiredService<IMemoryCache>();
+        var logger = serviceProvider.GetRequiredService<ILogger<SessionService>>();
+        return new SessionService(cache, logger) as ISessionService;
+    }
+    
+    return null as ISessionService;
+});
+
 // Scan queue: enqueue folder scans to be processed in the background
 builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
 // Background worker to consume scan jobs and persist audiobook files
@@ -164,49 +181,8 @@ if (builder.Environment.IsDevelopment())
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Authentication: Cookie-based (minimal default). This will be enforced by middleware when configured.
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options =>
-    {
-        options.LoginPath = "/api/account/login";
-        options.LogoutPath = "/api/account/logout";
-        options.Cookie.Name = "listenarr_auth";
-        options.Cookie.Path = "/";
-        // Harden cookie settings
-        options.SlidingExpiration = true;
-        options.Cookie.HttpOnly = true;
-            // Require HTTPS in production, but allow insecure cookies during local development
-            options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-                ? CookieSecurePolicy.None
-                : CookieSecurePolicy.Always; // require HTTPS in production
-        // When running behind a reverse proxy and the frontend is on a different origin,
-        // browsers require SameSite=None and Secure to allow cookies across origins.
-        // Use Lax in development for local convenience.
-        options.Cookie.SameSite = builder.Environment.IsDevelopment()
-            ? Microsoft.AspNetCore.Http.SameSiteMode.Lax
-            : Microsoft.AspNetCore.Http.SameSiteMode.None;
-        options.ExpireTimeSpan = TimeSpan.FromDays(7);
-        // Configure events to handle logout properly behind reverse proxy
-        options.Events.OnSigningOut = context =>
-        {
-            // Explicitly overwrite the authentication cookie with an expired one matching
-            // the same attributes so browsers will remove it even when behind a proxy.
-            var cookieName = options.Cookie.Name ?? "listenarr_auth";
-            var cookieOptions = new Microsoft.AspNetCore.Http.CookieOptions
-            {
-                Path = options.Cookie.Path,
-                Domain = options.Cookie.Domain,
-                SameSite = options.Cookie.SameSite,
-                HttpOnly = options.Cookie.HttpOnly,
-                Secure = options.Cookie.SecurePolicy == CookieSecurePolicy.Always,
-                Expires = DateTimeOffset.UtcNow.AddDays(-1)
-            };
-
-            context.Response.Cookies.Append(cookieName, string.Empty, cookieOptions);
-            context.Response.Cookies.Delete(cookieName, cookieOptions);
-            return Task.CompletedTask;
-        };
-    });
+// Authentication: Session-based (default)
+// No additional authentication scheme configuration needed for sessions
 
 // Configure forwarded headers - required for apps behind reverse proxy
 // This allows the app to see the real client IP and original protocol (HTTP/HTTPS)
@@ -338,8 +314,8 @@ if (app.Environment.IsDevelopment())
 {
     app.UseCors("DevOnly");
 }
-    // Enable authentication middleware
-    app.UseAuthentication();
+    // Session-based authentication middleware
+    app.UseMiddleware<Listenarr.Api.Middleware.SessionAuthenticationMiddleware>();
     // API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
     app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
     // Enforce authentication based on startup config
