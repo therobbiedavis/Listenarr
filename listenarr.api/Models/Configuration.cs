@@ -89,6 +89,9 @@ namespace Listenarr.Api.Models
         public bool EnableNotifications { get; set; } = false;
         public List<string> AllowedFileExtensions { get; set; } = new() { ".mp3", ".flac", ".m4a", ".m4b", ".ogg" };
 
+    // Action to take when a download completes: "Move" or "Copy"
+    public string CompletedFileAction { get; set; } = "Move";
+
         // Optional admin credentials submitted from the UI when saving settings.
         // These are NOT mapped to the ApplicationSettings table; they are used to create/update
         // a User record in the Users table via the ConfigurationService.

@@ -21,6 +21,8 @@ namespace Listenarr.Api.Services
         Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null);
         Task<List<QueueItem>> GetQueueAsync();
         Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
+        // Exposed for processing completed downloads (move/copy + DB updates)
+        Task ProcessCompletedDownloadAsync(string downloadId, string finalPath);
     }
 
     public interface IMetadataService
