@@ -32,10 +32,13 @@ namespace Listenarr.Api.Middleware
             _logger = logger;
         }
 
-        public async Task InvokeAsync(HttpContext context, ISessionService? sessionService)
+        public async Task InvokeAsync(HttpContext context, IServiceProvider serviceProvider)
         {
-            // Only process session authentication if session service is available and no user is already authenticated
-            if (sessionService != null && (!context.User.Identity?.IsAuthenticated ?? true))
+            // Get the session service - will always be available but may not be functional if auth is disabled
+            var sessionService = serviceProvider.GetRequiredService<ISessionService>();
+            
+            // Only process session authentication if no user is already authenticated
+            if (!context.User.Identity?.IsAuthenticated ?? true)
             {
                 var sessionToken = ExtractSessionToken(context);
                 if (!string.IsNullOrEmpty(sessionToken))

@@ -95,22 +95,8 @@ builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
 
-// Conditionally register session service based on authentication requirement
-builder.Services.AddScoped(serviceProvider =>
-{
-    var startupConfig = serviceProvider.GetRequiredService<IStartupConfigService>();
-    var config = startupConfig.GetConfig();
-    
-    // Only provide session service if authentication is required
-    if (config?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1")
-    {
-        var cache = serviceProvider.GetRequiredService<IMemoryCache>();
-        var logger = serviceProvider.GetRequiredService<ILogger<SessionService>>();
-        return new SessionService(cache, logger) as ISessionService;
-    }
-    
-    return null as ISessionService;
-});
+// Always register session service, but it will check config internally
+builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
 
 // Scan queue: enqueue folder scans to be processed in the background
 builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();

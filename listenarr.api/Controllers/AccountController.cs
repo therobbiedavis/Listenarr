@@ -14,9 +14,9 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<AccountController> _logger;
         private readonly IUserService _userService;
         private readonly ILoginRateLimiter _rateLimiter;
-        private readonly ISessionService? _sessionService;
+        private readonly ISessionService _sessionService;
 
-        public AccountController(IStartupConfigService startupConfigService, ILogger<AccountController> logger, IUserService userService, ILoginRateLimiter rateLimiter, ISessionService? sessionService)
+        public AccountController(IStartupConfigService startupConfigService, ILogger<AccountController> logger, IUserService userService, ILoginRateLimiter rateLimiter, ISessionService sessionService)
         {
             _startupConfigService = startupConfigService;
             _logger = logger;
@@ -64,14 +64,13 @@ namespace Listenarr.Api.Controllers
             var user = await _userService.GetByUsernameAsync(req.Username);
             _rateLimiter.RecordSuccess(key);
             
-            // Check if authentication is required
-            if (_sessionService != null)
+            // Try to create session token - this will fail if authentication is not enabled
+            try
             {
-                // Create session token when authentication is required
                 var sessionToken = await _sessionService.CreateSessionAsync(req.Username, user?.IsAdmin == true, req.RememberMe);
                 return Ok(new { message = "Logged in", sessionToken, authType = "session" });
             }
-            else
+            catch (InvalidOperationException)
             {
                 // Authentication not required - login succeeds but no session token
                 return Ok(new { message = "Logged in", authType = "none" });
@@ -111,7 +110,7 @@ namespace Listenarr.Api.Controllers
             try
             {
                 // Handle session-based authentication logout
-                if (_sessionService != null && User?.Identity?.AuthenticationType == "Session")
+                if (User?.Identity?.AuthenticationType == "Session")
                 {
                     var sessionTokenClaim = User?.FindFirst("session_token")?.Value;
                     if (!string.IsNullOrEmpty(sessionTokenClaim))
@@ -131,7 +130,10 @@ namespace Listenarr.Api.Controllers
                     _logger.LogInformation("User {Username} with auth type {AuthType} logged out", username, authType);
                 }
                 
-                var responseAuthType = _sessionService != null ? "session" : "none";
+                // Determine response auth type based on configuration
+                var config = _startupConfigService.GetConfig();
+                var authEnabled = config?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
+                var responseAuthType = authEnabled ? "session" : "none";
                 return Ok(new { message = "Logged out successfully", authType = responseAuthType });
             }
             catch (Exception ex)
