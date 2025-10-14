@@ -1,7 +1,5 @@
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -15,14 +13,16 @@ namespace Listenarr.Api.Controllers
         private readonly IStartupConfigService _startupConfigService;
         private readonly ILogger<AccountController> _logger;
         private readonly IUserService _userService;
-    private readonly ILoginRateLimiter _rateLimiter;
+        private readonly ILoginRateLimiter _rateLimiter;
+        private readonly ISessionService? _sessionService;
 
-        public AccountController(IStartupConfigService startupConfigService, ILogger<AccountController> logger, IUserService userService, ILoginRateLimiter rateLimiter)
+        public AccountController(IStartupConfigService startupConfigService, ILogger<AccountController> logger, IUserService userService, ILoginRateLimiter rateLimiter, ISessionService? sessionService)
         {
             _startupConfigService = startupConfigService;
             _logger = logger;
             _userService = userService;
             _rateLimiter = rateLimiter;
+            _sessionService = sessionService;
         }
 
         [HttpPost("login")]
@@ -62,22 +62,20 @@ namespace Listenarr.Api.Controllers
             }
 
             var user = await _userService.GetByUsernameAsync(req.Username);
-            var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, req.Username)
-            };
-            if (user?.IsAdmin == true) claims.Add(new Claim(ClaimTypes.Role, "Administrator"));
-
-            var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-            var authProperties = new AuthenticationProperties
-            {
-                IsPersistent = req.RememberMe
-            };
-
-            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(claimsIdentity), authProperties);
-            // Clear failures on successful login
             _rateLimiter.RecordSuccess(key);
-            return Ok(new { message = "Logged in" });
+            
+            // Check if authentication is required
+            if (_sessionService != null)
+            {
+                // Create session token when authentication is required
+                var sessionToken = await _sessionService.CreateSessionAsync(req.Username, user?.IsAdmin == true, req.RememberMe);
+                return Ok(new { message = "Logged in", sessionToken, authType = "session" });
+            }
+            else
+            {
+                // Authentication not required - login succeeds but no session token
+                return Ok(new { message = "Logged in", authType = "none" });
+            }
         }
 
         [HttpPost("register")]
@@ -112,11 +110,15 @@ namespace Listenarr.Api.Controllers
             
             try
             {
-                // Check if user is authenticated via cookie
-                if (User?.Identity?.AuthenticationType == CookieAuthenticationDefaults.AuthenticationScheme)
+                // Handle session-based authentication logout
+                if (_sessionService != null && User?.Identity?.AuthenticationType == "Session")
                 {
-                    await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                    _logger.LogInformation("Cookie-authenticated user {Username} logged out successfully", username);
+                    var sessionTokenClaim = User?.FindFirst("session_token")?.Value;
+                    if (!string.IsNullOrEmpty(sessionTokenClaim))
+                    {
+                        await _sessionService.InvalidateSessionAsync(sessionTokenClaim);
+                        _logger.LogInformation("Session-authenticated user {Username} logged out successfully", username);
+                    }
                 }
                 else if (User?.Identity?.AuthenticationType == "ApiKey" || username == "ApiKey")
                 {
@@ -126,12 +128,11 @@ namespace Listenarr.Api.Controllers
                 }
                 else
                 {
-                    // Fallback: try to sign out anyway
-                    await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                     _logger.LogInformation("User {Username} with auth type {AuthType} logged out", username, authType);
                 }
                 
-                return Ok(new { message = "Logged out successfully", authType = authType });
+                var responseAuthType = _sessionService != null ? "session" : "none";
+                return Ok(new { message = "Logged out successfully", authType = responseAuthType });
             }
             catch (Exception ex)
             {

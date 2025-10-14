@@ -12,7 +12,6 @@ namespace Listenarr.Api.Models
         public string? UrlBase { get; set; }
         public string? BindAddress { get; set; }
         public string? ApiKey { get; set; }
-        public string? AuthenticationMethod { get; set; }
         public string? UpdateMechanism { get; set; }
         public bool? LaunchBrowser { get; set; }
         public string? Branch { get; set; }
