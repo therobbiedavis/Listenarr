@@ -551,7 +551,7 @@
                 <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" class="admin-input" />
                 <div class="password-field">
                   <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="Admin password (optional)" class="admin-input password-input" />
-                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <button type="button" class="password-toggle" data-test="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
                     <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
                   </button>
                 </div>
@@ -849,6 +849,11 @@ const profileToDelete = ref<QualityProfile | null>(null)
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
 
+// Toggle function for password visibility. Use .value to avoid template-assignment edge cases
+const toggleShowPassword = () => {
+  showPassword.value = !showPassword.value
+}
+
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
   const axiosError = error as { response?: { data?: unknown; status?: number } }
@@ -971,7 +976,9 @@ const saveSettings = async () => {
     // If user toggled the authEnabled, attempt to save to startup config
     try {
       const original = startupConfig.value || {}
-      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'Enabled' : 'Disabled' }
+      // Persist authenticationRequired as string 'true'/'false' so it's explicit and
+      // consistent with expectations from the UI (was previously 'Enabled'/'Disabled').
+      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'true' : 'false' }
         try {
           await apiService.saveStartupConfig(newCfg)
           success('Startup configuration saved (config.json)')

@@ -540,9 +540,12 @@ onMounted(async () => {
   
   console.log('[App] ✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
   // Fetch startup config (do this regardless of auth so header/login visibility can be known)
-  try {
+    try {
     const cfg = await apiService.getStartupConfig()
-    const v = cfg?.authenticationRequired
+  // Accept both camelCase and PascalCase variants from backend (some responses use PascalCase)
+  const obj = cfg as Record<string, unknown> | null
+  const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
+  const v = raw as unknown
     authEnabled.value = (typeof v === 'boolean') ? v : (typeof v === 'string' ? (v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true') : false)
     if (import.meta.env.DEV) {
       try { console.debug('[App] startup config fetched', { authEnabled: authEnabled.value, cfg }) } catch {}
