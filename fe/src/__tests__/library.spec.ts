@@ -1,5 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { useLibraryStore } from '@/stores/library'
+import { describe, test, expect, beforeEach } from 'vitest'
 
 describe('library store merge', () => {
   beforeEach(() => {

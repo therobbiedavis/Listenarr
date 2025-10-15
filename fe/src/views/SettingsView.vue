@@ -935,6 +935,11 @@ const adminUsers = ref<Array<{ id: number; username: string; email?: string; isA
 const showMappingForm = ref(false)
 const mappingToEdit = ref<RemotePathMapping | null>(null)
 
+// Toggle function for password visibility. Use .value to avoid template-assignment edge cases
+const toggleShowPassword = () => {
+  showPassword.value = !showPassword.value
+}
+
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
   const axiosError = error as { response?: { data?: unknown; status?: number } }
@@ -1070,7 +1075,9 @@ const saveSettings = async () => {
     // If user toggled the authEnabled, attempt to save to startup config
     try {
       const original = startupConfig.value || {}
-      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'Enabled' : 'Disabled' }
+      // Persist authenticationRequired as string 'true'/'false' so it's explicit and
+      // consistent with expectations from the UI (was previously 'Enabled'/'Disabled').
+      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'true' : 'false' }
         try {
           await apiService.saveStartupConfig(newCfg)
           success('Startup configuration saved (config.json)')

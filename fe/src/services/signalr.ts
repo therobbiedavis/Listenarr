@@ -40,10 +40,23 @@ class SignalRService {
     
     try {
       // Using SignalR protocol over WebSocket
-      const hubUrl = `${wsUrl}/hubs/downloads`
-      
+      let hubUrl = `${wsUrl}/hubs/downloads`
+      try {
+        // Try to include API key as access_token if the startup config contains one
+        // This will allow the server-side ApiKeyMiddleware to accept the websocket handshake
+        const { getStartupConfigCached } = await import('./startupConfigCache')
+        const sc = await getStartupConfigCached(2000)
+        const apiKey = sc?.apiKey
+        if (apiKey) {
+          const sep = hubUrl.includes('?') ? '&' : '?'
+          hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(apiKey)}`
+        }
+      } catch (e) {
+        // ignore errors while reading startup config (log debug info)
+        try { console.debug('[SignalR] startupConfig read failed', e) } catch {}
+      }
+
       console.log('[SignalR] Connecting to:', hubUrl)
-      
       this.connection = new WebSocket(hubUrl)
       
       this.connection.onopen = () => {

@@ -21,7 +21,8 @@ import type {
   SearchSortDirection,
   AudibleBookMetadata
 } from '@/types'
-import { getStartupConfigCached } from './startupConfigCache'
+import { getStartupConfigCached, getCachedStartupConfig } from './startupConfigCache'
+import { sessionTokenManager } from '@/utils/sessionToken'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
 // In production, prefer a configured VITE_API_BASE_URL but fall back to a relative '/api'
@@ -62,6 +63,13 @@ class ApiService {
         config.headers = { ...(hdrs || {}), 'X-Api-Key': apiKey }
       }
     } catch {}
+
+    // Attach session token if available
+    const sessionToken = sessionTokenManager.getToken()
+    if (sessionToken) {
+      const hdrs = config.headers as Record<string, string> | undefined
+      config.headers = { ...(hdrs || {}), 'Authorization': `Bearer ${sessionToken}` }
+    }
 
     // Auto-attach antiforgery token for unsafe HTTP methods when not already provided.
     try {
@@ -436,8 +444,22 @@ class ApiService {
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       return imageUrl
     }
-    // Convert relative URL to absolute
-    return `${BACKEND_BASE_URL}${imageUrl}`
+      // Convert relative URL to absolute and append access_token if an API key is present
+      const absolute = `${BACKEND_BASE_URL}${imageUrl}`
+
+      // Use synchronous cached startup config getter to avoid async/await here
+      try {
+        const cfg = getCachedStartupConfig()
+        const apiKey = cfg?.apiKey
+        if (apiKey) {
+          const sep = absolute.includes('?') ? '&' : '?'
+          return `${absolute}${sep}access_token=${encodeURIComponent(apiKey)}`
+        }
+      } catch {
+        // ignore and return plain absolute URL
+      }
+
+      return absolute
   }
 
   // History API
@@ -662,7 +684,7 @@ class ApiService {
     }
   }
 
-  // Account login - expects server to set auth cookie
+  // Account login - uses session-based authentication
   async login(username: string, password: string, rememberMe: boolean, csrfToken?: string): Promise<void> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (csrfToken) headers['X-XSRF-TOKEN'] = csrfToken
@@ -695,6 +717,19 @@ class ApiService {
       (err as ErrorWithStatus).status = resp.status
       throw err
     }
+
+    // Handle session token response (only expected when authentication is required)
+    const responseData = await resp.json()
+    if (responseData.sessionToken) {
+      sessionTokenManager.setToken(responseData.sessionToken)
+      console.log('[ApiService] Session token received and stored')
+    } else if (responseData.authType === 'none') {
+      // Authentication not required - clear any existing token
+      sessionTokenManager.clearToken()
+      console.log('[ApiService] Authentication not required - no session token needed')
+    } else {
+      throw new Error('Login succeeded but expected session token or auth type not received')
+    }
   }
 
   // Current authenticated user (me)
@@ -710,6 +745,10 @@ class ApiService {
     } catch (error) {
       console.error('[ApiService] Logout request failed:', error)
       throw error
+    } finally {
+      // Always clear session token on logout, regardless of API call success
+      sessionTokenManager.clearToken()
+      console.log('[ApiService] Session token cleared')
     }
   }
 
