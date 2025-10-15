@@ -12,21 +12,6 @@ interface OpenLibrarySubject {
   name: string
 }
 
-interface OpenLibraryBookData {
-  title?: string
-  authors?: OpenLibraryAuthor[]
-  publish_date?: string
-  publishers?: OpenLibraryPublisher[]
-  number_of_pages?: number
-  subjects?: OpenLibrarySubject[]
-  cover?: {
-    large?: string
-    medium?: string
-    small?: string
-  }
-  excerpts?: Array<{ text: string }>
-}
-
 interface OpenLibraryAuthorRef {
   key?: string
 }

@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
+import type { StartupConfig } from '@/types'
 
 // Module-level cache/promise for startup config to avoid repeated requests during rapid navigation
 // Use a promise so concurrent navigations share the same inflight request instead of issuing many
@@ -59,7 +59,7 @@ router.beforeEach(async (to, from, next) => {
   const authRequiredConfig = (() => {
     if (startupConfigMissing) return true
     // Accept both camelCase and PascalCase variants from backend
-    const raw = (startupConfig as any)?.authenticationRequired ?? (startupConfig as any)?.AuthenticationRequired
+    const raw = startupConfig?.authenticationRequired ?? (startupConfig as StartupConfig & { AuthenticationRequired?: string | boolean })?.AuthenticationRequired
     const v = raw
     if (v === undefined || v === null) return false
     if (typeof v === 'boolean') return v

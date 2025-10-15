@@ -189,15 +189,23 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                _logger.LogDebug("Saving application settings");
                 await _configurationService.SaveApplicationSettingsAsync(settings);
+                
                 // Return the saved settings to confirm what was persisted
                 var savedSettings = await _configurationService.GetApplicationSettingsAsync();
+                
+                // Clear sensitive admin credentials from response (they are [NotMapped] but let's be safe)
+                savedSettings.AdminUsername = null;
+                savedSettings.AdminPassword = null;
+                
+                _logger.LogDebug("Application settings saved successfully");
                 return Ok(savedSettings);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error saving application settings");
-                return StatusCode(500, "Internal server error");
+                return StatusCode(500, new { error = "Failed to save application settings", message = ex.Message });
             }
         }
 

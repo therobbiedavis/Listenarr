@@ -276,6 +276,80 @@
             </div>
           </div>
         </div>
+
+        <!-- Remote Path Mappings Section -->
+        <div class="section-header" style="margin-top: 2rem;">
+          <h3>Remote Path Mappings</h3>
+          <button @click="openMappingForm()" class="add-button">
+            <i class="ph ph-plus"></i>
+            Add Mapping
+          </button>
+        </div>
+
+        <div v-if="remotePathMappings.length === 0" class="empty-state">
+          <i class="ph ph-link-simple"></i>
+          <p>No remote path mappings configured. Add a mapping to translate client remote paths to local paths the server can access.</p>
+        </div>
+
+        <div v-else class="config-list">
+          <div v-for="mapping in remotePathMappings" :key="mapping.id" class="config-card">
+            <div class="config-info">
+              <h4>{{ mapping.name || mapping.remotePath }}</h4>
+              <div class="detail-row">
+                <i class="ph ph-browser"></i>
+                <span class="detail-label">Remote Path:</span>
+                <span class="detail-value">{{ mapping.remotePath }}</span>
+              </div>
+              <div class="detail-row">
+                <i class="ph ph-folder"></i>
+                <span class="detail-label">Local Path:</span>
+                <span class="detail-value">{{ mapping.localPath }}</span>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button @click="editMapping(mapping)" class="edit-button" title="Edit">
+                <i class="ph ph-pencil"></i>
+              </button>
+              <button @click="deleteMapping(mapping.id)" class="delete-button" title="Delete">
+                <i class="ph ph-trash"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Remote Path Mapping Modal -->
+        <div v-if="showMappingForm" class="modal-overlay" @click="closeMappingForm()">
+          <div class="modal-content" @click.stop>
+            <div class="modal-header">
+              <h3>{{ mappingToEdit ? 'Edit' : 'Add' }} Remote Path Mapping</h3>
+              <button @click="closeMappingForm()" class="modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label>Mapping Name (optional)</label>
+                <input v-model="mappingToEditData.name" type="text" placeholder="Friendly name for this mapping" />
+              </div>
+              <div class="form-group">
+                <label>Download Client</label>
+                <select v-model="mappingToEditData.downloadClientId">
+                  <option v-for="c in configStore.downloadClientConfigurations" :key="c.id" :value="c.id">{{ c.name }} ({{ c.type }})</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Remote Path (from client)</label>
+                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/downloads/complete/sonarr/" />
+              </div>
+              <div class="form-group">
+                <label>Local Path (server)</label>
+                <FolderBrowser v-model="mappingToEditData.localPath" placeholder="Select a local path..." />
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
+              <button @click="saveMapping()" class="save-button"><i class="ph ph-check"></i> Save</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Quality Profiles Tab -->
@@ -554,18 +628,18 @@
               <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
             </div>
 
-            <div class="form-group">
-              <label>Initial Admin Account</label>
+            <div v-if="authEnabled" class="form-group">
+              <label>Admin Account Management</label>
               <div class="admin-credentials">
-                <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" class="admin-input" />
+                <input v-model="settings.adminUsername" type="text" placeholder="Admin username" class="admin-input" />
                 <div class="password-field">
-                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="Admin password (optional)" class="admin-input password-input" />
-                  <button type="button" class="password-toggle" data-test="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
+                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
                     <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
                   </button>
                 </div>
               </div>
-              <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
+              <span class="form-help">Manage the admin account. Enter a new password to update the admin user's password when you save settings. The username field shows the current admin username. This section is only available when authentication is enabled.</span>
             </div>
 
             <div class="form-group">
@@ -762,13 +836,13 @@ import { ref, onMounted, watch } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
-import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile } from '@/types'
+import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
 import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
 import { useNotification } from '@/composables/useNotification'
-import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile } from '@/services/api'
+import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile, getRemotePathMappings, createRemotePathMapping, updateRemotePathMapping, deleteRemotePathMapping } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -852,16 +926,14 @@ const regenerateApiKey = async () => {
 const authEnabled = ref(false)
 const indexers = ref<Indexer[]>([])
 const qualityProfiles = ref<QualityProfile[]>([])
+const remotePathMappings = ref<RemotePathMapping[]>([])
 const testingIndexer = ref<number | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
-
-// Toggle function for password visibility. Use .value to avoid template-assignment edge cases
-const toggleShowPassword = () => {
-  showPassword.value = !showPassword.value
-}
+const showMappingForm = ref(false)
+const mappingToEdit = ref<RemotePathMapping | null>(null)
 
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
@@ -980,7 +1052,20 @@ const saveSettings = async () => {
   if (!settings.value) return
   
   try {
-    await configStore.saveApplicationSettings(settings.value)
+    // Create a copy of settings, excluding empty admin fields
+    const settingsToSave = { ...settings.value }
+    
+    // Only include adminUsername if it's not empty
+    if (!settingsToSave.adminUsername || settingsToSave.adminUsername.trim() === '') {
+      delete settingsToSave.adminUsername
+    }
+    
+    // Only include adminPassword if it's not empty
+    if (!settingsToSave.adminPassword || settingsToSave.adminPassword.trim() === '') {
+      delete settingsToSave.adminPassword
+    }
+    
+    await configStore.saveApplicationSettings(settingsToSave)
     success('Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
@@ -1111,6 +1196,67 @@ const loadQualityProfiles = async () => {
   }
 }
 
+// Remote Path Mappings state
+const mappingToEditData = ref<{ downloadClientId: string; remotePath: string; localPath: string; name?: string }>({ downloadClientId: '', remotePath: '', localPath: '', name: '' })
+
+// Remote Path Mappings functions
+const openMappingForm = (mapping?: RemotePathMapping) => {
+  mappingToEdit.value = mapping || null
+  if (mapping) {
+    mappingToEditData.value = { ...mapping }
+  } else {
+    mappingToEditData.value = { downloadClientId: configStore.downloadClientConfigurations[0]?.id || '', remotePath: '', localPath: '', name: '' }
+  }
+  showMappingForm.value = true
+}
+
+const closeMappingForm = () => {
+  showMappingForm.value = false
+  mappingToEdit.value = null
+  mappingToEditData.value = { downloadClientId: '', remotePath: '', localPath: '', name: '' }
+}
+
+const saveMapping = async () => {
+  try {
+    const payload: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'> = {
+      downloadClientId: mappingToEditData.value.downloadClientId || '',
+      remotePath: mappingToEditData.value.remotePath || '',
+      localPath: mappingToEditData.value.localPath || '',
+      name: mappingToEditData.value.name || ''
+    }
+
+    if (mappingToEdit.value && mappingToEdit.value.id) {
+      const updated = await updateRemotePathMapping(mappingToEdit.value.id, payload)
+      const idx = remotePathMappings.value.findIndex(m => m.id === updated.id)
+      if (idx !== -1) remotePathMappings.value[idx] = updated
+      success('Remote path mapping updated')
+    } else {
+      const created = await createRemotePathMapping(payload)
+      remotePathMappings.value.push(created)
+      success('Remote path mapping created')
+    }
+
+    closeMappingForm()
+  } catch (err) {
+    console.error('Failed to save mapping', err)
+    showError('Failed to save mapping')
+  }
+}
+
+const editMapping = (mapping: RemotePathMapping) => openMappingForm(mapping)
+
+const deleteMapping = async (id: number) => {
+  if (!confirm('Delete this remote path mapping?')) return
+  try {
+    await deleteRemotePathMapping(id)
+    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== id)
+    success('Remote path mapping deleted')
+  } catch (err) {
+    console.error('Failed to delete mapping', err)
+    showError('Failed to delete mapping')
+  }
+}
+
 const loadAdminUsers = async () => {
   try {
     adminUsers.value = await apiService.getAdminUsers()
@@ -1227,6 +1373,8 @@ onMounted(async () => {
     configStore.loadApiConfigurations(),
     configStore.loadDownloadClientConfigurations(),
     configStore.loadApplicationSettings(),
+    // load remote path mappings
+    (async () => { try { remotePathMappings.value = await getRemotePathMappings() } catch (e) { console.debug('Failed to load remote path mappings', e) } })(),
     loadIndexers(),
     loadQualityProfiles(),
     loadAdminUsers()
@@ -1589,7 +1737,8 @@ onMounted(async () => {
 }
 
 .form-group input[type="text"],
-.form-group input[type="number"] {
+.form-group input[type="number"],
+.form-group select {
   padding: 0.75rem;
   background-color: #2a2a2a;
   border: 1px solid #555;
@@ -1600,7 +1749,8 @@ onMounted(async () => {
 }
 
 .form-group input[type="text"]:focus,
-.form-group input[type="number"]:focus {
+.form-group input[type="number"]:focus,
+.form-group select:focus {
   outline: none;
   border-color: #007acc;
   box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
