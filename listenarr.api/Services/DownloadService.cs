@@ -901,6 +901,16 @@ namespace Listenarr.Api.Services
             var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
+            // Get all downloads from database to filter queue items
+            List<Download> listenarrDownloads;
+            using (var scope = _serviceScopeFactory.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                listenarrDownloads = await dbContext.Downloads
+                    .Where(d => d.Status != DownloadStatus.Completed && d.Status != DownloadStatus.Failed)
+                    .ToListAsync();
+            }
+
             foreach (var client in enabledClients)
             {
                 try
@@ -914,7 +924,40 @@ namespace Listenarr.Api.Services
                         _ => new List<QueueItem>()
                     };
 
-                    queueItems.AddRange(clientQueue);
+                    // Filter to only include items that Listenarr initiated
+                    _logger.LogInformation("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name, clientQueue.Count);
+                    _logger.LogInformation("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
+                    
+                    foreach (var download in listenarrDownloads)
+                    {
+                        _logger.LogInformation("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}", 
+                            download.Id, download.Title, download.DownloadClientId, download.Status);
+                    }
+                    
+                    foreach (var queueItem in clientQueue.Take(3)) // Just show first 3 to avoid spam
+                    {
+                        _logger.LogInformation("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'", 
+                            queueItem.Id, queueItem.Title, queueItem.DownloadClientId);
+                    }
+                    
+                    var filteredQueue = clientQueue.Where(queueItem => 
+                        listenarrDownloads.Any(download => 
+                        {
+                            var clientIdMatch = download.DownloadClientId == client.Id;
+                            var idMatch = download.Id == queueItem.Id;
+                            var titleMatch = download.Title.Equals(queueItem.Title, StringComparison.OrdinalIgnoreCase);
+                            
+                            _logger.LogInformation("Comparing queue '{QueueTitle}' with download '{DownloadTitle}': ClientId={ClientIdMatch}, Id={IdMatch}, Title={TitleMatch}", 
+                                queueItem.Title, download.Title, clientIdMatch, idMatch, titleMatch);
+                                
+                            return clientIdMatch && (idMatch || titleMatch);
+                        })
+                    ).ToList();
+
+                    queueItems.AddRange(filteredQueue);
+                    
+                    _logger.LogInformation("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", 
+                        client.Name, clientQueue.Count, filteredQueue.Count);
                 }
                 catch (Exception ex)
                 {
