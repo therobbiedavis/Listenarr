@@ -1,5 +1,6 @@
 using Listenarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Listenarr.Api.Services;
 
@@ -7,13 +8,16 @@ public class RemotePathMappingService : IRemotePathMappingService
 {
     private readonly ListenArrDbContext _context;
     private readonly ILogger<RemotePathMappingService> _logger;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
 
     public RemotePathMappingService(
         ListenArrDbContext context,
-        ILogger<RemotePathMappingService> logger)
+        ILogger<RemotePathMappingService> logger,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
     {
         _context = context;
         _logger = logger;
+        _cache = cache;
     }
 
     public async Task<List<RemotePathMapping>> GetAllAsync()
@@ -31,10 +35,26 @@ public class RemotePathMappingService : IRemotePathMappingService
 
     public async Task<List<RemotePathMapping>> GetByClientIdAsync(string downloadClientId)
     {
-        return await _context.RemotePathMappings
-            .Where(m => m.DownloadClientId == downloadClientId)
-            .OrderBy(m => m.RemotePath.Length) // Order by path length descending for best match
-            .ToListAsync();
+        if (string.IsNullOrEmpty(downloadClientId)) return new List<RemotePathMapping>();
+        var cacheKey = $"rpm_client_{downloadClientId}";
+
+        // Use GetOrCreateAsync to prevent multiple concurrent requests from
+        // issuing duplicate DB queries (cache stampede). Also use AsNoTracking
+        // so we don't cache tracked EF entities tied to a specific DbContext.
+        var mappings = await _cache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60);
+
+            var list = await _context.RemotePathMappings
+                .AsNoTracking()
+                .Where(m => m.DownloadClientId == downloadClientId)
+                .OrderByDescending(m => m.RemotePath.Length) // longest first for best match
+                .ToListAsync();
+
+            return list;
+        });
+
+        return mappings ?? new List<RemotePathMapping>();
     }
 
     public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)
@@ -51,6 +71,8 @@ public class RemotePathMappingService : IRemotePathMappingService
         _logger.LogInformation(
             "Created remote path mapping {MappingId} for client {ClientId}: {RemotePath} -> {LocalPath}",
             mapping.Id, mapping.DownloadClientId, mapping.RemotePath, mapping.LocalPath);
+        // Evict cache for this client so subsequent lookups refresh
+        try { _cache.Remove($"rpm_client_{mapping.DownloadClientId}"); } catch { }
 
         return mapping;
     }
@@ -77,6 +99,8 @@ public class RemotePathMappingService : IRemotePathMappingService
         _logger.LogInformation(
             "Updated remote path mapping {MappingId} for client {ClientId}: {RemotePath} -> {LocalPath}",
             mapping.Id, mapping.DownloadClientId, mapping.RemotePath, mapping.LocalPath);
+        // Evict cache for this client so subsequent lookups refresh
+        try { _cache.Remove($"rpm_client_{mapping.DownloadClientId}"); } catch { }
 
         return existing;
     }
@@ -95,6 +119,8 @@ public class RemotePathMappingService : IRemotePathMappingService
         _logger.LogInformation(
             "Deleted remote path mapping {MappingId} for client {ClientId}",
             id, mapping.DownloadClientId);
+        // Evict cache for this client
+        try { _cache.Remove($"rpm_client_{mapping.DownloadClientId}"); } catch { }
 
         return true;
     }
@@ -111,10 +137,8 @@ public class RemotePathMappingService : IRemotePathMappingService
 
         // Get all mappings for this client, ordered by path length (longest first)
         // This ensures we match the most specific path first
-        var mappings = await _context.RemotePathMappings
-            .Where(m => m.DownloadClientId == downloadClientId)
-            .OrderByDescending(m => m.RemotePath.Length)
-            .ToListAsync();
+        // Use cached mapping list per client to avoid frequent DB queries
+        var mappings = await GetByClientIdAsync(downloadClientId);
 
         foreach (var mapping in mappings)
         {
@@ -152,12 +176,17 @@ public class RemotePathMappingService : IRemotePathMappingService
 
         var normalizedRemotePath = NormalizePath(remotePath);
 
-        // Check if any mapping matches this path
-        var hasMapping = await _context.RemotePathMappings
-            .AnyAsync(m => m.DownloadClientId == downloadClientId &&
-                          normalizedRemotePath.StartsWith(NormalizePath(m.RemotePath)));
+        // Use cached mappings to avoid hitting the database on every check.
+        var mappings = await GetByClientIdAsync(downloadClientId);
+        foreach (var m in mappings)
+        {
+            if (normalizedRemotePath.StartsWith(NormalizePath(m.RemotePath)))
+            {
+                return true;
+            }
+        }
 
-        return hasMapping;
+        return false;
     }
 
     /// <summary>
