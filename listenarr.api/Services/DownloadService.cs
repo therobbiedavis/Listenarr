@@ -261,15 +261,50 @@ namespace Listenarr.Api.Services
 
             _logger.LogInformation("Sending to {ClientType} download client: {ClientName}", downloadClient.Type, downloadClient.Name);
 
-            // Route to appropriate client handler
-            return downloadClient.Type.ToLower() switch
+            // Generate download ID
+            var downloadId = Guid.NewGuid().ToString();
+
+            // Create Download record in database before sending to client
+            var download = new Download
             {
-                "qbittorrent" => await SendToQBittorrent(downloadClient, searchResult),
-                "transmission" => await SendToTransmission(downloadClient, searchResult),
-                "sabnzbd" => await SendToSABnzbd(downloadClient, searchResult),
-                "nzbget" => await SendToNZBGet(downloadClient, searchResult),
-                _ => throw new Exception($"Unsupported download client type: {downloadClient.Type}")
+                Id = downloadId,
+                AudiobookId = audiobookId,
+                Title = searchResult.Title,
+                Artist = searchResult.Artist ?? string.Empty,
+                Album = searchResult.Album ?? string.Empty,
+                OriginalUrl = !string.IsNullOrEmpty(searchResult.MagnetLink) ? searchResult.MagnetLink : (searchResult.TorrentUrl ?? searchResult.NzbUrl ?? string.Empty),
+                Status = DownloadStatus.Queued,
+                Progress = 0,
+                TotalSize = searchResult.Size,
+                DownloadedSize = 0,
+                DownloadPath = downloadClient.DownloadPath ?? string.Empty,
+                FinalPath = string.Empty,
+                StartedAt = DateTime.UtcNow,
+                DownloadClientId = downloadClientId,
+                Metadata = new Dictionary<string, object>
+                {
+                    ["Source"] = searchResult.Source ?? string.Empty,
+                    ["Seeders"] = searchResult.Seeders,
+                    ["Quality"] = searchResult.Quality ?? string.Empty,
+                    ["DownloadType"] = searchResult.DownloadType ?? (IsTorrentResult(searchResult) ? "Torrent" : "Usenet")
+                }
             };
+
+            _dbContext.Downloads.Add(download);
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
+
+            // Route to appropriate client handler
+            await (downloadClient.Type.ToLower() switch
+            {
+                "qbittorrent" => SendToQBittorrent(downloadClient, searchResult),
+                "transmission" => SendToTransmission(downloadClient, searchResult),
+                "sabnzbd" => SendToSABnzbd(downloadClient, searchResult),
+                "nzbget" => SendToNZBGet(downloadClient, searchResult),
+                _ => throw new Exception($"Unsupported download client type: {downloadClient.Type}")
+            });
+
+            return downloadId;
         }
 
         private string BuildSearchQuery(Audiobook audiobook)
@@ -395,7 +430,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string> SendToQBittorrent(DownloadClientConfiguration client, SearchResult result)
+        private async Task SendToQBittorrent(DownloadClientConfiguration client, SearchResult result)
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
             
@@ -467,10 +502,9 @@ namespace Listenarr.Api.Services
             }
 
             _logger.LogInformation("Successfully sent torrent to qBittorrent");
-            return Guid.NewGuid().ToString(); // Return a download ID
         }
 
-        private async Task<string> SendToTransmission(DownloadClientConfiguration client, SearchResult result)
+        private async Task SendToTransmission(DownloadClientConfiguration client, SearchResult result)
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
             
@@ -591,7 +625,6 @@ namespace Listenarr.Api.Services
                     }
 
                     _logger.LogInformation("Successfully added torrent to Transmission with ID: {TorrentId}", torrentId);
-                    return torrentId;
                 }
                 else
                 {
@@ -657,7 +690,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string> SendToSABnzbd(DownloadClientConfiguration client, SearchResult result)
+        private async Task SendToSABnzbd(DownloadClientConfiguration client, SearchResult result)
         {
             try
             {
@@ -766,7 +799,6 @@ namespace Listenarr.Api.Services
                 }
 
                 _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", downloadId);
-                return downloadId;
             }
             catch (Exception ex)
             {
@@ -775,7 +807,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string> SendToNZBGet(DownloadClientConfiguration client, SearchResult result)
+        private async Task SendToNZBGet(DownloadClientConfiguration client, SearchResult result)
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
             
@@ -886,7 +918,6 @@ namespace Listenarr.Api.Services
                 }
 
                 _logger.LogInformation("Successfully added NZB to NZBGet with ID: {NzbId}", nzbId);
-                return nzbId;
             }
             catch (Exception ex)
             {
