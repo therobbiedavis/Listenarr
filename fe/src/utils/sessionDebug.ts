@@ -17,20 +17,7 @@ export const logSessionState = (context: string = 'Unknown') => {
     console.log('Session manager token:', managerToken ? `${managerToken.substring(0, 10)}...` : 'None')
     console.log('Has valid token:', sessionTokenManager.hasToken())
     
-    // Check cookies
-    const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-      const [name, value] = cookie.trim().split('=')
-      acc[name] = value
-      return acc
-    }, {} as Record<string, string>)
-    
-    const authCookies = Object.entries(cookies).filter(([key]) => 
-      key.toLowerCase().includes('auth') || 
-      key.toLowerCase().includes('session') ||
-      key.toLowerCase().includes('listenarr')
-    )
-    
-    console.log('Auth-related cookies:', authCookies.length > 0 ? authCookies : 'None')
+    // Note: Authentication uses Bearer tokens, not cookies (cookies only used for CSRF)
     
     // Check sessionStorage
     const sessionItems: string[] = []
@@ -81,20 +68,7 @@ export const clearAllAuthData = () => {
       console.warn('[Session Debug] Could not clear sessionStorage:', error)
     }
     
-    // Clear cookies
-    try {
-      document.cookie.split(';').forEach(cookie => {
-        const eqPos = cookie.indexOf('=')
-        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim()
-        if (name) {
-          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`
-          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`
-        }
-      })
-      console.log('[Session Debug] Cookies cleared')
-    } catch (error) {
-      console.warn('[Session Debug] Could not clear cookies:', error)
-    }
+    // Note: Authentication uses Bearer tokens, not cookies (CSRF cookies will expire naturally)
     
     console.log('[Session Debug] All authentication data cleared')
   } catch (error) {
