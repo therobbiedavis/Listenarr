@@ -142,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { AudibleBookMetadata, QualityProfile } from '@/types'
 import { getQualityProfiles } from '@/services/api'
 

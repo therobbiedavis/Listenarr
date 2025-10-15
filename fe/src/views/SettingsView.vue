@@ -935,11 +935,6 @@ const adminUsers = ref<Array<{ id: number; username: string; email?: string; isA
 const showMappingForm = ref(false)
 const mappingToEdit = ref<RemotePathMapping | null>(null)
 
-// Toggle function for password visibility. Use .value to avoid template-assignment edge cases
-const toggleShowPassword = () => {
-  showPassword.value = !showPassword.value
-}
-
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
   const axiosError = error as { response?: { data?: unknown; status?: number } }

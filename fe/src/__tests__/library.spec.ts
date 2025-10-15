@@ -1,6 +1,7 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { useLibraryStore } from '@/stores/library'
 import { describe, test, expect, beforeEach } from 'vitest'
+import type { Audiobook } from '@/types'
 
 describe('library store merge', () => {
   beforeEach(() => {
@@ -11,7 +12,7 @@ describe('library store merge', () => {
     const store = useLibraryStore()
     store.audiobooks = [
       { id: 1, title: 'Local', files: [{ id: 10, path: '/local/file.m4b' }] }
-    ] as any
+    ] as Audiobook[]
 
     const serverList = [
       { id: 1, title: 'Local (server)', files: [] }

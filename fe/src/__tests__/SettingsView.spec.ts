@@ -28,6 +28,10 @@ vi.mock('@/services/api', () => ({
   deleteQualityProfile: vi.fn(async () => ({})),
   createQualityProfile: vi.fn(async (p: unknown) => p),
   updateQualityProfile: vi.fn(async (id: number, p: unknown) => p),
+  getRemotePathMappings: vi.fn(async () => []),
+  createRemotePathMapping: vi.fn(async (p: unknown) => p),
+  updateRemotePathMapping: vi.fn(async (id: number, p: unknown) => p),
+  deleteRemotePathMapping: vi.fn(async () => ({})),
 }))
 
 describe('SettingsView', () => {
