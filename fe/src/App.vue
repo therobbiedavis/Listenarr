@@ -427,8 +427,35 @@ const applyFirstResult = () => {
 onMounted(async () => {
   console.log('[App] Initializing real-time updates via SignalR...')
   
+  // Import session debugging utilities
+  const { logSessionState, clearAllAuthData } = await import('@/utils/sessionDebug')
+  
+  // Log initial session state for debugging
+  logSessionState('App Mount - Initial State')
+  
+  // Verify session is valid before proceeding
+  console.log('[App] Verifying session state...')
+  try {
+    // Check if we have valid session/authentication
+    const sessionCheck = await apiService.getServiceHealth()
+    console.log('[App] Session verification successful:', sessionCheck)
+  } catch (sessionError) {
+    console.warn('[App] Session verification failed:', sessionError)
+    // If we get 401/403, clear any stale auth state
+    const status = (sessionError && typeof sessionError === 'object' && 'status' in sessionError) ? sessionError.status : 0
+    if (status === 401 || status === 403) {
+      console.log('[App] Clearing stale authentication state due to session error')
+      auth.user.authenticated = false
+      // Use the comprehensive clear function
+      clearAllAuthData()
+    }
+  }
+  
   // Load current auth state before touching protected endpoints
   await auth.loadCurrentUser()
+  
+  // Log session state after authentication attempt
+  logSessionState('App Mount - After Auth Load')
 
   // If authenticated, load protected resources and enable real-time updates
     if (auth.user.authenticated) {

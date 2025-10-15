@@ -9,11 +9,24 @@ export const useAuthStore = defineStore('auth', () => {
   const redirectTo = ref<string | null>(null)
 
   const loadCurrentUser = async () => {
+    console.log('[AuthStore] Loading current user...')
     try {
       const u = await apiService.getCurrentUser()
+      console.log('[AuthStore] Current user loaded:', u)
       user.value = u
       loaded.value = true
-    } catch {
+    } catch (error) {
+      console.warn('[AuthStore] Failed to load current user:', error)
+      const status = (error && typeof error === 'object' && 'status' in error) ? (error as any).status : 0
+      if (status === 401 || status === 403) {
+        console.log('[AuthStore] Authentication error - clearing session')
+        // Clear any stale tokens when we get auth errors
+        try {
+          import('@/utils/sessionToken').then(({ sessionTokenManager }) => {
+            sessionTokenManager.clearToken()
+          })
+        } catch {}
+      }
       user.value = { authenticated: false }
       loaded.value = true
     }
