@@ -6,7 +6,7 @@ import type { Download, QueueItem, Audiobook } from '@/types'
 // In DEV use localhost. In production prefer configured VITE_API_BASE_URL origin;
 // fall back to same-origin by using a relative '/api' which implies current host.
 const API_BASE_URL = import.meta.env.DEV
-  ? 'http://localhost:5146'
+  ? 'http://localhost:5000'
   : (import.meta.env.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL.replace('/api', '') : '')
 
 type DownloadUpdateCallback = (downloads: Download[]) => void

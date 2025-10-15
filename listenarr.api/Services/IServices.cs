@@ -23,6 +23,11 @@ namespace Listenarr.Api.Services
         Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
         // Exposed for processing completed downloads (move/copy + DB updates)
         Task ProcessCompletedDownloadAsync(string downloadId, string finalPath);
+        
+        // Reprocessing methods for existing downloads
+        Task<string?> ReprocessDownloadAsync(string downloadId);
+        Task<List<ReprocessResult>> ReprocessDownloadsAsync(List<string> downloadIds);
+        Task<List<ReprocessResult>> ReprocessAllCompletedDownloadsAsync(bool includeProcessed = false, TimeSpan? maxAge = null);
     }
 
     public interface IMetadataService

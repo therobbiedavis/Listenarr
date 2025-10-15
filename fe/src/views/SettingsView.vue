@@ -264,7 +264,7 @@
               <div class="detail-row">
                 <i class="ph ph-folder"></i>
                 <span class="detail-label">Download Path:</span>
-                <span class="detail-value">{{ client.downloadPath }}</span>
+                <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
               </div>
               <div class="detail-row">
                 <i class="ph ph-check-circle"></i>

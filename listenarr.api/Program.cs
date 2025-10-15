@@ -99,6 +99,7 @@ builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
+builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
 
 // Always register session service, but it will check config internally
 builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
@@ -127,6 +128,9 @@ builder.Services.AddHostedService<FfmpegInstallBackgroundService>();
 
 // Background service to rescan files missing metadata
 builder.Services.AddHostedService<MetadataRescanService>();
+
+// Register background service for download processing queue
+builder.Services.AddHostedService<DownloadProcessingBackgroundService>();
 
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()

@@ -32,6 +32,7 @@ namespace Listenarr.Api.Models
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; }
     public DbSet<User> Users { get; set; }
         public DbSet<Download> Downloads { get; set; }
+        public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; }
         public DbSet<QualityProfile> QualityProfiles { get; set; }
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
 
@@ -139,9 +140,20 @@ namespace Listenarr.Api.Models
             modelBuilder.Entity<DownloadClientConfiguration>()
                 .Ignore(e => e.Settings);
 
-            // Download - ignore Metadata dictionary (not stored in DB for now)
+            // Download - store Metadata as JSON
             modelBuilder.Entity<Download>()
-                .Ignore(e => e.Metadata);
+                .Property(e => e.Metadata)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>()
+                );
+            modelBuilder.Entity<Download>()
+                .Property(e => e.Metadata)
+                .Metadata.SetValueComparer(new ValueComparer<Dictionary<string, object>>(
+                    (c1, c2) => (c1 ?? new Dictionary<string, object>()).SequenceEqual(c2 ?? new Dictionary<string, object>()),
+                    c => (c ?? new Dictionary<string, object>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.Key.GetHashCode(), v.Value != null ? v.Value.GetHashCode() : 0)),
+                    c => c == null ? new Dictionary<string, object>() : new Dictionary<string, object>(c)
+                ));
 
             // QualityProfile configuration - store complex properties as JSON
             modelBuilder.Entity<QualityProfile>()
@@ -226,6 +238,35 @@ namespace Listenarr.Api.Models
                     (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
                     c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
                     c => c.ToList()
+                ));
+
+            // DownloadProcessingJob - store complex properties as JSON
+            modelBuilder.Entity<DownloadProcessingJob>()
+                .Property(e => e.JobData)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>()
+                );
+            modelBuilder.Entity<DownloadProcessingJob>()
+                .Property(e => e.JobData)
+                .Metadata.SetValueComparer(new ValueComparer<Dictionary<string, object>>(
+                    (c1, c2) => (c1 ?? new Dictionary<string, object>()).SequenceEqual(c2 ?? new Dictionary<string, object>()),
+                    c => (c ?? new Dictionary<string, object>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.Key.GetHashCode(), v.Value != null ? v.Value.GetHashCode() : 0)),
+                    c => c == null ? new Dictionary<string, object>() : new Dictionary<string, object>(c)
+                ));
+
+            modelBuilder.Entity<DownloadProcessingJob>()
+                .Property(e => e.ProcessingLog)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<string>()
+                );
+            modelBuilder.Entity<DownloadProcessingJob>()
+                .Property(e => e.ProcessingLog)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c == null ? new List<string>() : c.ToList()
                 ));
 
             // Ensure AudiobookFile uniqueness per audiobook path

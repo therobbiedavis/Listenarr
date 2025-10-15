@@ -3,6 +3,7 @@ using System;
 using Listenarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Api.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    partial class ListenArrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251015125618_AddMetadataToDownloads")]
+    partial class AddMetadataToDownloads
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
@@ -263,9 +266,6 @@ namespace Listenarr.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Asin")
-                        .HasColumnType("TEXT");
-
                     b.Property<int?>("AudiobookId")
                         .HasColumnType("INTEGER");
 
@@ -286,17 +286,8 @@ namespace Listenarr.Api.Migrations
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("ExpectedFileSize")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("FinalPath")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Isbn")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Language")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Metadata")
@@ -308,18 +299,6 @@ namespace Listenarr.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Progress")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Publisher")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("Runtime")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Series")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesNumber")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("StartedAt")
@@ -388,67 +367,6 @@ namespace Listenarr.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("DownloadClientConfigurations");
-                });
-
-            modelBuilder.Entity("Listenarr.Api.Models.DownloadProcessingJob", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DestinationPath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadClientId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DownloadId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("JobData")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("JobType")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MaxRetries")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("NextRetryAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ProcessingLog")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("RetryCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("SourcePath")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("DownloadProcessingJobs");
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.History", b =>
