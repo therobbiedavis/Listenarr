@@ -728,41 +728,62 @@ namespace Listenarr.Api.Services
                 string destinationPath = string.Empty;
                 try
                 {
-                    if (settings.EnableMetadataProcessing && fileNaming != null)
+                    if (fileNaming != null)
                     {
-                        _logger.LogDebug("Using metadata processing and file naming service");
+                        _logger.LogDebug("Using file naming service to generate destination path");
                         
-                        // Try to extract metadata minimally
-                        var metadataService = scope.ServiceProvider.GetService<IMetadataService>();
+                        // Always use file naming service for consistent naming
                         AudioMetadata metadata = new AudioMetadata { Title = download.Title ?? "Unknown Title" };
                         
-                        if (metadataService != null)
+                        if (settings.EnableMetadataProcessing)
                         {
-                            try 
-                            { 
-                                metadata = await metadataService.ExtractFileMetadataAsync(sourceFile);
-                                _logger.LogDebug("Extracted metadata: Title='{Title}', Artist='{Artist}', Album='{Album}'", 
-                                    metadata.Title, metadata.Artist, metadata.Album);
-                            } 
-                            catch (Exception ex)
+                            // Try to extract metadata from file
+                            var metadataService = scope.ServiceProvider.GetService<IMetadataService>();
+                            if (metadataService != null)
                             {
-                                _logger.LogWarning(ex, "Failed to extract metadata from {SourceFile}, using download info", sourceFile);
+                                try 
+                                { 
+                                    metadata = await metadataService.ExtractFileMetadataAsync(sourceFile);
+                                    _logger.LogDebug("Extracted metadata: Title='{Title}', Artist='{Artist}', Album='{Album}'", 
+                                        metadata.Title, metadata.Artist, metadata.Album);
+                                } 
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to extract metadata from {SourceFile}, using download info", sourceFile);
+                                }
                             }
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Metadata processing disabled, using download info for naming");
                         }
                         
                         var ext = Path.GetExtension(sourceFile);
-                        destinationPath = await fileNaming.GenerateFilePathAsync(metadata, null, null, ext);
-                        _logger.LogInformation("Generated destination path using naming service: {DestinationPath}", destinationPath);
+                        var generatedPath = await fileNaming.GenerateFilePathAsync(metadata, null, null, ext);
+                        
+                        // Ensure the file goes directly to OutputPath (root folder) without subdirectories
+                        var outRoot = settings.OutputPath;
+                        if (string.IsNullOrWhiteSpace(outRoot))
+                        {
+                            outRoot = "./completed";
+                            _logger.LogDebug("No output path configured, using default: {OutputRoot}", outRoot);
+                        }
+                        
+                        // Extract just the filename from the generated path (ignore any directories)
+                        var generatedFileName = Path.GetFileName(generatedPath);
+                        destinationPath = Path.Combine(outRoot, generatedFileName);
+                        
+                        _logger.LogInformation("Generated destination path: {DestinationPath}", destinationPath);
                     }
                     else
                     {
-                        _logger.LogDebug("Using simple file naming (metadata processing disabled)");
+                        _logger.LogWarning("File naming service not available, using simple naming");
                         
                         var outRoot = settings.OutputPath;
-                        if (string.IsNullOrEmpty(outRoot))
+                        if (string.IsNullOrWhiteSpace(outRoot))
                         {
-                            outRoot = Path.GetDirectoryName(sourceFile) ?? ".";
-                            _logger.LogDebug("No output path configured, using source directory: {OutputRoot}", outRoot);
+                            outRoot = "./completed";
+                            _logger.LogDebug("No output path configured, using default: {OutputRoot}", outRoot);
                         }
                         
                         var fileName = Path.GetFileName(sourceFile);
@@ -774,10 +795,15 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogError(ex, "Failed to generate destination path for download {DownloadId}", download.Id);
                     
-                    // Fallback to simple path in source directory
-                    var fallbackDir = Path.GetDirectoryName(sourceFile) ?? ".";
+                    // Fallback to simple path in output directory
+                    var outRoot = settings.OutputPath;
+                    if (string.IsNullOrWhiteSpace(outRoot))
+                    {
+                        outRoot = "./completed";
+                    }
+                    
                     var fallbackFileName = Path.GetFileName(sourceFile);
-                    destinationPath = Path.Combine(fallbackDir, fallbackFileName);
+                    destinationPath = Path.Combine(outRoot, fallbackFileName);
                     _logger.LogWarning("Using fallback destination path: {DestinationPath}", destinationPath);
                 }
 
