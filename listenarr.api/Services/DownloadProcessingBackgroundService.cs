@@ -17,6 +17,8 @@
  */
 
 using Listenarr.Api.Models;
+using Microsoft.EntityFrameworkCore;
+using System.Linq;
 
 namespace Listenarr.Api.Services
 {
@@ -45,6 +47,9 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
+                    // Ensure any previously completed downloads are enqueued for processing
+                    await EnqueueCompletedDownloadsAsync(stoppingToken);
+
                     await ProcessQueueAsync(stoppingToken);
                     await ProcessRetryJobsAsync(stoppingToken);
                 }
@@ -86,10 +91,19 @@ namespace Listenarr.Api.Services
             try
             {
                 await ProcessJobAsync(job, scope, cancellationToken);
-                
-                job.MarkAsCompleted();
-                _logger.LogInformation("Successfully completed job {JobId} for download {DownloadId}", 
-                    job.Id, job.DownloadId);
+
+                // Only mark the job as completed if it is still in Processing state.
+                // Some job handlers may set the job to Failed/Retry/Skipped and we should respect that.
+                if (job.Status == ProcessingJobStatus.Processing)
+                {
+                    job.MarkAsCompleted();
+                    _logger.LogInformation("Successfully completed job {JobId} for download {DownloadId}", 
+                        job.Id, job.DownloadId);
+                }
+                else
+                {
+                    _logger.LogInformation("Job {JobId} for download {DownloadId} finished with status {Status}", job.Id, job.DownloadId, job.Status);
+                }
             }
             catch (Exception ex)
             {
@@ -124,12 +138,111 @@ namespace Listenarr.Api.Services
             }
         }
 
+        /// <summary>
+        /// Find completed downloads that are not yet enqueued for processing and add them to the queue.
+        /// This runs briefly each loop to ensure existing completed items are eventually processed.
+        /// </summary>
+        private async Task EnqueueCompletedDownloadsAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var scope = _serviceScopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
+                var pathMapping = scope.ServiceProvider.GetService<IRemotePathMappingService>();
+
+                // Find recent completed downloads that have not yet been processed into jobs
+                var candidates = await dbContext.Downloads
+                    .Where(d => d.Status == DownloadStatus.Completed)
+                    .OrderByDescending(d => d.CompletedAt)
+                    .Take(200)
+                    .ToListAsync(cancellationToken);
+
+                foreach (var dl in candidates)
+                {
+                    try
+                    {
+                        // Skip if there is already a job for this download pending/processing/retry
+                        var existingJobs = await queueService.GetJobsForDownloadAsync(dl.Id);
+                        if (existingJobs != null && existingJobs.Any(j => j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
+                        {
+                            continue;
+                        }
+
+                        // Determine a plausible source path to process
+                        var possiblePaths = new List<string?>();
+                        if (!string.IsNullOrEmpty(dl.FinalPath)) possiblePaths.Add(dl.FinalPath);
+                        if (!string.IsNullOrEmpty(dl.DownloadPath)) possiblePaths.Add(dl.DownloadPath);
+                        if (dl.Metadata != null && dl.Metadata.TryGetValue("ClientContentPath", out var clientObj))
+                        {
+                            var clientPath = clientObj?.ToString();
+                            if (!string.IsNullOrEmpty(clientPath)) possiblePaths.Add(clientPath);
+                        }
+
+                        string? found = null;
+
+                        foreach (var p in possiblePaths.Where(p => !string.IsNullOrEmpty(p)))
+                        {
+                            var testPath = p!;
+
+                            // If path mapping service exists, try translating
+                            if (pathMapping != null && !string.IsNullOrEmpty(dl.DownloadClientId))
+                            {
+                                try
+                                {
+                                    var translated = await pathMapping.TranslatePathAsync(dl.DownloadClientId, testPath);
+                                    if (!string.IsNullOrEmpty(translated) && File.Exists(translated))
+                                    {
+                                        found = translated;
+                                        break;
+                                    }
+                                }
+                                catch
+                                {
+                                    // ignore and fallback to raw path
+                                }
+                            }
+
+                            if (File.Exists(testPath))
+                            {
+                                found = testPath;
+                                break;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(found))
+                        {
+                            // Queue for processing
+                            await queueService.QueueDownloadProcessingAsync(dl.Id, found!, dl.DownloadClientId);
+                            _logger.LogInformation("Enqueued existing completed download {DownloadId} for processing: {Source}", dl.Id, found);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to consider completed download {DownloadId} for enqueue", dl.Id);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error while enqueuing completed downloads");
+            }
+        }
+
         private async Task ProcessJobAsync(DownloadProcessingJob job, IServiceScope scope, CancellationToken cancellationToken)
         {
             switch (job.JobType)
             {
                 case ProcessingJobType.MoveOrCopyFile:
                     await ProcessMoveOrCopyJobAsync(job, scope, cancellationToken);
+                    break;
+                case ProcessingJobType.ExtractMetadata:
+                    // Older jobs in the queue may use job types that are no longer supported.
+                    // Mark them as failed with a helpful message and do not throw to avoid retry storms.
+                    job.AddLogEntry("Job type ExtractMetadata is not supported");
+                    job.ErrorMessage = "Job type ExtractMetadata is not supported";
+                    job.Status = ProcessingJobStatus.Failed;
+                    job.CompletedAt = DateTime.UtcNow;
                     break;
                 default:
                     throw new NotSupportedException($"Job type {job.JobType} is not supported");
@@ -204,19 +317,52 @@ namespace Listenarr.Api.Services
                     
                     // Build metadata for naming - get download info from database
                     var metadata = new AudioMetadata { Title = "Unknown Title" };
+                    // When possible we'll build a namingMetadata from the linked Audiobook to ensure
+                    // audiobook fields are authoritative for naming (avoid extracted tags overwriting them).
+                    AudioMetadata? namingMetadata = null;
 
                     using var scope = _serviceScopeFactory.CreateScope();
                     var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                     var download = await dbContext.Downloads.FindAsync(job.DownloadId);
                     if (download != null)
                     {
-                        metadata.Title = download.Title ?? "Unknown Title";
-                        metadata.Artist = download.Artist;
-                        metadata.Album = download.Album;
+                        // Start with values from the download record
+                        metadata.Title = download.Title ?? metadata.Title;
+                        metadata.Artist = download.Artist ?? string.Empty;
+                        metadata.Album = download.Album ?? string.Empty;
                         job.AddLogEntry($"Using download metadata: {metadata.Title} by {metadata.Artist}");
+
+                        // If the download is linked to an Audiobook, prefer its metadata for naming
+                        if (download.AudiobookId != null)
+                        {
+                            try
+                            {
+                                var audiobook = await dbContext.Audiobooks.FindAsync(download.AudiobookId);
+                                if (audiobook != null)
+                                {
+                                    // Create a naming-only metadata object from the Audiobook. This will be
+                                    // used as the authoritative source for file naming fields.
+                                    namingMetadata = new AudioMetadata
+                                    {
+                                        Title = audiobook.Title ?? metadata.Title,
+                                        Artist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
+                                        AlbumArtist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
+                                        Series = !string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series : (audiobook.Title ?? metadata.Title),
+                                    };
+
+                                    job.AddLogEntry($"Using audiobook metadata for naming: {namingMetadata.Title} by {namingMetadata.Artist}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                job.AddLogEntry($"Failed to retrieve audiobook metadata: {ex.Message}");
+                            }
+                        }
                     }
 
-                    // Try to extract metadata from file if metadata processing enabled
+                    // Try to extract metadata from file if metadata processing enabled.
+                    // NOTE: do NOT overwrite existing metadata (which may include audiobook/download values).
+                    // Instead merge extracted values only into missing fields so audiobook data is preserved.
                     if (metadataService != null)
                     {
                         try
@@ -224,8 +370,63 @@ namespace Listenarr.Api.Services
                             var extractedMetadata = await metadataService.ExtractFileMetadataAsync(sourcePath);
                             if (extractedMetadata != null)
                             {
-                                metadata = extractedMetadata;
-                                job.AddLogEntry($"Extracted file metadata: {metadata.Title} by {metadata.Artist}");
+                                // If we have namingMetadata from the Audiobook, only fill missing fields from
+                                // the extracted metadata so audiobook values remain authoritative.
+                                if (namingMetadata != null)
+                                {
+                                    if (string.IsNullOrWhiteSpace(namingMetadata.Title) && !string.IsNullOrWhiteSpace(extractedMetadata.Title))
+                                        namingMetadata.Title = extractedMetadata.Title;
+                                    if (string.IsNullOrWhiteSpace(namingMetadata.Artist) && !string.IsNullOrWhiteSpace(extractedMetadata.Artist))
+                                        namingMetadata.Artist = extractedMetadata.Artist;
+                                    if (string.IsNullOrWhiteSpace(namingMetadata.Series) && !string.IsNullOrWhiteSpace(extractedMetadata.Series))
+                                        namingMetadata.Series = extractedMetadata.Series;
+                                    if (!namingMetadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
+                                        namingMetadata.SeriesPosition = extractedMetadata.SeriesPosition;
+                                    if (!namingMetadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
+                                        namingMetadata.TrackNumber = extractedMetadata.TrackNumber;
+                                    if (!namingMetadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
+                                        namingMetadata.DiscNumber = extractedMetadata.DiscNumber;
+                                    if (!namingMetadata.Year.HasValue && extractedMetadata.Year.HasValue)
+                                        namingMetadata.Year = extractedMetadata.Year;
+                                    if (!namingMetadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
+                                        namingMetadata.Bitrate = extractedMetadata.Bitrate;
+                                    if (string.IsNullOrWhiteSpace(namingMetadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
+                                        namingMetadata.Format = extractedMetadata.Format;
+
+                                    job.AddLogEntry($"Merged extracted file metadata into naming metadata: {namingMetadata.Title} by {namingMetadata.Artist}");
+                                }
+                                else
+                                {
+                                    // No audiobook naming metadata - fall back to previous merge behavior
+                                    string FirstNonEmpty(params string?[] candidates)
+                                    {
+                                        foreach (var c in candidates)
+                                        {
+                                            if (!string.IsNullOrWhiteSpace(c)) return c!;
+                                        }
+                                        return string.Empty;
+                                    }
+
+                                    metadata.Title = FirstNonEmpty(metadata.Title, extractedMetadata.Title, "Unknown Title");
+                                    metadata.Artist = FirstNonEmpty(metadata.Artist, extractedMetadata.Artist, extractedMetadata.AlbumArtist, metadata.Artist);
+                                    metadata.Album = FirstNonEmpty(metadata.Album, extractedMetadata.Album);
+                                    metadata.Series = FirstNonEmpty(metadata.Series, extractedMetadata.Series, metadata.Series);
+
+                                    if (!metadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
+                                        metadata.SeriesPosition = extractedMetadata.SeriesPosition;
+                                    if (!metadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
+                                        metadata.TrackNumber = extractedMetadata.TrackNumber;
+                                    if (!metadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
+                                        metadata.DiscNumber = extractedMetadata.DiscNumber;
+                                    if (!metadata.Year.HasValue && extractedMetadata.Year.HasValue)
+                                        metadata.Year = extractedMetadata.Year;
+                                    if (!metadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
+                                        metadata.Bitrate = extractedMetadata.Bitrate;
+                                    if (string.IsNullOrWhiteSpace(metadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
+                                        metadata.Format = extractedMetadata.Format;
+
+                                    job.AddLogEntry($"Merged extracted file metadata: {metadata.Title} by {metadata.Artist}");
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -236,7 +437,22 @@ namespace Listenarr.Api.Services
 
                     // Generate path using naming pattern
                     var ext = Path.GetExtension(sourcePath);
-                    var generatedPath = await fileNamingService.GenerateFilePathAsync(metadata, null, null, ext);
+                    // Use namingMetadata if present (authoritative audiobook fields), otherwise use metadata
+                    var metadataForNaming = namingMetadata ?? metadata;
+
+                    // Record the resolved naming metadata on the job for diagnostics
+                    try
+                    {
+                        job.AddLogEntry($"Resolved naming metadata: Author='{metadataForNaming.Artist}', AlbumArtist='{metadataForNaming.AlbumArtist}', Series='{metadataForNaming.Series}', Title='{metadataForNaming.Title}', Year='{metadataForNaming.Year}'");
+                    }
+                    catch
+                    {
+                        // ignore logging errors
+                    }
+                    // Use the overload that accepts an explicit outputPath so the naming service combines correctly
+                    var generatedPath = fileNamingService != null
+                        ? await fileNamingService.GenerateFilePathAsync(metadataForNaming, settings.OutputPath ?? string.Empty, null, null, ext)
+                        : Path.GetFileName(sourcePath);
 
                     // Preserve subdirectories from the generated path. The naming pattern may include
                     // subfolders (e.g. {Author}/{Series}/...). If the generatedPath is rooted, use it
@@ -276,19 +492,73 @@ namespace Listenarr.Api.Services
                     var action = settings.CompletedFileAction ?? "Move";
                     job.AddLogEntry($"Performing {action} operation");
 
-                    if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                    // Capture source size before operation for later verification (move will remove source)
+                    long? sourceSize = null;
+                    try
                     {
-                        File.Copy(sourcePath, destinationPath, true);
-                        job.AddLogEntry($"Copied file: {sourcePath} -> {destinationPath}");
+                        if (File.Exists(sourcePath))
+                        {
+                            sourceSize = new FileInfo(sourcePath).Length;
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        // Default to Move
-                        File.Move(sourcePath, destinationPath, true);
-                        job.AddLogEntry($"Moved file: {sourcePath} -> {destinationPath}");
+                        job.AddLogEntry($"Failed to read source file size: {ex.Message}");
                     }
 
-                    job.DestinationPath = destinationPath;
+                    try
+                    {
+                        if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Copy(sourcePath, destinationPath, true);
+                            job.AddLogEntry($"Copied file: {sourcePath} -> {destinationPath}");
+                        }
+                        else
+                        {
+                            // Default to Move
+                            File.Move(sourcePath, destinationPath, true);
+                            job.AddLogEntry($"Moved file: {sourcePath} -> {destinationPath}");
+                        }
+
+                        // Verification: ensure destination exists and (if sourceSize available) sizes match
+                        if (!File.Exists(destinationPath))
+                        {
+                            job.AddLogEntry($"Destination not found after {action}: {destinationPath}");
+                            job.ErrorMessage = $"Destination not found after {action}";
+                            throw new IOException($"Destination not found after {action}: {destinationPath}");
+                        }
+
+                        if (sourceSize.HasValue)
+                        {
+                            try
+                            {
+                                var destSize = new FileInfo(destinationPath).Length;
+                                if (destSize != sourceSize.Value)
+                                {
+                                    job.AddLogEntry($"Destination size ({destSize}) does not match source size ({sourceSize.Value})");
+                                    job.ErrorMessage = $"Destination size mismatch: {destSize} != {sourceSize.Value}";
+                                    throw new IOException("Destination size mismatch after file operation");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                // If verifying size fails for any reason, record and surface the error
+                                job.AddLogEntry($"Failed to verify destination size: {ex.Message}");
+                                job.ErrorMessage = ex.Message;
+                                throw;
+                            }
+                        }
+
+                        job.AddLogEntry($"Verified destination: {destinationPath} (size: {new FileInfo(destinationPath).Length})");
+                        job.DestinationPath = destinationPath;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Ensure the error is recorded on the job so it surfaces in the queue stats/logs
+                        job.AddLogEntry($"File operation failed: {ex.Message}");
+                        job.ErrorMessage = ex.Message;
+                        throw;
+                    }
                 }
                 else
                 {

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
+using System.Linq;
 
 namespace Listenarr.Api.Controllers;
 
@@ -212,26 +213,45 @@ public class DownloadsController : ControllerBase
         var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
         var clientLookup = downloadClients.ToDictionary(c => c.Id, c => c.Name);
         
-        return downloads.Select(d => new
-        {
-            id = d.Id,
-            audiobookId = d.AudiobookId,
-            title = d.Title,
-            artist = d.Artist,
-            album = d.Album,
-            originalUrl = d.OriginalUrl,
-            status = d.Status.ToString(),
-            progress = d.Progress,
-            totalSize = d.TotalSize,
-            downloadedSize = d.DownloadedSize,
-            finalPath = d.FinalPath,
-            startedAt = d.StartedAt,
-            completedAt = d.CompletedAt,
-            errorMessage = d.ErrorMessage,
-            downloadClientId = d.DownloadClientId,
-            downloadClientName = d.DownloadClientId == "DDL" ? "Direct Download" : 
-                               clientLookup.TryGetValue(d.DownloadClientId, out var clientName) ? clientName : "Unknown Client",
-            metadata = d.Metadata
+        return downloads.Select(d => {
+            // Remove any client-local content path information before returning to the frontend.
+            // Server keeps `DownloadPath`/metadata internally for mapping/monitoring, but must not transmit
+            // client-local paths (for example ClientContentPath) to user browsers.
+            object? sanitizedMetadata = null;
+            if (d.Metadata != null)
+            {
+                var dict = new Dictionary<string, object>();
+                foreach (var kvp in d.Metadata)
+                {
+                    if (!string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dict[kvp.Key] = kvp.Value!;
+                    }
+                }
+                sanitizedMetadata = dict;
+            }
+
+            return new
+            {
+                id = d.Id,
+                audiobookId = d.AudiobookId,
+                title = d.Title,
+                artist = d.Artist,
+                album = d.Album,
+                originalUrl = d.OriginalUrl,
+                status = d.Status.ToString(),
+                progress = d.Progress,
+                totalSize = d.TotalSize,
+                downloadedSize = d.DownloadedSize,
+                finalPath = d.FinalPath,
+                startedAt = d.StartedAt,
+                completedAt = d.CompletedAt,
+                errorMessage = d.ErrorMessage,
+                downloadClientId = d.DownloadClientId,
+                downloadClientName = d.DownloadClientId == "DDL" ? "Direct Download" : 
+                                   clientLookup.TryGetValue(d.DownloadClientId, out var clientName) ? clientName : "Unknown Client",
+                metadata = sanitizedMetadata
+            };
         }).Cast<object>().ToList();
     }
 }

@@ -337,7 +337,7 @@
               </div>
               <div class="form-group">
                 <label>Remote Path (from client)</label>
-                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/downloads/complete/sonarr/" />
+                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/path/to/complete/downloads" />
               </div>
               <div class="form-group">
                 <label>Local Path (server)</label>

@@ -750,7 +750,6 @@ namespace Listenarr.Api.Services
                     var pathVariations = new[]
                     {
                         clientPath,
-                        clientPath.Replace("/downloads", "/host/downloads"),
                         clientPath.Replace("/data", "/host/data"),
                         clientPath.Replace(client.DownloadPath, "/host" + client.DownloadPath),
                         Path.Combine("/host", clientPath.TrimStart('/')),
@@ -1648,18 +1647,58 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogDebug("Broadcasting {Count} download updates", changedDownloads.Count);
 
+                // Sanitize each Download before broadcasting to clients (remove DownloadPath and client-local metadata)
+                var sanitized = changedDownloads.Select(d => new {
+                    id = d.Id,
+                    audiobookId = d.AudiobookId,
+                    title = d.Title,
+                    artist = d.Artist,
+                    album = d.Album,
+                    originalUrl = d.OriginalUrl,
+                    status = d.Status.ToString(),
+                    progress = d.Progress,
+                    totalSize = d.TotalSize,
+                    downloadedSize = d.DownloadedSize,
+                    finalPath = d.FinalPath,
+                    startedAt = d.StartedAt,
+                    completedAt = d.CompletedAt,
+                    errorMessage = d.ErrorMessage,
+                    downloadClientId = d.DownloadClientId,
+                    metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+                }).ToList();
+
                 await _hubContext.Clients.All.SendAsync(
                     "DownloadUpdate",
-                    changedDownloads,
+                    sanitized,
                     cancellationToken);
             }
 
             // Also send full list periodically (every 10 polls)
             if (DateTime.UtcNow.Second % 30 == 0)
             {
+                // Broadcast a sanitized full list (remove DownloadPath and client-local metadata)
+                var sanitizedList = currentDownloads.Select(d => new {
+                    id = d.Id,
+                    audiobookId = d.AudiobookId,
+                    title = d.Title,
+                    artist = d.Artist,
+                    album = d.Album,
+                    originalUrl = d.OriginalUrl,
+                    status = d.Status.ToString(),
+                    progress = d.Progress,
+                    totalSize = d.TotalSize,
+                    downloadedSize = d.DownloadedSize,
+                    finalPath = d.FinalPath,
+                    startedAt = d.StartedAt,
+                    completedAt = d.CompletedAt,
+                    errorMessage = d.ErrorMessage,
+                    downloadClientId = d.DownloadClientId,
+                    metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+                }).ToList();
+
                 await _hubContext.Clients.All.SendAsync(
-                    "DownloadsList", 
-                    currentDownloads, 
+                    "DownloadsList",
+                    sanitizedList,
                     cancellationToken);
             }
         }

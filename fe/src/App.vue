@@ -226,7 +226,14 @@ const systemIssues = ref(0)
 // Activity count: combines downloads (SignalR) + queue (SignalR)
 // All real-time, no polling!
 const activityCount = computed(() => {
-  const downloadsActive = downloadsStore.activeDownloads.length
+  // Only count downloads that are actually active (not paused/completed/failed)
+  const trulyActiveDownloads = downloadsStore.activeDownloads.filter(d => 
+    d.status === 'Downloading' || 
+    d.status === 'Queued' || 
+    d.status === 'Processing'
+  )
+  
+  const downloadsActive = trulyActiveDownloads.length
   const queueActive = queueItems.value.filter(item =>
     item.status === 'downloading' ||
     item.status === 'paused' ||
@@ -234,7 +241,7 @@ const activityCount = computed(() => {
   ).length
   
   // Count DDL downloads separately (they never appear in queue)
-  const ddlDownloads = downloadsStore.activeDownloads.filter(d => d.downloadClientId === 'DDL').length
+  const ddlDownloads = trulyActiveDownloads.filter(d => d.downloadClientId === 'DDL').length
   
   // Count external client downloads (may be in both downloads and queue)
   const externalDownloads = downloadsActive - ddlDownloads

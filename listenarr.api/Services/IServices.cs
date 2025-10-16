@@ -101,6 +101,17 @@ namespace Listenarr.Api.Services
         Task<string> GenerateFilePathAsync(AudioMetadata metadata, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
         
         /// <summary>
+        /// Apply the configured file naming pattern to generate the final file path with a specific output path
+        /// </summary>
+        /// <param name="metadata">Audiobook metadata</param>
+        /// <param name="outputPath">Specific output path to use</param>
+        /// <param name="diskNumber">Optional disk/part number</param>
+        /// <param name="chapterNumber">Optional chapter number</param>
+        /// <param name="originalExtension">File extension (e.g., ".m4b", ".mp3")</param>
+        /// <returns>Full file path using the naming pattern</returns>
+        Task<string> GenerateFilePathAsync(AudioMetadata metadata, string outputPath, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
+        
+        /// <summary>
         /// Parse a naming pattern and replace variables with actual values
         /// </summary>
         string ApplyNamingPattern(string pattern, Dictionary<string, object> variables);

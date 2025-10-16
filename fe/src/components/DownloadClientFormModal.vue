@@ -69,6 +69,17 @@
               />
             </div>
 
+            <div class="form-group">
+              <label for="downloadPath">Download Path</label>
+              <input 
+                id="downloadPath" 
+                v-model="formData.downloadPath" 
+                type="text" 
+                placeholder="Leave blank to use client's default"
+              />
+              <small>Optional: Override the download client's default save path. Leave blank to use the client's configured download directory.</small>
+            </div>
+
             <div class="checkbox-group">
               <label>
                 <input type="checkbox" v-model="formData.useSSL" />

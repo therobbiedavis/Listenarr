@@ -48,7 +48,16 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Queue Monitor Service starting");
 
             // Wait a bit before starting to ensure the app is fully initialized
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Queue Monitor Service cancelled before start");
+                return;
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -56,13 +65,25 @@ namespace Listenarr.Api.Services
                 {
                     await MonitorQueueAsync(stoppingToken);
                 }
+                catch (OperationCanceledException)
+                {
+                    // Cancellation requested - exit gracefully
+                    break;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error in Queue Monitor Service");
                 }
 
                 // Wait before next poll
-                await Task.Delay(_pollingInterval, stoppingToken);
+                try
+                {
+                    await Task.Delay(_pollingInterval, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
 
             _logger.LogInformation("Queue Monitor Service stopping");
