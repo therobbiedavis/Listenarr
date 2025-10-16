@@ -145,7 +145,9 @@ namespace Listenarr.Api.Models
                 .Property(e => e.Metadata)
                 .HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>()
+                    v => string.IsNullOrWhiteSpace(v)
+                        ? new Dictionary<string, object>()
+                        : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>()
                 );
             modelBuilder.Entity<Download>()
                 .Property(e => e.Metadata)
@@ -160,7 +162,9 @@ namespace Listenarr.Api.Models
                 .Property(e => e.Qualities)
                 .HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => System.Text.Json.JsonSerializer.Deserialize<List<QualityDefinition>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<QualityDefinition>()
+                    v => string.IsNullOrWhiteSpace(v)
+                        ? new List<QualityDefinition>()
+                        : System.Text.Json.JsonSerializer.Deserialize<List<QualityDefinition>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<QualityDefinition>()
                 );
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.Qualities)
@@ -174,7 +178,7 @@ namespace Listenarr.Api.Models
                 .Property(e => e.PreferredFormats)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
-                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.PreferredFormats)
@@ -188,7 +192,7 @@ namespace Listenarr.Api.Models
                 .Property(e => e.PreferredWords)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
-                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.PreferredWords)
@@ -202,7 +206,7 @@ namespace Listenarr.Api.Models
                 .Property(e => e.MustNotContain)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
-                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.MustNotContain)
@@ -216,7 +220,7 @@ namespace Listenarr.Api.Models
                 .Property(e => e.MustContain)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
-                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.MustContain)
@@ -230,7 +234,7 @@ namespace Listenarr.Api.Models
                 .Property(e => e.PreferredLanguages)
                 .HasConversion(
                     v => string.Join("|", v ?? new List<string>()),
-                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
             modelBuilder.Entity<QualityProfile>()
                 .Property(e => e.PreferredLanguages)
@@ -245,7 +249,9 @@ namespace Listenarr.Api.Models
                 .Property(e => e.JobData)
                 .HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>()
+                    v => string.IsNullOrWhiteSpace(v)
+                        ? new Dictionary<string, object>()
+                        : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>()
                 );
             modelBuilder.Entity<DownloadProcessingJob>()
                 .Property(e => e.JobData)
@@ -259,7 +265,9 @@ namespace Listenarr.Api.Models
                 .Property(e => e.ProcessingLog)
                 .HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<string>()
+                    v => string.IsNullOrWhiteSpace(v)
+                        ? new List<string>()
+                        : System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<string>()
                 );
             modelBuilder.Entity<DownloadProcessingJob>()
                 .Property(e => e.ProcessingLog)
