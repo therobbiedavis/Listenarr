@@ -83,6 +83,54 @@ namespace Listenarr.Api.Tests
             Assert.False(result);
         }
 
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_RefusesFileOutsideAudiobookFolder_AndCreatesHistory()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
+
+            // Create audiobook with a legacy FilePath in Author/BookA folder
+            var bookA = new Audiobook { Title = "Book A", Authors = new System.Collections.Generic.List<string> { "Author" }, FilePath = Path.Combine(Path.GetTempPath(), "Author", "BookA", "track1.m4b") };
+            db.Audiobooks.Add(bookA);
+            await db.SaveChangesAsync();
+
+            // Ensure the audiobook directory exists on disk for the containment check
+            var bookADir = Path.GetDirectoryName(bookA.FilePath);
+            if (!Directory.Exists(bookADir)) Directory.CreateDirectory(bookADir!);
+
+            // Create a file in a sibling folder Author/BookB which should be refused
+            var rejectedDir = Path.Combine(Path.GetTempPath(), "Author", "BookB");
+            if (!Directory.Exists(rejectedDir)) Directory.CreateDirectory(rejectedDir);
+            var rejectedFile = Path.Combine(rejectedDir, $"rejected-{Guid.NewGuid()}.m4b");
+            await File.WriteAllTextAsync(rejectedFile, "dummy");
+
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>())).ReturnsAsync(new AudioMetadata());
+
+            var services = new ServiceCollection();
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+            services.AddSingleton<ListenArrDbContext>(db);
+            services.AddSingleton<MetadataExtractionLimiter>();
+            services.AddMemoryCache();
+
+            var provider = services.BuildServiceProvider();
+            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+            var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<AudioFileService>>();
+            var svc = new AudioFileService(scopeFactory, loggerMock.Object, provider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(), provider.GetRequiredService<MetadataExtractionLimiter>());
+
+            var result = await svc.EnsureAudiobookFileAsync(bookA.Id, rejectedFile, "test-scan");
+            Assert.False(result);
+
+            // History entry should be created
+            var history = await db.History.FirstOrDefaultAsync(h => h.AudiobookId == bookA.Id && h.EventType == "File Association Refused");
+            Assert.NotNull(history);
+            Assert.Contains("Refused to associate file", history.Message);
+        }
+
         // Test helper DbContext that throws on SaveChangesAsync
         private class ThrowingSaveChangesDbContext : ListenArrDbContext
         {

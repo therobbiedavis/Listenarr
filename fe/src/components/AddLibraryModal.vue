@@ -146,7 +146,7 @@ import { ref, onMounted } from 'vue'
 import type { AudibleBookMetadata, QualityProfile, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 
 interface Props {
   visible: boolean
@@ -162,7 +162,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const configStore = useConfigurationStore()
-const { success, error: showError } = useNotification()
+const toast = useToast()
 
 const isAdding = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
@@ -194,13 +194,13 @@ const addToLibrary = async () => {
       autoSearch: options.value.autoSearch
     })
 
-    success(`"${props.book.title}" has been added to your library!`)
+  toast.success('Added', `"${props.book.title}" has been added to your library!`)
     emit('added', result.audiobook)
     closeModal()
   } catch (err: unknown) {
     console.error('Failed to add audiobook:', err)
     const errorMessage = err instanceof Error ? err.message : 'Failed to add audiobook. Please try again.'
-    showError(errorMessage)
+  toast.error('Add failed', errorMessage)
   } finally {
     isAdding.value = false
   }

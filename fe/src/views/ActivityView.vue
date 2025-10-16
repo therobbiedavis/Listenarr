@@ -156,6 +156,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -278,7 +279,8 @@ const confirmRemove = async () => {
     itemToRemove.value = null
   } catch (err) {
     console.error('Failed to remove download:', err)
-    alert('Failed to remove download: ' + (err as Error).message)
+    const toast = useToast()
+    toast.error('Remove failed', (err as Error).message)
   } finally {
     removing.value = false
   }

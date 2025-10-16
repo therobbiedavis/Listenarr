@@ -28,6 +28,9 @@ namespace Listenarr.Api.Services
         Task<string?> ReprocessDownloadAsync(string downloadId);
         Task<List<ReprocessResult>> ReprocessDownloadsAsync(List<string> downloadIds);
         Task<List<ReprocessResult>> ReprocessAllCompletedDownloadsAsync(bool includeProcessed = false, TimeSpan? maxAge = null);
+
+        // Test a download client configuration (returns success flag, message and optionally the client back)
+        Task<(bool Success, string Message, Listenarr.Api.Models.DownloadClientConfiguration? Client)> TestDownloadClientAsync(Listenarr.Api.Models.DownloadClientConfiguration client);
     }
 
     public interface IMetadataService

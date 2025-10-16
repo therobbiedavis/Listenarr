@@ -28,6 +28,7 @@ class SignalRService {
   private scanJobCallbacks: Set<ScanJobCallback> = new Set()
   private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
   private searchProgressCallbacks: Set<(payload: { message: string; asin?: string | null }) => void> = new Set()
+  private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
   private pingInterval: number | null = null
 
   async connect(): Promise<void> {
@@ -184,6 +185,12 @@ class SignalRService {
           this.searchProgressCallbacks.forEach(cb => cb(payload))
         }
         break
+      case 'ToastMessage':
+        if (args && args[0]) {
+          const payload = args[0] as { level: string; title: string; message: string; timeoutMs?: number }
+          this.toastCallbacks.forEach(cb => cb(payload))
+        }
+        break
     }
   }
 
@@ -285,6 +292,12 @@ class SignalRService {
   onSearchProgress(callback: (payload: { message: string; asin?: string | null }) => void): () => void {
     this.searchProgressCallbacks.add(callback)
     return () => { this.searchProgressCallbacks.delete(callback) }
+  }
+
+  // Subscribe to server-sent toast messages
+  onToast(callback: (payload: { level: string; title: string; message: string; timeoutMs?: number }) => void): () => void {
+    this.toastCallbacks.add(callback)
+    return () => { this.toastCallbacks.delete(callback) }
   }
 
   // Subscribe to files removed notifications

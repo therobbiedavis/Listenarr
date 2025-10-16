@@ -233,6 +233,15 @@
                 >
                   <i class="ph ph-pencil"></i>
                 </button>
+                <button
+                  @click="testClient(client)"
+                  class="icon-button"
+                  title="Test"
+                  :disabled="testingClient === client.id"
+                >
+                  <i v-if="testingClient === client.id" class="ph ph-spinner ph-spin"></i>
+                  <i v-else class="ph ph-bolt"></i>
+                </button>
                 <button 
                   @click="confirmDeleteClient(client)" 
                   class="icon-button danger"
@@ -841,13 +850,13 @@ import FolderBrowser from '@/components/FolderBrowser.vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
 import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
-import { useNotification } from '@/composables/useNotification'
-import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile, getRemotePathMappings, createRemotePathMapping, updateRemotePathMapping, deleteRemotePathMapping } from '@/services/api'
+import { useToast } from '@/services/toastService'
+import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile, getRemotePathMappings, createRemotePathMapping, updateRemotePathMapping, deleteRemotePathMapping, testDownloadClient as apiTestDownloadClient } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
-const { success, error: showError, info } = useNotification()
+const toast = useToast()
 const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general'>('indexers')
 const showApiForm = ref(false)
 const showClientForm = ref(false)
@@ -896,7 +905,7 @@ const regenerateApiKey = async () => {
       try {
         resp = await apiService.generateInitialApiKey()
         startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
-        info(resp.message || 'API key generated - copied to clipboard')
+        toast.info('API key', resp.message || 'API key generated - copied to clipboard')
         try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
         return
       } catch (initialErr) {
@@ -908,16 +917,16 @@ const regenerateApiKey = async () => {
     // Fall back to authenticated regeneration
     resp = await apiService.regenerateApiKey()
     startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
-    info('API key regenerated - copied to clipboard')
+    toast.info('API key', 'API key regenerated - copied to clipboard')
     try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
   } catch (err) {
     console.error('Failed to generate/regenerate API key', err)
     // If server returns 401/403, suggest logging in as admin
     const status = (err && typeof err === 'object' && err !== null && 'status' in err) ? (err as { status: number }).status : 0
     if (status === 401 || status === 403) {
-      showError('You must be logged in as an administrator to regenerate the API key. Please login and try again.')
+      toast.error('Permission denied', 'You must be logged in as an administrator to regenerate the API key. Please login and try again.')
     } else {
-      showError('Failed to generate/regenerate API key')
+      toast.error('API key failed', 'Failed to generate/regenerate API key')
     }
   } finally {
     loadingApiKey.value = false
@@ -928,6 +937,7 @@ const indexers = ref<Indexer[]>([])
 const qualityProfiles = ref<QualityProfile[]>([])
 const remotePathMappings = ref<RemotePathMapping[]>([])
 const testingIndexer = ref<number | null>(null)
+const testingClient = ref<string | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
@@ -1000,11 +1010,11 @@ const deleteApiConfig = async (id: string) => {
   if (confirm('Are you sure you want to delete this API configuration?')) {
     try {
       await configStore.deleteApiConfiguration(id)
-      success('API configuration deleted successfully')
+      toast.success('API', 'API configuration deleted successfully')
     } catch (error) {
       console.error('Failed to delete API configuration:', error)
       const errorMessage = formatApiError(error)
-      showError(errorMessage)
+      toast.error('API delete failed', errorMessage)
     }
   }
 }
@@ -1019,15 +1029,41 @@ const executeDeleteClient = async (id?: string) => {
   const clientId = id || clientToDelete.value?.id
   if (!clientId) return
   
-  try {
+    try {
     await configStore.deleteDownloadClientConfiguration(clientId)
-    success('Download client deleted successfully')
+    toast.success('Download client', 'Download client deleted successfully')
   } catch (error) {
     console.error('Failed to delete download client:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Delete failed', errorMessage)
   } finally {
     clientToDelete.value = null
+  }
+}
+
+// Test a download client configuration (include credentials in payload)
+const testClient = async (client: DownloadClientConfiguration) => {
+  testingClient.value = client.id
+  try {
+    // Send full client config to server for testing (credentials included)
+    const result = await apiTestDownloadClient(client)
+    if (result && result.success) {
+      toast.success('Download client', result.message || 'Test succeeded')
+      // Update local list if server returned an updated client object
+      if (result.client) {
+        const idx = configStore.downloadClientConfigurations.findIndex(c => c.id === result.client!.id)
+        if (idx !== -1) configStore.downloadClientConfigurations[idx] = result.client as DownloadClientConfiguration
+      }
+    } else {
+      const message = (result && result.message) ? result.message : 'Test failed'
+      toast.error('Download client test failed', message)
+    }
+  } catch (err) {
+    console.error('Failed to test download client:', err)
+    const errorMessage = formatApiError(err)
+    toast.error('Download client test failed', errorMessage)
+  } finally {
+    testingClient.value = null
   }
 }
 
@@ -1043,7 +1079,7 @@ const getClientTypeClass = (type: string): string => {
 
 const saveApiConfig = () => {
   // Placeholder for API config save
-  info('API configuration form would be implemented here')
+  toast.info('API', 'API configuration form would be implemented here')
   showApiForm.value = false
   editingApi.value = null
 }
@@ -1065,20 +1101,20 @@ const saveSettings = async () => {
       delete settingsToSave.adminPassword
     }
     
-    await configStore.saveApplicationSettings(settingsToSave)
-    success('Settings saved successfully')
+  await configStore.saveApplicationSettings(settingsToSave)
+  toast.success('Settings', 'Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
       const original = startupConfig.value || {}
       // Persist authenticationRequired as string 'true'/'false' so it's explicit and
       // consistent with expectations from the UI (was previously 'Enabled'/'Disabled').
       const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'true' : 'false' }
-        try {
+          try {
           await apiService.saveStartupConfig(newCfg)
-          success('Startup configuration saved (config.json)')
+          toast.success('Startup config', 'Startup configuration saved (config.json)')
         } catch {
           // If server can't persist startup config (e.g., permission denied), offer a fallback download of the config JSON
-          info('Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.')
+          toast.info('Startup config', 'Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.')
           try {
             const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
             const url = URL.createObjectURL(blob)
@@ -1089,19 +1125,19 @@ const saveSettings = async () => {
             a.click()
             a.remove()
             URL.revokeObjectURL(url)
-            info('Download started. Save the file to the server config directory to persist the change.')
+            toast.info('Startup config', 'Download started. Save the file to the server config directory to persist the change.')
           } catch {
-            info('Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.')
+            toast.info('Startup config', 'Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.')
           }
         }
     } catch {
       // Not fatal - write may not be allowed in some deployments
-      info('Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
+      toast.info('Startup config', 'Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
     }
   } catch (error) {
     console.error('Failed to save settings:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Save failed', errorMessage)
   }
 }
 
@@ -1112,7 +1148,7 @@ const loadIndexers = async () => {
   } catch (error) {
     console.error('Failed to load indexers:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Load failed', errorMessage)
   }
 }
 
@@ -1123,11 +1159,11 @@ const toggleIndexerFunc = async (id: number) => {
     if (index !== -1) {
       indexers.value[index] = updatedIndexer
     }
-    success(`Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
+    toast.success('Indexer', `Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
   } catch (error) {
     console.error('Failed to toggle indexer:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Toggle failed', errorMessage)
   }
 }
 
@@ -1136,7 +1172,7 @@ const testIndexerFunc = async (id: number) => {
   try {
     const result = await apiTestIndexer(id)
     if (result.success) {
-      success(`Indexer tested successfully: ${result.message}`)
+      toast.success('Indexer test', `Indexer tested successfully: ${result.message}`)
       // Update the indexer with test results
       const index = indexers.value.findIndex(i => i.id === id)
       if (index !== -1) {
@@ -1144,7 +1180,7 @@ const testIndexerFunc = async (id: number) => {
       }
     } else {
       const errorMessage = formatApiError({ response: { data: result.error || result.message } })
-      showError(errorMessage)
+      toast.error('Indexer test failed', errorMessage)
       // Still update to show failed test status
       const index = indexers.value.findIndex(i => i.id === id)
       if (index !== -1) {
@@ -1154,7 +1190,7 @@ const testIndexerFunc = async (id: number) => {
   } catch (error) {
     console.error('Failed to test indexer:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Indexer test failed', errorMessage)
   } finally {
     testingIndexer.value = null
   }
@@ -1173,13 +1209,13 @@ const executeDeleteIndexer = async () => {
   if (!indexerToDelete.value) return
   
   try {
-    await deleteIndexer(indexerToDelete.value.id)
-    indexers.value = indexers.value.filter(i => i.id !== indexerToDelete.value!.id)
-    success('Indexer deleted successfully')
-  } catch (error) {
+  await deleteIndexer(indexerToDelete.value.id)
+  indexers.value = indexers.value.filter(i => i.id !== indexerToDelete.value!.id)
+  toast.success('Indexer', 'Indexer deleted successfully')
+    } catch (error) {
     console.error('Failed to delete indexer:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Delete failed', errorMessage)
   } finally {
     indexerToDelete.value = null
   }
@@ -1192,7 +1228,7 @@ const loadQualityProfiles = async () => {
   } catch (error) {
     console.error('Failed to load quality profiles:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Load failed', errorMessage)
   }
 }
 
@@ -1225,21 +1261,21 @@ const saveMapping = async () => {
       name: mappingToEditData.value.name || ''
     }
 
-    if (mappingToEdit.value && mappingToEdit.value.id) {
+      if (mappingToEdit.value && mappingToEdit.value.id) {
       const updated = await updateRemotePathMapping(mappingToEdit.value.id, payload)
       const idx = remotePathMappings.value.findIndex(m => m.id === updated.id)
       if (idx !== -1) remotePathMappings.value[idx] = updated
-      success('Remote path mapping updated')
+      toast.success('Remote path mapping', 'Remote path mapping updated')
     } else {
       const created = await createRemotePathMapping(payload)
       remotePathMappings.value.push(created)
-      success('Remote path mapping created')
+      toast.success('Remote path mapping', 'Remote path mapping created')
     }
 
     closeMappingForm()
   } catch (err) {
     console.error('Failed to save mapping', err)
-    showError('Failed to save mapping')
+    toast.error('Save failed', 'Failed to save mapping')
   }
 }
 
@@ -1250,10 +1286,10 @@ const deleteMapping = async (id: number) => {
   try {
     await deleteRemotePathMapping(id)
     remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== id)
-    success('Remote path mapping deleted')
+    toast.success('Remote path mapping', 'Remote path mapping deleted')
   } catch (err) {
     console.error('Failed to delete mapping', err)
-    showError('Failed to delete mapping')
+    toast.error('Delete failed', 'Failed to delete mapping')
   }
 }
 
@@ -1263,7 +1299,7 @@ const loadAdminUsers = async () => {
   } catch (error) {
     console.error('Failed to load admin users:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Load failed', errorMessage)
   }
 }
 
@@ -1287,11 +1323,11 @@ const executeDeleteProfile = async () => {
   try {
     await deleteQualityProfile(profileToDelete.value.id!)
     qualityProfiles.value = qualityProfiles.value.filter(p => p.id !== profileToDelete.value!.id)
-    success('Quality profile deleted successfully')
+    toast.success('Quality profile', 'Quality profile deleted successfully')
   } catch (error: unknown) {
     console.error('Failed to delete quality profile:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Delete failed', errorMessage)
   } finally {
     profileToDelete.value = null
   }
@@ -1299,26 +1335,26 @@ const executeDeleteProfile = async () => {
 
 const saveQualityProfile = async (profile: QualityProfile) => {
   try {
-    if (profile.id) {
+      if (profile.id) {
       // Update existing profile
       const updated = await updateQualityProfile(profile.id, profile)
       const index = qualityProfiles.value.findIndex(p => p.id === profile.id)
       if (index !== -1) {
         qualityProfiles.value[index] = updated
       }
-      success('Quality profile updated successfully')
+      toast.success('Quality profile', 'Quality profile updated successfully')
     } else {
       // Create new profile
       const created = await createQualityProfile(profile)
       qualityProfiles.value.push(created)
-      success('Quality profile created successfully')
+      toast.success('Quality profile', 'Quality profile created successfully')
     }
     showQualityProfileForm.value = false
     editingQualityProfile.value = null
-  } catch (error: unknown) {
+    } catch (error: unknown) {
     console.error('Failed to save quality profile:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Save failed', errorMessage)
   }
 }
 
@@ -1334,11 +1370,11 @@ const setDefaultProfile = async (profile: QualityProfile) => {
       isDefault: p.id === profile.id
     }))
     
-    success(`${profile.name} set as default quality profile`)
+    toast.success('Quality profile', `${profile.name} set as default quality profile`)
   } catch (error: unknown) {
     console.error('Failed to set default profile:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Set default failed', errorMessage)
   }
 }
 

@@ -182,6 +182,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
@@ -437,6 +438,7 @@ function buildSearchQuery(): string {
 
 async function downloadResult(result: SearchResult) {
   downloading.value[result.id] = true
+  const toast = useToast()
   
   try {
     // Check if this is a DDL
@@ -482,7 +484,8 @@ async function downloadResult(result: SearchResult) {
       userMessage = 'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
     }
     
-    alert(userMessage)
+    // Show error as a non-blocking toast instead of a modal alert
+    toast.error('Download failed', userMessage)
     delete downloading.value[result.id]
   }
 }

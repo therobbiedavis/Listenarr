@@ -79,6 +79,28 @@ namespace Listenarr.Api.Services
                             continue;
                         }
 
+                        // If the audiobook has a stored file path, prefer scanning its containing folder
+                        // This ensures a scan requested for a specific audiobook only operates within the
+                        // closest folder (e.g. /.../Stephen Graham Jones/Mongrels/) rather than the
+                        // parent artist folder.
+                        try
+                        {
+                            if (!string.IsNullOrEmpty(audiobook.FilePath))
+                            {
+                                var audiobookDir = Path.GetDirectoryName(audiobook.FilePath) ?? string.Empty;
+                                if (!string.IsNullOrEmpty(audiobookDir) && Directory.Exists(audiobookDir))
+                                {
+                                    // Use the audiobook directory as the scan root to avoid scanning siblings
+                                    scanRoot = audiobookDir;
+                                    _logger.LogDebug("Adjusted scan root to audiobook folder for job {JobId}: {ScanRoot}", job.Id, scanRoot);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to adjust scan root to audiobook folder for job {JobId}", job.Id);
+                        }
+
                         var titleToken = (audiobook.Title ?? string.Empty).Replace("\"", string.Empty).Trim();
                         var authorToken = audiobook.Authors?.FirstOrDefault() ?? string.Empty;
 
