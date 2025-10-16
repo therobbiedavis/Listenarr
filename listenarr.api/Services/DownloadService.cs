@@ -1670,6 +1670,13 @@ namespace Listenarr.Api.Services
                     return items;
                 }
 
+                // Check for empty response content
+                if (string.IsNullOrWhiteSpace(responseContent))
+                {
+                    _logger.LogWarning("Transmission returned empty response for client {ClientName}", client.Name);
+                    return items;
+                }
+
                 // Parse response
                 var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
                 
@@ -1804,6 +1811,14 @@ namespace Listenarr.Api.Services
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync();
+
+                // Check for empty response content
+                if (string.IsNullOrWhiteSpace(jsonContent))
+                {
+                    _logger.LogWarning("SABnzbd returned empty response for client {ClientName}", client.Name);
+                    return items;
+                }
+
                 var doc = JsonDocument.Parse(jsonContent);
                 
                 // Navigate to queue.slots array
@@ -2025,6 +2040,13 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("NZBGet queue request failed with status {Status}", response.StatusCode);
+                    return items;
+                }
+
+                // Check for empty response content
+                if (string.IsNullOrWhiteSpace(responseContent))
+                {
+                    _logger.LogWarning("NZBGet returned empty response for client {ClientName}", client.Name);
                     return items;
                 }
 
