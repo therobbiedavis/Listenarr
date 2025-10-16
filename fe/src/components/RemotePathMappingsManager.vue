@@ -126,7 +126,7 @@
         <input
           v-model="testPath"
           type="text"
-          placeholder="Enter a remote path to test (e.g., /downloads/audiobooks/book.m4b)"
+          placeholder="Enter a remote path to test (e.g., /path/to/downloads/book.m4b)"
           class="test-input"
           @keyup.enter="handleTestPath"
         />

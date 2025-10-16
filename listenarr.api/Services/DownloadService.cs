@@ -22,6 +22,7 @@ using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Listenarr.Api.Services
 {
@@ -57,6 +58,66 @@ namespace Listenarr.Api.Services
             _pathMappingService = pathMappingService;
             _searchService = searchService;
             _hubContext = hubContext;
+        }
+
+        /// <summary>
+        /// Normalizes a title for better matching by removing format indicators and extra spaces
+        /// </summary>
+        private static string NormalizeTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+
+            // Remove ALL bracketed content [anything] - more robust than specific patterns
+            var result = System.Text.RegularExpressions.Regex.Replace(title, @"\[.*?\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove ALL parentheses content (anything) - handles unknown quality/group indicators
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\(.*?\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove curly braces content {anything}
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\{.*?\}", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove common separators and replace with spaces
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"[\-_\.]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove common quality/format indicators that might not be in brackets
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\b(mp3|m4a|m4b|flac|aac|ogg|opus|320|256|128|v0|v2|audiobook|unabridged|abridged)\b", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Normalize multiple spaces to single spaces
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ");
+            
+            // Remove trailing/leading spaces, dashes, etc.
+            result = result.Trim(' ', '-', '.', ',');
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if two titles are similar enough to be considered a match
+        /// </summary>
+        private static bool AreTitlesSimilar(string title1, string title2)
+        {
+            var norm1 = NormalizeTitle(title1);
+            var norm2 = NormalizeTitle(title2);
+            
+            // Exact match after normalization
+            if (string.Equals(norm1, norm2, StringComparison.OrdinalIgnoreCase))
+                return true;
+                
+            // Bidirectional contains
+            if (norm1.Contains(norm2, StringComparison.OrdinalIgnoreCase) || 
+                norm2.Contains(norm1, StringComparison.OrdinalIgnoreCase))
+                return true;
+                
+            // First 50 chars (for very long titles)
+            if (norm1.Length > 20 && norm2.Length > 20)
+            {
+                var len = Math.Min(50, Math.Min(norm1.Length, norm2.Length));
+                if (norm1.Substring(0, len).Equals(norm2.Substring(0, len), StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            
+            return false;
         }
 
         // Placeholder implementations for existing interface methods
@@ -294,15 +355,41 @@ namespace Listenarr.Api.Services
             await _dbContext.SaveChangesAsync();
             _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
 
-            // Route to appropriate client handler
-            await (downloadClient.Type.ToLower() switch
+            // Route to appropriate client handler and capture client-specific IDs
+            string? clientSpecificId = null;
+            switch (downloadClient.Type.ToLower())
             {
-                "qbittorrent" => SendToQBittorrent(downloadClient, searchResult),
-                "transmission" => SendToTransmission(downloadClient, searchResult),
-                "sabnzbd" => SendToSABnzbd(downloadClient, searchResult),
-                "nzbget" => SendToNZBGet(downloadClient, searchResult),
-                _ => throw new Exception($"Unsupported download client type: {downloadClient.Type}")
-            });
+                case "qbittorrent":
+                    clientSpecificId = await SendToQBittorrent(downloadClient, searchResult);
+                    break;
+                case "transmission":
+                    await SendToTransmission(downloadClient, searchResult);
+                    break;
+                case "sabnzbd":
+                    await SendToSABnzbd(downloadClient, searchResult);
+                    break;
+                case "nzbget":
+                    await SendToNZBGet(downloadClient, searchResult);
+                    break;
+                default:
+                    throw new Exception($"Unsupported download client type: {downloadClient.Type}");
+            }
+
+            // Update download record with client-specific ID if available
+            if (!string.IsNullOrEmpty(clientSpecificId))
+            {
+                var downloadToUpdate = await _dbContext.Downloads.FindAsync(downloadId);
+                if (downloadToUpdate != null)
+                {
+                    if (downloadToUpdate.Metadata == null)
+                        downloadToUpdate.Metadata = new Dictionary<string, object>();
+                        
+                    downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
+                    _dbContext.Downloads.Update(downloadToUpdate);
+                    await _dbContext.SaveChangesAsync();
+                    _logger.LogInformation("Updated download {DownloadId} with qBittorrent hash: {Hash}", downloadId, clientSpecificId);
+                }
+            }
 
             return downloadId;
         }
@@ -430,7 +517,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task SendToQBittorrent(DownloadClientConfiguration client, SearchResult result)
+        private async Task<string?> SendToQBittorrent(DownloadClientConfiguration client, SearchResult result)
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
             
@@ -460,11 +547,32 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
             _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
 
+            // Get existing torrents list before adding (to find the new one)
+            var torrentsBeforeResp = await _httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+            var existingHashes = new HashSet<string>();
+            if (torrentsBeforeResp.IsSuccessStatusCode)
+            {
+                var beforeJson = await torrentsBeforeResp.Content.ReadAsStringAsync();
+                var beforeTorrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(beforeJson);
+                if (beforeTorrents != null)
+                {
+                    foreach (var t in beforeTorrents)
+                    {
+                        if (t.ContainsKey("hash"))
+                        {
+                            var hash = t["hash"].GetString();
+                            if (!string.IsNullOrEmpty(hash))
+                                existingHashes.Add(hash);
+                        }
+                    }
+                }
+            }
+
             // Prepare torrent add data
             var formData = new List<KeyValuePair<string, string>>
             {
                 new KeyValuePair<string, string>("urls", torrentUrl),
-                new KeyValuePair<string, string>("savepath", client.DownloadPath)
+                new KeyValuePair<string, string>("savepath", string.IsNullOrEmpty(client.DownloadPath) ? "" : client.DownloadPath)
             };
 
             // Add category if configured
@@ -502,6 +610,37 @@ namespace Listenarr.Api.Services
             }
 
             _logger.LogInformation("Successfully sent torrent to qBittorrent");
+
+            // Wait a moment for qBittorrent to process the torrent
+            await Task.Delay(1000);
+
+            // Get updated torrents list to find the newly added torrent hash
+            var torrentsAfterResp = await _httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+            if (torrentsAfterResp.IsSuccessStatusCode)
+            {
+                var afterJson = await torrentsAfterResp.Content.ReadAsStringAsync();
+                var afterTorrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(afterJson);
+                if (afterTorrents != null)
+                {
+                    // Find the new torrent by comparing with existing hashes
+                    foreach (var t in afterTorrents)
+                    {
+                        if (t.ContainsKey("hash"))
+                        {
+                            var hash = t["hash"].GetString();
+                            if (!string.IsNullOrEmpty(hash) && !existingHashes.Contains(hash))
+                            {
+                                var name = t.ContainsKey("name") ? t["name"].GetString() ?? "" : "";
+                                _logger.LogInformation("Found newly added qBittorrent torrent: {Name} with hash {Hash}", name, hash);
+                                return hash;
+                            }
+                        }
+                    }
+                }
+            }
+
+            _logger.LogWarning("Could not retrieve torrent hash from qBittorrent after adding torrent: {Title}", result.Title);
+            return null;
         }
 
         private async Task SendToTransmission(DownloadClientConfiguration client, SearchResult result)
@@ -933,13 +1072,76 @@ namespace Listenarr.Api.Services
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
             // Get all downloads from database to filter queue items
+            // For external clients, we'll only include downloads that are actually present in the client's queue
+            // For DDL downloads, include active ones plus completed ones with pending processing jobs
             List<Download> listenarrDownloads;
             using (var scope = _serviceScopeFactory.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-                listenarrDownloads = await dbContext.Downloads
-                    .Where(d => d.Status != DownloadStatus.Completed && d.Status != DownloadStatus.Failed)
+                
+                // Get all downloads (include failed so activity can show failed items)
+                var allDownloads = await dbContext.Downloads
                     .ToListAsync();
+
+                _logger.LogInformation("Found {TotalDownloads} downloads (including failed)", allDownloads.Count);
+                
+                // For DDL downloads, include active ones plus completed ones with pending processing jobs
+                var ddlDownloads = allDownloads.Where(d => d.DownloadClientId == "DDL").ToList();
+                var ddlToShow = new List<Download>();
+                
+                if (ddlDownloads.Any())
+                {
+                    var ddlCompleted = ddlDownloads.Where(d => d.Status == DownloadStatus.Completed).ToList();
+                    if (ddlCompleted.Any())
+                    {
+                        var completedIds = ddlCompleted.Select(d => d.Id).ToList();
+                        
+                        // Get DDL downloads with pending/active processing jobs
+                        var pendingJobs = await dbContext.DownloadProcessingJobs
+                            .Where(j => completedIds.Contains(j.DownloadId) && 
+                               (j.Status == ProcessingJobStatus.Pending || 
+                                j.Status == ProcessingJobStatus.Processing || 
+                                j.Status == ProcessingJobStatus.Retry))
+                            .Select(j => j.DownloadId)
+                            .Distinct()
+                            .ToListAsync();
+                        
+                        // Get DDL downloads with any processing jobs (to identify those without jobs)
+                        var allJobDownloads = await dbContext.DownloadProcessingJobs
+                            .Where(j => completedIds.Contains(j.DownloadId))
+                            .Select(j => j.DownloadId)
+                            .Distinct()
+                            .ToListAsync();
+                        
+                        // Include DDL completed downloads that either:
+                        // 1. Have pending/active processing jobs, OR
+                        // 2. Have no processing jobs at all (legacy downloads needing processing)
+                        var ddlCompletedToShow = ddlCompleted
+                            .Where(d => pendingJobs.Contains(d.Id) || !allJobDownloads.Contains(d.Id))
+                            .ToList();
+                        
+                        ddlToShow.AddRange(ddlCompletedToShow);
+                        _logger.LogInformation("DDL pending jobs count: {PendingJobs}, All job downloads count: {AllJobs}, DDL completed to show: {CompletedToShow}", 
+                            pendingJobs.Count, allJobDownloads.Count, ddlCompletedToShow.Count);
+                    }
+                    
+                    // Add active DDL downloads
+                    ddlToShow.AddRange(ddlDownloads.Where(d => d.Status != DownloadStatus.Completed));
+                }
+                
+                // For external clients, we'll filter based on what's actually in their queues
+                // So we include all downloads from external clients for matching purposes
+                var externalDownloads = allDownloads.Where(d => d.DownloadClientId != "DDL").ToList();
+                
+                listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
+                
+                _logger.LogInformation("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)", 
+                    listenarrDownloads.Count, ddlToShow.Count, externalDownloads.Count);
+                foreach (var dl in listenarrDownloads)
+                {
+                    _logger.LogInformation("Including download: {Id}, Status: {Status}, Client: {Client}, Title: '{Title}'", 
+                        dl.Id, dl.Status, dl.DownloadClientId, dl.Title);
+                }
             }
 
             foreach (var client in enabledClients)
@@ -971,24 +1173,126 @@ namespace Listenarr.Api.Services
                             queueItem.Id, queueItem.Title, queueItem.DownloadClientId);
                     }
                     
-                    var filteredQueue = clientQueue.Where(queueItem => 
+                    // Find queue items that correspond to Listenarr downloads
+                    // Include ONLY client queue items that ARE tracked by Listenarr
+                    var initialFiltered = clientQueue.Where(queueItem => 
                         listenarrDownloads.Any(download => 
                         {
-                            var clientIdMatch = download.DownloadClientId == client.Id;
                             var idMatch = download.Id == queueItem.Id;
-                            var titleMatch = download.Title.Equals(queueItem.Title, StringComparison.OrdinalIgnoreCase);
+
+                            // For qBittorrent, also check if queue item ID matches stored torrent hash
+                            var hashMatch = false;
+                            if (client.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
+                            {
+                                try 
+                                {
+                                    if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                    {
+                                        var storedHash = hashObj?.ToString();
+                                        if (!string.IsNullOrEmpty(storedHash))
+                                        {
+                                            hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                    hashMatch = false;
+                                }
+                            }
+
+            // Enhanced title match using robust normalization
+            var titleMatch = false;
+            try
+            {
+                if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
+                {
+                    titleMatch = IsMatchingTitle(download.Title, queueItem.Title);
+                    _logger.LogInformation("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}", 
+                        download.Id, download.Title, queueItem.Title, titleMatch);
+                }
+            }
+            catch { titleMatch = false; }
+
+                            var clientMatch = download.DownloadClientId == client.Id;
+                            var overallMatch = clientMatch && (idMatch || hashMatch || titleMatch);
                             
-                            _logger.LogInformation("Comparing queue '{QueueTitle}' with download '{DownloadTitle}': ClientId={ClientIdMatch}, Id={IdMatch}, Title={TitleMatch}", 
-                                queueItem.Title, download.Title, clientIdMatch, idMatch, titleMatch);
-                                
-                            return clientIdMatch && (idMatch || titleMatch);
+                            _logger.LogInformation("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}", 
+                                download.Id, queueItem.Id, clientMatch, idMatch, hashMatch, titleMatch, overallMatch);
+                            
+                            return overallMatch;
                         })
                     ).ToList();
 
-                    queueItems.AddRange(filteredQueue);
+                    // Map each filtered queue item to the Listenarr DB download id so the UI won't show duplicates
+                    var mappedFiltered = new List<QueueItem>();
+                    foreach (var queueItem in initialFiltered)
+                    {
+                        try
+                        {
+                            var matchedDownload = listenarrDownloads.FirstOrDefault(download =>
+                                download.DownloadClientId == client.Id && (
+                                    download.Id == queueItem.Id ||
+                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title) && IsMatchingTitle(download.Title, queueItem.Title))
+                                )
+                            );
+
+                            if (matchedDownload != null)
+                            {
+                                // Normalize the queue item id to the Listenarr DB id so the front-end treats them as the same
+                                queueItem.Id = matchedDownload.Id;
+                            }
+
+                            mappedFiltered.Add(queueItem);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error mapping filtered queue item to Listenarr download");
+                            mappedFiltered.Add(queueItem);
+                        }
+                    }
+
+                    queueItems.AddRange(mappedFiltered);
                     
                     _logger.LogInformation("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", 
-                        client.Name, clientQueue.Count, filteredQueue.Count);
+                        client.Name, clientQueue.Count, mappedFiltered.Count);
+
+                    // Purge orphaned download records that are no longer in the client's queue
+                    try
+                    {
+                        var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
+                        var mappedDownloadIds = mappedFiltered.Select(q => q.Id).ToHashSet();
+                        
+                        var orphanedDownloads = clientDownloads.Where(d => !mappedDownloadIds.Contains(d.Id)).ToList();
+                        
+                        if (orphanedDownloads.Any())
+                        {
+                            using (var purgeScope = _serviceScopeFactory.CreateScope())
+                            {
+                                var dbContext = purgeScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                                
+                                foreach (var orphanedDownload in orphanedDownloads)
+                                {
+                                    var trackedDownload = await dbContext.Downloads.FindAsync(orphanedDownload.Id);
+                                    if (trackedDownload != null)
+                                    {
+                                        dbContext.Downloads.Remove(trackedDownload);
+                                        _logger.LogInformation("Purged orphaned download record: {DownloadId} '{Title}' (no longer exists in {ClientName} queue)", 
+                                            orphanedDownload.Id, orphanedDownload.Title, client.Name);
+                                    }
+                                }
+                                
+                                await dbContext.SaveChangesAsync();
+                                _logger.LogInformation("Purged {Count} orphaned download records from {ClientName}", 
+                                    orphanedDownloads.Count, client.Name);
+                            }
+                        }
+                    }
+                    catch (Exception purgeEx)
+                    {
+                        _logger.LogError(purgeEx, "Error purging orphaned downloads for client {ClientName}", client.Name);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1003,6 +1307,49 @@ namespace Listenarr.Api.Services
         {
             try
             {
+                bool removedFromClient = false;
+                Download? downloadRecord = null;
+                
+                // Find the database record first
+                using (var scope = _serviceScopeFactory.CreateScope())
+                {
+                    var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                    
+                    // Try to find by direct ID match first
+                    downloadRecord = await dbContext.Downloads.FindAsync(downloadId);
+                    
+                    // If not found, try to find by client-specific ID (e.g., torrent hash)
+                    if (downloadRecord == null)
+                    {
+                        downloadRecord = await dbContext.Downloads
+                            .Where(d => d.Metadata != null && 
+                                   d.Metadata.ContainsKey("TorrentHash") && 
+                                   d.Metadata["TorrentHash"].ToString() == downloadId)
+                            .FirstOrDefaultAsync();
+                    }
+                    
+                    // If still not found, try enhanced title/name matching for legacy downloads
+                    if (downloadRecord == null && downloadClientId != null)
+                    {
+                        var client = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
+                        if (client != null)
+                        {
+                            // Get queue item to find title
+                            var queue = await GetQueueAsync();
+                            var queueItem = queue.FirstOrDefault(q => q.Id == downloadId && q.DownloadClientId == downloadClientId);
+                            
+                            if (queueItem != null)
+                            {
+                                downloadRecord = await dbContext.Downloads
+                                    .Where(d => d.DownloadClientId == downloadClientId)
+                                    .ToListAsync()
+                                    .ContinueWith(task => task.Result.FirstOrDefault(d => 
+                                        IsMatchingTitle(d.Title, queueItem.Title)));
+                            }
+                        }
+                    }
+                }
+                
                 if (downloadClientId == null)
                 {
                     // Try all clients to find and remove the item
@@ -1011,17 +1358,44 @@ namespace Listenarr.Api.Services
 
                     foreach (var client in enabledClients)
                     {
-                        bool removed = await RemoveFromClientAsync(client, downloadId);
-                        if (removed) return true;
+                        removedFromClient = await RemoveFromClientAsync(client, downloadId);
+                        if (removedFromClient) 
+                        {
+                            downloadClientId = client.Id; // Track which client it was removed from
+                            break;
+                        }
                     }
-                    return false;
                 }
                 else
                 {
                     var client = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
-                    if (client == null) return false;
-                    return await RemoveFromClientAsync(client, downloadId);
+                    if (client != null)
+                    {
+                        removedFromClient = await RemoveFromClientAsync(client, downloadId);
+                    }
                 }
+                
+                // If successfully removed from client, also remove from database
+                if (removedFromClient && downloadRecord != null)
+                {
+                    using (var scope = _serviceScopeFactory.CreateScope())
+                    {
+                        var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                        
+                        // Re-attach the entity if needed
+                        var trackedDownload = await dbContext.Downloads.FindAsync(downloadRecord.Id);
+                        if (trackedDownload != null)
+                        {
+                            dbContext.Downloads.Remove(trackedDownload);
+                            await dbContext.SaveChangesAsync();
+                            
+                            _logger.LogInformation("Removed download record from database: {DownloadId} (Title: {Title})", 
+                                trackedDownload.Id, trackedDownload.Title);
+                        }
+                    }
+                }
+                
+                return removedFromClient;
             }
             catch (Exception ex)
             {
@@ -2227,15 +2601,41 @@ namespace Listenarr.Api.Services
 
                                     // Generate final path using naming pattern
                                     _logger.LogInformation("DDL download [{DownloadId}] Generating final path with pattern: {Pattern}", downloadId, settings.FileNamingPattern);
+                                    
+                                    // Ensure we have an output path for file operations
+                                    var effectiveOutputPath = settings.OutputPath;
+                                    if (string.IsNullOrWhiteSpace(effectiveOutputPath))
+                                    {
+                                        effectiveOutputPath = "./completed";
+                                        _logger.LogDebug("DDL download [{DownloadId}] No output path configured, using default: {DefaultPath}", downloadId, effectiveOutputPath);
+                                    }
+                                    
                                     var extension = Path.GetExtension(tempFilePath);
                                     finalPath = await fileNamingService.GenerateFilePathAsync(
                                         metadata, 
-                                        diskNumber: metadata.DiscNumber, 
-                                        chapterNumber: metadata.TrackNumber, 
-                                        originalExtension: extension
+                                        effectiveOutputPath,
+                                        metadata.DiscNumber, 
+                                        metadata.TrackNumber, 
+                                        extension
                                     );
 
-                                    _logger.LogInformation("DDL download [{DownloadId}] Generated final path: {FinalPath}", downloadId, finalPath);
+                                    // Validate the generated path - if it's empty or invalid, fall back to simple naming
+                                    if (string.IsNullOrWhiteSpace(finalPath) || 
+                                        string.IsNullOrWhiteSpace(Path.GetFileName(finalPath)))
+                                    {
+                                        _logger.LogWarning("DDL download [{DownloadId}] Generated path is invalid or empty, falling back to simple naming", downloadId);
+                                        var fileName = Path.GetFileName(tempFilePath);
+                                        if (string.IsNullOrWhiteSpace(fileName))
+                                        {
+                                            fileName = $"ddl_download_{downloadId}{extension}";
+                                        }
+                                        finalPath = Path.Combine(effectiveOutputPath, fileName);
+                                        _logger.LogInformation("DDL download [{DownloadId}] Using fallback final path: {FinalPath}", downloadId, finalPath);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation("DDL download [{DownloadId}] Generated final path: {FinalPath}", downloadId, finalPath);
+                                    }
 
                                     // Create directory if it doesn't exist
                                     var finalDirectory = Path.GetDirectoryName(finalPath);
@@ -2385,7 +2785,7 @@ namespace Listenarr.Api.Services
         }
 
         /// <summary>
-        /// Process a completed download by updating its Download record and creating an AudiobookFile if linked.
+        /// Process a completed download by updating its Download record, handling file operations, and creating an AudiobookFile if linked.
         /// Exposed for reuse and unit testing.
         /// </summary>
         public async Task ProcessCompletedDownloadAsync(string downloadId, string finalPath)
@@ -2393,13 +2793,195 @@ namespace Listenarr.Api.Services
             using (var scope = _serviceScopeFactory.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var fileNamingService = scope.ServiceProvider.GetService<IFileNamingService>();
+                var metadataService = scope.ServiceProvider.GetService<IMetadataService>();
+                var pathMappingService = scope.ServiceProvider.GetService<IRemotePathMappingService>();
+                
                 var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
                 if (completedDownload != null)
                 {
+                    // Get application settings for file operations
+                    var settings = await configService.GetApplicationSettingsAsync();
+                    
+                    string localPath = finalPath;
+                    string destinationPath = finalPath;
+                    
+                    // Apply remote path mapping first to get the correct local path
+                    if (pathMappingService != null && !string.IsNullOrEmpty(completedDownload.DownloadClientId))
+                    {
+                        try
+                        {
+                            var translatedPath = await pathMappingService.TranslatePathAsync(completedDownload.DownloadClientId, finalPath);
+                            if (!string.Equals(translatedPath, finalPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                localPath = translatedPath;
+                                _logger.LogDebug("Applied path mapping for download {DownloadId}: {RemotePath} -> {LocalPath}", 
+                                    downloadId, finalPath, localPath);
+                            }
+                        }
+                        catch (Exception pathEx)
+                        {
+                            _logger.LogWarning(pathEx, "Failed to apply path mapping for download {DownloadId}, using original path: {Path}", 
+                                downloadId, finalPath);
+                        }
+                    }
+                    
+                    // Handle file move/copy operations if configured
+                    if (File.Exists(localPath))
+                    {
+                        try
+                        {
+                            // Determine destination path based on settings
+                            if (fileNamingService != null && settings.EnableMetadataProcessing)
+                            {
+                                _logger.LogDebug("Using file naming service to determine destination for download {DownloadId}", downloadId);
+                                
+                                // Build metadata for naming
+                                var metadata = new AudioMetadata 
+                                { 
+                                    Title = completedDownload.Title ?? "Unknown Title",
+                                    Artist = completedDownload.Artist,
+                                    Album = completedDownload.Album
+                                };
+                                
+                                // Try to extract metadata from file if metadata processing enabled
+                                if (metadataService != null)
+                                {
+                                    try
+                                    {
+                                        var extractedMetadata = await metadataService.ExtractFileMetadataAsync(localPath);
+                                        if (extractedMetadata != null)
+                                        {
+                                            metadata = extractedMetadata;
+                                            _logger.LogDebug("Extracted metadata: Title='{Title}', Artist='{Artist}', Album='{Album}'", 
+                                                metadata.Title, metadata.Artist, metadata.Album);
+                                        }
+                                    }
+                                    catch (Exception metaEx)
+                                    {
+                                        _logger.LogWarning(metaEx, "Failed to extract metadata from {FilePath}, using download info", localPath);
+                                    }
+                                }
+                                
+                                // Ensure we have an output path for file operations
+                                var effectiveOutputPath = settings.OutputPath;
+                                if (string.IsNullOrWhiteSpace(effectiveOutputPath))
+                                {
+                                    effectiveOutputPath = "./completed";
+                                    _logger.LogDebug("No output path configured, using default: {DefaultPath}", effectiveOutputPath);
+                                }
+                                
+                                // Generate path using naming pattern with effective output path
+                                var ext = Path.GetExtension(localPath);
+                                var generatedPath = await fileNamingService.GenerateFilePathAsync(metadata, effectiveOutputPath, null, null, ext);
+
+                                // Validate the generated path - if it's empty or invalid, fall back to simple naming
+                                if (string.IsNullOrWhiteSpace(generatedPath) || 
+                                    string.IsNullOrWhiteSpace(Path.GetFileName(generatedPath)))
+                                {
+                                    _logger.LogWarning("Generated path is invalid or empty for download {DownloadId}, falling back to simple naming", downloadId);
+                                    var fileName = Path.GetFileName(localPath);
+                                    if (string.IsNullOrWhiteSpace(fileName))
+                                    {
+                                        fileName = $"download_{downloadId}{ext}";
+                                    }
+                                    destinationPath = Path.Combine(effectiveOutputPath, fileName);
+                                    _logger.LogInformation("Using fallback destination path for download {DownloadId}: {DestinationPath}", 
+                                        downloadId, destinationPath);
+                                }
+                                else
+                                {
+                                    // The generated path should now be absolute since we provided an effective output path
+                                    destinationPath = generatedPath;
+                                    _logger.LogInformation("Generated destination path for download {DownloadId} (preserving subfolders): {DestinationPath}", 
+                                        downloadId, destinationPath);
+                                }
+                            }
+                            else
+                            {
+                                // Simple naming - use original filename in output directory
+                                var effectiveOutputPath = settings.OutputPath;
+                                if (string.IsNullOrWhiteSpace(effectiveOutputPath))
+                                {
+                                    effectiveOutputPath = "./completed";
+                                    _logger.LogDebug("No output path configured, using default for simple naming: {DefaultPath}", effectiveOutputPath);
+                                }
+                                
+                                var fileName = Path.GetFileName(localPath);
+                                destinationPath = Path.Combine(effectiveOutputPath, fileName);
+                                _logger.LogInformation("Using simple destination path for download {DownloadId}: {DestinationPath}", 
+                                    downloadId, destinationPath);
+                            }
+                            
+                            // Ensure destination directory exists
+                            var destDir = Path.GetDirectoryName(destinationPath);
+                            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+                            {
+                                Directory.CreateDirectory(destDir);
+                                _logger.LogDebug("Created destination directory: {Directory}", destDir);
+                            }
+                            
+                            // Perform file operation if source and destination are different
+                            if (!string.Equals(Path.GetFullPath(localPath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+                            {
+                                var action = settings.CompletedFileAction ?? "Move";
+                                
+                                if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    File.Copy(localPath, destinationPath, true);
+                                    _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
+                                        downloadId, localPath, destinationPath);
+                                }
+                                else
+                                {
+                                    // Default to Move
+                                    File.Move(localPath, destinationPath, true);
+                                    _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
+                                        downloadId, localPath, destinationPath);
+                                }
+                                
+                                // Update the final path to the new location
+                                finalPath = destinationPath;
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Source and destination are the same for download {DownloadId}, no file operation needed", downloadId);
+                            }
+                        }
+                        catch (Exception fileEx)
+                        {
+                            _logger.LogError(fileEx, "Failed to move/copy file for download {DownloadId}: {Source} -> {Destination}. Using original path.", 
+                                downloadId, localPath, destinationPath);
+                            // Continue with original path if file operation fails
+                            finalPath = localPath;
+                        }
+                    }
+                    else if (string.IsNullOrEmpty(settings.OutputPath))
+                    {
+                        _logger.LogDebug("No output path configured, keeping file at original location for download {DownloadId}", downloadId);
+                        finalPath = localPath; // Use the mapped local path
+                    }
+                    else if (!File.Exists(localPath))
+                    {
+                        _logger.LogWarning("Source file does not exist for download {DownloadId}: {FilePath} (mapped from {OriginalPath})", 
+                            downloadId, localPath, finalPath);
+                        finalPath = localPath; // Use the mapped path even if file doesn't exist for record-keeping
+                    }
+                    else
+                    {
+                        // File exists but no output path configured, use mapped local path
+                        finalPath = localPath;
+                    }
+                    
+                    // Update database with completion status and final path
                     completedDownload.Status = DownloadStatus.Completed;
                     completedDownload.Progress = 100;
-                    var finalFileInfo = new FileInfo(finalPath);
-                    completedDownload.DownloadedSize = finalFileInfo.Length;
+                    if (File.Exists(finalPath))
+                    {
+                        var finalFileInfo = new FileInfo(finalPath);
+                        completedDownload.DownloadedSize = finalFileInfo.Length;
+                    }
                     completedDownload.CompletedAt = DateTime.UtcNow;
                     completedDownload.FinalPath = finalPath;
                     dbContext.Downloads.Update(completedDownload);
@@ -2429,8 +3011,29 @@ namespace Listenarr.Api.Services
                         if (updatedDownload != null)
                         {
                             // Broadcast a single-item update so SignalR clients receive immediate notification
-                            await _hubContext.Clients.All.SendAsync("DownloadUpdate", new List<Download> { updatedDownload });
-                            _logger.LogInformation("Broadcasted DownloadUpdate for {DownloadId} via SignalR", updatedDownload.Id);
+                            // Construct a DTO that intentionally omits DownloadPath to avoid leaking client-local paths
+                            var downloadDto = new
+                            {
+                                id = updatedDownload.Id,
+                                audiobookId = updatedDownload.AudiobookId,
+                                title = updatedDownload.Title,
+                                artist = updatedDownload.Artist,
+                                album = updatedDownload.Album,
+                                originalUrl = updatedDownload.OriginalUrl,
+                                status = updatedDownload.Status.ToString(),
+                                progress = updatedDownload.Progress,
+                                totalSize = updatedDownload.TotalSize,
+                                downloadedSize = updatedDownload.DownloadedSize,
+                                finalPath = updatedDownload.FinalPath,
+                                startedAt = updatedDownload.StartedAt,
+                                completedAt = updatedDownload.CompletedAt,
+                                errorMessage = updatedDownload.ErrorMessage,
+                                downloadClientId = updatedDownload.DownloadClientId,
+                                metadata = updatedDownload.Metadata
+                            };
+
+                            await _hubContext.Clients.All.SendAsync("DownloadUpdate", new List<object> { downloadDto });
+                            _logger.LogInformation("Broadcasted DownloadUpdate for {DownloadId} via SignalR (with redacted DownloadPath)", updatedDownload.Id);
                         }
                     }
                     catch (Exception hubEx)
@@ -2492,6 +3095,194 @@ namespace Listenarr.Api.Services
                         _logger.LogWarning(abHubEx, "Failed to broadcast AudiobookUpdate for download {DownloadId}", completedDownload.Id);
                     }
                 }
+            }
+        }
+        
+        private bool IsMatchingTitle(string title1, string title2)
+        {
+            if (string.IsNullOrEmpty(title1) || string.IsNullOrEmpty(title2))
+                return false;
+
+            // Use the existing robust normalization from this class
+            return AreTitlesSimilar(title1, title2);
+        }
+
+        /// <summary>
+        /// Reprocess a specific completed download by adding it to the processing queue
+        /// </summary>
+        public async Task<string?> ReprocessDownloadAsync(string downloadId)
+        {
+            try
+            {
+                using var scope = _serviceScopeFactory.CreateScope();
+                var processingQueueService = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                if (processingQueueService == null)
+                {
+                    _logger.LogWarning("Download processing queue service not available for reprocessing download {DownloadId}", downloadId);
+                    return null;
+                }
+
+                var download = await _dbContext.Downloads.FindAsync(downloadId);
+                if (download == null)
+                {
+                    _logger.LogWarning("Download {DownloadId} not found for reprocessing", downloadId);
+                    return null;
+                }
+
+                // Only reprocess completed downloads
+                if (download.Status != DownloadStatus.Completed)
+                {
+                    _logger.LogWarning("Download {DownloadId} is not completed (status: {Status}), cannot reprocess", 
+                        downloadId, download.Status);
+                    return null;
+                }
+
+                // Try several candidate paths for the source file so reprocess is tolerant
+                var candidates = new List<string?>();
+                if (!string.IsNullOrEmpty(download.FinalPath)) candidates.Add(download.FinalPath);
+                if (!string.IsNullOrEmpty(download.DownloadPath)) candidates.Add(download.DownloadPath);
+                if (download.Metadata != null && download.Metadata.TryGetValue("ClientContentPath", out var clientContentPathObj))
+                {
+                    var clientContentPath = clientContentPathObj?.ToString();
+                    if (!string.IsNullOrEmpty(clientContentPath)) candidates.Add(clientContentPath);
+                }
+
+                string? foundSource = null;
+
+                foreach (var cand in candidates.Where(c => !string.IsNullOrEmpty(c)))
+                {
+                    try
+                    {
+                        // Try the candidate as-is first
+                        if (File.Exists(cand))
+                        {
+                            foundSource = cand;
+                            break;
+                        }
+
+                        // If not an absolute/local path, try translating remote -> local via path mappings
+                        // This helps when the DB stores a client-side path (e.g. in docker) that needs translation
+                        try
+                        {
+                            if (!string.IsNullOrEmpty(cand))
+                            {
+                                var translated = await _pathMappingService.TranslatePathAsync(download.DownloadClientId, cand);
+                                if (!string.IsNullOrEmpty(translated) && File.Exists(translated))
+                                {
+                                    foundSource = translated;
+                                    break;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Path translation failed for candidate path '{PathCandidate}'", cand);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Error checking candidate path '{PathCandidate}' for download {DownloadId}", cand, downloadId);
+                    }
+                }
+
+                if (string.IsNullOrEmpty(foundSource))
+                {
+                    _logger.LogWarning("Source file not found for download {DownloadId}. Tried candidates: {Candidates}", 
+                        downloadId, string.Join(";", candidates.Where(c => !string.IsNullOrEmpty(c))));
+                    return null;
+                }
+
+                var jobId = await processingQueueService.QueueDownloadProcessingAsync(
+                    downloadId,
+                    foundSource,
+                    download.DownloadClientId);
+
+                _logger.LogInformation("Enqueued download {DownloadId} for reprocessing with job {JobId} (source: {Source})",
+                    downloadId, jobId, foundSource);
+
+                return jobId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reprocessing download {DownloadId}", downloadId);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Bulk reprocess multiple completed downloads
+        /// </summary>
+        public async Task<List<ReprocessResult>> ReprocessDownloadsAsync(List<string> downloadIds)
+        {
+            var results = new List<ReprocessResult>();
+
+            foreach (var downloadId in downloadIds)
+            {
+                try
+                {
+                    var jobId = await ReprocessDownloadAsync(downloadId);
+                    if (jobId != null)
+                    {
+                        results.Add(ReprocessResult.FromSuccess(downloadId, jobId));
+                    }
+                    else
+                    {
+                        results.Add(ReprocessResult.FromFailure(downloadId, "Download not found or not eligible for reprocessing"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error reprocessing download {DownloadId} in bulk operation", downloadId);
+                    results.Add(ReprocessResult.FromFailure(downloadId, "Exception occurred", ex.Message));
+                }
+            }
+
+            _logger.LogInformation("Bulk reprocess completed: {Successful}/{Total} downloads processed", 
+                results.Count(r => r.Success), results.Count);
+
+            return results;
+        }
+
+        /// <summary>
+        /// Reprocess all completed downloads that meet certain criteria
+        /// </summary>
+        public async Task<List<ReprocessResult>> ReprocessAllCompletedDownloadsAsync(bool includeProcessed = false, TimeSpan? maxAge = null)
+        {
+            try
+            {
+                var cutoffDate = maxAge.HasValue ? DateTime.UtcNow.Subtract(maxAge.Value) : DateTime.MinValue;
+
+                // Query for eligible downloads
+                var query = _dbContext.Downloads
+                    .Where(d => d.Status == DownloadStatus.Completed)
+                    .Where(d => d.CompletedAt >= cutoffDate)
+                    .Where(d => !string.IsNullOrEmpty(d.FinalPath));
+
+                // If not including already processed items, filter out those that might have been processed
+                if (!includeProcessed)
+                {
+                    // This is a simple heuristic - you might want to add a "ProcessedAt" field to track this better
+                    query = query.Where(d => d.CompletedAt >= DateTime.UtcNow.AddDays(-1)); // Only recent completions
+                }
+
+                var eligibleDownloads = await query
+                    .Select(d => new { d.Id, d.FinalPath, d.Title })
+                    .ToListAsync();
+
+                _logger.LogInformation("Found {Count} downloads eligible for reprocessing", eligibleDownloads.Count);
+
+                var downloadIds = eligibleDownloads.Select(d => d.Id).ToList();
+                var results = await ReprocessDownloadsAsync(downloadIds);
+
+                _logger.LogInformation("Reprocess all completed: {Successful}/{Total} downloads processed", 
+                    results.Count(r => r.Success), results.Count);
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in reprocess all completed downloads");
+                throw;
             }
         }
     }

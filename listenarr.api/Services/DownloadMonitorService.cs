@@ -48,6 +48,66 @@ namespace Listenarr.Api.Services
             _logger = logger;
         }
 
+        /// <summary>
+        /// Normalizes a title for better matching by removing format indicators and extra spaces
+        /// </summary>
+        private static string NormalizeTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+
+            // Remove ALL bracketed content [anything] - more robust than specific patterns
+            var result = System.Text.RegularExpressions.Regex.Replace(title, @"\[.*?\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove ALL parentheses content (anything) - handles unknown quality/group indicators
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\(.*?\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove curly braces content {anything}
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\{.*?\}", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove common separators and replace with spaces
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"[\-_\.]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Remove common quality/format indicators that might not be in brackets
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\b(mp3|m4a|m4b|flac|aac|ogg|opus|320|256|128|v0|v2|audiobook|unabridged|abridged)\b", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            // Normalize multiple spaces to single spaces
+            result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ");
+            
+            // Remove trailing/leading spaces, dashes, etc.
+            result = result.Trim(' ', '-', '.', ',');
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if two titles are similar enough to be considered a match
+        /// </summary>
+        private static bool AreTitlesSimilar(string title1, string title2)
+        {
+            var norm1 = NormalizeTitle(title1);
+            var norm2 = NormalizeTitle(title2);
+            
+            // Exact match after normalization
+            if (string.Equals(norm1, norm2, StringComparison.OrdinalIgnoreCase))
+                return true;
+                
+            // Bidirectional contains
+            if (norm1.Contains(norm2, StringComparison.OrdinalIgnoreCase) || 
+                norm2.Contains(norm1, StringComparison.OrdinalIgnoreCase))
+                return true;
+                
+            // First 50 chars (for very long titles)
+            if (norm1.Length > 20 && norm2.Length > 20)
+            {
+                var len = Math.Min(50, Math.Min(norm1.Length, norm2.Length));
+                if (norm1.Substring(0, len).Equals(norm2.Substring(0, len), StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            
+            return false;
+        }
+        
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Download Monitor Service starting");
@@ -85,6 +145,13 @@ namespace Listenarr.Api.Services
                            d.Status == DownloadStatus.Downloading ||
                            d.Status == DownloadStatus.Processing)
                 .ToListAsync(cancellationToken);
+
+            _logger.LogDebug("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
+            foreach (var dl in activeDownloads)
+            {
+                _logger.LogDebug("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}", 
+                    dl.Id, dl.Title, dl.Status, dl.DownloadClientId);
+            }
 
             // Only poll download clients if there are active downloads
             if (activeDownloads.Any())
@@ -223,26 +290,99 @@ namespace Listenarr.Api.Services
                         {
                             _logger.LogDebug("Looking for qBittorrent match for download {DownloadId}: {Title}", dl.Id, dl.Title);
                             
-                            // Enhanced matching logic: try multiple strategies
-                            var matched = torrentLookup.FirstOrDefault(t =>
-                                // Exact name match
-                                string.Equals(t.Name, dl.Title, StringComparison.OrdinalIgnoreCase) ||
-                                // Partial name match
-                                (!string.IsNullOrEmpty(dl.Title) && t.Name.Contains(dl.Title, StringComparison.OrdinalIgnoreCase)) ||
-                                // Path-based matching
-                                (!string.IsNullOrEmpty(dl.DownloadPath) && !string.IsNullOrEmpty(t.SavePath) && 
-                                 (t.SavePath.Contains(dl.DownloadPath, StringComparison.OrdinalIgnoreCase) || 
-                                  dl.DownloadPath.Contains(t.SavePath, StringComparison.OrdinalIgnoreCase)))
-                            );
-
-                            if (matched.Hash == null)
+                            // Try hash-based matching first (most reliable for qBittorrent)
+                            var matched = (Hash: "", Name: "", SavePath: "", ContentPath: "", Progress: 0.0, AmountLeft: 0L, State: "", Size: 0L, Category: "");
+                            
+                            // Check if we have a stored torrent hash for this download
+                            if (dl.Metadata != null && dl.Metadata.TryGetValue("TorrentHash", out var hashObj))
                             {
-                                _logger.LogDebug("No matching torrent found for download {DownloadId}: {Title}", dl.Id, dl.Title);
+                                var storedHash = hashObj?.ToString();
+                                if (!string.IsNullOrEmpty(storedHash))
+                                {
+                                    matched = torrentLookup.FirstOrDefault(t => 
+                                        string.Equals(t.Hash, storedHash, StringComparison.OrdinalIgnoreCase));
+                                    
+                                    if (!string.IsNullOrEmpty(matched.Hash))
+                                    {
+                                        _logger.LogDebug("Found qBittorrent torrent by hash match: {Hash} for download {DownloadId}", storedHash, dl.Id);
+                                    }
+                                }
+                            }
+                            
+                            // Fallback to title/name matching if hash matching failed
+                            if (string.IsNullOrEmpty(matched.Hash))
+                            {
+                                _logger.LogInformation("Hash matching failed for download {DownloadId}, trying title/name matching", dl.Id);
+                                matched = torrentLookup.FirstOrDefault(t =>
+                                {
+                                    // Exact name match
+                                    if (string.Equals(t.Name, dl.Title, StringComparison.OrdinalIgnoreCase))
+                                        return true;
+                                    
+                                    // Enhanced title matching with robust normalization
+                                    if (AreTitlesSimilar(dl.Title, t.Name))
+                                    {
+                                        _logger.LogInformation("Title match found: '{DbTitle}' <-> '{TorrentTitle}' (normalized: '{NormDb}' <-> '{NormTorrent}')",
+                                            dl.Title, t.Name, NormalizeTitle(dl.Title), NormalizeTitle(t.Name));
+                                        return true;
+                                    }
+                                    
+                                    // Path-based matching
+                                    if (!string.IsNullOrEmpty(dl.DownloadPath) && !string.IsNullOrEmpty(t.SavePath) && 
+                                        (t.SavePath.Contains(dl.DownloadPath, StringComparison.OrdinalIgnoreCase) || 
+                                         dl.DownloadPath.Contains(t.SavePath, StringComparison.OrdinalIgnoreCase)))
+                                        return true;
+                                    
+                                    return false;
+                                });
+                            }
+
+                            if (string.IsNullOrEmpty(matched.Hash))
+                            {
+                                _logger.LogWarning("No matching qBittorrent torrent found for download {DownloadId}: {Title}", dl.Id, dl.Title);
                                 continue;
                             }
 
                             _logger.LogDebug("Found matching qBittorrent torrent for {DownloadId}: {TorrentName} (Hash: {Hash}, State: {State}, Progress: {Progress:P2}, SavePath: {SavePath}, ContentPath: {ContentPath})", 
                                 dl.Id, matched.Name, matched.Hash, matched.State, matched.Progress, matched.SavePath, matched.ContentPath);
+
+                            // Persist client's save/content path to the download as a fallback so FinalizeDownloadAsync
+                            // can locate files even if later client state is noisy or the torrent is removed.
+                            try
+                            {
+                                var dbDownload = await dbContext.Downloads.FindAsync(new object[] { dl.Id }, cancellationToken);
+                                if (dbDownload != null)
+                                {
+                                    var changed = false;
+                                    if (!string.IsNullOrEmpty(matched.SavePath) && dbDownload.DownloadPath != matched.SavePath)
+                                    {
+                                        dbDownload.DownloadPath = matched.SavePath;
+                                        changed = true;
+                                    }
+
+                                    if (dbDownload.Metadata == null) dbDownload.Metadata = new Dictionary<string, object>();
+                                    // Record content path in metadata as it's often the most accurate file path
+                                    if (!string.IsNullOrEmpty(matched.ContentPath))
+                                    {
+                                        dbDownload.Metadata["ClientContentPath"] = matched.ContentPath;
+                                        changed = true;
+                                    }
+
+                                    if (changed)
+                                    {
+                                        dbContext.Downloads.Update(dbDownload);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Persisted client paths for download {DownloadId}: DownloadPath={DownloadPath}, ClientContentPath={ClientContentPath}", dl.Id, dbDownload.DownloadPath, matched.ContentPath);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to persist client paths for download {DownloadId}", dl.Id);
+                            }
+
+                            // Update database with real-time progress information
+                            await UpdateDownloadProgressAsync(dl.Id, matched.Progress * 100, matched.AmountLeft, matched.State, dbContext, cancellationToken);
 
                             // Correct completion detection for qBittorrent
                             // A torrent is complete when:
@@ -380,6 +520,9 @@ namespace Listenarr.Api.Services
                             var percent = matching.TryGetProperty("percentDone", out var p) ? p.GetDouble() : 0.0;
                             var left = matching.TryGetProperty("leftUntilDone", out var l) ? l.GetInt64() : 0L;
                             var isFinished = matching.TryGetProperty("isFinished", out var f) ? f.GetBoolean() : false;
+
+                            // Update database with real-time progress information
+                            await UpdateDownloadProgressAsync(dl.Id, percent * 100, left, "downloading", dbContext, cancellationToken);
 
                             var isComplete = percent >= 1.0 || left == 0 || isFinished;
 
@@ -607,7 +750,6 @@ namespace Listenarr.Api.Services
                     var pathVariations = new[]
                     {
                         clientPath,
-                        clientPath.Replace("/downloads", "/host/downloads"),
                         clientPath.Replace("/data", "/host/data"),
                         clientPath.Replace(client.DownloadPath, "/host" + client.DownloadPath),
                         Path.Combine("/host", clientPath.TrimStart('/')),
@@ -823,38 +965,98 @@ namespace Listenarr.Api.Services
                     return;
                 }
 
-                // Check if source and destination are the same
-                if (string.Equals(Path.GetFullPath(sourceFile), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+                // Before enqueueing, mark the download as observed complete and persist client path info
+                try
                 {
-                    _logger.LogInformation("Source and destination are the same, skipping file operation: {FilePath}", sourceFile);
+                    var dbDownload = await db.Downloads.FindAsync(download.Id, cancellationToken);
+                    if (dbDownload != null)
+                    {
+                        // Ensure DownloadPath contains the client save path (already mapped to localPath earlier)
+                        if (!string.IsNullOrEmpty(localPath) && dbDownload.DownloadPath != localPath)
+                        {
+                            dbDownload.DownloadPath = localPath;
+                        }
+
+                        // Set CompletedAt now to indicate the client reported completion. This will remain
+                        // set until the file has been fully processed/moved/copied by ProcessCompletedDownloadAsync.
+                        if (dbDownload.CompletedAt == null)
+                        {
+                            dbDownload.CompletedAt = DateTime.UtcNow;
+                        }
+
+                        // Mark status as Completed so UI shows it as completed while processing happens
+                        dbDownload.Status = DownloadStatus.Completed;
+
+                        db.Downloads.Update(dbDownload);
+                        await db.SaveChangesAsync(cancellationToken);
+
+                        _logger.LogInformation("Marked download {DownloadId} as Completed (observed) and persisted DownloadPath: {DownloadPath}", download.Id, dbDownload.DownloadPath);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Move or copy according to settings
-                    try
+                    _logger.LogWarning(ex, "Failed to persist observed completion for download {DownloadId}", download.Id);
+                }
+
+                // Enqueue download processing job instead of moving/copying immediately
+                try
+                {
+                    var processingQueueService = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                    if (processingQueueService != null)
                     {
                         var action = settings.CompletedFileAction ?? "Move";
-                        
-                        if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                        var outputPath = settings.OutputPath;
+                        if (string.IsNullOrWhiteSpace(outputPath))
                         {
-                            File.Copy(sourceFile, destinationPath, true);
-                            _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
-                                download.Id, sourceFile, destinationPath);
+                            outputPath = "./completed";
+                        }
+                        
+                        await processingQueueService.QueueDownloadProcessingAsync(
+                            download.Id,
+                            sourceFile,
+                            client.Id);
+                        
+                        _logger.LogInformation("Enqueued download {DownloadId} for processing: {Source}", 
+                            download.Id, sourceFile);
+                        
+                        // Set the destination path to the expected final location for the download record
+                        destinationPath = Path.Combine(outputPath, Path.GetFileName(destinationPath));
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Download processing queue service not available, falling back to immediate file operation");
+                        
+                        // Check if source and destination are the same
+                        if (string.Equals(Path.GetFullPath(sourceFile), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogInformation("Source and destination are the same, skipping file operation: {FilePath}", sourceFile);
                         }
                         else
                         {
-                            // Default to Move
-                            File.Move(sourceFile, destinationPath, true);
-                            _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
-                                download.Id, sourceFile, destinationPath);
+                            // Fallback to immediate processing
+                            var action = settings.CompletedFileAction ?? "Move";
+                            
+                            if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                            {
+                                File.Copy(sourceFile, destinationPath, true);
+                                _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
+                                    download.Id, sourceFile, destinationPath);
+                            }
+                            else
+                            {
+                                // Default to Move
+                                File.Move(sourceFile, destinationPath, true);
+                                _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
+                                    download.Id, sourceFile, destinationPath);
+                            }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to {Action} file for download {DownloadId}: {Source} -> {Destination}", 
-                            settings.CompletedFileAction ?? "Move", download.Id, sourceFile, destinationPath);
-                        return;
-                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to enqueue or process download {DownloadId}: {Source} -> {Destination}", 
+                        download.Id, sourceFile, destinationPath);
+                    return;
                 }
 
                 // Finally, call shared completion handler to update DB and broadcast via SignalR
@@ -901,6 +1103,55 @@ namespace Listenarr.Api.Services
                     {
                         _logger.LogWarning("SABnzbd API key not configured for client {ClientName}", client.Name);
                         return;
+                    }
+
+                    // Poll SABnzbd queue for active downloads progress updates
+                    var queueUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                    var queueResponse = await http.GetAsync(queueUrl, cancellationToken);
+
+                    if (queueResponse.IsSuccessStatusCode)
+                    {
+                        var queueJson = await queueResponse.Content.ReadAsStringAsync(cancellationToken);
+                        var queueDoc = System.Text.Json.JsonDocument.Parse(queueJson);
+
+                        if (queueDoc.RootElement.TryGetProperty("queue", out var queue) &&
+                            queue.TryGetProperty("slots", out var queueSlots) &&
+                            queueSlots.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            foreach (var slot in queueSlots.EnumerateArray())
+                            {
+                                try
+                                {
+                                    var nzoId = slot.TryGetProperty("nzo_id", out var nzoIdProp) ? nzoIdProp.GetString() ?? "" : "";
+                                    var filename = slot.TryGetProperty("filename", out var filenameProp) ? filenameProp.GetString() ?? "" : "";
+                                    var percentage = slot.TryGetProperty("percentage", out var percentageProp) ? percentageProp.GetDouble() : 0.0;
+                                    var mb = slot.TryGetProperty("mb", out var mbProp) ? mbProp.GetDouble() : 0.0;
+                                    var mbleft = slot.TryGetProperty("mbleft", out var mbleftProp) ? mbleftProp.GetDouble() : 0.0;
+                                    var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
+                                    var category = slot.TryGetProperty("cat", out var catProp) ? catProp.GetString() ?? "" : "";
+
+                                    // Find matching download by NZO ID
+                                    var matchingDownload = downloads.FirstOrDefault(dl =>
+                                        !string.IsNullOrEmpty(dl.DownloadClientId) &&
+                                        dl.DownloadClientId == nzoId);
+
+                                    if (matchingDownload != null)
+                                    {
+                                        // Calculate progress and update
+                                        var progress = percentage / 100.0;
+                                        var downloadedSize = (long)(mb * 1024 * 1024 * progress); // Convert MB to bytes
+                                        var totalSize = (long)(mb * 1024 * 1024); // Convert MB to bytes
+                                        var amountLeft = (long)(mbleft * 1024 * 1024); // Convert MB to bytes
+
+                                        await UpdateDownloadProgressAsync(matchingDownload.Id, progress, amountLeft, status, dbContext, cancellationToken);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Error updating SABnzbd queue progress for slot");
+                                }
+                            }
+                        }
                     }
 
                     // Get completed downloads (history) - limit to recent items
@@ -957,7 +1208,7 @@ namespace Listenarr.Api.Services
                     {
                         try
                         {
-                            // Find matching completed download by name
+                            // Find matching active download by NZO ID
                             var matchingItem = completedItems.FirstOrDefault(item =>
                                 string.Equals(item.Name, dl.Title, StringComparison.OrdinalIgnoreCase) ||
                                 (!string.IsNullOrEmpty(dl.Title) && item.Name.Contains(dl.Title, StringComparison.OrdinalIgnoreCase))
@@ -987,7 +1238,9 @@ namespace Listenarr.Api.Services
                             }
                             else
                             {
-                                // Not found in completed items - remove from candidates if present
+                                // Not found in completed items - check if it's still in queue for progress updates
+                                // SABnzbd doesn't provide queue data in history API, so we can't update progress here
+                                // Progress updates for SABnzbd would need to be done via the queue API
                                 if (_completionCandidates.ContainsKey(dl.Id))
                                 {
                                     _completionCandidates.Remove(dl.Id);
@@ -1029,6 +1282,88 @@ namespace Listenarr.Api.Services
                         var authBytes = System.Text.Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                         var authHeader = Convert.ToBase64String(authBytes);
                         http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    }
+
+                    // Get active downloads from status for progress updates
+                    var statusRequest = new
+                    {
+                        method = "status",
+                        id = 2
+                    };
+
+                    var statusJsonContent = System.Text.Json.JsonSerializer.Serialize(statusRequest);
+                    var statusHttpContent = new StringContent(statusJsonContent, System.Text.Encoding.UTF8, "application/json");
+
+                    var statusResponse = await http.PostAsync(baseUrl, statusHttpContent, cancellationToken);
+
+                    if (statusResponse.IsSuccessStatusCode)
+                    {
+                        var statusJson = await statusResponse.Content.ReadAsStringAsync(cancellationToken);
+                        var statusDoc = System.Text.Json.JsonDocument.Parse(statusJson);
+
+                        if (statusDoc.RootElement.TryGetProperty("result", out var statusResult))
+                        {
+                            // Get download progress from status
+                            var downloadRate = statusResult.TryGetProperty("DownloadRate", out var rateProp) ? rateProp.GetInt64() : 0;
+                            var remainingSize = statusResult.TryGetProperty("RemainingSizeMB", out var remainingProp) ? remainingProp.GetInt64() : 0;
+                            var downloadedSizeMB = statusResult.TryGetProperty("DownloadedSizeMB", out var downloadedProp) ? downloadedProp.GetInt64() : 0;
+
+                            // Get queue for active downloads
+                            var queueRequest = new
+                            {
+                                method = "listgroups",
+                                id = 3
+                            };
+
+                            var queueJsonContent = System.Text.Json.JsonSerializer.Serialize(queueRequest);
+                            var queueHttpContent = new StringContent(queueJsonContent, System.Text.Encoding.UTF8, "application/json");
+
+                            var queueResponse = await http.PostAsync(baseUrl, queueHttpContent, cancellationToken);
+
+                            if (queueResponse.IsSuccessStatusCode)
+                            {
+                                var queueJson = await queueResponse.Content.ReadAsStringAsync(cancellationToken);
+                                var queueDoc = System.Text.Json.JsonDocument.Parse(queueJson);
+
+                                if (queueDoc.RootElement.TryGetProperty("result", out var queueResult) && queueResult.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                {
+                                    foreach (var group in queueResult.EnumerateArray())
+                                    {
+                                        try
+                                        {
+                                            var nzbId = group.TryGetProperty("NZBID", out var nzbIdProp) ? nzbIdProp.GetInt32() : 0;
+                                            var nzbName = group.TryGetProperty("NZBName", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                                            var status = group.TryGetProperty("Status", out var statusProp) ? statusProp.GetString() ?? "" : "";
+                                            var fileSizeMB = group.TryGetProperty("FileSizeMB", out var sizeProp) ? sizeProp.GetString() ?? "" : "";
+                                            var remainingSizeMB = group.TryGetProperty("RemainingSizeMB", out var remainingSizeProp) ? remainingSizeProp.GetString() ?? "" : "";
+                                            var downloadedSizeMB_Group = group.TryGetProperty("DownloadedSizeMB", out var downloadedSizeProp) ? downloadedSizeProp.GetString() ?? "" : "";
+
+                                            // Find matching download by NZB ID
+                                            var matchingDownload = downloads.FirstOrDefault(dl =>
+                                                !string.IsNullOrEmpty(dl.DownloadClientId) &&
+                                                dl.DownloadClientId == nzbId.ToString());
+
+                                            if (matchingDownload != null)
+                                            {
+                                                // Parse sizes
+                                                if (double.TryParse(fileSizeMB, out var totalMB) && double.TryParse(remainingSizeMB, out var remainingMB))
+                                                {
+                                                    var progress = totalMB > 0 ? (totalMB - remainingMB) / totalMB : 0.0;
+                                                    var downloadedSize = (long)((totalMB - remainingMB) * 1024 * 1024); // Convert MB to bytes
+                                                    var amountLeft = (long)(remainingMB * 1024 * 1024); // Convert MB to bytes
+
+                                                    await UpdateDownloadProgressAsync(matchingDownload.Id, progress, amountLeft, status, dbContext, cancellationToken);
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogWarning(ex, "Error updating NZBGet queue progress for group");
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // Get completed downloads from history
@@ -1157,6 +1492,101 @@ namespace Listenarr.Api.Services
             }, cancellationToken);
         }
 
+        private async Task UpdateDownloadProgressAsync(string downloadId, double progress, long amountLeft, string clientState, ListenArrDbContext dbContext, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var download = await dbContext.Downloads.FindAsync(new object[] { downloadId }, cancellationToken);
+                if (download == null) return;
+
+                // Map client state to our DownloadStatus
+                var mappedStatus = clientState switch
+                {
+                    "downloading" => DownloadStatus.Downloading,
+                    "metaDL" => DownloadStatus.Downloading,
+                    "forcedDL" => DownloadStatus.Downloading,
+                    "stalledDL" => DownloadStatus.Downloading,
+                    "checkingDL" => DownloadStatus.Downloading,
+                    "checkingResumeData" => DownloadStatus.Downloading,
+                    "moving" => DownloadStatus.Downloading,
+                    "uploading" => DownloadStatus.Downloading,
+                    "stalledUP" => DownloadStatus.Downloading,
+                    "checkingUP" => DownloadStatus.Downloading,
+                    "forcedUP" => DownloadStatus.Downloading,
+                    "stoppedDL" => DownloadStatus.Paused,
+                    "stoppedUP" => DownloadStatus.Paused,
+                    "queuedDL" => DownloadStatus.Queued,
+                    "queuedUP" => DownloadStatus.Queued,
+                    "error" => DownloadStatus.Failed,
+                    "missingFiles" => DownloadStatus.Failed,
+                    _ => DownloadStatus.Queued
+                };
+
+                // Calculate downloaded size from progress and total size
+                long downloadedSize = download.TotalSize > 0 ? (long)(download.TotalSize * progress / 100) : 0;
+
+                // Update download record
+                download.Progress = (decimal)progress;
+                download.DownloadedSize = downloadedSize;
+
+                // Conservative guard: if the DB record is currently Failed, do not overwrite
+                // the status to a non-failed value unless we have strong evidence (progress increased)
+                // or the client reports Completed. This prevents transient client "error" states
+                // from flipping the UI incorrectly.
+                if (download.Status == DownloadStatus.Failed && mappedStatus != DownloadStatus.Failed)
+                {
+                    var incomingProgress = (decimal)progress;
+
+                    // Allow transition to Completed always (finalization or client reports complete)
+                    if (mappedStatus == DownloadStatus.Completed)
+                    {
+                        _logger.LogInformation("Allowing Failed->Completed for {DownloadId} because client reports completion", downloadId);
+                        download.Status = mappedStatus;
+                    }
+                    else
+                    {
+                        // Only allow non-failed status if progress increased
+                        if (incomingProgress <= download.Progress)
+                        {
+                            _logger.LogDebug("Skipping status overwrite for failed download {DownloadId}: incoming progress {Incoming} <= current {Current}", downloadId, incomingProgress, download.Progress);
+                            // still update metadata for visibility
+                            if (download.Metadata == null) download.Metadata = new Dictionary<string, object>();
+                            download.Metadata["ClientState"] = clientState;
+                            download.Metadata["AmountLeft"] = amountLeft;
+                            dbContext.Downloads.Update(download);
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            return;
+                        }
+
+                        _logger.LogInformation("Updating Failed -> {MappedStatus} for {DownloadId} because progress increased ({Old} -> {New})", mappedStatus, downloadId, download.Progress, incomingProgress);
+                        download.Status = mappedStatus;
+                    }
+                }
+                else
+                {
+                    download.Status = mappedStatus;
+                }
+
+                // Add metadata for real-time updates
+                if (download.Metadata == null)
+                {
+                    download.Metadata = new Dictionary<string, object>();
+                }
+                download.Metadata["ClientState"] = clientState;
+                download.Metadata["AmountLeft"] = amountLeft;
+
+                dbContext.Downloads.Update(download);
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                _logger.LogDebug("Updated download {DownloadId} progress: {Progress:F1}%, Status: {Status}, Downloaded: {Downloaded:N0} bytes", 
+                    downloadId, progress, mappedStatus, downloadedSize);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error updating download progress for {DownloadId}", downloadId);
+            }
+        }
+
         private async Task BroadcastDownloadUpdatesAsync(
             List<Download> currentDownloads, 
             CancellationToken cancellationToken)
@@ -1217,18 +1647,58 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogDebug("Broadcasting {Count} download updates", changedDownloads.Count);
 
+                // Sanitize each Download before broadcasting to clients (remove DownloadPath and client-local metadata)
+                var sanitized = changedDownloads.Select(d => new {
+                    id = d.Id,
+                    audiobookId = d.AudiobookId,
+                    title = d.Title,
+                    artist = d.Artist,
+                    album = d.Album,
+                    originalUrl = d.OriginalUrl,
+                    status = d.Status.ToString(),
+                    progress = d.Progress,
+                    totalSize = d.TotalSize,
+                    downloadedSize = d.DownloadedSize,
+                    finalPath = d.FinalPath,
+                    startedAt = d.StartedAt,
+                    completedAt = d.CompletedAt,
+                    errorMessage = d.ErrorMessage,
+                    downloadClientId = d.DownloadClientId,
+                    metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+                }).ToList();
+
                 await _hubContext.Clients.All.SendAsync(
                     "DownloadUpdate",
-                    changedDownloads,
+                    sanitized,
                     cancellationToken);
             }
 
             // Also send full list periodically (every 10 polls)
             if (DateTime.UtcNow.Second % 30 == 0)
             {
+                // Broadcast a sanitized full list (remove DownloadPath and client-local metadata)
+                var sanitizedList = currentDownloads.Select(d => new {
+                    id = d.Id,
+                    audiobookId = d.AudiobookId,
+                    title = d.Title,
+                    artist = d.Artist,
+                    album = d.Album,
+                    originalUrl = d.OriginalUrl,
+                    status = d.Status.ToString(),
+                    progress = d.Progress,
+                    totalSize = d.TotalSize,
+                    downloadedSize = d.DownloadedSize,
+                    finalPath = d.FinalPath,
+                    startedAt = d.StartedAt,
+                    completedAt = d.CompletedAt,
+                    errorMessage = d.ErrorMessage,
+                    downloadClientId = d.DownloadClientId,
+                    metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
+                }).ToList();
+
                 await _hubContext.Clients.All.SendAsync(
-                    "DownloadsList", 
-                    currentDownloads, 
+                    "DownloadsList",
+                    sanitizedList,
                     cancellationToken);
             }
         }

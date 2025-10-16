@@ -27,11 +27,16 @@ namespace Listenarr.Api.Controllers
     public class DownloadController : ControllerBase
     {
         private readonly IDownloadService _downloadService;
+        private readonly IDownloadProcessingQueueService _processingQueueService;
         private readonly ILogger<DownloadController> _logger;
 
-        public DownloadController(IDownloadService downloadService, ILogger<DownloadController> logger)
+        public DownloadController(
+            IDownloadService downloadService, 
+            IDownloadProcessingQueueService processingQueueService,
+            ILogger<DownloadController> logger)
         {
             _downloadService = downloadService;
+            _processingQueueService = processingQueueService;
             _logger = logger;
         }
 
@@ -129,6 +134,121 @@ namespace Listenarr.Api.Controllers
                 return StatusCode(500, new { message = "Failed to remove from queue", error = ex.Message });
             }
         }
+
+        /// <summary>
+        /// Reprocess a specific completed download by adding it to the processing queue
+        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// </summary>
+        [HttpPost("reprocess/{downloadId}")]
+        public async Task<ActionResult> ReprocessDownload(string downloadId)
+        {
+            try
+            {
+                var jobId = await _downloadService.ReprocessDownloadAsync(downloadId);
+                if (jobId != null)
+                {
+                    return Ok(new { message = "Download queued for reprocessing", jobId });
+                }
+                return NotFound(new { message = "Download not found or not eligible for reprocessing" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reprocessing download {DownloadId}", downloadId);
+                return StatusCode(500, new { message = "Failed to reprocess download", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Bulk reprocess multiple completed downloads
+        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// </summary>
+        [HttpPost("reprocess/bulk")]
+        public async Task<ActionResult> ReprocessDownloads([FromBody] ReprocessRequest request)
+        {
+            try
+            {
+                var results = await _downloadService.ReprocessDownloadsAsync(request.DownloadIds);
+                return Ok(new 
+                { 
+                    message = "Bulk reprocessing initiated", 
+                    processed = results.Count(r => r.Success),
+                    failed = results.Count(r => !r.Success),
+                    results 
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in bulk reprocess");
+                return StatusCode(500, new { message = "Failed to bulk reprocess downloads", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Reprocess all completed downloads that meet certain criteria
+        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// </summary>
+        [HttpPost("reprocess/all")]
+        public async Task<ActionResult> ReprocessAllDownloads([FromBody] ReprocessAllRequest? request = null)
+        {
+            try
+            {
+                var results = await _downloadService.ReprocessAllCompletedDownloadsAsync(
+                    request?.IncludeProcessed ?? false,
+                    request?.MaxAge ?? TimeSpan.FromDays(30)
+                );
+                
+                return Ok(new 
+                { 
+                    message = "Reprocessing initiated for all eligible downloads", 
+                    processed = results.Count(r => r.Success),
+                    failed = results.Count(r => !r.Success),
+                    results 
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in reprocess all");
+                return StatusCode(500, new { message = "Failed to reprocess all downloads", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get processing queue statistics
+        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// </summary>
+        [HttpGet("processing/stats")]
+        public async Task<ActionResult> GetProcessingStats()
+        {
+            try
+            {
+                var stats = await _processingQueueService.GetStatsAsync();
+                return Ok(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting processing stats");
+                return StatusCode(500, new { message = "Failed to get processing stats", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get recent processing activity
+        /// Requires API key authentication via X-Api-Key header or Authorization: ApiKey header
+        /// </summary>
+        [HttpGet("processing/activity")]
+        public async Task<ActionResult> GetProcessingActivity([FromQuery] int count = 50)
+        {
+            try
+            {
+                var activity = await _processingQueueService.GetRecentActivityAsync(count);
+                return Ok(activity);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting processing activity");
+                return StatusCode(500, new { message = "Failed to get processing activity", error = ex.Message });
+            }
+        }
     }
 
     public class SearchAndDownloadRequest
@@ -141,5 +261,23 @@ namespace Listenarr.Api.Controllers
         public SearchResult SearchResult { get; set; } = new();
         public string? DownloadClientId { get; set; }
         public int? AudiobookId { get; set; }
+    }
+
+    public class ReprocessRequest
+    {
+        public List<string> DownloadIds { get; set; } = new();
+    }
+
+    public class ReprocessAllRequest
+    {
+        /// <summary>
+        /// Include downloads that have already been processed
+        /// </summary>
+        public bool IncludeProcessed { get; set; } = false;
+
+        /// <summary>
+        /// Maximum age of downloads to include (default: 30 days)
+        /// </summary>
+        public TimeSpan MaxAge { get; set; } = TimeSpan.FromDays(30);
     }
 }

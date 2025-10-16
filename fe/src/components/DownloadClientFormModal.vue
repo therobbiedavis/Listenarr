@@ -69,6 +69,17 @@
               />
             </div>
 
+            <div class="form-group">
+              <label for="downloadPath">Download Path</label>
+              <input 
+                id="downloadPath" 
+                v-model="formData.downloadPath" 
+                type="text" 
+                placeholder="Leave blank to use client's default"
+              />
+              <small>Optional: Override the download client's default save path. Leave blank to use the client's configured download directory.</small>
+            </div>
+
             <div class="checkbox-group">
               <label>
                 <input type="checkbox" v-model="formData.useSSL" />
@@ -307,7 +318,7 @@ const defaultFormData = {
   username: '',
   password: '',
   apiKey: '',
-  downloadPath: '/downloads',
+  downloadPath: '',
   useSSL: false,
   isEnabled: true,
   category: '',
@@ -387,7 +398,7 @@ watch(() => props.editingClient, (newClient) => {
       username: newClient.username || '',
       password: newClient.password || '',
       apiKey: (settings?.apiKey as string) || '',
-      downloadPath: newClient.downloadPath,
+  downloadPath: newClient.downloadPath,
       useSSL: newClient.useSSL,
       isEnabled: newClient.isEnabled,
       category: (settings?.category as string) || '',
@@ -442,7 +453,7 @@ const handleSubmit = async () => {
       port: formData.value.port,
       username: formData.value.username || '',
       password: formData.value.password || '',
-      downloadPath: formData.value.downloadPath || '/downloads',
+  downloadPath: formData.value.downloadPath || '',
       useSSL: formData.value.useSSL,
       isEnabled: formData.value.isEnabled,
       settings: {

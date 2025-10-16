@@ -110,7 +110,23 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var configs = await _configurationService.GetDownloadClientConfigurationsAsync();
-                return Ok(configs);
+                // Redact client-local DownloadPath before returning to frontend
+                var response = configs.Select(c => new
+                {
+                    c.Id,
+                    c.Name,
+                    c.Type,
+                    c.Host,
+                    c.Port,
+                    c.Username,
+                    // Do not include DownloadPath - client should decide its local path
+                    c.UseSSL,
+                    c.IsEnabled,
+                    Settings = c.Settings,
+                    c.CreatedAt
+                }).ToList();
+
+                return Ok(response);
             }
             catch (Exception ex)
             {
@@ -129,7 +145,24 @@ namespace Listenarr.Api.Controllers
                 {
                     return NotFound();
                 }
-                return Ok(config);
+
+                // Redact client-local DownloadPath before returning
+                var response = new
+                {
+                    config.Id,
+                    config.Name,
+                    config.Type,
+                    config.Host,
+                    config.Port,
+                    config.Username,
+                    // Do not include DownloadPath
+                    config.UseSSL,
+                    config.IsEnabled,
+                    Settings = config.Settings,
+                    config.CreatedAt
+                };
+
+                return Ok(response);
             }
             catch (Exception ex)
             {

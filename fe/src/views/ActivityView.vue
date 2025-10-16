@@ -190,7 +190,7 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
     downloadSpeed: 0, // Not tracked for DDL
     eta: undefined, // Not available for DDL
     quality: '',
-    downloadClient: download.downloadClientId === 'DDL' ? 'Direct Download' : download.downloadClientId,
+    downloadClient: (download as any).downloadClientName || download.downloadClientId || 'Unknown Client',
     downloadClientId: download.downloadClientId,
     downloadClientType: download.downloadClientId === 'DDL' ? 'DDL' : 'external',
     addedAt: download.startedAt,
@@ -201,31 +201,24 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
 
 // Merge queue items and active downloads (DDL) into unified list
 const allActivityItems = computed(() => {
-  // Get queue items from external clients
+  // Get queue items from external clients (these are already filtered by backend to only show Listenarr-managed downloads)
   const queueItems = [...queue.value]
   
-  // Get active downloads (DDL, new torrents not yet in queue)
-  const downloadItems = downloadsStore.activeDownloads
-    .filter(d => {
-      // Include DDL downloads always
-      if (d.downloadClientId === 'DDL') return true
-      
-      // For external clients, only include if not already in queue
-      // (avoid duplicates - queue is the source of truth for external clients)
-      return !queueItems.some(q => q.id === d.id)
-    })
+  // Get DDL downloads from database (since they don't have corresponding queue items)
+  const ddlDownloadItems = downloadsStore.activeDownloads
+    .filter(d => d.downloadClientId === 'DDL')
     .map(convertDownloadToQueueItem)
   
   console.log('[ActivityView] 🔍 allActivityItems computed:', {
     totalActiveDownloads: downloadsStore.activeDownloads.length,
     ddlDownloads: downloadsStore.activeDownloads.filter(d => d.downloadClientId === 'DDL').length,
-    downloadItemsAfterFilter: downloadItems.length,
+    ddlDownloadItems: ddlDownloadItems.length,
     queueItems: queueItems.length,
-    totalMerged: downloadItems.length + queueItems.length
+    totalMerged: ddlDownloadItems.length + queueItems.length
   })
   
-  // Combine and sort by newest first
-  return [...downloadItems, ...queueItems]
+  // Combine queue items (external clients managed by Listenarr) and DDL downloads
+  return [...queueItems, ...ddlDownloadItems]
 })
 
 const filterTabs = computed(() => [

@@ -264,7 +264,7 @@
               <div class="detail-row">
                 <i class="ph ph-folder"></i>
                 <span class="detail-label">Download Path:</span>
-                <span class="detail-value">{{ client.downloadPath }}</span>
+                <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
               </div>
               <div class="detail-row">
                 <i class="ph ph-check-circle"></i>
@@ -337,7 +337,7 @@
               </div>
               <div class="form-group">
                 <label>Remote Path (from client)</label>
-                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/downloads/complete/sonarr/" />
+                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/path/to/complete/downloads" />
               </div>
               <div class="form-group">
                 <label>Local Path (server)</label>
