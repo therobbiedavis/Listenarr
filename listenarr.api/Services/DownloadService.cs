@@ -1478,6 +1478,7 @@ namespace Listenarr.Api.Services
                     AutomaticDecompression = DecompressionMethods.All
                 };
 
+                string torrentsJson;
                 using (var httpClient = new HttpClient(handler))
                 {
                     // Try to login first
@@ -1504,7 +1505,8 @@ namespace Listenarr.Api.Services
                     var torrentsResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
                     if (!torrentsResponse.IsSuccessStatusCode) return items;
 
-                    var torrentsJson = await torrentsResponse.Content.ReadAsStringAsync();
+                    torrentsJson = await torrentsResponse.Content.ReadAsStringAsync();
+                }
 
                 if (string.IsNullOrWhiteSpace(torrentsJson))
                 {
