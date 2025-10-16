@@ -521,7 +521,8 @@ namespace Listenarr.Api.Services
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
             
-            // Login to qBittorrent
+            // Check if authentication is required by attempting login
+            bool requiresAuth = true;
             var loginData = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("username", client.Username),
@@ -531,7 +532,23 @@ namespace Listenarr.Api.Services
             var loginResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
             if (!loginResponse.IsSuccessStatusCode)
             {
-                throw new Exception("Failed to login to qBittorrent");
+                // Check if this is a 403 Forbidden (authentication disabled) vs other errors
+                if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    _logger.LogInformation("qBittorrent login returned Forbidden - authentication may be disabled, proceeding without authentication");
+                    requiresAuth = false;
+                }
+                else
+                {
+                    var responseContent = await loginResponse.Content.ReadAsStringAsync();
+                    _logger.LogError("Failed to login to qBittorrent. Status: {Status}, Response: {Response}", 
+                        loginResponse.StatusCode, responseContent);
+                    throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode}");
+                }
+            }
+            else
+            {
+                _logger.LogInformation("Successfully authenticated with qBittorrent");
             }
 
             // Get torrent URL - prefer magnet link, fall back to torrent file URL
@@ -1411,7 +1428,7 @@ namespace Listenarr.Api.Services
 
             try
             {
-                // Login
+                // Try to login first
                 var loginData = new FormUrlEncodedContent(new[]
                 {
                     new KeyValuePair<string, string>("username", client.Username),
@@ -1419,9 +1436,19 @@ namespace Listenarr.Api.Services
                 });
 
                 var loginResponse = await _httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
-                if (!loginResponse.IsSuccessStatusCode) return items;
 
-                // Get torrents
+                // Check if authentication is disabled (403 Forbidden) or login succeeded
+                if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    _logger.LogInformation("qBittorrent authentication appears to be disabled (403 Forbidden), proceeding without authentication");
+                }
+                else if (!loginResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("qBittorrent login failed with status {Status}, cannot retrieve queue", loginResponse.StatusCode);
+                    return items;
+                }
+
+                // Get torrents (with or without authentication)
                 var torrentsResponse = await _httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
                 if (!torrentsResponse.IsSuccessStatusCode) return items;
 
