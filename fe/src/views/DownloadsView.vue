@@ -112,10 +112,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useDownloadsStore } from '@/stores/downloads'
 import type { Download } from '@/types'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 
 const downloadsStore = useDownloadsStore()
-const { success, error: showError, info } = useNotification()
+const toast = useToast()
 const activeTab = ref<'active' | 'completed' | 'failed'>('active')
 
 const currentDownloads = computed(() => {
@@ -138,24 +138,26 @@ const refreshDownloads = async () => {
 const cancelDownload = async (downloadId: string) => {
   try {
     await downloadsStore.cancelDownload(downloadId)
-    success('Download canceled successfully')
+    toast.success('Success', 'Download canceled successfully')
   } catch (error) {
     console.error('Failed to cancel download:', error)
-    showError('Failed to cancel download')
+    toast.error('Error', 'Failed to cancel download')
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const retryDownload = async (download: Download) => {
-  // For now, just show a message. In a real implementation, 
+  // For now, just show a message. In a real implementation,
   // you would restart the download
-  info('Retry functionality will be implemented soon', 'Coming Soon')
+  // useToast expects (title, message)
+  toast.info('Coming Soon', 'Retry functionality will be implemented soon')
 }
 
 const openFolder = (path: string) => {
   // This would need to be implemented with a backend endpoint
   // that can open the folder in the OS file explorer
-  info(`Would open folder: ${path}`, 'Open Folder')
+  // map (message, title) -> (title, message)
+  toast.info('Open Folder', `Would open folder: ${path}`)
 }
 
 const getEmptyMessage = () => {

@@ -152,7 +152,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 import type { QualityProfile } from '@/types'
 
 interface Props {
@@ -191,7 +191,7 @@ const hasChanges = computed(() => {
          formData.value.rootFolder !== null
 })
 
-const { success, error: showError } = useNotification()
+const toast = useToast()
 
 watch(() => props.isOpen, async (isOpen) => {
   if (isOpen) {
@@ -271,7 +271,7 @@ async function handleSave() {
 
   // Count successes
   const successCount = results.value.filter(r => r.success).length
-  success(`Updated ${successCount} of ${results.value.length} audiobook(s)`)
+  toast.success('Bulk update', `Updated ${successCount} of ${results.value.length} audiobook(s)`)
 
   // Notify parent and leave modal open so user can review results
   emit('saved')
@@ -307,7 +307,7 @@ async function handleSave() {
     } catch {
       // fallback
     }
-    showError(message)
+  toast.error('Bulk update failed', message)
   } finally {
     saving.value = false
   }

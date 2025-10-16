@@ -427,6 +427,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
+import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -611,8 +612,9 @@ async function scanFiles() {
     }
   } catch (err) {
     console.error('Scan failed:', err)
-    // Show a simple alert for now
-    alert('Scan failed: ' + (err instanceof Error ? err.message : String(err)))
+    // Show a non-blocking toast instead of an alert
+    const toast = useToast()
+    toast.error('Scan failed', (err instanceof Error ? err.message : String(err)))
   } finally {
     scanning.value = false
   }

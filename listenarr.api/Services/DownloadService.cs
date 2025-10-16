@@ -61,6 +61,111 @@ namespace Listenarr.Api.Services
             _hubContext = hubContext;
         }
 
+        public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
+        {
+            try
+            {
+                // Perform lightweight checks depending on client type
+                var type = client.Type?.ToLowerInvariant();
+                switch (type)
+                {
+                    case "qbittorrent":
+                        // Attempt to login to qBittorrent
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+                            var cookieJar = new CookieContainer();
+                            var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
+                            using var httpClient = new HttpClient(handler);
+                            var loginData = new FormUrlEncodedContent(new[] {
+                                new KeyValuePair<string,string>("username", client.Username ?? string.Empty),
+                                new KeyValuePair<string,string>("password", client.Password ?? string.Empty)
+                            });
+                            var resp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+                            if (resp.IsSuccessStatusCode)
+                                return (true, "qBittorrent: authentication successful", client);
+                            // 403 may indicate auth disabled - treat as success
+                            if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                                return (true, "qBittorrent: authentication rejected but service responded (authentication may be disabled)", client);
+
+                            var body = await resp.Content.ReadAsStringAsync();
+                            return (false, $"qBittorrent login failed: {resp.StatusCode} - {body}", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "qBittorrent test failed");
+                            return (false, "qBittorrent test failed: " + ex.Message, client);
+                        }
+
+                    case "transmission":
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
+                            // Use existing helper to get session id which attempts a request
+                            var sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
+                            return (true, "Transmission: session established", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Transmission test failed");
+                            return (false, "Transmission test failed: " + ex.Message, client);
+                        }
+
+                    case "sabnzbd":
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+                            // Get API key from settings
+                            var apiKey = "";
+                            if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                                apiKey = apiKeyObj?.ToString() ?? "";
+                            if (string.IsNullOrEmpty(apiKey))
+                                return (false, "SABnzbd API key not configured in client settings", client);
+
+                            var url = $"{baseUrl}?mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                            var resp = await _httpClient.GetAsync(url);
+                            var txt = await resp.Content.ReadAsStringAsync();
+                            if (!resp.IsSuccessStatusCode)
+                                return (false, $"SABnzbd returned {resp.StatusCode}: {txt}", client);
+
+                            return (true, "SABnzbd: API reachable and key validated", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "SABnzbd test failed");
+                            return (false, "SABnzbd test failed: " + ex.Message, client);
+                        }
+
+                    case "nzbget":
+                        try
+                        {
+                            // NZBGet uses JSON-RPC - call a harmless method like 'version'
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
+                            var pingReq = new { method = "version", @params = new object[] { }, id = 1 };
+                            var content = new StringContent(JsonSerializer.Serialize(pingReq), Encoding.UTF8, "application/json");
+                            var resp = await _httpClient.PostAsync(baseUrl, content);
+                            var txt = await resp.Content.ReadAsStringAsync();
+                            if (!resp.IsSuccessStatusCode)
+                                return (false, $"NZBGet returned {resp.StatusCode}: {txt}", client);
+                            return (true, "NZBGet: RPC reachable", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "NZBGet test failed");
+                            return (false, "NZBGet test failed: " + ex.Message, client);
+                        }
+
+                    default:
+                        return (false, $"Unsupported client type: {client.Type}", client);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during TestDownloadClientAsync");
+                return (false, ex.Message, client);
+            }
+        }
+
         /// <summary>
         /// Normalizes a title for better matching by removing format indicators and extra spaces
         /// </summary>

@@ -303,6 +303,14 @@ class ApiService {
     return this.request<boolean>(`/configuration/download-clients/${id}`, { method: 'DELETE' })
   }
 
+  async testDownloadClient(config: DownloadClientConfiguration): Promise<{ success: boolean; message: string; client?: DownloadClientConfiguration }>
+  {
+    return this.request<{ success: boolean; message: string; client?: DownloadClientConfiguration }>('/configuration/download-clients/test', {
+      method: 'POST',
+      body: JSON.stringify(config)
+    })
+  }
+
   // Application Settings
   async getApplicationSettings(): Promise<ApplicationSettings> {
     return this.request<ApplicationSettings>('/configuration/settings')
@@ -793,5 +801,8 @@ export const createQualityProfile = (profile: Omit<QualityProfile, 'id' | 'creat
 export const updateQualityProfile = (id: number, profile: Partial<QualityProfile>) => apiService.updateQualityProfile(id, profile)
 export const deleteQualityProfile = (id: number) => apiService.deleteQualityProfile(id)
 export const scoreSearchResults = (profileId: number, searchResults: SearchResult[]) => apiService.scoreSearchResults(profileId, searchResults)
+
+// Download client helpers
+export const testDownloadClient = (config: DownloadClientConfiguration) => apiService.testDownloadClient(config)
 
 

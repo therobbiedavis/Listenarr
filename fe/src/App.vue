@@ -177,6 +177,9 @@
       :auto-close="notification.autoClose"
       @close="closeNotification"
     />
+
+    <!-- Global toast notifications -->
+    <GlobalToast />
   </div>
 </template>
 
@@ -192,8 +195,10 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
 import { ref as vueRef2, reactive } from 'vue'
+import GlobalToast from '@/components/GlobalToast.vue'
+import { useToast } from '@/services/toastService'
 
-const { notification, close: closeNotification, info } = useNotification()
+const { notification, close: closeNotification } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
@@ -475,12 +480,15 @@ onMounted(async () => {
       queueItems.value = queue
     })
 
+    // Prepare toast helper for this mounted scope
+    const toast = useToast()
+
     // Subscribe to files-removed notifications so we can inform the user
     unsubscribeFilesRemoved = signalRService.onFilesRemoved((payload) => {
       try {
         const removed = Array.isArray(payload?.removed) ? payload.removed.map(r => r.path) : []
         const display = removed.length > 0 ? removed.join(', ') : 'Files were removed from a library item.'
-        info(display, 'Files removed', 6000)
+        toast.info('Files removed', display, 6000)
         // Refresh wanted badge in case monitored items lost files
         refreshWantedBadge()
         // Push into recent notifications
@@ -494,6 +502,20 @@ onMounted(async () => {
       } catch (err) {
         console.error('Error handling FilesRemoved payload', err)
       }
+    })
+
+    // Subscribe to server-sent toast messages and forward to toastService
+    signalRService.onToast((payload) => {
+      try {
+        const lvl = (payload?.level || 'info').toLowerCase()
+        const title = payload?.title || ''
+        const msg = payload?.message || ''
+        const timeout = payload?.timeoutMs
+        if (lvl === 'success') toast.success(title, msg, timeout)
+        else if (lvl === 'warning') toast.warning(title, msg, timeout)
+        else if (lvl === 'error') toast.error(title, msg, timeout)
+        else toast.info(title, msg, timeout)
+      } catch (e) { console.error('Toast dispatch error', e) }
     })
 
     // Subscribe to audiobook updates (for wanted badge refresh only, no notifications)

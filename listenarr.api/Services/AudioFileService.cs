@@ -38,6 +38,71 @@ namespace Listenarr.Api.Services
                     return false;
                 }
 
+                // Conservative safety: if the audiobook already has a stored FilePath (legacy
+                // single-file representation) prefer to only associate files that live in the
+                // same containing directory. This prevents accidental associations when a
+                // completed download move erroneously places a file in a sibling folder.
+                try
+                {
+                    var audiobook = await db.Audiobooks.FindAsync(audiobookId);
+                    if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.FilePath))
+                    {
+                        var existingDir = Path.GetFullPath(Path.GetDirectoryName(audiobook.FilePath) ?? string.Empty);
+                        var candidateDir = Path.GetFullPath(Path.GetDirectoryName(filePath) ?? string.Empty);
+
+                        if (!string.IsNullOrEmpty(existingDir) && !string.IsNullOrEmpty(candidateDir))
+                        {
+                            // Ensure candidate is the same directory or a subdirectory of the existing dir
+                            if (!candidateDir.Equals(existingDir, StringComparison.OrdinalIgnoreCase) &&
+                                !candidateDir.StartsWith(existingDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogWarning("Refusing to associate file outside audiobook folder. AudiobookId={AudiobookId}, AudiobookDir={AudiobookDir}, File={File}", audiobookId, existingDir, filePath);
+                                // Create a history entry so the UI can show that an attempted association was refused
+                                try
+                                {
+                                    var historyEntry = new History
+                                    {
+                                        AudiobookId = audiobookId,
+                                        AudiobookTitle = audiobook?.Title ?? "Unknown",
+                                        EventType = "File Association Refused",
+                                        Message = $"Refused to associate file outside audiobook folder: {Path.GetFileName(filePath)}",
+                                        Source = source ?? "Scan",
+                                        Data = JsonSerializer.Serialize(new { FilePath = filePath, AudiobookDir = existingDir }),
+                                        Timestamp = DateTime.UtcNow
+                                    };
+
+                                    db.History.Add(historyEntry);
+                                    await db.SaveChangesAsync();
+
+                                    // Broadcast a UI toast message so clients see immediate feedback
+                                    try
+                                    {
+                                        var toastSvc = scope.ServiceProvider.GetService<IToastService>();
+                                        if (toastSvc != null)
+                                        {
+                                            await toastSvc.PublishToastAsync("warning", "File not associated", $"Refused to associate {Path.GetFileName(filePath)} to {audiobook?.Title ?? "Unknown"}");
+                                        }
+                                    }
+                                    catch (Exception thx)
+                                    {
+                                        _logger.LogDebug(thx, "Failed to publish toast for refused file association");
+                                    }
+                                }
+                                catch (Exception hx)
+                                {
+                                    _logger.LogDebug(hx, "Failed to persist history for refused file association (AudiobookId={AudiobookId}, File={File})", audiobookId, filePath);
+                                }
+
+                                return false;
+                            }
+                        }
+                    }
+                }
+                catch (Exception exDir)
+                {
+                    _logger.LogDebug(exDir, "Failed to verify audiobook folder containment for AudiobookId={AudiobookId} File={File}", audiobookId, filePath);
+                }
+
                 AudioMetadata? meta = null;
                 try
                 {

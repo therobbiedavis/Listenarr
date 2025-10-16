@@ -287,7 +287,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type { DownloadClientConfiguration } from '@/types'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
 import RemotePathMappingsManager from './RemotePathMappingsManager.vue'
 
@@ -305,7 +305,7 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 const configStore = useConfigurationStore()
-const { success, error: showError } = useNotification()
+const toast = useToast()
 
 const saving = ref(false)
 const testing = ref(false)
@@ -428,10 +428,10 @@ const testConnection = async () => {
   try {
     // TODO: Implement actual test endpoint
     await new Promise(resolve => setTimeout(resolve, 1000))
-    success('Connection test successful')
+    toast.success('Test successful', 'Connection test successful')
   } catch (error) {
     console.error('Failed to test download client:', error)
-    showError('Failed to test download client connection')
+    toast.error('Test failed', 'Failed to test download client connection')
   } finally {
     testing.value = false
   }
@@ -471,15 +471,15 @@ const handleSubmit = async () => {
       }
     }
 
-    console.log('Saving download client configuration:', clientConfig)
-    await configStore.saveDownloadClientConfiguration(clientConfig)
-    success(`Download client ${props.editingClient ? 'updated' : 'created'} successfully`)
+  console.log('Saving download client configuration:', clientConfig)
+  await configStore.saveDownloadClientConfiguration(clientConfig)
+  toast.success('Saved', `Download client ${props.editingClient ? 'updated' : 'created'} successfully`)
     
     emit('saved')
     closeModal()
   } catch (error) {
-    console.error('Failed to save download client:', error)
-    showError(`Failed to save download client: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  console.error('Failed to save download client:', error)
+  toast.error('Save failed', `Failed to save download client: ${error instanceof Error ? error.message : 'Unknown error'}`)
   } finally {
     saving.value = false
   }

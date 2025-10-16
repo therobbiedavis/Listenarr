@@ -271,7 +271,7 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 
 // Extended type for title search results that includes search metadata
 type TitleSearchResult = OpenLibraryBook & { searchResult?: SearchResult }
@@ -279,7 +279,7 @@ type TitleSearchResult = OpenLibraryBook & { searchResult?: SearchResult }
 const router = useRouter()
 const configStore = useConfigurationStore()
 const libraryStore = useLibraryStore()
-const { error: showError, warning } = useNotification()
+const toast = useToast()
 
 // Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
 const decodeHtml = (input?: string | null): string => {
@@ -632,7 +632,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
   
   if (!asin) {
     console.error('No ASIN available for selected book')
-    warning('Cannot add to library: No ASIN available')
+    toast.warning('Cannot add', 'Cannot add to library: No ASIN available')
     return
   }
 
@@ -648,7 +648,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
     await addToLibrary(metadata)
   } catch (error) {
     console.error('Failed to add audiobook:', error)
-    showError('Failed to add audiobook. Please try again.')
+    toast.error('Add failed', 'Failed to add audiobook. Please try again.')
   }
 }
 
@@ -659,9 +659,9 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
       const result = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
       selectedBook.value = result
       showDetailsModal.value = true
-    } catch (error) {
-      console.error('Failed to fetch detailed metadata:', error)
-      showError('Failed to fetch audiobook details. Please try again.')
+  } catch (error) {
+  console.error('Failed to fetch detailed metadata:', error)
+  toast.error('Fetch failed', 'Failed to fetch audiobook details. Please try again.')
     }
   } else {
     console.error('No ASIN available for selected book')

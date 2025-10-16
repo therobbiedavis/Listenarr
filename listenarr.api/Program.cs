@@ -101,6 +101,9 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
 builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
 
+// Toast service for broadcasting UI toasts via SignalR
+builder.Services.AddSingleton<IToastService, ToastService>();
+
 // Always register session service, but it will check config internally
 builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
 
