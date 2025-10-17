@@ -28,7 +28,6 @@ namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/audible")]
-    [EnableCors("AllowVueApp")]
     public class AudibleController : ControllerBase
     {
         private readonly IAudibleMetadataService _audibleMetadataService;
