@@ -307,6 +307,10 @@ app.UseForwardedHeaders();
     app.UseDefaultFiles();
     app.UseStaticFiles();
 
+// Ensure routing middleware is enabled so endpoint routing features (CORS, Authorization)
+// can be applied by subsequent middleware. This must run before UseCors()/UseAuthorization().
+app.UseRouting();
+
 // Enable CORS only in development (production should use reverse proxy for CORS)
 if (app.Environment.IsDevelopment())
 {
