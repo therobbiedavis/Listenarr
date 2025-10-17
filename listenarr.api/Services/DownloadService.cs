@@ -84,9 +84,26 @@ namespace Listenarr.Api.Services
                             var resp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
                             if (resp.IsSuccessStatusCode)
                                 return (true, "qBittorrent: authentication successful", client);
-                            // 403 may indicate auth disabled - treat as success
+                            
+                            // 403 Forbidden can mean either:
+                            // 1. Authentication is disabled (should proceed without auth)
+                            // 2. Authentication is enabled but credentials are wrong
+                            // To distinguish, try a request without authentication
                             if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                                return (true, "qBittorrent: authentication rejected but service responded (authentication may be disabled)", client);
+                            {
+                                // Try a simple API call without authentication
+                                var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                                if (testResp.IsSuccessStatusCode)
+                                {
+                                    // API works without auth, so authentication is disabled
+                                    return (true, "qBittorrent: authentication disabled, proceeding without credentials", client);
+                                }
+                                else
+                                {
+                                    // API fails without auth, so authentication is enabled but credentials are wrong
+                                    return (false, "qBittorrent: authentication enabled but credentials are incorrect", client);
+                                }
+                            }
 
                             var body = await resp.Content.ReadAsStringAsync();
                             return (false, $"qBittorrent login failed: {resp.StatusCode} - {body}", client);
@@ -655,7 +672,18 @@ namespace Listenarr.Api.Services
                     // Check if this is a 403 Forbidden (authentication disabled) vs other errors
                     if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
-                        _logger.LogInformation("qBittorrent login returned Forbidden - authentication may be disabled, proceeding without authentication. Response: {Response}", loginResponseContent);
+                        // Try a simple API call without authentication
+                        var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                        if (testResp.IsSuccessStatusCode)
+                        {
+                            // API works without auth, so authentication is disabled
+                            _logger.LogInformation("qBittorrent authentication disabled, proceeding without credentials");
+                        }
+                        else
+                        {
+                            // API fails without auth, so authentication is enabled but credentials are wrong
+                            throw new Exception("qBittorrent authentication enabled but credentials are incorrect");
+                        }
                     }
                     else
                     {
@@ -1598,7 +1626,18 @@ namespace Listenarr.Api.Services
                     // Check if authentication is disabled (403 Forbidden) or login succeeded
                     if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
-                        _logger.LogInformation("qBittorrent authentication appears to be disabled (403 Forbidden), proceeding without authentication");
+                        // Test if API is accessible without authentication to distinguish between
+                        // "auth disabled" vs "wrong credentials"
+                        var testResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                        if (testResponse.IsSuccessStatusCode)
+                        {
+                            _logger.LogInformation("qBittorrent authentication appears to be disabled (403 Forbidden on login, but API accessible without auth)");
+                        }
+                        else
+                        {
+                            _logger.LogWarning("qBittorrent login failed with 403 Forbidden and API is not accessible without authentication - credentials may be incorrect");
+                            return items;
+                        }
                     }
                     else if (!loginResponse.IsSuccessStatusCode)
                     {

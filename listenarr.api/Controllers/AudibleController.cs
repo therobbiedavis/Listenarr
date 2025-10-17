@@ -22,7 +22,6 @@ using Listenarr.Api.Models;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Cors;
 
 namespace Listenarr.Api.Controllers
 {
