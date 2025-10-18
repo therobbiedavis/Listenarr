@@ -240,7 +240,7 @@
                   :disabled="testingClient === client.id"
                 >
                   <i v-if="testingClient === client.id" class="ph ph-spinner ph-spin"></i>
-                  <i v-else class="ph ph-bolt"></i>
+                  <i v-else class="ph ph-check-circle"></i>
                 </button>
                 <button 
                   @click="confirmDeleteClient(client)" 

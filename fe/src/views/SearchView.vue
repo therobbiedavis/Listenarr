@@ -267,7 +267,7 @@ const addToLibrary = async (result: SearchResult) => {
     
     // Add to library
     console.log('Adding to library via /api/library/add')
-    await apiService.addToLibrary(metadata)
+    await apiService.addToLibrary(metadata, { searchResult: result })
     
   console.log('Successfully added to library')
   toast.success('Added to library', `"${metadata.title}" has been added to your library!`)

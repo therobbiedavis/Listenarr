@@ -68,6 +68,25 @@ namespace Listenarr.Api.Controllers
         {
             var metadata = request.Metadata;
             
+            _logger.LogInformation("AddToLibrary received metadata: Title={Title}, Asin={Asin}, PublishYear={PublishYear}, Authors={Authors}, Series={Series}",
+                metadata.Title, metadata.Asin, metadata.PublishYear, 
+                metadata.Authors != null ? string.Join(", ", metadata.Authors) : "null",
+                metadata.Series);
+            
+            // If metadata doesn't have PublishYear but we have search result with publishedDate, try to extract year
+            if (string.IsNullOrWhiteSpace(metadata.PublishYear) && request.SearchResult != null)
+            {
+                try
+                {
+                    metadata.PublishYear = request.SearchResult.PublishedDate.Year.ToString();
+                    _logger.LogInformation("Extracted publish year from search result publishedDate: {Year}", metadata.PublishYear);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to extract publish year from search result publishedDate");
+                }
+            }
+            
             // Check if audiobook already exists in library
             if (!string.IsNullOrEmpty(metadata.Asin))
             {
@@ -136,6 +155,9 @@ namespace Listenarr.Api.Controllers
                 Monitored = request.Monitored  // Use custom monitored setting
             };
             
+            _logger.LogInformation("Created Audiobook entity: Title={Title}, Asin={Asin}, PublishYear={PublishYear}",
+                audiobook.Title, audiobook.Asin, audiobook.PublishYear);
+            
             // Assign quality profile - use custom if provided, otherwise default
             if (request.QualityProfileId.HasValue)
             {
@@ -198,17 +220,28 @@ namespace Listenarr.Api.Controllers
             {
                 id = a.Id,
                 title = a.Title,
+                subtitle = a.Subtitle,
                 authors = a.Authors,
+                publishYear = a.PublishYear,
+                series = a.Series,
+                seriesNumber = a.SeriesNumber,
                 description = a.Description,
+                genres = a.Genres,
+                tags = a.Tags,
+                narrators = a.Narrators,
+                isbn = a.Isbn,
+                asin = a.Asin,
+                publisher = a.Publisher,
+                language = a.Language,
+                runtime = a.Runtime,
+                version = a.Version,
+                @explicit = a.Explicit,
+                abridged = a.Abridged,
                 imageUrl = a.ImageUrl,
                 filePath = a.FilePath,
                 fileSize = a.FileSize,
-                runtime = a.Runtime,
                 monitored = a.Monitored,
                 quality = a.Quality,
-                series = a.Series,
-                seriesNumber = a.SeriesNumber,
-                tags = a.Tags,
                 files = a.Files?.Select(f => new {
                     id = f.Id,
                     path = f.Path,
@@ -382,172 +415,6 @@ namespace Listenarr.Api.Controllers
             }
 
             return StatusCode(500, new { message = "Failed to delete audiobook" });
-        }
-
-        [HttpPost("delete-bulk")]
-        public async Task<IActionResult> DeleteBulk([FromBody] BulkDeleteRequest request)
-        {
-            if (request.Ids == null || !request.Ids.Any())
-            {
-                return BadRequest(new { message = "No IDs provided for deletion" });
-            }
-
-            // Get audiobooks to delete (for image cleanup)
-            var audiobooks = new List<Audiobook>();
-            foreach (var id in request.Ids)
-            {
-                var audiobook = await _repo.GetByIdAsync(id);
-                if (audiobook != null)
-                {
-                    audiobooks.Add(audiobook);
-                }
-            }
-
-            // Delete associated images from cache
-            var deletedImagesCount = 0;
-            foreach (var audiobook in audiobooks)
-            {
-                if (!string.IsNullOrEmpty(audiobook.Asin))
-                {
-                    try
-                    {
-                        var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
-                        if (imagePath != null)
-                        {
-                            var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
-                            if (System.IO.File.Exists(fullPath))
-                            {
-                                System.IO.File.Delete(fullPath);
-                                deletedImagesCount++;
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
-                        // Continue with deletion even if image cleanup fails
-                    }
-                }
-            }
-
-            var deletedCount = await _repo.DeleteBulkAsync(request.Ids);
-            
-            _logger.LogInformation("Bulk delete: {DeletedCount} audiobooks and {ImageCount} images deleted", deletedCount, deletedImagesCount);
-            
-            return Ok(new 
-            { 
-                message = $"Successfully deleted {deletedCount} audiobook(s)", 
-                deletedCount,
-                deletedImagesCount,
-                ids = request.Ids 
-            });
-        }
-
-    [HttpPost("bulk-update")]
-    public async Task<IActionResult> BulkUpdate([FromBody] BulkUpdateRequest request)
-        {
-            if (request.Ids == null || !request.Ids.Any())
-            {
-                return BadRequest(new { message = "No IDs provided for update" });
-            }
-            if (request.Updates == null || !request.Updates.Any())
-            {
-                return BadRequest(new { message = "No updates provided" });
-            }
-
-            var results = new List<object>();
-            foreach (var id in request.Ids)
-            {
-                var audiobook = await _repo.GetByIdAsync(id);
-                if (audiobook == null)
-                {
-                    results.Add(new { id, success = false, error = "Audiobook not found" });
-                    continue;
-                }
-
-                bool anySuccess = false;
-                var errors = new List<string>();
-                foreach (var kvp in request.Updates)
-                {
-                    var prop = typeof(Audiobook).GetProperty(kvp.Key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    if (prop == null || !prop.CanWrite)
-                    {
-                        errors.Add($"Property '{kvp.Key}' not found or not writable");
-                        continue;
-                    }
-                    try
-                    {
-                        var converted = ConvertUpdateValue(kvp.Value, prop.PropertyType);
-                        prop.SetValue(audiobook, converted);
-                        anySuccess = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        var incomingType = kvp.Value?.GetType().FullName ?? "null";
-                        var raw = kvp.Value is JsonElement j ? j.GetRawText() : kvp.Value?.ToString();
-                        var msg = $"Failed to set '{kvp.Key}': {ex.Message} (incomingType={incomingType}, raw={raw})";
-                        errors.Add(msg);
-                        _logger.LogError(ex, "Bulk update conversion error for property {Property} on audiobook {Id}: {Msg}", kvp.Key, id, msg);
-                    }
-                }
-                if (anySuccess)
-                {
-                    await _repo.UpdateAsync(audiobook);
-                }
-                results.Add(new { id, success = anySuccess, errors });
-            }
-            return Ok(new { message = "Bulk update completed", results });
-        }
-
-        [HttpPost("{id}/search")]
-        public async Task<IActionResult> TriggerAutomaticSearch(int id)
-        {
-            var audiobook = await _repo.GetByIdAsync(id);
-            if (audiobook == null)
-            {
-                return NotFound(new { message = "Audiobook not found" });
-            }
-
-            if (!audiobook.Monitored)
-            {
-                return BadRequest(new { message = "Audiobook is not monitored" });
-            }
-
-            if (audiobook.QualityProfile == null)
-            {
-                return BadRequest(new { message = "Audiobook has no quality profile assigned" });
-            }
-
-            try
-            {
-                // Get required services
-                using var scope = _serviceProvider.CreateScope();
-                var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
-                var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
-                var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-
-                // Process the audiobook using the same logic as AutomaticSearchService
-                var downloadsQueued = await ProcessAudiobookForSearchAsync(
-                    audiobook, searchService, qualityProfileService, downloadService, _dbContext);
-
-                // Update last search time
-                audiobook.LastSearchTime = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogInformation("Manual search triggered for audiobook '{Title}' - queued {QueuedCount} downloads",
-                    audiobook.Title, downloadsQueued);
-
-                return Ok(new { 
-                    message = $"Search completed for audiobook '{audiobook.Title}'", 
-                    downloadsQueued,
-                    audiobookId = id
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during manual search for audiobook '{Title}' (ID: {Id})", audiobook.Title, id);
-                return StatusCode(500, new { message = "Error during search", error = ex.Message });
-            }
         }
 
         /// <summary>
@@ -1260,8 +1127,6 @@ namespace Listenarr.Api.Controllers
             return value;
         }
 
-        }
-
     public class BulkDeleteRequest
     {
         public List<int> Ids { get; set; } = new List<int>();
@@ -1279,5 +1144,7 @@ namespace Listenarr.Api.Controllers
         public bool Monitored { get; set; } = true;
         public int? QualityProfileId { get; set; }
         public bool AutoSearch { get; set; } = false;
+        public SearchResult? SearchResult { get; set; }
     }
+}
 }

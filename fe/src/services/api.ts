@@ -370,12 +370,13 @@ class ApiService {
     return this.request<Audiobook[]>('/library')
   }
 
-  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean }): Promise<{ message: string; audiobook: Audiobook }> {
+  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean; searchResult?: SearchResult }): Promise<{ message: string; audiobook: Audiobook }> {
     const request = {
       metadata,
       monitored: options?.monitored ?? true,
       qualityProfileId: options?.qualityProfileId,
-      autoSearch: options?.autoSearch ?? false
+      autoSearch: options?.autoSearch ?? false,
+      searchResult: options?.searchResult
     }
     return this.request<{ message: string; audiobook: Audiobook }>('/library/add', {
       method: 'POST',
@@ -443,6 +444,19 @@ class ApiService {
     message: string
   }> {
     return this.request(`/filesystem/validate?path=${encodeURIComponent(path)}`)
+  }
+
+  // Manual import preview / start
+  async previewManualImport(path: string): Promise<{ items: Array<any> }> {
+    const params = path ? `?path=${encodeURIComponent(path)}` : ''
+    return this.request(`/library/manual-import/preview${params}`)
+  }
+
+  async startManualImport(request: { path: string; mode: 'automatic' | 'interactive'; items?: Array<any>; inputMode?: 'move' | 'copy' }): Promise<{ importedCount: number }> {
+    return this.request<{ importedCount: number }>(`/library/manual-import`, {
+      method: 'POST',
+      body: JSON.stringify(request)
+    })
   }
 
   // Helper to convert relative image URLs to absolute

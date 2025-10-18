@@ -8,89 +8,70 @@
         class="browser-input"
         @blur="validatePath"
       />
-      <button @click="toggleBrowser" class="browse-button" type="button">
+      <!-- Folder icon button opens inline browser beneath the input -->
+      <button @click="toggleBrowser" class="browse-button" type="button" aria-label="Browse folders">
         <i class="ph ph-folder-open"></i>
-        Browse
       </button>
     </div>
-    
+
     <div v-if="validationMessage" class="validation-message" :class="{ error: !isValid, success: isValid }">
       <i :class="isValid ? 'ph ph-check-circle' : 'ph ph-warning-circle'"></i>
       {{ validationMessage }}
     </div>
 
-    <div v-if="showBrowser" class="browser-modal" @click="closeBrowser">
-      <div class="browser-content" @click.stop>
-        <div class="browser-header">
-          <h3>
-            <i class="ph ph-folder-open"></i>
-            Select Folder
-          </h3>
-          <button @click="closeBrowser" class="close-button">
-            <i class="ph ph-x"></i>
+    <!-- Inline browser area toggled below the input. Only render the browser-body content (no header/footer). -->
+    <div v-if="showBrowser" class="browser-inline">
+      <div class="browser-body">
+        <div class="current-path">
+          <button 
+            v-if="parentPath !== null"
+            @click="navigateToParent"
+            class="back-button"
+            title="Go up to parent folder"
+          >
+            <i class="ph ph-arrow-left"></i>
+          </button>
+          <i class="ph ph-folder"></i>
+          <span>{{ currentPath || 'Computer' }}</span>
+          <button class="select-inline" @click="selectCurrentPath" title="Select this folder">
+            <i class="ph ph-check-circle"></i>
           </button>
         </div>
 
-        <div class="browser-body">
-          <div class="current-path">
-            <button 
-              v-if="parentPath !== null"
-              @click="navigateToParent"
-              class="back-button"
-              title="Go up to parent folder"
-            >
-              <i class="ph ph-arrow-left"></i>
-            </button>
+        <div v-if="isLoading" class="loading-state">
+          <i class="ph ph-spinner ph-spin"></i>
+          <span>Loading directories...</span>
+        </div>
+
+        <div v-else-if="error" class="error-state">
+          <i class="ph ph-warning-circle"></i>
+          <span>{{ error }}</span>
+        </div>
+
+        <div v-else class="directory-list">
+          <div
+            v-if="parentPath !== null"
+            @click="navigateToParent"
+            class="directory-item parent-item"
+          >
+            <i class="ph ph-arrow-up"></i>
+            <span>Go up to parent folder</span>
+          </div>
+
+          <div
+            v-for="item in items"
+            :key="item.path"
+            @click="navigateToDirectory(item)"
+            class="directory-item"
+          >
             <i class="ph ph-folder"></i>
-            <span>{{ currentPath || 'Computer' }}</span>
+            <span>{{ item.name }}</span>
           </div>
 
-          <div v-if="isLoading" class="loading-state">
-            <i class="ph ph-spinner ph-spin"></i>
-            <span>Loading directories...</span>
+          <div v-if="items.length === 0 && !parentPath" class="empty-state">
+            <i class="ph ph-folder-open"></i>
+            <span>No accessible directories found</span>
           </div>
-
-          <div v-else-if="error" class="error-state">
-            <i class="ph ph-warning-circle"></i>
-            <span>{{ error }}</span>
-          </div>
-
-          <div v-else class="directory-list">
-            <div
-              v-if="parentPath !== null"
-              @click="navigateToParent"
-              class="directory-item parent-item"
-            >
-              <i class="ph ph-arrow-up"></i>
-              <span>Go up to parent folder</span>
-            </div>
-
-            <div
-              v-for="item in items"
-              :key="item.path"
-              @click="navigateToDirectory(item)"
-              class="directory-item"
-            >
-              <i class="ph ph-folder"></i>
-              <span>{{ item.name }}</span>
-            </div>
-
-            <div v-if="items.length === 0 && !parentPath" class="empty-state">
-              <i class="ph ph-folder-open"></i>
-              <span>No accessible directories found</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="browser-footer">
-          <button @click="closeBrowser" class="cancel-button">
-            <i class="ph ph-x"></i>
-            Cancel
-          </button>
-          <button @click="selectCurrentPath" class="select-button">
-            <i class="ph ph-check"></i>
-            Select Folder
-          </button>
         </div>
       </div>
     </div>
@@ -113,12 +94,19 @@ interface FileSystemItem {
   lastModified: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  placeholder: 'Select a folder...'
+interface BrowserProps extends Props {
+  inline?: boolean
+}
+
+const props = withDefaults(defineProps<BrowserProps>(), {
+  placeholder: 'Select a folder...',
+  inline: false
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'browser-opened': []
+  'browser-closed': []
 }>()
 
 const localPath = ref(props.modelValue)
@@ -144,7 +132,10 @@ watch(localPath, (newValue) => {
 const toggleBrowser = async () => {
   showBrowser.value = !showBrowser.value
   if (showBrowser.value) {
+    emit('browser-opened')
     await browseDirectory(localPath.value || '')
+  } else {
+    emit('browser-closed')
   }
 }
 
@@ -186,6 +177,7 @@ const selectCurrentPath = () => {
   emit('update:modelValue', currentPath.value)
   validatePath()
   closeBrowser()
+  emit('browser-closed')
 }
 
 const validatePath = async () => {
@@ -238,7 +230,7 @@ const validatePath = async () => {
 }
 
 .browse-button {
-  padding: 0.75rem 1.25rem;
+  padding: 0.5rem 1rem;
   background-color: #007acc;
   color: white;
   border: none;
@@ -246,10 +238,10 @@ const validatePath = async () => {
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
   font-weight: 500;
   transition: all 0.2s;
-  white-space: nowrap;
+  font-size: 1.2rem;
 }
 
 .browse-button:hover {
@@ -278,17 +270,14 @@ const validatePath = async () => {
 }
 
 .browser-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 1rem;
+  display: none; /* overlay modal removed; keep class for backward compatibility */
+}
+
+.browser-inline {
+  border: 1px solid #444;
+  background: #2a2a2a;
+  border-radius: 6px;
+  padding: 0.75rem;
 }
 
 .browser-content {
@@ -400,6 +389,17 @@ const validatePath = async () => {
 .back-button i {
   font-size: 1.2rem;
 }
+
+.select-inline {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #2ecc71;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.select-inline i { font-size: 1.1rem }
 
 .loading-state,
 .error-state,

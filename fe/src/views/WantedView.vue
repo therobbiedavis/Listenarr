@@ -10,6 +10,10 @@
           <i class="ph ph-robot"></i>
           Automatic Search All
         </button>
+        <button class="btn btn-secondary" @click="openManualImport">
+          <i class="ph ph-folder-plus"></i>
+          Manual Import
+        </button>
       </div>
     </div>
 
@@ -117,6 +121,13 @@
       @close="closeManualSearch"
       @downloaded="handleDownloaded"
     />
+
+    <!-- Manual Import Modal -->
+    <ManualImportModal
+      :is-open="showManualImportModal"
+      @close="closeManualImport"
+      @imported="handleImported"
+    />
   </div>
 </template>
 
@@ -126,6 +137,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
+import ManualImportModal from '@/components/ManualImportModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
 
 const libraryStore = useLibraryStore()
@@ -151,6 +163,7 @@ const searching = ref<Record<number, boolean>>({})
 const searchResults = ref<Record<number, string>>({})
 const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
+const showManualImportModal = ref(false)
 
 onMounted(async () => {
   loading.value = true
@@ -296,6 +309,21 @@ const searchMissing = async () => {
 function openManualSearch(item: Audiobook) {
   selectedAudiobook.value = item
   showManualSearchModal.value = true
+}
+
+function openManualImport() {
+  showManualImportModal.value = true
+}
+
+function closeManualImport() {
+  showManualImportModal.value = false
+}
+
+async function handleImported(result: { imported: number }) {
+  console.log('Manual import completed, imported:', result.imported)
+  // Refresh library
+  await libraryStore.fetchLibrary()
+  closeManualImport()
 }
 
 function closeManualSearch() {
