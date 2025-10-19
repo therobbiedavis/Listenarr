@@ -362,6 +362,7 @@ const saveCellEditor = () => {
   else if (f === 'quality') it.qualityProfileId = (cellEditorValue.value as number) ?? null
   else if (f === 'language') it.language = (cellEditorValue.value as string) ?? null
   else if (f === 'releaseGroup') it.releaseGroup = (cellEditorValue.value as string) ?? null
+  it.selected = true
   closeCellEditor()
 }
 
@@ -474,8 +475,7 @@ const importSelected = async () => {
     }))
 
   type ManualPayload = { path: string; mode: 'interactive'; items: Array<Record<string, unknown>>; inputMode?: 'move' | 'copy' }
-  const manualPayload: ManualPayload = { path: selectedPath.value, mode: 'interactive', items: payloadItems as Array<Record<string, unknown>> }
-  if (inputMode.value === 'move' || inputMode.value === 'copy') manualPayload.inputMode = inputMode.value
+  const manualPayload: ManualPayload = { path: selectedPath.value, mode: 'interactive', items: payloadItems as Array<Record<string, unknown>>, inputMode: inputMode.value || 'copy' }
   const resp = await apiService.startManualImport(manualPayload)
     emit('imported', { imported: resp.importedCount ?? selected.length })
     close()

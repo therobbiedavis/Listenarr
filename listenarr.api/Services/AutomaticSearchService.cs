@@ -143,12 +143,10 @@ namespace Listenarr.Api.Services
                 return 0;
             }
 
-            // Check if quality cutoff is already met
-            if (await IsQualityCutoffMetAsync(audiobook, qualityProfileService, dbContext))
-            {
-                _logger.LogInformation("Quality cutoff already met for audiobook '{Title}', skipping search", audiobook.Title);
-                return 0;
-            }
+            // Check existing quality and decide whether to search
+            var (cutoffMet, bestExistingQuality) = await GetExistingQualityAsync(audiobook, qualityProfileService, dbContext);
+            _logger.LogInformation("Audiobook '{Title}': cutoff met={CutoffMet}, best existing quality={BestQuality}",
+                audiobook.Title, cutoffMet, bestExistingQuality ?? "none");
 
             // Build search query
             var searchQuery = BuildSearchQuery(audiobook);
@@ -240,8 +238,26 @@ namespace Listenarr.Api.Services
                 return 0;
             }
 
-            _logger.LogInformation("Found top result for audiobook '{Title}': {ResultTitle} (Score: {Score})",
-                audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore);
+            _logger.LogInformation("Found top result for audiobook '{Title}': {ResultTitle} (Score: {Score}, Quality: {Quality})",
+                audiobook.Title, topResult.SearchResult.Title, topResult.TotalScore, topResult.SearchResult.Quality);
+
+            // Check if the found result is better quality than what we already have
+            if (!string.IsNullOrEmpty(bestExistingQuality))
+            {
+                var resultIsBetter = IsQualityBetter(topResult.SearchResult.Quality, bestExistingQuality, audiobook.QualityProfile);
+                if (!resultIsBetter)
+                {
+                    _logger.LogInformation("Top result quality '{ResultQuality}' is not better than existing quality '{ExistingQuality}' for audiobook '{Title}', skipping download",
+                        topResult.SearchResult.Quality, bestExistingQuality, audiobook.Title);
+                    return 0;
+                }
+                _logger.LogInformation("Top result quality '{ResultQuality}' is better than existing quality '{ExistingQuality}', proceeding with download",
+                    topResult.SearchResult.Quality, bestExistingQuality);
+            }
+            else
+            {
+                _logger.LogInformation("No existing files for audiobook '{Title}', proceeding with download", audiobook.Title);
+            }
 
             // Add score to the search result for tracking
             topResult.SearchResult.Score = topResult.TotalScore;
@@ -478,6 +494,73 @@ namespace Listenarr.Api.Services
             _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
                 result.Title, result.Source);
             return false;
+        }
+
+        /// <summary>
+        /// Determine whether the audiobook already meets the quality cutoff and return the best existing quality string (if any).
+        /// </summary>
+        private async Task<(bool cutoffMet, string? bestExistingQuality)> GetExistingQualityAsync(
+            Audiobook audiobook,
+            IQualityProfileService qualityProfileService,
+            ListenArrDbContext dbContext)
+        {
+            // Reuse existing cutoff logic
+            var cutoffMet = await IsQualityCutoffMetAsync(audiobook, qualityProfileService, dbContext);
+
+            // Find the best quality among existing files and completed downloads (if any)
+            string? bestQuality = null;
+
+            var existingDownloads = await dbContext.Downloads
+                .Where(d => d.AudiobookId == audiobook.Id && d.Status == DownloadStatus.Completed)
+                .ToListAsync();
+
+            foreach (var dl in existingDownloads)
+            {
+                if (dl.Metadata != null && dl.Metadata.TryGetValue("Quality", out var qobj) && qobj != null)
+                {
+                    var q = qobj.ToString();
+                    if (!string.IsNullOrEmpty(q))
+                    {
+                        if (bestQuality == null) bestQuality = q;
+                        else if (IsQualityBetter(q, bestQuality, audiobook.QualityProfile)) bestQuality = q;
+                    }
+                }
+            }
+
+            var existingFiles = await dbContext.AudiobookFiles
+                .Where(f => f.AudiobookId == audiobook.Id)
+                .ToListAsync();
+
+            foreach (var f in existingFiles)
+            {
+                var fq = DetermineFileQuality(f);
+                if (!string.IsNullOrEmpty(fq))
+                {
+                    if (bestQuality == null) bestQuality = fq;
+                    else if (IsQualityBetter(fq, bestQuality, audiobook.QualityProfile)) bestQuality = fq;
+                }
+            }
+
+            return (cutoffMet, bestQuality);
+        }
+
+        /// <summary>
+        /// Compare two quality strings using the quality profile priorities.
+        /// Returns true if candidateQuality is better (higher priority) than existingQuality.
+        /// </summary>
+        private bool IsQualityBetter(string? candidateQuality, string? existingQuality, QualityProfile? profile)
+        {
+            if (string.IsNullOrEmpty(candidateQuality)) return false;
+            if (string.IsNullOrEmpty(existingQuality)) return true;
+            if (profile == null) return false;
+
+            var cand = profile.Qualities.FirstOrDefault(q => q.Quality == candidateQuality);
+            var exist = profile.Qualities.FirstOrDefault(q => q.Quality == existingQuality);
+
+            if (cand == null) return false;
+            if (exist == null) return true; // unknown existing quality -> treat candidate as better
+
+            return cand.Priority > exist.Priority;
         }
 
         private async Task<string> GetAppropriateDownloadClientAsync(SearchResult searchResult, bool isTorrent)

@@ -185,13 +185,22 @@ onMounted(async () => {
 })
 
 // Filter audiobooks that are monitored and missing files
+// Prefer the server-provided `wanted` flag when present. If the server
+// does not include the flag (migration / older records), fall back to a
+// local computation: monitored && no files (or no primary filePath).
 const wantedAudiobooks = computed(() => {
-  // Use authoritative server-provided `wanted` flag exclusively. During
-  // migration older records may not have this field; treat missing/undefined
-  // as NOT wanted so the server is authoritative.
   return libraryStore.audiobooks.filter(audiobook => {
     const serverWanted = (audiobook as unknown as Record<string, unknown>)['wanted']
-    return serverWanted === true
+
+    // If server explicitly provided true/false, honor it
+    if (serverWanted === true) return true
+    if (serverWanted === false) return false
+
+    // Fallback: treat as wanted when monitored and there are no files
+    const hasFiles = Array.isArray(audiobook.files) ? audiobook.files.length > 0 : false
+    const hasPrimaryFile = !!(audiobook.filePath && audiobook.filePath.toString().trim() !== '')
+
+    return !!audiobook.monitored && !hasFiles && !hasPrimaryFile
   })
 })
 

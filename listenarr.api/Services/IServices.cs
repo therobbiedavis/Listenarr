@@ -114,10 +114,10 @@ namespace Listenarr.Api.Services
         /// <returns>Full file path using the naming pattern</returns>
         Task<string> GenerateFilePathAsync(AudioMetadata metadata, string outputPath, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
         
-        /// <summary>
-        /// Parse a naming pattern and replace variables with actual values
-        /// </summary>
-        string ApplyNamingPattern(string pattern, Dictionary<string, object> variables);
+    /// <summary>
+    /// Parse a naming pattern and replace variables with actual values
+    /// </summary>
+    string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false);
     }
 
     public interface IAudioFileService

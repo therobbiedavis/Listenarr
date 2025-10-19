@@ -51,6 +51,9 @@ namespace Listenarr.Api.Models
     public string? FilePath { get; set; }
     public long? FileSize { get; set; }
 
+    // Base path for multi-file audiobooks (common root directory)
+    public string? BasePath { get; set; }
+
     // Multi-file support: store zero or more file records for this audiobook
     public List<AudiobookFile>? Files { get; set; }
         public string? Quality { get; set; }

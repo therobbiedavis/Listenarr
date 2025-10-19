@@ -68,6 +68,20 @@ namespace Listenarr.Api.Services
 
         public async Task<bool> UpdateAsync(Audiobook audiobook)
         {
+            // Defensive: preserve existing BasePath if the incoming audiobook doesn't provide one
+            try
+            {
+                var existing = await _db.Audiobooks.AsNoTracking().FirstOrDefaultAsync(a => a.Id == audiobook.Id);
+                if (existing != null && string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrEmpty(existing.BasePath))
+                {
+                    audiobook.BasePath = existing.BasePath;
+                }
+            }
+            catch
+            {
+                // If anything goes wrong reading existing record, fall back to update behavior
+            }
+
             _db.Audiobooks.Update(audiobook);
             await _db.SaveChangesAsync();
             return true;

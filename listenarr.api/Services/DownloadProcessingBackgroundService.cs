@@ -347,7 +347,7 @@ namespace Listenarr.Api.Services
                                         Title = audiobook.Title ?? metadata.Title,
                                         Artist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
                                         AlbumArtist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
-                                        Series = !string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series : (audiobook.Title ?? metadata.Title),
+                                        Series = audiobook.Series,
                                     };
 
                                     job.AddLogEntry($"Using audiobook metadata for naming: {namingMetadata.Title} by {namingMetadata.Artist}");
@@ -360,73 +360,44 @@ namespace Listenarr.Api.Services
                         }
                     }
 
-                    // Try to extract metadata from file if metadata processing enabled.
-                    // NOTE: do NOT overwrite existing metadata (which may include audiobook/download values).
-                    // Instead merge extracted values only into missing fields so audiobook data is preserved.
-                    if (metadataService != null)
+                    // Only extract file metadata for naming when we do NOT have audiobook naming metadata.
+                    // If the download is linked to an audiobook (namingMetadata != null) we must not use
+                    // file-embedded tags for naming — the audiobook DB entry is authoritative.
+                    if (namingMetadata == null && metadataService != null)
                     {
                         try
                         {
                             var extractedMetadata = await metadataService.ExtractFileMetadataAsync(sourcePath);
                             if (extractedMetadata != null)
                             {
-                                // If we have namingMetadata from the Audiobook, only fill missing fields from
-                                // the extracted metadata so audiobook values remain authoritative.
-                                if (namingMetadata != null)
+                                // No audiobook naming metadata - merge extracted values without overwriting
+                                string FirstNonEmpty(params string?[] candidates)
                                 {
-                                    if (string.IsNullOrWhiteSpace(namingMetadata.Title) && !string.IsNullOrWhiteSpace(extractedMetadata.Title))
-                                        namingMetadata.Title = extractedMetadata.Title;
-                                    if (string.IsNullOrWhiteSpace(namingMetadata.Artist) && !string.IsNullOrWhiteSpace(extractedMetadata.Artist))
-                                        namingMetadata.Artist = extractedMetadata.Artist;
-                                    if (string.IsNullOrWhiteSpace(namingMetadata.Series) && !string.IsNullOrWhiteSpace(extractedMetadata.Series))
-                                        namingMetadata.Series = extractedMetadata.Series;
-                                    if (!namingMetadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
-                                        namingMetadata.SeriesPosition = extractedMetadata.SeriesPosition;
-                                    if (!namingMetadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
-                                        namingMetadata.TrackNumber = extractedMetadata.TrackNumber;
-                                    if (!namingMetadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
-                                        namingMetadata.DiscNumber = extractedMetadata.DiscNumber;
-                                    if (!namingMetadata.Year.HasValue && extractedMetadata.Year.HasValue)
-                                        namingMetadata.Year = extractedMetadata.Year;
-                                    if (!namingMetadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
-                                        namingMetadata.Bitrate = extractedMetadata.Bitrate;
-                                    if (string.IsNullOrWhiteSpace(namingMetadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
-                                        namingMetadata.Format = extractedMetadata.Format;
-
-                                    job.AddLogEntry($"Merged extracted file metadata into naming metadata: {namingMetadata.Title} by {namingMetadata.Artist}");
-                                }
-                                else
-                                {
-                                    // No audiobook naming metadata - fall back to previous merge behavior
-                                    string FirstNonEmpty(params string?[] candidates)
+                                    foreach (var c in candidates)
                                     {
-                                        foreach (var c in candidates)
-                                        {
-                                            if (!string.IsNullOrWhiteSpace(c)) return c!;
-                                        }
-                                        return string.Empty;
+                                        if (!string.IsNullOrWhiteSpace(c)) return c!;
                                     }
-
-                                    metadata.Title = FirstNonEmpty(metadata.Title, extractedMetadata.Title, "Unknown Title");
-                                    metadata.Artist = FirstNonEmpty(metadata.Artist, extractedMetadata.Artist, extractedMetadata.AlbumArtist, metadata.Artist);
-                                    metadata.Album = FirstNonEmpty(metadata.Album, extractedMetadata.Album);
-                                    metadata.Series = FirstNonEmpty(metadata.Series, extractedMetadata.Series, metadata.Series);
-
-                                    if (!metadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
-                                        metadata.SeriesPosition = extractedMetadata.SeriesPosition;
-                                    if (!metadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
-                                        metadata.TrackNumber = extractedMetadata.TrackNumber;
-                                    if (!metadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
-                                        metadata.DiscNumber = extractedMetadata.DiscNumber;
-                                    if (!metadata.Year.HasValue && extractedMetadata.Year.HasValue)
-                                        metadata.Year = extractedMetadata.Year;
-                                    if (!metadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
-                                        metadata.Bitrate = extractedMetadata.Bitrate;
-                                    if (string.IsNullOrWhiteSpace(metadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
-                                        metadata.Format = extractedMetadata.Format;
-
-                                    job.AddLogEntry($"Merged extracted file metadata: {metadata.Title} by {metadata.Artist}");
+                                    return string.Empty;
                                 }
+
+                                metadata.Title = FirstNonEmpty(metadata.Title, extractedMetadata.Title, "Unknown Title");
+                                metadata.Artist = FirstNonEmpty(metadata.Artist, extractedMetadata.Artist, extractedMetadata.AlbumArtist, metadata.Artist);
+                                metadata.Album = FirstNonEmpty(metadata.Album, extractedMetadata.Album, metadata.Album);
+
+                                if (!metadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
+                                    metadata.SeriesPosition = extractedMetadata.SeriesPosition;
+                                if (!metadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
+                                    metadata.TrackNumber = extractedMetadata.TrackNumber;
+                                if (!metadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
+                                    metadata.DiscNumber = extractedMetadata.DiscNumber;
+                                if (!metadata.Year.HasValue && extractedMetadata.Year.HasValue)
+                                    metadata.Year = extractedMetadata.Year;
+                                if (!metadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
+                                    metadata.Bitrate = extractedMetadata.Bitrate;
+                                if (string.IsNullOrWhiteSpace(metadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
+                                    metadata.Format = extractedMetadata.Format;
+
+                                job.AddLogEntry($"Merged extracted metadata: {metadata.Title} by {metadata.Artist}");
                             }
                         }
                         catch (Exception ex)
@@ -439,6 +410,14 @@ namespace Listenarr.Api.Services
                     var ext = Path.GetExtension(sourcePath);
                     // Use namingMetadata if present (authoritative audiobook fields), otherwise use metadata
                     var metadataForNaming = namingMetadata ?? metadata;
+
+                    // Log naming variables for diagnostics
+                    try
+                    {
+                        var dbgVars = $"Author={(metadataForNaming.Artist ?? "(null)")}, Series={(metadataForNaming.Series ?? "(null)" )}, Title={(metadataForNaming.Title ?? "(null)")}";
+                        job.AddLogEntry($"Resolved naming metadata: {dbgVars}");
+                    }
+                    catch { }
 
                     // Record the resolved naming metadata on the job for diagnostics
                     try
@@ -458,6 +437,13 @@ namespace Listenarr.Api.Services
                     // subfolders (e.g. {Author}/{Series}/...). If the generatedPath is rooted, use it
                     // directly. If it's relative, combine it with the configured OutputPath so subfolders
                     // are retained instead of being stripped to a single filename.
+                    _logger.LogDebug("GeneratedPath from FileNamingService: {GeneratedPath} (rooted={IsRooted})", generatedPath, Path.IsPathRooted(generatedPath));
+
+                    // Only allow subfolders if the naming pattern includes DiskNumber or ChapterNumber
+                    var fullPattern = settings.FileNamingPattern ?? string.Empty;
+                    var patternAllowsSubfolders = fullPattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                        || fullPattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
+
                     if (Path.IsPathRooted(generatedPath))
                     {
                         destinationPath = generatedPath;
@@ -465,10 +451,53 @@ namespace Listenarr.Api.Services
                     else
                     {
                         var outputRoot = settings.OutputPath ?? string.Empty;
-                        destinationPath = Path.Combine(outputRoot, generatedPath);
+
+                        if (!patternAllowsSubfolders)
+                        {
+                            // Force filename-only: take only the filename portion of generatedPath and sanitize it
+                            var forcedFilename = Path.GetFileName(generatedPath) ?? Path.GetFileName(sourcePath);
+                            try
+                            {
+                                var invalid = Path.GetInvalidFileNameChars();
+                                var sb = new System.Text.StringBuilder();
+                                foreach (var c in forcedFilename)
+                                {
+                                    sb.Append(invalid.Contains(c) ? '_' : c);
+                                }
+                                forcedFilename = sb.ToString();
+                            }
+                            catch (Exception ex)
+                            {
+                                job.AddLogEntry($"Failed to sanitize forced filename: {ex.Message}");
+                            }
+
+                            destinationPath = Path.Combine(outputRoot, forcedFilename);
+                            job.AddLogEntry($"Pattern does not allow subfolders. Forced filename-only destination: {destinationPath}");
+                        }
+                        else
+                        {
+                            destinationPath = Path.Combine(outputRoot, generatedPath);
+                        }
                     }
 
                     job.AddLogEntry($"Generated destination (preserving subfolders): {destinationPath}");
+                    try
+                    {
+                        var destDirForCheck = Path.GetDirectoryName(destinationPath) ?? string.Empty;
+                        var exists = !string.IsNullOrEmpty(destDirForCheck) && Directory.Exists(destDirForCheck);
+                        var root = string.Empty;
+                        try { root = Path.GetPathRoot(destDirForCheck) ?? string.Empty; } catch { root = string.Empty; }
+                        job.AddLogEntry($"Destination dir exists: {exists} PathRoot={root}");
+
+                        if (!string.IsNullOrEmpty(root) && string.Equals(root.TrimEnd(Path.DirectorySeparatorChar), destDirForCheck.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                        {
+                            job.AddLogEntry($"Warning: destination dir is a root path: {destDirForCheck}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        job.AddLogEntry($"Failed to inspect destination directory: {ex.Message}");
+                    }
                 }
                 else
                 {
@@ -478,91 +507,98 @@ namespace Listenarr.Api.Services
                     job.AddLogEntry($"Using simple destination: {destinationPath}");
                 }
 
-                // Ensure destination directory exists
+                // Determine destination directory but DO NOT create it during import/processing
                 var destDir = Path.GetDirectoryName(destinationPath);
-                if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+
+                // Only perform file operations if the destination directory already exists.
+                if (!string.IsNullOrEmpty(destDir) && Directory.Exists(destDir))
                 {
-                    Directory.CreateDirectory(destDir);
-                    job.AddLogEntry($"Created directory: {destDir}");
-                }
-
-                // Perform file operation if source and destination are different
-                if (!string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
-                {
-                    var action = settings.CompletedFileAction ?? "Move";
-                    job.AddLogEntry($"Performing {action} operation");
-
-                    // Capture source size before operation for later verification (move will remove source)
-                    long? sourceSize = null;
-                    try
+                    // Perform file operation if source and destination are different
+                    if (!string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
                     {
-                        if (File.Exists(sourcePath))
-                        {
-                            sourceSize = new FileInfo(sourcePath).Length;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        job.AddLogEntry($"Failed to read source file size: {ex.Message}");
-                    }
+                        var action = settings.CompletedFileAction ?? "Move";
+                        job.AddLogEntry($"Performing {action} operation");
 
-                    try
-                    {
-                        if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                        // Capture source size before operation for later verification (move will remove source)
+                        long? sourceSize = null;
+                        try
                         {
-                            File.Copy(sourcePath, destinationPath, true);
-                            job.AddLogEntry($"Copied file: {sourcePath} -> {destinationPath}");
-                        }
-                        else
-                        {
-                            // Default to Move
-                            File.Move(sourcePath, destinationPath, true);
-                            job.AddLogEntry($"Moved file: {sourcePath} -> {destinationPath}");
-                        }
-
-                        // Verification: ensure destination exists and (if sourceSize available) sizes match
-                        if (!File.Exists(destinationPath))
-                        {
-                            job.AddLogEntry($"Destination not found after {action}: {destinationPath}");
-                            job.ErrorMessage = $"Destination not found after {action}";
-                            throw new IOException($"Destination not found after {action}: {destinationPath}");
-                        }
-
-                        if (sourceSize.HasValue)
-                        {
-                            try
+                            if (File.Exists(sourcePath))
                             {
-                                var destSize = new FileInfo(destinationPath).Length;
-                                if (destSize != sourceSize.Value)
+                                sourceSize = new FileInfo(sourcePath).Length;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            job.AddLogEntry($"Failed to read source file size: {ex.Message}");
+                        }
+
+                        try
+                        {
+                            if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                            {
+                                File.Copy(sourcePath, destinationPath, true);
+                                job.AddLogEntry($"Copied file: {sourcePath} -> {destinationPath}");
+                            }
+                            else
+                            {
+                                // Default to Move
+                                File.Move(sourcePath, destinationPath, true);
+                                job.AddLogEntry($"Moved file: {sourcePath} -> {destinationPath}");
+                            }
+
+                            // Verification: ensure destination exists and (if sourceSize available) sizes match
+                            if (!File.Exists(destinationPath))
+                            {
+                                job.AddLogEntry($"Destination not found after {action}: {destinationPath}");
+                                job.ErrorMessage = $"Destination not found after {action}";
+                                throw new IOException($"Destination not found after {action}: {destinationPath}");
+                            }
+
+                            if (sourceSize.HasValue)
+                            {
+                                try
                                 {
-                                    job.AddLogEntry($"Destination size ({destSize}) does not match source size ({sourceSize.Value})");
-                                    job.ErrorMessage = $"Destination size mismatch: {destSize} != {sourceSize.Value}";
-                                    throw new IOException("Destination size mismatch after file operation");
+                                    var destSize = new FileInfo(destinationPath).Length;
+                                    if (destSize != sourceSize.Value)
+                                    {
+                                        job.AddLogEntry($"Destination size ({destSize}) does not match source size ({sourceSize.Value})");
+                                        job.ErrorMessage = $"Destination size mismatch: {destSize} != {sourceSize.Value}";
+                                        throw new IOException("Destination size mismatch after file operation");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    // If verifying size fails for any reason, record and surface the error
+                                    job.AddLogEntry($"Failed to verify destination size: {ex.Message}");
+                                    job.ErrorMessage = ex.Message;
+                                    throw;
                                 }
                             }
-                            catch (Exception ex)
-                            {
-                                // If verifying size fails for any reason, record and surface the error
-                                job.AddLogEntry($"Failed to verify destination size: {ex.Message}");
-                                job.ErrorMessage = ex.Message;
-                                throw;
-                            }
-                        }
 
-                        job.AddLogEntry($"Verified destination: {destinationPath} (size: {new FileInfo(destinationPath).Length})");
-                        job.DestinationPath = destinationPath;
+                            job.AddLogEntry($"Verified destination: {destinationPath} (size: {new FileInfo(destinationPath).Length})");
+                            job.DestinationPath = destinationPath;
+                        }
+                        catch (Exception ex)
+                        {
+                            // Ensure the error is recorded on the job so it surfaces in the queue stats/logs
+                            job.AddLogEntry($"File operation failed: {ex.Message}");
+                            job.ErrorMessage = ex.Message;
+                            throw;
+                        }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        // Ensure the error is recorded on the job so it surfaces in the queue stats/logs
-                        job.AddLogEntry($"File operation failed: {ex.Message}");
-                        job.ErrorMessage = ex.Message;
-                        throw;
+                        job.AddLogEntry("Source and destination are the same, no file operation needed");
+                        job.DestinationPath = sourcePath;
                     }
                 }
                 else
                 {
-                    job.AddLogEntry("Source and destination are the same, no file operation needed");
+                    // Do not create directories during processing/import. If destination directory doesn't exist,
+                    // leave the file in place and log a warning.
+                    job.AddLogEntry($"Destination directory does not exist: {destDir}. Skipping file move/copy and keeping source: {sourcePath}");
+                    job.ErrorMessage = $"Destination directory does not exist: {destDir}";
                     job.DestinationPath = sourcePath;
                 }
             }

@@ -215,6 +215,7 @@ export interface Audiobook {
   monitored?: boolean
   filePath?: string
   fileSize?: number
+  basePath?: string
   files?: {
     id: number
     path?: string

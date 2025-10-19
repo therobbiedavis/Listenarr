@@ -977,15 +977,13 @@ namespace Listenarr.Api.Services
                             dbDownload.DownloadPath = localPath;
                         }
 
-                        // Set CompletedAt now to indicate the client reported completion. This will remain
-                        // set until the file has been fully processed/moved/copied by ProcessCompletedDownloadAsync.
-                        if (dbDownload.CompletedAt == null)
-                        {
-                            dbDownload.CompletedAt = DateTime.UtcNow;
-                        }
-
-                        // Mark status as Completed so UI shows it as completed while processing happens
-                        dbDownload.Status = DownloadStatus.Completed;
+                        // Mark the download as Processing (observed complete by client,
+                        // but file-level processing/move/copy is still pending). We avoid
+                        // setting Status=Completed here to prevent premature UI notifications
+                        // that indicate the download is fully finished before post-processing
+                        // has completed. CompletedAt will be set later by the shared
+                        // ProcessCompletedDownloadAsync handler when the file is finalized.
+                        dbDownload.Status = DownloadStatus.Processing;
 
                         db.Downloads.Update(dbDownload);
                         await db.SaveChangesAsync(cancellationToken);

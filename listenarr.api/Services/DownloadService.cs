@@ -20,6 +20,7 @@ using Listenarr.Api.Models;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -2796,7 +2797,7 @@ namespace Listenarr.Api.Services
                                         metadata.Artist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
                                         metadata.Album = audiobook.Series ?? audiobook.Title ?? searchResult.Album ?? searchResult.Title;
                                         metadata.AlbumArtist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
-                                        metadata.Series = audiobook.Series ?? audiobook.Title;
+                                        metadata.Series = string.IsNullOrWhiteSpace(audiobook.Series) ? string.Empty : audiobook.Series;
                                         metadata.SeriesPosition = !string.IsNullOrEmpty(audiobook.SeriesNumber) && decimal.TryParse(audiobook.SeriesNumber, out var pos) ? pos : null;
                                         metadata.Narrator = audiobook.Narrators?.FirstOrDefault();
                                         metadata.Publisher = audiobook.Publisher;
@@ -2816,7 +2817,7 @@ namespace Listenarr.Api.Services
                                         metadata.Artist = searchResult.Artist ?? "Unknown Author";
                                         metadata.Album = searchResult.Album ?? searchResult.Title;
                                         metadata.AlbumArtist = searchResult.Artist ?? "Unknown Author";
-                                        metadata.Series = searchResult.Album ?? searchResult.Title;
+                                        metadata.Series = string.IsNullOrWhiteSpace(searchResult.Album) ? string.Empty : searchResult.Album;
                                         
                                         _logger.LogInformation("DDL download [{DownloadId}] Using search result metadata: Title='{Title}', Artist='{Artist}', Series='{Series}'", 
                                             downloadId, metadata.Title, metadata.Artist, metadata.Series);
@@ -2873,6 +2874,62 @@ namespace Listenarr.Api.Services
                                         extension
                                     );
 
+                                    // Enforce subfolder policy: only allow subfolders when pattern includes DiskNumber or ChapterNumber
+                                    try
+                                    {
+                                        var fullPattern = settings.FileNamingPattern ?? string.Empty;
+                                        var patternAllowsSubfolders = fullPattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                                            || fullPattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                                        if (!patternAllowsSubfolders)
+                                        {
+                                            // Collapse to output root + filename (no subfolders)
+                                            var fileOnly = Path.GetFileName(finalPath) ?? Path.GetFileName(tempFilePath) ?? ($"ddl_download_{downloadId}{extension}");
+                                            var collapsed = Path.Combine(effectiveOutputPath, fileOnly);
+                                            _logger.LogInformation("DDL download [{DownloadId}] Pattern does not allow subfolders. Collapsing generated path to: {Collapsed}", downloadId, collapsed);
+                                            finalPath = collapsed;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to enforce subfolder policy for DDL download [{DownloadId}]", downloadId);
+                                    }
+
+                                    // Defensive: collapse any duplicate adjacent path components that may have been produced
+                                    try
+                                    {
+                                        var parts = finalPath.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                                        for (int i = parts.Count - 1; i > 0; i--)
+                                        {
+                                            if (string.Equals(parts[i], parts[i - 1], StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                // remove duplicate component
+                                                parts.RemoveAt(i);
+                                            }
+                                        }
+                                        // Rebuild path preserving root (drive or UNC) if present
+                                        var root = Path.GetPathRoot(finalPath) ?? string.Empty;
+                                        var rebuilt = root;
+                                        if (parts.Any())
+                                        {
+                                            // If root is a drive letter like 'C:\', avoid duplicating separators
+                                            if (!string.IsNullOrEmpty(root) && (root.EndsWith(Path.DirectorySeparatorChar) || root.EndsWith(Path.AltDirectorySeparatorChar)))
+                                                rebuilt = root + string.Join(Path.DirectorySeparatorChar.ToString(), parts.Skip(root == string.Empty ? 0 : (root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Split(Path.DirectorySeparatorChar).Length)));
+                                            else
+                                                rebuilt = Path.Combine(new[] { root }.Concat(parts).Where(s => !string.IsNullOrEmpty(s)).ToArray());
+                                        }
+
+                                        if (!string.Equals(rebuilt, finalPath, StringComparison.Ordinal))
+                                        {
+                                            _logger.LogDebug("DDL download [{DownloadId}] Collapsed duplicate path components: {Old} -> {New}", downloadId, finalPath, rebuilt);
+                                            finalPath = rebuilt;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to collapse duplicate path components for DDL download [{DownloadId}]");
+                                    }
+
                                     // Validate the generated path - if it's empty or invalid, fall back to simple naming
                                     if (string.IsNullOrWhiteSpace(finalPath) || 
                                         string.IsNullOrWhiteSpace(Path.GetFileName(finalPath)))
@@ -2902,8 +2959,64 @@ namespace Listenarr.Api.Services
                                     // Move file to final location
                                     if (tempFilePath != finalPath && File.Exists(tempFilePath))
                                     {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
-                                        File.Move(tempFilePath, finalPath, overwrite: true);
+                                        // If the tempFilePath is a path to a file inside a temp folder that itself contains a single top-level folder
+                                        // (common for torrents that extract as 'Title/…'), avoid moving the container folder into the destination which would create an extra nesting.
+                                        try
+                                        {
+                                            var tempDirectory = Path.GetDirectoryName(tempFilePath);
+                                            if (Directory.Exists(tempDirectory))
+                                            {
+                                                var topLevelEntries = Directory.GetFileSystemEntries(tempDirectory);
+                                                if (topLevelEntries.Length == 1 && Directory.Exists(topLevelEntries[0]))
+                                                {
+                                                    // Found a single child folder - flatten by moving files from inside that folder into the final destination
+                                                    var singleChild = topLevelEntries[0];
+                                                    _logger.LogDebug("DDL download [{DownloadId}] Detected single-child container folder in temp dir: {Child}. Flattening contents into destination.", downloadId, singleChild);
+                                                    // Move files from child to final directory (create final directory first)
+                                                    var destDir = Path.GetDirectoryName(finalPath) ?? effectiveOutputPath;
+                                                    if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+                                                    var files = Directory.GetFiles(singleChild, "*", SearchOption.AllDirectories);
+                                                    // If only one file and it matches the tempFilePath filename, move it to finalPath
+                                                    if (files.Length == 1 && string.Equals(Path.GetFileName(files[0]), Path.GetFileName(tempFilePath), StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, files[0], finalPath);
+                                                        File.Move(files[0], finalPath, overwrite: true);
+                                                    }
+                                                    else
+                                                    {
+                                                        // multiple files - try to flatten by copying/moving each into the destDir
+                                                        foreach (var f in files)
+                                                        {
+                                                            var relative = Path.GetRelativePath(singleChild, f);
+                                                            var target = Path.Combine(destDir, relative);
+                                                            var targetDir = Path.GetDirectoryName(target);
+                                                            if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
+                                                            _logger.LogInformation("DDL download [{DownloadId}] Moving file from {Source} to {Target}", downloadId, f, target);
+                                                            File.Move(f, target, overwrite: true);
+                                                        }
+                                                    }
+                                                    // Cleanup the now-empty container
+                                                    try { Directory.Delete(singleChild, recursive: true); } catch { }
+                                                    // Cleanup the original temp file if it still exists
+                                                    if (File.Exists(tempFilePath)) File.Delete(tempFilePath);
+                                                }
+                                                else
+                                                {
+                                                    _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
+                                                    File.Move(tempFilePath, finalPath, overwrite: true);
+                                                }
+                                            }
+                                            else
+                                            {
+                                                _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
+                                                File.Move(tempFilePath, finalPath, overwrite: true);
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogWarning(ex, "DDL download [{DownloadId}] Failed to move files; attempting simple move", downloadId);
+                                            File.Move(tempFilePath, finalPath, overwrite: true);
+                                        }
                                         _logger.LogInformation("DDL download [{DownloadId}] ✅ File moved successfully to: {FinalPath}", downloadId, finalPath);
                                         
                                         // Clean up temp file after successful move
@@ -3047,16 +3160,37 @@ namespace Listenarr.Api.Services
             using (var scope = _serviceScopeFactory.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                // Try to resolve IConfigurationService from the scope; fall back to the injected instance for testability
+                var configService = scope.ServiceProvider.GetService<IConfigurationService>() ?? _configurationService;
                 var fileNamingService = scope.ServiceProvider.GetService<IFileNamingService>();
+                // Provide a fallback FileNamingService for testability when not registered in the scope
+                if (fileNamingService == null)
+                {
+                    var loggerForNaming = scope.ServiceProvider.GetService<ILogger<FileNamingService>>();
+                    if (loggerForNaming == null)
+                        loggerForNaming = new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>();
+
+                    // Use the scoped configService when available, otherwise fall back to the injected one
+                    var cfgSvcForNaming = scope.ServiceProvider.GetService<IConfigurationService>() ?? _configurationService;
+                    fileNamingService = new FileNamingService(cfgSvcForNaming, loggerForNaming);
+                }
                 var metadataService = scope.ServiceProvider.GetService<IMetadataService>();
                 var pathMappingService = scope.ServiceProvider.GetService<IRemotePathMappingService>();
                 
                 var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
                 if (completedDownload != null)
                 {
-                    // Get application settings for file operations
-                    var settings = await configService.GetApplicationSettingsAsync();
+                    // Get application settings for file operations (be defensive: tests may provide a mock that returns null)
+                    ApplicationSettings settings;
+                    try
+                    {
+                        settings = await (configService?.GetApplicationSettingsAsync() ?? Task.FromResult(new ApplicationSettings()));
+                        if (settings == null) settings = new ApplicationSettings();
+                    }
+                    catch
+                    {
+                        settings = new ApplicationSettings();
+                    }
                     
                     string localPath = finalPath;
                     string destinationPath = finalPath;
@@ -3091,25 +3225,86 @@ namespace Listenarr.Api.Services
                             {
                                 _logger.LogDebug("Using file naming service to determine destination for download {DownloadId}", downloadId);
                                 
-                                // Build metadata for naming
-                                var metadata = new AudioMetadata 
-                                { 
+                                // Build metadata for naming. Prefer audiobook metadata when available
+                                var metadata = new AudioMetadata
+                                {
                                     Title = completedDownload.Title ?? "Unknown Title",
                                     Artist = completedDownload.Artist,
                                     Album = completedDownload.Album
                                 };
-                                
-                                // Try to extract metadata from file if metadata processing enabled
+
+                                // If this download is linked to an Audiobook, use its fields as authoritative
+                                AudioMetadata? namingMetadata = null;
+                                if (completedDownload.AudiobookId != null)
+                                {
+                                    try
+                                    {
+                                        var audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
+                                        if (audiobook != null)
+                                        {
+                                            namingMetadata = new AudioMetadata
+                                            {
+                                                Title = audiobook.Title ?? metadata.Title,
+                                                Artist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
+                                                AlbumArtist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
+                                                Series = audiobook.Series,
+                                            };
+
+                                            _logger.LogDebug("Using audiobook metadata for naming: {Title} by {Artist}", namingMetadata.Title, namingMetadata.Artist);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to load audiobook metadata for naming");
+                                    }
+                                }
+
+                                // Try to extract metadata from file if metadata processing enabled.
+                                // If an audiobook provides authoritative naming metadata, skip parsing file tags for naming.
                                 if (metadataService != null)
                                 {
                                     try
                                     {
-                                        var extractedMetadata = await metadataService.ExtractFileMetadataAsync(localPath);
-                                        if (extractedMetadata != null)
+                                        if (namingMetadata != null)
                                         {
-                                            metadata = extractedMetadata;
-                                            _logger.LogDebug("Extracted metadata: Title='{Title}', Artist='{Artist}', Album='{Album}'", 
-                                                metadata.Title, metadata.Artist, metadata.Album);
+                                            // We intentionally do not extract/merge file tags when audiobook DB metadata is available
+                                            // to prevent file-embedded tags from overriding the authoritative audiobook naming.
+                                            _logger.LogDebug("Skipping file metadata extraction because audiobook naming metadata is present for download {DownloadId}", downloadId);
+                                        }
+                                        else
+                                        {
+                                            var extractedMetadata = await metadataService.ExtractFileMetadataAsync(localPath);
+                                            if (extractedMetadata != null)
+                                            {
+                                                // No audiobook naming metadata - merge extracted values without overwriting existing download info
+                                                string FirstNonEmpty(params string?[] candidates)
+                                                {
+                                                    foreach (var c in candidates)
+                                                    {
+                                                        if (!string.IsNullOrWhiteSpace(c)) return c!;
+                                                    }
+                                                    return string.Empty;
+                                                }
+
+                                                metadata.Title = FirstNonEmpty(metadata.Title, extractedMetadata.Title, "Unknown Title");
+                                                metadata.Artist = FirstNonEmpty(metadata.Artist, extractedMetadata.Artist, extractedMetadata.AlbumArtist, metadata.Artist);
+                                                metadata.Album = FirstNonEmpty(metadata.Album, extractedMetadata.Album);
+
+                                                if (!metadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
+                                                    metadata.SeriesPosition = extractedMetadata.SeriesPosition;
+                                                if (!metadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
+                                                    metadata.TrackNumber = extractedMetadata.TrackNumber;
+                                                if (!metadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
+                                                    metadata.DiscNumber = extractedMetadata.DiscNumber;
+                                                if (!metadata.Year.HasValue && extractedMetadata.Year.HasValue)
+                                                    metadata.Year = extractedMetadata.Year;
+                                                if (!metadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
+                                                    metadata.Bitrate = extractedMetadata.Bitrate;
+                                                if (string.IsNullOrWhiteSpace(metadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
+                                                    metadata.Format = extractedMetadata.Format;
+
+                                                _logger.LogDebug("Merged extracted metadata: {Title} by {Artist}", metadata.Title, metadata.Artist);
+                                            }
                                         }
                                     }
                                     catch (Exception metaEx)
@@ -3118,38 +3313,189 @@ namespace Listenarr.Api.Services
                                     }
                                 }
                                 
-                                // Ensure we have an output path for file operations
-                                var effectiveOutputPath = settings.OutputPath;
-                                if (string.IsNullOrWhiteSpace(effectiveOutputPath))
-                                {
-                                    effectiveOutputPath = "./completed";
-                                    _logger.LogDebug("No output path configured, using default: {DefaultPath}", effectiveOutputPath);
-                                }
-                                
-                                // Generate path using naming pattern with effective output path
-                                var ext = Path.GetExtension(localPath);
-                                var generatedPath = await fileNamingService.GenerateFilePathAsync(metadata, effectiveOutputPath, null, null, ext);
+                                // Determine the base path for file operations
+                                string basePathForFile;
+                                string filenamePattern;
 
-                                // Validate the generated path - if it's empty or invalid, fall back to simple naming
-                                if (string.IsNullOrWhiteSpace(generatedPath) || 
-                                    string.IsNullOrWhiteSpace(Path.GetFileName(generatedPath)))
+                                // If this download is linked to an Audiobook with a BasePath, use it as the base directory
+                                // and extract just the filename part of the naming pattern
+                                // var usingAudiobookBasePath = false; // no longer needed
+                                if (completedDownload.AudiobookId != null && namingMetadata != null)
                                 {
-                                    _logger.LogWarning("Generated path is invalid or empty for download {DownloadId}, falling back to simple naming", downloadId);
-                                    var fileName = Path.GetFileName(localPath);
-                                    if (string.IsNullOrWhiteSpace(fileName))
+                                    try
                                     {
-                                        fileName = $"download_{downloadId}{ext}";
+                                        var audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
+                                        if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
+                                        {
+                                            basePathForFile = audiobook.BasePath;
+                                            _logger.LogDebug("Using audiobook BasePath for download {DownloadId}: {BasePath}", downloadId, basePathForFile);
+
+                                            // usingAudiobookBasePath no longer tracked here
+
+                                            // Extract filename-only pattern (everything after the last '/')
+                                            var fullPattern = settings.FileNamingPattern;
+                                            if (string.IsNullOrWhiteSpace(fullPattern))
+                                            {
+                                                fullPattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                            }
+
+                                            // Find the last '/' in the pattern to get just the filename part
+                                            var lastSlashIndex = fullPattern.LastIndexOf('/');
+                                            if (lastSlashIndex >= 0 && lastSlashIndex < fullPattern.Length - 1)
+                                            {
+                                                filenamePattern = fullPattern.Substring(lastSlashIndex + 1);
+                                            }
+                                            else
+                                            {
+                                                // No directory separators, use the whole pattern as filename
+                                                filenamePattern = fullPattern;
+                                            }
+
+                                            _logger.LogDebug("Using filename-only pattern for audiobook download {DownloadId}: {Pattern}", downloadId, filenamePattern);
+                                        }
+                                        else
+                                        {
+                                            // Fallback to global output path with full pattern
+                                            basePathForFile = settings.OutputPath;
+                                            if (string.IsNullOrWhiteSpace(basePathForFile))
+                                            {
+                                                basePathForFile = "./completed";
+                                                _logger.LogDebug("No output path configured, using default: {DefaultPath}", basePathForFile);
+                                            }
+                                            filenamePattern = settings.FileNamingPattern;
+                                            if (string.IsNullOrWhiteSpace(filenamePattern))
+                                            {
+                                                filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                            }
+                                        }
                                     }
-                                    destinationPath = Path.Combine(effectiveOutputPath, fileName);
-                                    _logger.LogInformation("Using fallback destination path for download {DownloadId}: {DestinationPath}", 
-                                        downloadId, destinationPath);
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Failed to load audiobook for BasePath, falling back to global output path");
+                                        basePathForFile = settings.OutputPath;
+                                        if (string.IsNullOrWhiteSpace(basePathForFile))
+                                        {
+                                            basePathForFile = "./completed";
+                                        }
+                                        filenamePattern = settings.FileNamingPattern;
+                                        if (string.IsNullOrWhiteSpace(filenamePattern))
+                                        {
+                                            filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    // The generated path should now be absolute since we provided an effective output path
-                                    destinationPath = generatedPath;
-                                    _logger.LogInformation("Generated destination path for download {DownloadId} (preserving subfolders): {DestinationPath}", 
-                                        downloadId, destinationPath);
+                                    // Not an audiobook download, use global output path with full pattern
+                                    basePathForFile = settings.OutputPath;
+                                    if (string.IsNullOrWhiteSpace(basePathForFile))
+                                    {
+                                        basePathForFile = "./completed";
+                                        _logger.LogDebug("No output path configured, using default: {DefaultPath}", basePathForFile);
+                                    }
+                                    filenamePattern = settings.FileNamingPattern;
+                                    if (string.IsNullOrWhiteSpace(filenamePattern))
+                                    {
+                                        filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                    }
+                                }
+                                
+                                // Generate filename using the appropriate pattern
+                                var ext = Path.GetExtension(localPath);
+                                var metadataForNaming = namingMetadata ?? metadata;
+                                
+                                // Build variables for filename pattern
+                                var variables = new Dictionary<string, object>
+                                {
+                                    { "Author", metadataForNaming.Artist ?? "Unknown Author" },
+                                    { "Series", string.IsNullOrWhiteSpace(metadataForNaming.Series) ? string.Empty : metadataForNaming.Series },
+                                    { "Title", metadataForNaming.Title ?? "Unknown Title" },
+                                    { "SeriesNumber", metadataForNaming.SeriesPosition?.ToString() ?? metadataForNaming.TrackNumber?.ToString() ?? string.Empty },
+                                    { "Year", metadataForNaming.Year?.ToString() ?? string.Empty },
+                                    { "Quality", (metadataForNaming.Bitrate.HasValue ? metadataForNaming.Bitrate.ToString() + "kbps" : null) ?? metadataForNaming.Format ?? string.Empty },
+                                    { "DiskNumber", metadataForNaming.DiscNumber?.ToString() ?? string.Empty },
+                                    { "ChapterNumber", metadataForNaming.TrackNumber?.ToString() ?? string.Empty }
+                                };
+
+                                // Log naming variables for debugging (sensitive paths not included)
+                                try
+                                {
+                                    var varDbg = string.Join(", ", variables.Select(kv => $"{kv.Key}={(kv.Value == null ? "(null)" : kv.Value.ToString())}"));
+                                    _logger.LogDebug("Filename variables for download {DownloadId}: {Vars}", downloadId, varDbg);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to log filename variables for download {DownloadId}", downloadId);
+                                }
+
+                                // Only allow subfolders when not importing into an audiobook BasePath. When using BasePath
+                                // we must avoid creating arbitrary subfolders except those explicitly intended (e.g., Disk/Chapter).
+                                var patternAllowsSubfolders = false;
+                                if (!string.IsNullOrWhiteSpace(filenamePattern))
+                                {
+                                    patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
+                                }
+
+                                // Enforce: only allow subfolders when the pattern explicitly includes DiskNumber or ChapterNumber.
+                                // This prevents arbitrary folders being created from tokens like {Title} or {Series}.
+                                var treatAsFilename = !patternAllowsSubfolders;
+
+                                _logger.LogDebug("PatternAllowsSubfolders={Allows} => enforce filename-only when false (treatAsFilename={Treat}) for download {DownloadId}",
+                                    patternAllowsSubfolders, treatAsFilename, downloadId);
+
+                                var filename = fileNamingService.ApplyNamingPattern(filenamePattern, variables, treatAsFilename);
+                                // If pattern resulted in any directory separators unexpectedly, log them
+                                if (filename.IndexOfAny(new[] { '/', '\\' }) >= 0)
+                                {
+                                    _logger.LogWarning("Generated filename contains directory separators for download {DownloadId}: '{Filename}' (treatAsFilename={Treat}). This may create extra folders.", downloadId, filename, treatAsFilename);
+                                }
+                                if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    filename += ext;
+                                }
+
+                                // If pattern does NOT allow subfolders, ensure filename is a single file name (no path separators)
+                                if (!patternAllowsSubfolders)
+                                {
+                                    try
+                                    {
+                                        var forced = Path.GetFileName(filename);
+                                        // sanitize invalid filename chars
+                                        var invalid = Path.GetInvalidFileNameChars();
+                                        var sb = new System.Text.StringBuilder();
+                                        foreach (var c in forced)
+                                        {
+                                            sb.Append(invalid.Contains(c) ? '_' : c);
+                                        }
+                                        filename = sb.ToString();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to sanitize forced filename for download {DownloadId}", downloadId);
+                                        filename = Path.GetFileName(filename);
+                                    }
+                                }
+
+                                // Combine base path with generated filename
+                                destinationPath = Path.Combine(basePathForFile, filename);
+
+                                _logger.LogInformation("Generated destination path for download {DownloadId}: {DestinationPath}", downloadId, destinationPath);
+                                try
+                                {
+                                    var destDirCheck = Path.GetDirectoryName(destinationPath) ?? string.Empty;
+                                    _logger.LogDebug("Destination directory for download {DownloadId}: '{DestDir}' Exists={Exists}", downloadId, destDirCheck, Directory.Exists(destDirCheck));
+
+                                    // If dest dir is root or output path root, log that specifically
+                                    var rootNormalized = Path.GetPathRoot(destDirCheck) ?? string.Empty;
+                                    if (!string.IsNullOrEmpty(rootNormalized) && string.Equals(rootNormalized.TrimEnd(Path.DirectorySeparatorChar), destDirCheck.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _logger.LogWarning("Destination directory for download {DownloadId} is the drive/root path: '{DestDir}' - this can cause files to be placed at root.", downloadId, destDirCheck);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to inspect destination directory for download {DownloadId}", downloadId);
                                 }
                             }
                             else
@@ -3168,39 +3514,46 @@ namespace Listenarr.Api.Services
                                     downloadId, destinationPath);
                             }
                             
-                            // Ensure destination directory exists
+                            // Determine destination directory but DO NOT create it.
                             var destDir = Path.GetDirectoryName(destinationPath);
-                            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+
+                            // Only perform file operations if the destination directory already exists.
+                            if (!string.IsNullOrEmpty(destDir) && Directory.Exists(destDir))
                             {
-                                Directory.CreateDirectory(destDir);
-                                _logger.LogDebug("Created destination directory: {Directory}", destDir);
-                            }
-                            
-                            // Perform file operation if source and destination are different
-                            if (!string.Equals(Path.GetFullPath(localPath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
-                            {
-                                var action = settings.CompletedFileAction ?? "Move";
-                                
-                                if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                                // Perform file operation if source and destination are different
+                                if (!string.Equals(Path.GetFullPath(localPath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
                                 {
-                                    File.Copy(localPath, destinationPath, true);
-                                    _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
-                                        downloadId, localPath, destinationPath);
+                                    var action = settings.CompletedFileAction ?? "Move";
+
+                                    if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        File.Copy(localPath, destinationPath, true);
+                                        _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
+                                            downloadId, localPath, destinationPath);
+                                    }
+                                    else
+                                    {
+                                        // Default to Move
+                                        File.Move(localPath, destinationPath, true);
+                                        _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
+                                            downloadId, localPath, destinationPath);
+                                    }
+
+                                    // Update the final path to the new location
+                                    finalPath = destinationPath;
                                 }
                                 else
                                 {
-                                    // Default to Move
-                                    File.Move(localPath, destinationPath, true);
-                                    _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
-                                        downloadId, localPath, destinationPath);
+                                    _logger.LogDebug("Source and destination are the same for download {DownloadId}, no file operation needed", downloadId);
                                 }
-                                
-                                // Update the final path to the new location
-                                finalPath = destinationPath;
                             }
                             else
                             {
-                                _logger.LogDebug("Source and destination are the same for download {DownloadId}, no file operation needed", downloadId);
+                                // Do not create directories during import. If the destination directory doesn't exist,
+                                // leave the file in its original location and log a warning.
+                                _logger.LogWarning("Destination directory does not exist for download {DownloadId}: {DestDir}. Not creating directories during import. Keeping file at original location: {Source}",
+                                    downloadId, destDir ?? "(null)", localPath);
+                                finalPath = localPath;
                             }
                         }
                         catch (Exception fileEx)
@@ -3243,13 +3596,29 @@ namespace Listenarr.Api.Services
                     // If this download is linked to an audiobook, create an AudiobookFile record (centralized service)
                     if (completedDownload.AudiobookId != null)
                     {
-                        try
-                        {
-                            var audiobookId = completedDownload.AudiobookId.Value;
-                            using var afScope = _serviceScopeFactory.CreateScope();
-                            var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
-                            await audioFileService.EnsureAudiobookFileAsync(audiobookId, finalPath, completedDownload.DownloadClientId ?? "download");
-                        }
+                            try
+                            {
+                                var audiobookId = completedDownload.AudiobookId.Value;
+                                using var afScope = _serviceScopeFactory.CreateScope();
+                                // Prefer DI-registered audio file service, but fall back to a constructed instance
+                                var audioFileService = afScope.ServiceProvider.GetService<IAudioFileService>();
+                                if (audioFileService == null)
+                                {
+                                    // Resolve dependencies for fallback AudioFileService
+                                    var memoryCache = afScope.ServiceProvider.GetRequiredService<IMemoryCache>();
+                                    var limiter = afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>();
+                                    var loggerForAudioFile = afScope.ServiceProvider.GetService<ILogger<AudioFileService>>();
+                                    // Use NullLogger if no logger is registered
+                                    if (loggerForAudioFile == null)
+                                    {
+                                        loggerForAudioFile = new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>();
+                                    }
+
+                                    audioFileService = new AudioFileService(_serviceScopeFactory, loggerForAudioFile, memoryCache, limiter);
+                                }
+
+                                await audioFileService.EnsureAudiobookFileAsync(audiobookId, finalPath, completedDownload.DownloadClientId ?? "download");
+                            }
                         catch (Exception abEx)
                         {
                             _logger.LogWarning(abEx, "Failed to create AudiobookFile record for AudiobookId: {AudiobookId}", completedDownload.AudiobookId.Value);
@@ -3317,6 +3686,7 @@ namespace Listenarr.Api.Services
                                     imageUrl = updatedAudiobook.ImageUrl,
                                     filePath = updatedAudiobook.FilePath,
                                     fileSize = updatedAudiobook.FileSize,
+                                    basePath = updatedAudiobook.BasePath,
                                     runtime = updatedAudiobook.Runtime,
                                     monitored = updatedAudiobook.Monitored,
                                     quality = updatedAudiobook.Quality,
