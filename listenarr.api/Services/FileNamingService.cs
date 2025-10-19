@@ -24,7 +24,7 @@ namespace Listenarr.Api.Services
             int? chapterNumber = null, 
             string originalExtension = ".m4b")
         {
-            var settings = await _configService.GetApplicationSettingsAsync();
+            var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
             var pattern = settings.FileNamingPattern;
             var outputPath = settings.OutputPath;
 
@@ -68,8 +68,11 @@ namespace Listenarr.Api.Services
 
             var variables = new Dictionary<string, object>
             {
+                // Keep multi-word author names as a single folder name (e.g. "Jane Austen")
                 { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor(metadata), "Unknown Author")) },
-                { "Series", SanitizePathComponent(FirstNonEmpty(metadata.Series, metadata.Album, metadata.Title, "Unknown Series")) },
+                // For Series we must not fallback to Album or Title - when Series is blank we want
+                // the variable to be empty so ApplyNamingPattern can remove any adjacent separators
+                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
                 { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
                 { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
                 { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
@@ -117,7 +120,7 @@ namespace Listenarr.Api.Services
             int? chapterNumber = null, 
             string originalExtension = ".m4b")
         {
-            var settings = await _configService.GetApplicationSettingsAsync();
+            var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
             var pattern = settings.FileNamingPattern;
 
             if (string.IsNullOrWhiteSpace(pattern))
@@ -158,7 +161,8 @@ namespace Listenarr.Api.Services
             var variables = new Dictionary<string, object>
             {
                 { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor2(metadata), "Unknown Author")) },
-                { "Series", SanitizePathComponent(FirstNonEmpty(metadata.Series, metadata.Album, metadata.Title, "Unknown Series")) },
+                // Same behavior for overload with custom outputPath: do not fallback for Series
+                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
                 { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
                 { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
                 { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
@@ -199,7 +203,7 @@ namespace Listenarr.Api.Services
         /// <summary>
         /// Parse a naming pattern and replace variables with actual values
         /// </summary>
-        public string ApplyNamingPattern(string pattern, Dictionary<string, object> variables)
+        public string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false)
         {
             if (string.IsNullOrWhiteSpace(pattern))
             {
@@ -265,10 +269,40 @@ namespace Listenarr.Api.Services
             // Clean up multiple consecutive slashes or spaces
             result = Regex.Replace(result, @"[\\/]{2,}", "/");
             result = Regex.Replace(result, @"\s{2,}", " ");
-            
-            // Remove leading/trailing slashes and spaces from each path component
-            var parts = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
-            result = string.Join(Path.DirectorySeparatorChar.ToString(), parts.Select(p => p.Trim()));
+
+            if (treatAsFilename)
+            {
+                // If we're generating a filename (not a path), ensure no directory separators remain.
+                // Split on any slashes and take the last segment to avoid creating directories from tokens.
+                var partsForFilename = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                result = partsForFilename.Length > 0 ? partsForFilename.Last().Trim() : result.Trim();
+
+                // Remove any stray separators and sanitize the filename component
+                result = result.Replace("/", string.Empty).Replace("\\", string.Empty);
+                result = SanitizePathComponent(result);
+            }
+            else
+            {
+                // Remove leading/trailing slashes and spaces from each path component
+                var parts = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim())
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToList();
+
+                // Collapse adjacent duplicate components (case-insensitive) to avoid
+                // patterns producing repeated folders like "Title/Title (...)/Title"
+                for (int i = parts.Count - 1; i > 0; i--)
+                {
+                    if (string.Equals(parts[i], parts[i - 1], StringComparison.OrdinalIgnoreCase))
+                    {
+                        parts.RemoveAt(i);
+                    }
+                }
+
+                // Sanitize each path component to remove invalid characters
+                var sanitizedParts = parts.Select(p => SanitizePathComponent(p)).ToList();
+                result = string.Join(Path.DirectorySeparatorChar.ToString(), sanitizedParts);
+            }
 
             return result;
         }

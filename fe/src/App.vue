@@ -239,11 +239,10 @@ const activityCount = computed(() => {
   )
   
   const downloadsActive = trulyActiveDownloads.length
-  const queueActive = queueItems.value.filter(item =>
-    item.status === 'downloading' ||
-    item.status === 'paused' ||
-    item.status === 'queued'
-  ).length
+  const queueActive = queueItems.value.filter(item => {
+    const s = (item.status || '').toString().toLowerCase()
+    return s === 'downloading' || s === 'paused' || s === 'queued'
+  }).length
   
   // Count DDL downloads separately (they never appear in queue)
   const ddlDownloads = trulyActiveDownloads.filter(d => d.downloadClientId === 'DDL').length
@@ -465,6 +464,14 @@ onMounted(async () => {
   
   // Load current auth state before touching protected endpoints
   await auth.loadCurrentUser()
+
+  // Ensure SignalR connects (or reconnects) after auth state is loaded so any
+  // session cookie or API key can be applied to the handshake.
+  try {
+    await signalRService.connect()
+  } catch (e) {
+    console.debug('[App] SignalR connect after auth failed (will retry):', e)
+  }
   
   // Log session state after authentication attempt
   logSessionState('App Mount - After Auth Load')

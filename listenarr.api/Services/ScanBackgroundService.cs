@@ -62,43 +62,36 @@ namespace Listenarr.Api.Services
                         }
 
                         var scanRoot = job.Path;
-                        try
+
+                        // If audiobook has a BasePath configured, always scan that path for safety
+                        // and to avoid scanning the global output root which may be large/unrelated.
+                        if (!string.IsNullOrEmpty(audiobook.BasePath))
                         {
-                            var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                            var settings = await configService.GetApplicationSettingsAsync();
-                            if (string.IsNullOrEmpty(scanRoot)) scanRoot = settings.OutputPath;
+                            scanRoot = audiobook.BasePath;
+                            _logger.LogDebug("Using audiobook BasePath as scan root for job {JobId}: {ScanRoot}", job.Id, scanRoot);
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            _logger.LogWarning(ex, "Failed to read settings for scan job {JobId}", job.Id);
+                            // No BasePath - allow explicit job path, otherwise fall back to settings OutputPath
+                            if (string.IsNullOrEmpty(scanRoot))
+                            {
+                                try
+                                {
+                                    var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                                    var settings = await configService.GetApplicationSettingsAsync();
+                                    scanRoot = settings.OutputPath;
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to read settings for scan job {JobId}", job.Id);
+                                }
+                            }
                         }
 
                         if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
                         {
                             _logger.LogWarning("Scan path not found for job {JobId}: {Path}", job.Id, scanRoot);
                             continue;
-                        }
-
-                        // If the audiobook has a stored file path, prefer scanning its containing folder
-                        // This ensures a scan requested for a specific audiobook only operates within the
-                        // closest folder (e.g. /.../Stephen Graham Jones/Mongrels/) rather than the
-                        // parent artist folder.
-                        try
-                        {
-                            if (!string.IsNullOrEmpty(audiobook.FilePath))
-                            {
-                                var audiobookDir = Path.GetDirectoryName(audiobook.FilePath) ?? string.Empty;
-                                if (!string.IsNullOrEmpty(audiobookDir) && Directory.Exists(audiobookDir))
-                                {
-                                    // Use the audiobook directory as the scan root to avoid scanning siblings
-                                    scanRoot = audiobookDir;
-                                    _logger.LogDebug("Adjusted scan root to audiobook folder for job {JobId}: {ScanRoot}", job.Id, scanRoot);
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Failed to adjust scan root to audiobook folder for job {JobId}", job.Id);
                         }
 
                         var titleToken = (audiobook.Title ?? string.Empty).Replace("\"", string.Empty).Trim();
@@ -208,6 +201,14 @@ namespace Listenarr.Api.Services
                             }
                         }
 
+                        // Calculate base path for the audiobook files
+                        var basePath = CalculateBasePath(foundFiles);
+                        if (!string.IsNullOrEmpty(basePath))
+                        {
+                            audiobook.BasePath = basePath;
+                            _logger.LogInformation("Set base path for audiobook '{Title}' (ID: {AudiobookId}): {BasePath}", audiobook.Title, audiobook.Id, basePath);
+                        }
+
                         var createdFiles = 0;
                         foreach (var filePath in foundFiles)
                         {
@@ -215,7 +216,11 @@ namespace Listenarr.Api.Services
                             {
                                 using var afScope = _scopeFactory.CreateScope();
                                 var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
-                                var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, filePath, "scan");
+                                
+                                // Calculate relative path from base path
+                                var relativePath = !string.IsNullOrEmpty(basePath) ? Path.GetRelativePath(basePath, filePath) : filePath;
+                                
+                                var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, relativePath, "scan");
                                 if (created) createdFiles++;
                             }
                             catch (Exception ex)
@@ -233,9 +238,11 @@ namespace Listenarr.Api.Services
                                 .Where(f => f.AudiobookId == audiobook.Id)
                                 .ToListAsync();
 
-                            var foundSet = new HashSet<string>(foundFiles, StringComparer.OrdinalIgnoreCase);
+                            var foundSet = new HashSet<string>(
+                                foundFiles.Select(f => !string.IsNullOrEmpty(basePath) ? Path.GetRelativePath(basePath, f) : f), 
+                                StringComparer.OrdinalIgnoreCase);
                             var toRemove = existingFiles
-                                .Where(f => f.Path != null && !foundSet.Contains(f.Path) && !System.IO.File.Exists(f.Path))
+                                .Where(f => f.Path != null && !foundSet.Contains(f.Path))
                                 .ToList();
 
                             List<object> removedFilesDto = new();
@@ -380,6 +387,7 @@ namespace Listenarr.Api.Services
                                 imageUrl = updated.ImageUrl,
                                 filePath = updated.FilePath,
                                 fileSize = updated.FileSize,
+                                basePath = updated.BasePath,
                                 runtime = updated.Runtime,
                                 monitored = updated.Monitored,
                                 quality = updated.Quality,
@@ -424,6 +432,102 @@ namespace Listenarr.Api.Services
                     _logger.LogError(ex, "Unhandled error in ScanBackgroundService loop");
                 }
             }
+        }
+
+        private string CalculateBasePath(List<string> filePaths)
+        {
+            if (!filePaths.Any())
+                return string.Empty;
+
+            // Convert all paths to directory paths (get parent directory for each file)
+            var directories = filePaths.Select(p => Path.GetDirectoryName(p) ?? p).Distinct().ToList();
+
+            if (directories.Count == 1)
+            {
+                // All files are in the same directory
+                return directories[0];
+            }
+
+            // Find the common ancestor directory
+            var commonPath = GetCommonPath(directories);
+            
+            // Walk up the directory tree until we find a directory that has more than 1 subdirectory or file
+            var currentPath = commonPath;
+            while (!string.IsNullOrEmpty(currentPath))
+            {
+                try
+                {
+                    var parent = Directory.GetParent(currentPath)?.FullName;
+                    if (string.IsNullOrEmpty(parent))
+                        break;
+
+                    // Count subdirectories and files in parent
+                    var subDirs = Directory.GetDirectories(parent).Length;
+                    var files = Directory.GetFiles(parent).Length;
+                    
+                    // If parent has more than 1 thing (subdirs + files), we've found our base path
+                    if (subDirs + files > 1)
+                    {
+                        return currentPath;
+                    }
+
+                    currentPath = parent;
+                }
+                catch
+                {
+                    // If we can't access the directory, stop here
+                    break;
+                }
+            }
+
+            return commonPath;
+        }
+
+        private string GetCommonPath(List<string> paths)
+        {
+            if (!paths.Any())
+                return string.Empty;
+
+            var firstPath = paths[0];
+            var commonPath = firstPath;
+
+            foreach (var path in paths.Skip(1))
+            {
+                var minLength = Math.Min(commonPath.Length, path.Length);
+                var commonLength = 0;
+
+                for (int i = 0; i < minLength; i++)
+                {
+                    if (commonPath[i] == path[i])
+                        commonLength++;
+                    else
+                        break;
+                }
+
+                // Ensure we don't break in the middle of a directory name
+                if (commonLength < commonPath.Length)
+                {
+                    var lastSep = commonPath.LastIndexOf(Path.DirectorySeparatorChar, commonLength - 1);
+                    if (lastSep >= 0)
+                        commonLength = lastSep + 1;
+                    else
+                        commonLength = 0;
+                }
+
+                commonPath = commonPath.Substring(0, commonLength);
+                
+                if (string.IsNullOrEmpty(commonPath))
+                    break;
+            }
+
+            // Ensure it's a valid directory path
+            if (!string.IsNullOrEmpty(commonPath) && !Directory.Exists(commonPath))
+            {
+                var parent = Directory.GetParent(commonPath)?.FullName;
+                return parent ?? commonPath;
+            }
+
+            return commonPath;
         }
     }
 }

@@ -1,0 +1,245 @@
+# Listenarr Copilot Rules
+
+## Project Overview
+Listenarr is a C# .NET Core Web API backend with Vue.js frontend for automated audiobook downloading and processing. The backend uses ASP.NET Core with Entity Framework Core and SQLite, while the frontend uses Vue.js 3 with TypeScript, Pinia, and Vite.
+
+## Coding Standards & Patterns
+
+### Backend (C#)
+
+#### Architecture
+- **Service Layer Pattern**: All business logic goes in Services (e.g., `SearchService`, `DownloadService`)
+- **Repository Pattern**: Database operations through repositories (e.g., `AudiobookRepository`)
+- **Dependency Injection**: All services use constructor injection
+- **Async/Await**: All I/O operations must be async
+
+#### Naming Conventions
+- **Classes**: PascalCase (e.g., `AudiobookRepository`, `SearchService`)
+- **Methods**: PascalCase (e.g., `GetByIdAsync()`, `ProcessDownloadAsync()`)
+- **Properties**: PascalCase (e.g., `Title`, `CreatedAt`)
+- **Private Fields**: camelCase with underscore prefix (e.g., `_logger`, `_dbContext`)
+- **Interfaces**: Start with 'I' (e.g., `IAudiobookRepository`, `ISearchService`)
+
+#### Code Structure
+```csharp
+// Service class example
+public class ExampleService : IExampleService
+{
+    private readonly ILogger<ExampleService> _logger;
+    private readonly IRepository _repository;
+
+    public ExampleService(ILogger<ExampleService> logger, IRepository repository)
+    {
+        _logger = logger;
+        _repository = repository;
+    }
+
+    public async Task<Result> DoSomethingAsync(Request request)
+    {
+        try
+        {
+            // Validation
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
+            // Business logic
+            var result = await _repository.GetSomethingAsync(request.Id);
+
+            // Logging
+            _logger.LogInformation("Did something for {Id}", request.Id);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to do something for {Id}", request.Id);
+            throw;
+        }
+    }
+}
+```
+
+#### Error Handling
+- Use try/catch blocks for all public methods
+- Log errors with appropriate log levels
+- Re-throw exceptions after logging (don't swallow them)
+- Use custom exceptions for business logic errors
+
+#### Logging
+- Use structured logging with placeholders: `_logger.LogInformation("Processing {Item} for {User}", item, user)`
+- Log levels: Debug (detailed), Information (normal operations), Warning (unexpected but handled), Error (failures)
+- Include relevant context in log messages
+
+#### Database
+- Use Entity Framework Core with async methods
+- Include related entities when needed: `.Include(a => a.Files)`
+- Use navigation properties for relationships
+- Apply migrations automatically on startup
+
+### Frontend (Vue.js + TypeScript)
+
+#### Component Structure
+```vue
+<template>
+  <div class="component">
+    <!-- Template content -->
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useStore } from '@/stores/store'
+
+// Props
+interface Props {
+  item?: Item
+  loading?: boolean
+}
+const props = withDefaults(defineProps<Props>(), {
+  loading: false
+})
+
+// Emits
+const emit = defineEmits<{
+  selected: [item: Item]
+  closed: []
+}>()
+
+// Reactive data
+const items = ref<Item[]>([])
+const loading = ref(false)
+
+// Computed
+const hasItems = computed(() => items.value.length > 0)
+
+// Methods
+const handleSelect = (item: Item) => {
+  emit('selected', item)
+}
+
+const loadData = async () => {
+  try {
+    loading.value = true
+    items.value = await apiService.getItems()
+  } catch (error) {
+    console.error('Failed to load items:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadData()
+})
+</script>
+
+<style scoped>
+.component {
+  /* Styles */
+}
+</style>
+```
+
+#### State Management (Pinia)
+- Use Pinia stores for global state
+- Actions should be async and handle errors
+- Use getters for computed state
+- Follow the pattern: `useStoreNameStore`
+
+#### API Communication
+- Use a centralized API service
+- Handle errors consistently
+- Use TypeScript interfaces for request/response types
+- Implement proper error handling and user feedback
+
+#### Naming Conventions
+- **Components**: PascalCase (e.g., `AudiobookCard.vue`, `SearchForm.vue`)
+- **Files**: kebab-case (e.g., `audiobook-card.vue`, `search-form.vue`)
+- **Variables**: camelCase (e.g., `selectedItem`, `isLoading`)
+- **Types**: PascalCase (e.g., `Audiobook`, `SearchResult`)
+
+### General Rules
+
+#### File Organization
+- **Backend**: Follow the established folder structure (Controllers/, Services/, Models/, etc.)
+- **Frontend**: Use the established folder structure (components/, views/, stores/, etc.)
+- Keep related files together
+- Use index files for clean imports
+
+#### Testing
+- Write unit tests for business logic
+- Mock external dependencies
+- Use descriptive test names
+- Test both success and error scenarios
+
+#### Documentation
+- Add XML comments to public methods and classes
+- Keep README files up to date
+- Document complex business logic
+- Use clear commit messages
+
+#### Performance
+- Use async/await for I/O operations
+- Implement caching where appropriate
+- Avoid N+1 queries in database operations
+- Use lazy loading for heavy components
+
+#### Security
+- Validate all input data
+- Use parameterized queries
+- Implement proper authentication/authorization
+- Sanitize user inputs
+- Follow OWASP guidelines
+
+### Development Workflow
+
+1. **Branching**: Use feature branches for new work
+2. **Commits**: Make small, focused commits with clear messages
+3. **Testing**: Run tests before committing
+4. **Code Review**: Submit PRs for review
+5. **Deployment**: Use automated deployment scripts
+
+### Common Patterns
+
+#### API Response Format
+```csharp
+// Success response
+return Ok(new { data = result, message = "Success" });
+
+// Error response
+return BadRequest(new { error = "Invalid request", details = validationErrors });
+
+// Not found
+return NotFound(new { error = "Item not found" });
+```
+
+#### Frontend Error Handling
+```typescript
+try {
+  const result = await apiService.doSomething(request)
+  // Handle success
+} catch (error) {
+  if (error.response?.status === 400) {
+    // Handle validation errors
+  } else if (error.response?.status === 404) {
+    // Handle not found
+  } else {
+    // Handle other errors
+  }
+}
+```
+
+#### Database Queries
+```csharp
+// Good: Use async and include related data
+var audiobooks = await _db.Audiobooks
+    .Include(a => a.Files)
+    .Where(a => a.Monitored)
+    .OrderBy(a => a.Title)
+    .ToListAsync();
+
+// Avoid: Synchronous database calls
+// Avoid: N+1 queries without Include
+```
+
+Remember: This project follows established patterns. When in doubt, look at existing code for examples of how similar functionality is implemented.</content>
+<parameter name="filePath">c:\Users\Robbie\Documents\GitHub\Listenarr\.cursorrules

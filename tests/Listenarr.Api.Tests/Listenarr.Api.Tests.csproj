@@ -2,6 +2,10 @@
   <PropertyGroup>
   <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
+    <!-- Enable nullable annotations for test code to avoid CS8632 warnings -->
+    <Nullable>enable</Nullable>
+    <!-- Suppress specific test-only warning about FormatterServices obsoletion -->
+    <NoWarn>$(NoWarn);SYSLIB0050</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,7 +15,7 @@
     <PackageReference Include="coverlet.collector" Version="3.2.0" />
   <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
   <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.10" />
-    <PackageReference Include="Moq" Version="4.20.3" />
+    <PackageReference Include="Moq" Version="4.20.69" />
   </ItemGroup>
 
   <ItemGroup>

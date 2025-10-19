@@ -27,7 +27,14 @@ export const useLibraryStore = defineStore('library', () => {
             ? local.files
             : serverItem.files
 
-        return { ...local, ...serverItem, files }
+        // Preserve a meaningful basePath: prefer server value when present, otherwise keep local
+        const basePath = (serverItem.basePath && serverItem.basePath.length > 0)
+          ? serverItem.basePath
+          : (local.basePath && local.basePath.length > 0)
+            ? local.basePath
+            : serverItem.basePath
+
+        return { ...local, ...serverItem, files, basePath }
       })
 
       audiobooks.value = merged
@@ -121,6 +128,27 @@ export const useLibraryStore = defineStore('library', () => {
       } catch (e) {
         // Defensive: don't allow signal handler errors to break the app
         console.error('Error applying FilesRemoved to library store', e)
+      }
+    })
+
+    signalRService.onAudiobookUpdate((updatedAudiobook) => {
+      try {
+        const index = audiobooks.value.findIndex(b => b.id === updatedAudiobook.id)
+        if (index !== -1) {
+          // Update the audiobook in the store, preserving reactivity
+          audiobooks.value = audiobooks.value.slice()
+          const prev = audiobooks.value[index]
+          if (!prev) return
+          const merged = { ...prev, ...updatedAudiobook }
+          // Preserve basePath if server payload omits or clears it
+          if ((!('basePath' in updatedAudiobook) || !updatedAudiobook.basePath) && prev.basePath) {
+            merged.basePath = prev.basePath
+          }
+          audiobooks.value[index] = merged
+        }
+      } catch (e) {
+        // Defensive: don't allow signal handler errors to break the app
+        console.error('Error applying AudiobookUpdate to library store', e)
       }
     })
   } catch {

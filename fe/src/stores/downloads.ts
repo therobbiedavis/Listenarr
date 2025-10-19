@@ -92,7 +92,8 @@ export const useDownloadsStore = defineStore('downloads', () => {
   
   const activeDownloads = computed(() => {
     const active = downloads.value.filter(d => {
-      const isActive = ['Queued', 'Downloading', 'Paused', 'Processing'].includes(d.status)
+      const status = (d.status || '').toString().toLowerCase()
+      const isActive = ['queued', 'downloading', 'paused', 'processing'].includes(status)
       if (isActive && d.downloadClientId === 'DDL') {
         console.log('[Downloads Store] 🎯 DDL download IS ACTIVE:', d.id, d.title, d.status, d.progress + '%')
       }
