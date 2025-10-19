@@ -28,6 +28,7 @@ using System;
 using System.Text.Json;
 using System.Reflection;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace Listenarr.Api.Controllers
 {
@@ -1335,6 +1336,23 @@ namespace Listenarr.Api.Controllers
 
         private string ComputeAudiobookBaseDirectoryFromPattern(Audiobook audiobook, string rootPath, string fileNamingPattern)
         {
+            // Derive directory pattern from file naming pattern by removing file-specific variables
+            // File-specific variables that should be removed for directory structure
+            var fileSpecificVars = new[] { "DiskNumber", "ChapterNumber" };
+
+            string directoryPattern = fileNamingPattern;
+            foreach (var fileVar in fileSpecificVars)
+            {
+                // Remove patterns like {DiskNumber}, {DiskNumber:00}, {ChapterNumber}, etc.
+                directoryPattern = Regex.Replace(directoryPattern, $@"\{{{fileVar}(?::[^}}]+)?\}}", "", RegexOptions.IgnoreCase);
+                // Also remove any resulting empty path segments (double slashes, etc.)
+                directoryPattern = Regex.Replace(directoryPattern, @"//+", "/", RegexOptions.IgnoreCase);
+            }
+
+            // Clean up any trailing or leading slashes and empty segments
+            directoryPattern = directoryPattern.Trim('/');
+            directoryPattern = Regex.Replace(directoryPattern, @"/+", "/", RegexOptions.IgnoreCase);
+
             // Build variables for naming pattern using audiobook-level metadata
             var variables = new Dictionary<string, object>
             {
@@ -1348,47 +1366,13 @@ namespace Listenarr.Api.Controllers
                 { "ChapterNumber", string.Empty }
             };
 
-            // Apply the naming pattern; this yields a relative path that typically ends with a file-like segment
-            var relative = _fileNamingService.ApplyNamingPattern(fileNamingPattern, variables, false);
+            // Apply the directory pattern to get the relative directory path
+            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
 
-            // Normalize separators and split into parts so we can inspect directory components
-            var parts = relative.Replace('\\', '/').Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            // Combine with root path
+            var combined = string.IsNullOrWhiteSpace(rootPath) ? relative : Path.Combine(rootPath, relative);
 
-            // Collapse redundant consecutive segments. If a later segment starts with or equals an earlier
-            // consecutive segment (for example: "Series" followed by "Series Title"), treat the earlier
-            // one as redundant and remove it. This avoids creating paths like Author/Series/Series Title.
-            var cleanedParts = new List<string>();
-            foreach (var part in parts)
-            {
-                if (string.IsNullOrWhiteSpace(part)) continue;
-
-                // Remove prior segments that are redundant with the current part
-                while (cleanedParts.Count > 0)
-                {
-                    var prev = cleanedParts.Last();
-                    if (part.StartsWith(prev, StringComparison.OrdinalIgnoreCase) || prev.StartsWith(part, StringComparison.OrdinalIgnoreCase) || string.Equals(part, prev, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Prefer the more descriptive segment (current 'part'), so drop the previous one
-                        cleanedParts.RemoveAt(cleanedParts.Count - 1);
-                        continue; // re-evaluate against the new last
-                    }
-                    break;
-                }
-
-                cleanedParts.Add(part.Trim());
-            }
-
-            var cleanedRelative = string.Join(Path.DirectorySeparatorChar.ToString(), cleanedParts);
-            var combined = string.IsNullOrWhiteSpace(rootPath) ? cleanedRelative : Path.Combine(rootPath, cleanedRelative);
-
-            // The base directory is the directory component of the combined path
-            var dir = Path.GetDirectoryName(combined);
-            if (string.IsNullOrWhiteSpace(dir))
-            {
-                dir = combined; // Fallback: if no directory separator present, use combined
-            }
-
-            return dir!;
+            return combined;
         }
         
         private string CalculateBasePath(List<string> filePaths)
