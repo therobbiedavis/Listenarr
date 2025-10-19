@@ -52,7 +52,7 @@ jobs:
           echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
 
       - name: Restore .NET
-        run: dotnet restore ${{ env.API_PROJECT }}
+        run: dotnet restore listenarr.sln
 
       - name: Persist bumped version to csproj (for build)
         if: steps.resolve-version.outputs.VERSION != ''
