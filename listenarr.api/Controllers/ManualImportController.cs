@@ -236,8 +236,8 @@ public class ManualImportController : ControllerBase
 
     private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
     {
-        // For manual import, use the FileNamingService to create proper folder structure
-        // within the audiobook's base path
+        // For manual import, create folder structure within the audiobook's base path
+        // Since basePath already represents the author's folder, we use a pattern without {Author}
         
         // Get the file extension from the source file (preserve original extension)
         var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
@@ -246,28 +246,43 @@ public class ManualImportController : ControllerBase
             extension = ".m4b"; // Fallback if no extension
         }
 
-        // Create metadata for the naming service
-        var namingMetadata = new AudioMetadata
+        // Create the title with year: "Title (Year)"
+        var titleWithYear = audiobook.Title ?? "Unknown Title";
+        if (!string.IsNullOrWhiteSpace(audiobook.PublishYear))
         {
-            Title = audiobook.Title ?? "Unknown Title",
-            Artist = audiobook.Authors?.FirstOrDefault() ?? "Unknown Author",
-            AlbumArtist = audiobook.Authors?.FirstOrDefault() ?? "Unknown Author",
-            Series = audiobook.Series,
-            SeriesPosition = decimal.TryParse(audiobook.SeriesNumber, out var seriesPos) ? seriesPos : null,
-            Year = int.TryParse(audiobook.PublishYear, out var year) ? year : null,
-            DiscNumber = metadata.DiscNumber,
-            TrackNumber = metadata.TrackNumber
+            titleWithYear += $" ({audiobook.PublishYear})";
+        }
+
+        // Use a manual import specific pattern: {Series}/{Title} or just {Title} if no series
+        var pattern = string.IsNullOrWhiteSpace(audiobook.Series) 
+            ? "{Title}"  // No series, just create title folder
+            : "{Series}/{Title}";  // Series folder, then title folder
+
+        // Build variables for the pattern
+        var variables = new Dictionary<string, object>
+        {
+            { "Series", string.IsNullOrWhiteSpace(audiobook.Series) ? string.Empty : _fileNamingService.ApplyNamingPattern(audiobook.Series, new Dictionary<string, object>()) },
+            { "Title", titleWithYear },
+            { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
+            { "ChapterNumber", metadata.TrackNumber?.ToString() ?? string.Empty }
         };
 
-        // Use the FileNamingService to generate the path within the base path
-        var relativePath = await _fileNamingService.GenerateFilePathAsync(
-            namingMetadata, 
-            audiobook.BasePath ?? string.Empty,
-            metadata.DiscNumber, 
-            metadata.TrackNumber, 
-            extension);
+        // Apply the pattern to get relative path
+        var relativePath = _fileNamingService.ApplyNamingPattern(pattern, variables);
+        
+        // Ensure it has the correct extension
+        if (!relativePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+        {
+            relativePath += extension;
+        }
 
-        return relativePath;
+        // Combine with audiobook's base path
+        var basePath = audiobook.BasePath ?? string.Empty;
+        var fullPath = string.IsNullOrWhiteSpace(basePath) 
+            ? relativePath 
+            : Path.Combine(basePath, relativePath);
+
+        return fullPath;
     }
 
     private static string FormatSize(long bytes)
