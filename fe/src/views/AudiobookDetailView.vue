@@ -43,7 +43,7 @@
           />
         </div>
         <div class="info-section">
-          <h1 class="title">{{ audiobook.title }}</h1>
+          <h1 class="title">{{ safeText(audiobook.title) }}</h1>
           <div class="subtitle" v-if="audiobook.subtitle">{{ audiobook.subtitle }}</div>
           
           <div class="meta-info">
@@ -162,11 +162,11 @@
             <h3>Author Information</h3>
             <div class="detail-row" v-if="audiobook.authors">
               <span class="label">Author(s):</span>
-              <span class="value">{{ audiobook.authors.join(', ') }}</span>
+              <span class="value">{{ audiobook.authors.map(safeText).join(', ') }}</span>
             </div>
             <div class="detail-row" v-if="audiobook.narrators">
               <span class="label">Narrator(s):</span>
-              <span class="value">{{ audiobook.narrators.join(', ') }}</span>
+              <span class="value">{{ audiobook.narrators.map(safeText).join(', ') }}</span>
             </div>
           </div>
 
@@ -174,7 +174,7 @@
             <h3>Publication Details</h3>
             <div class="detail-row" v-if="audiobook.publisher">
               <span class="label">Publisher:</span>
-              <span class="value">{{ audiobook.publisher }}</span>
+              <span class="value">{{ safeText(audiobook.publisher) }}</span>
             </div>
             <div class="detail-row" v-if="audiobook.publishYear">
               <span class="label">Year:</span>
@@ -190,7 +190,7 @@
             <h3>Series Information</h3>
             <div class="detail-row">
               <span class="label">Series:</span>
-              <span class="value">{{ audiobook.series }}</span>
+              <span class="value">{{ safeText(audiobook.series) }}</span>
             </div>
             <div class="detail-row" v-if="audiobook.seriesNumber">
               <span class="label">Book #:</span>
@@ -426,6 +426,7 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
+import { safeText } from '@/utils/textUtils'
 
 const route = useRoute()
 const router = useRouter()

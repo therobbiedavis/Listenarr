@@ -47,9 +47,9 @@
           class="result-card"
         >
           <div class="result-info">
-            <h4>{{ result.title }}</h4>
-            <p class="result-artist">{{ result.artist }}</p>
-            <p class="result-album">{{ result.album }}</p>
+            <h4>{{ safeText(result.title) }}</h4>
+            <p class="result-artist">{{ safeText(result.artist) }}</p>
+            <p class="result-album">{{ safeText(result.album) }}</p>
             
             <!-- Quality Score Badge -->
             <div v-if="getResultScore(result.id)" class="quality-score">
@@ -74,14 +74,14 @@
             <!-- Audiobook metadata -->
             <div v-if="result.narrator || result.runtime || result.series" class="audiobook-meta">
               <p v-if="result.narrator" class="meta-narrator">
-                Narrated by {{ result.narrator }}
+                Narrated by {{ safeText(result.narrator) }}
               </p>
               <div class="meta-details">
                 <span v-if="result.runtime" class="meta-runtime">
                   ⏱ {{ formatRuntime(result.runtime) }}
                 </span>
                 <span v-if="result.series" class="meta-series">
-                  Series: {{ result.series }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
+                  Series: {{ safeText(result.series) }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
                 </span>
               </div>
             </div>
@@ -125,6 +125,7 @@ import type { SearchResult, AudibleBookMetadata, QualityScore, QualityProfile } 
 import { useToast } from '@/services/toastService'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
+import { safeText } from '@/utils/textUtils'
 
 const searchStore = useSearchStore()
 const libraryStore = useLibraryStore()

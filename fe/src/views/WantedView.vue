@@ -51,10 +51,10 @@
           />
         </div>
         <div class="wanted-info">
-          <h3>{{ item.title }}</h3>
-          <h4 v-if="item.authors?.length">by {{ item.authors.join(', ') }}</h4>
+          <h3>{{ safeText(item.title) }}</h3>
+          <h4 v-if="item.authors?.length">by {{ item.authors.map(author => safeText(author)).join(', ') }}</h4>
           <div class="wanted-meta">
-            <span v-if="item.series">{{ item.series }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span>
+            <span v-if="item.series">{{ safeText(item.series) }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span>
             <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
             <span v-if="item.runtime">{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span>
           </div>
@@ -139,6 +139,7 @@ import { apiService } from '@/services/api'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
+import { safeText } from '@/utils/textUtils'
 
 const libraryStore = useLibraryStore()
 

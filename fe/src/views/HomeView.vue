@@ -84,11 +84,11 @@
                 <img :src="audiobook.poster || '/placeholder-poster.jpg'" :alt="audiobook.title" />
               </div>
               <div class="episode-info">
-                <h4>{{ audiobook.title }}</h4>
-                <p>by {{ audiobook.author }}</p>
+                <h4>{{ safeText(audiobook.title) }}</h4>
+                <p>by {{ safeText(audiobook.author) }}</p>
                 <div class="episode-meta">
                   <span>{{ audiobook.duration }}</span>
-                  <span>{{ audiobook.narrator }}</span>
+                  <span>{{ safeText(audiobook.narrator) }}</span>
                 </div>
               </div>
             </div>
@@ -154,6 +154,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { safeText } from '@/utils/textUtils'
 
 // Sample dashboard data
 const audiobookStats = ref({

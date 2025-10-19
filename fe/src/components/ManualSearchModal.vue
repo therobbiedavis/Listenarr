@@ -110,7 +110,7 @@
                   <td class="col-age">{{ formatAge(result.publishedDate) }}</td>
                   <td class="col-title">
                     <div class="title-cell">
-                      <span class="title-text">{{ result.title }}</span>
+                      <span class="title-text">{{ safeText(result.title) }}</span>
                     </div>
                   </td>
                   <td class="col-indexer">
@@ -187,6 +187,7 @@ import { apiService } from '@/services/api'
 import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
+import { safeText } from '@/utils/textUtils'
 
 interface Props {
   isOpen: boolean
