@@ -23,10 +23,27 @@ using Listenarr.Api.Middleware;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
+using Serilog;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
+
+// Configure Serilog for file logging with rotation
+var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "logs.txt");
+Log.Logger = new Serilog.LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()
+    .WriteTo.File(
+        logFilePath,
+        fileSizeLimitBytes: 10 * 1024 * 1024, // 10MB per file
+        rollOnFileSizeLimit: true,
+        retainedFileCountLimit: 5,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+// Use Serilog for logging
+builder.Host.UseSerilog();
 
 // Configure URLs to listen on port 5000 (standard ASP.NET Core port) - can be overridden by --urls
 if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
@@ -34,12 +51,7 @@ if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
     builder.WebHost.UseUrls("http://*:5000");
 }
 
-// Configure logging
-
-// Configure logging
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.AddDebug();
+// Configure logging is now handled by Serilog above
 
 // Add services to the container.
 builder.Services.AddControllers()
