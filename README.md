@@ -110,7 +110,7 @@ npm run dev:web      # Start only frontend web
 ```
 
 **Services will be available at:**
-- Backend API: http://localhost:5146
+- Backend API: http://localhost:5000
 - Frontend Web: http://localhost:5173
 
 ## CI/CD
