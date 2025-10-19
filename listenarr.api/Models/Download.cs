@@ -26,7 +26,8 @@ namespace Listenarr.Api.Models
         Completed,
         Failed,
         Processing,
-        Ready
+        Ready,
+        Moved // Added to track completed moves
     }
 
     public class Download

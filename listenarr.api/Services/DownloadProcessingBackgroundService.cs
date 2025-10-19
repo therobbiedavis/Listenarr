@@ -513,7 +513,16 @@ namespace Listenarr.Api.Services
                 // Only perform file operations if the destination directory already exists.
                 if (!string.IsNullOrEmpty(destDir) && Directory.Exists(destDir))
                 {
-                    // Perform file operation if source and destination are different
+                    // Check if already moved (use download loaded from dbContext above)
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                    var download = await dbContext.Downloads.FindAsync(job.DownloadId);
+                    if (download != null && download.Status == DownloadStatus.Moved)
+                    {
+                        job.AddLogEntry("File already moved by DownloadService. Skipping background move.");
+                        job.DestinationPath = destinationPath;
+                        return;
+                    }
                     if (!string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
                     {
                         var action = settings.CompletedFileAction ?? "Move";

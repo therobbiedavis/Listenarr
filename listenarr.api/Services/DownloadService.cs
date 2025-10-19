@@ -2927,7 +2927,7 @@ namespace Listenarr.Api.Services
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogDebug(ex, "Failed to collapse duplicate path components for DDL download [{DownloadId}]");
+                                        _logger.LogDebug(ex, "Failed to collapse duplicate path components for DDL download [{DownloadId}]", downloadId);
                                     }
 
                                     // Validate the generated path - if it's empty or invalid, fall back to simple naming
@@ -3004,6 +3004,18 @@ namespace Listenarr.Api.Services
                                                 {
                                                     _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
                                                     File.Move(tempFilePath, finalPath, overwrite: true);
+                                                    // Mark download as moved
+                                                    using (var moveScope = _serviceScopeFactory.CreateScope())
+                                                    {
+                                                        var dbContext = moveScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                                                        var movedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                                                        if (movedDownload != null)
+                                                        {
+                                                            movedDownload.Status = DownloadStatus.Moved;
+                                                            dbContext.Downloads.Update(movedDownload);
+                                                            await dbContext.SaveChangesAsync();
+                                                        }
+                                                    }
                                                 }
                                             }
                                             else
@@ -3582,7 +3594,15 @@ namespace Listenarr.Api.Services
                     }
                     
                     // Update database with completion status and final path
-                    completedDownload.Status = DownloadStatus.Completed;
+                    // If file was moved/copied, mark as Moved; otherwise, Completed
+                    if (completedDownload.Status != DownloadStatus.Moved && File.Exists(finalPath))
+                    {
+                        completedDownload.Status = DownloadStatus.Moved;
+                    }
+                    else
+                    {
+                        completedDownload.Status = DownloadStatus.Completed;
+                    }
                     completedDownload.Progress = 100;
                     if (File.Exists(finalPath))
                     {
