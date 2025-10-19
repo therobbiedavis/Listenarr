@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net7.0</TargetFramework>
+  <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
+    <!-- Enable nullable annotations for test code to avoid CS8632 warnings -->
+    <Nullable>enable</Nullable>
+    <!-- Suppress specific test-only warning about FormatterServices obsoletion -->
+    <NoWarn>$(NoWarn);SYSLIB0050</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -9,9 +13,9 @@
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.0" />
     <PackageReference Include="coverlet.collector" Version="3.2.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="7.0.17" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="7.0.10" />
-    <PackageReference Include="Moq" Version="4.20.3" />
+  <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
+  <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.10" />
+    <PackageReference Include="Moq" Version="4.20.69" />
   </ItemGroup>
 
   <ItemGroup>

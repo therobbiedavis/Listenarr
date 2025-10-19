@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.1.14</Version>
-    <AssemblyVersion>0.1.14</AssemblyVersion>
+    <Version>0.1.44</Version>
+    <AssemblyVersion>0.1.44</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -23,6 +23,8 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.48.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
     <PackageReference Include="HtmlAgilityPack" Version="1.11.67" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
   </ItemGroup>
 
   

@@ -10,6 +10,10 @@
           <i class="ph ph-robot"></i>
           Automatic Search All
         </button>
+        <button class="btn btn-secondary" @click="openManualImport">
+          <i class="ph ph-folder-plus"></i>
+          Manual Import
+        </button>
       </div>
     </div>
 
@@ -47,10 +51,10 @@
           />
         </div>
         <div class="wanted-info">
-          <h3>{{ item.title }}</h3>
-          <h4 v-if="item.authors?.length">by {{ item.authors.join(', ') }}</h4>
+          <h3>{{ safeText(item.title) }}</h3>
+          <h4 v-if="item.authors?.length">by {{ item.authors.map(author => safeText(author)).join(', ') }}</h4>
           <div class="wanted-meta">
-            <span v-if="item.series">{{ item.series }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span>
+            <span v-if="item.series">{{ safeText(item.series) }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span>
             <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
             <span v-if="item.runtime">{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span>
           </div>
@@ -117,6 +121,13 @@
       @close="closeManualSearch"
       @downloaded="handleDownloaded"
     />
+
+    <!-- Manual Import Modal -->
+    <ManualImportModal
+      :is-open="showManualImportModal"
+      @close="closeManualImport"
+      @imported="handleImported"
+    />
   </div>
 </template>
 
@@ -126,7 +137,9 @@ import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
+import ManualImportModal from '@/components/ManualImportModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
+import { safeText } from '@/utils/textUtils'
 
 const libraryStore = useLibraryStore()
 
@@ -151,6 +164,7 @@ const searching = ref<Record<number, boolean>>({})
 const searchResults = ref<Record<number, string>>({})
 const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
+const showManualImportModal = ref(false)
 
 onMounted(async () => {
   loading.value = true
@@ -172,13 +186,22 @@ onMounted(async () => {
 })
 
 // Filter audiobooks that are monitored and missing files
+// Prefer the server-provided `wanted` flag when present. If the server
+// does not include the flag (migration / older records), fall back to a
+// local computation: monitored && no files (or no primary filePath).
 const wantedAudiobooks = computed(() => {
-  // Use authoritative server-provided `wanted` flag exclusively. During
-  // migration older records may not have this field; treat missing/undefined
-  // as NOT wanted so the server is authoritative.
   return libraryStore.audiobooks.filter(audiobook => {
     const serverWanted = (audiobook as unknown as Record<string, unknown>)['wanted']
-    return serverWanted === true
+
+    // If server explicitly provided true/false, honor it
+    if (serverWanted === true) return true
+    if (serverWanted === false) return false
+
+    // Fallback: treat as wanted when monitored and there are no files
+    const hasFiles = Array.isArray(audiobook.files) ? audiobook.files.length > 0 : false
+    const hasPrimaryFile = !!(audiobook.filePath && audiobook.filePath.toString().trim() !== '')
+
+    return !!audiobook.monitored && !hasFiles && !hasPrimaryFile
   })
 })
 
@@ -296,6 +319,21 @@ const searchMissing = async () => {
 function openManualSearch(item: Audiobook) {
   selectedAudiobook.value = item
   showManualSearchModal.value = true
+}
+
+function openManualImport() {
+  showManualImportModal.value = true
+}
+
+function closeManualImport() {
+  showManualImportModal.value = false
+}
+
+async function handleImported(result: { imported: number }) {
+  console.log('Manual import completed, imported:', result.imported)
+  // Refresh library
+  await libraryStore.fetchLibrary()
+  closeManualImport()
 }
 
 function closeManualSearch() {

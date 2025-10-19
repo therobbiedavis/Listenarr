@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Resolve and bump version (patch)
+      - name: Resolve and bump version (minor)
         id: resolve-version
         run: |
           set -euo pipefail
@@ -45,14 +45,14 @@ jobs:
           fi
           echo "Found base version: ${VERSION}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION}"
-          PATCH=${PATCH:-0}
-          NEWPATCH=$((PATCH + 1))
-          NEWVERSION="${MAJOR}.${MINOR}.${NEWPATCH}"
+          MINOR=${MINOR:-0}
+          NEWMINOR=$((MINOR + 1))
+          NEWVERSION="${MAJOR}.${NEWMINOR}.0"
           echo "Bumped nightly version: ${NEWVERSION}"
           echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
 
       - name: Restore .NET
-        run: dotnet restore ${{ env.API_PROJECT }}
+        run: dotnet restore listenarr.sln
 
       - name: Persist bumped version to csproj (for build)
         if: steps.resolve-version.outputs.VERSION != ''

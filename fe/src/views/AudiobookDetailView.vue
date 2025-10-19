@@ -43,7 +43,7 @@
           />
         </div>
         <div class="info-section">
-          <h1 class="title">{{ audiobook.title }}</h1>
+          <h1 class="title">{{ safeText(audiobook.title) }}</h1>
           <div class="subtitle" v-if="audiobook.subtitle">{{ audiobook.subtitle }}</div>
           
           <div class="meta-info">
@@ -53,12 +53,13 @@
             </span>
             <span class="genre">{{ audiobook.genres?.join(', ') || 'Audiobook' }}</span>
             <span class="year" v-if="audiobook.publishYear">{{ audiobook.publishYear }}</span>
+            
           </div>
 
           <div class="key-details">
-            <div class="detail-item" v-if="audiobook.filePath">
+            <div class="detail-item" v-if="displayBasePath">
               <i class="ph ph-folder"></i>
-              <span>{{ audiobook.filePath }}</span>
+              <span class="file-path">{{ displayBasePath }}</span>
             </div>
             <div class="detail-item" v-if="audiobook.fileSize">
               <i class="ph ph-database"></i>
@@ -161,11 +162,11 @@
             <h3>Author Information</h3>
             <div class="detail-row" v-if="audiobook.authors">
               <span class="label">Author(s):</span>
-              <span class="value">{{ audiobook.authors.join(', ') }}</span>
+              <span class="value">{{ audiobook.authors.map(safeText).join(', ') }}</span>
             </div>
             <div class="detail-row" v-if="audiobook.narrators">
               <span class="label">Narrator(s):</span>
-              <span class="value">{{ audiobook.narrators.join(', ') }}</span>
+              <span class="value">{{ audiobook.narrators.map(safeText).join(', ') }}</span>
             </div>
           </div>
 
@@ -173,7 +174,7 @@
             <h3>Publication Details</h3>
             <div class="detail-row" v-if="audiobook.publisher">
               <span class="label">Publisher:</span>
-              <span class="value">{{ audiobook.publisher }}</span>
+              <span class="value">{{ safeText(audiobook.publisher) }}</span>
             </div>
             <div class="detail-row" v-if="audiobook.publishYear">
               <span class="label">Year:</span>
@@ -189,7 +190,7 @@
             <h3>Series Information</h3>
             <div class="detail-row">
               <span class="label">Series:</span>
-              <span class="value">{{ audiobook.series }}</span>
+              <span class="value">{{ safeText(audiobook.series) }}</span>
             </div>
             <div class="detail-row" v-if="audiobook.seriesNumber">
               <span class="label">Book #:</span>
@@ -267,7 +268,7 @@
                 <tbody>
                   <tr v-if="f.path">
                     <td class="metadata-label">Path:</td>
-                    <td class="metadata-value">{{ f.path }}</td>
+                    <td class="metadata-value">{{ getFullPath(f.path) }}</td>
                   </tr>
                   <tr v-if="f.size !== undefined">
                     <td class="metadata-label">Size:</td>
@@ -312,16 +313,6 @@
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-        <div v-else-if="audiobook.filePath" class="file-list">
-          <div class="file-item">
-            <div class="file-info">
-              <i class="ph ph-file-audio"></i>
-              <span class="file-name">{{ getFileName(audiobook.filePath) }}</span>
-            </div>
-            <span class="file-size" v-if="audiobook.fileSize">{{ formatFileSize(audiobook.fileSize) }}</span>
-            <span class="file-size" v-else>Unknown size</span>
           </div>
         </div>
         <div v-else class="empty-files">
@@ -427,16 +418,20 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
+import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
+import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
+import { safeText } from '@/utils/textUtils'
 
 const route = useRoute()
 const router = useRouter()
 const libraryStore = useLibraryStore()
+const configStore = useConfigurationStore()
 
 const audiobook = ref<Audiobook | null>(null)
 const loading = ref(true)
@@ -463,6 +458,57 @@ const assignedProfileName = computed(() => {
   const p = qualityProfiles.value.find(q => q.id === id)
   return p ? p.name : null
 })
+
+// Show a base path even when no files exist yet by falling back to configured outputPath
+const displayBasePath = computed(() => {
+  // Prefer server-provided basePath
+  const server = audiobook.value?.basePath
+  if (server && server.length > 0) return server
+
+  const settings = configStore.applicationSettings
+  if (!settings) return ''
+  const root = (settings.outputPath || '').trim()
+  const pattern = (settings.fileNamingPattern || '').trim()
+  if (!root || !pattern) return root || ''
+
+  const author = (audiobook.value?.authors && audiobook.value.authors[0]) ? audiobook.value.authors[0] : 'Unknown Author'
+  const series = audiobook.value?.series || ''
+  const title = audiobook.value?.title || 'Unknown Title'
+  const year = audiobook.value?.publishYear || ''
+  const seriesNumber = audiobook.value?.seriesNumber || ''
+
+  // Basic variable replacement mirroring server pattern keys
+  let relative = pattern
+    .replace(/\{Author(?::[^}]+)?\}/gi, sanitizePathComponent(author))
+    .replace(/\{Series(?::[^}]+)?\}/gi, sanitizePathComponent(series))
+    .replace(/\{Title(?::[^}]+)?\}/gi, sanitizePathComponent(title))
+    .replace(/\{Year(?::[^}]+)?\}/gi, year)
+    .replace(/\{SeriesNumber(?::[^}]+)?\}/gi, seriesNumber)
+
+  // Remove file-level variables (Disk/Chapter/Quality) if present
+  relative = relative
+    .replace(/\{DiskNumber(?::[^}]+)?\}/gi, '')
+    .replace(/\{ChapterNumber(?::[^}]+)?\}/gi, '')
+    .replace(/\{Quality(?::[^}]+)?\}/gi, '')
+
+  // Normalize repeated slashes and trim
+  relative = relative
+    .replace(/[\\/]{2,}/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+
+  const combined = (root.endsWith('/') || root.endsWith('\\')) ? root + relative : root + '/' + relative
+  // Base path should be the directory containing the files -> strip the last segment
+  const parts = combined.split(/[/\\]+/).filter(Boolean)
+  if (parts.length <= 1) return combined
+  const dir = parts.slice(0, -1).join('/')
+  return dir
+})
+
+function sanitizePathComponent(s?: string): string {
+  if (!s) return 'Unknown'
+  // Replace invalid filename chars with underscore
+  return s.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Unknown'
+}
 
 // Watch for tab changes to load history when needed
 watch(activeTab, async (newTab) => {
@@ -611,8 +657,9 @@ async function scanFiles() {
     }
   } catch (err) {
     console.error('Scan failed:', err)
-    // Show a simple alert for now
-    alert('Scan failed: ' + (err instanceof Error ? err.message : String(err)))
+    // Show a non-blocking toast instead of an alert
+    const toast = useToast()
+    toast.error('Scan failed', (err instanceof Error ? err.message : String(err)))
   } finally {
     scanning.value = false
   }
@@ -784,6 +831,13 @@ function toggleFileAccordion(fileId: number): void {
   } else {
     expandedFileAccordions.value.add(fileId)
   }
+}
+
+function getFullPath(relativePath?: string): string {
+  if (!relativePath) return 'Unknown'
+  if (!audiobook.value?.basePath) return relativePath
+  // Combine base path with relative path
+  return audiobook.value.basePath + (audiobook.value.basePath.endsWith('/') || audiobook.value.basePath.endsWith('\\') ? '' : '/') + relativePath
 }
 
 function formatDate(dateString?: string): string {
@@ -963,6 +1017,13 @@ function formatDate(dateString?: string): string {
 
 .runtime i, .rating i {
   color: #007acc;
+}
+
+.file-path {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+  color: #aaa;
 }
 
 .key-details {

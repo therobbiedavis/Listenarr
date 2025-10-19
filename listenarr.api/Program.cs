@@ -19,19 +19,39 @@
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
 using Listenarr.Api.Hubs;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Listenarr.Api.Middleware;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
+using Serilog;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
-// Configure logging
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.AddDebug();
+// Configure Serilog for file logging with rotation
+var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "logs.txt");
+Log.Logger = new Serilog.LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()
+    .WriteTo.File(
+        logFilePath,
+        fileSizeLimitBytes: 10 * 1024 * 1024, // 10MB per file
+        rollOnFileSizeLimit: true,
+        retainedFileCountLimit: 5,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+// Use Serilog for logging
+builder.Host.UseSerilog();
+
+// Configure URLs to listen on port 5000 (standard ASP.NET Core port) - can be overridden by --urls
+if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
+{
+    builder.WebHost.UseUrls("http://*:5000");
+}
+
+// Configure logging is now handled by Serilog above
 
 // Add services to the container.
 builder.Services.AddControllers()
@@ -94,6 +114,13 @@ builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
+builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
+
+// Toast service for broadcasting UI toasts via SignalR
+builder.Services.AddSingleton<IToastService, ToastService>();
+
+// Always register session service, but it will check config internally
+builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
 
 // Scan queue: enqueue folder scans to be processed in the background
 builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
@@ -120,6 +147,9 @@ builder.Services.AddHostedService<FfmpegInstallBackgroundService>();
 // Background service to rescan files missing metadata
 builder.Services.AddHostedService<MetadataRescanService>();
 
+// Register background service for download processing queue
+builder.Services.AddHostedService<DownloadProcessingBackgroundService>();
+
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
@@ -136,72 +166,46 @@ builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
 // Register Playwright page fetcher for JS-rendered pages and bot-workarounds
 // Playwright-based page fetcher removed; AudibleMetadataService will create Playwright on-demand if needed.
 
-// Add CORS support for frontend
-builder.Services.AddCors(options =>
+// CORS is handled by reverse proxy (nginx, Traefik, Caddy, etc.)
+// Only add CORS support for local development
+if (builder.Environment.IsDevelopment())
 {
-    options.AddPolicy("AllowVueApp",
-        policy =>
-        {
-            policy.WithOrigins(
-                    "http://localhost:5173",
-                    "https://localhost:5173",
-                    "http://localhost:3000",
-                    "https://localhost:3000"
-                )
-                .AllowAnyHeader()
-                .AllowAnyMethod()
-                .AllowCredentials(); // Required for SignalR
-        });
-
-    // Development fallback (use cautiously). This can help diagnose unexpected origin mismatches.
-    options.AddPolicy("DevAll", p => p
-    .AllowAnyOrigin()
-    .AllowAnyHeader()
-    .AllowAnyMethod());
-});
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy("DevOnly",
+            policy =>
+            {
+                policy.WithOrigins(
+                        "http://localhost:5173",
+                        "https://localhost:5173",
+                        "http://localhost:3000",
+                        "https://localhost:3000",
+                        "http://127.0.0.1:5173",
+                        "https://127.0.0.1:5173"
+                    )
+                    .AllowAnyHeader()
+                    .AllowAnyMethod()
+                    .AllowCredentials(); // Required for SignalR
+            });
+    });
+}
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Authentication: Cookie-based (minimal default). This will be enforced by middleware when configured.
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options =>
-    {
-        options.LoginPath = "/api/account/login";
-        options.LogoutPath = "/api/account/logout";
-        options.Cookie.Name = "listenarr_auth";
-        options.Cookie.Path = "/";
-        // Harden cookie settings
-        options.SlidingExpiration = true;
-        options.Cookie.HttpOnly = true;
-            // Require HTTPS in production, but allow insecure cookies during local development
-            options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-                ? CookieSecurePolicy.None
-                : CookieSecurePolicy.Always; // require HTTPS in production
-        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
-        options.ExpireTimeSpan = TimeSpan.FromDays(7);
-        // Configure events to handle logout properly behind reverse proxy
-        options.Events.OnSigningOut = context =>
-        {
-            // Ensure the cookie is properly cleared by setting it to expire
-            context.Response.Cookies.Delete(options.Cookie.Name!, new Microsoft.AspNetCore.Http.CookieOptions
-            {
-                Path = options.Cookie.Path,
-                Domain = options.Cookie.Domain,
-                SameSite = options.Cookie.SameSite,
-                HttpOnly = options.Cookie.HttpOnly,
-                Secure = options.Cookie.SecurePolicy == CookieSecurePolicy.Always
-            });
-            return Task.CompletedTask;
-        };
-    });
+// Authentication: Session-based (default)
+// No additional authentication scheme configuration needed for sessions
 
-// Configure forwarded headers for reverse proxy support
+// Configure forwarded headers - required for apps behind reverse proxy
+// This allows the app to see the real client IP and original protocol (HTTP/HTTPS)
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
-    // Clear the known networks and proxies lists to allow any proxy
+    // Only forward the essential headers needed for proper operation
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    
+    // Trust any proxy since this app runs in a controlled Docker/reverse proxy environment
+    // Users are responsible for configuring their reverse proxy securely
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
@@ -308,27 +312,27 @@ if (app.Environment.IsDevelopment())
 }
 
 // Use forwarded headers middleware (must be early in pipeline)
+// This processes X-Forwarded-For and X-Forwarded-Proto headers from the reverse proxy
 app.UseForwardedHeaders();
 
-app.UseHttpsRedirection();
+// Note: HTTPS redirection is handled by the reverse proxy, not by this application
 
     // Serve frontend static files from wwwroot (index.html + assets)
     // DefaultFiles enables serving index.html when requesting '/'
     app.UseDefaultFiles();
     app.UseStaticFiles();
 
-// Enable CORS (use restrictive policy by default, allow override via environment var)
-var corsPolicy = Environment.GetEnvironmentVariable("LISTENARR_CORS_POLICY");
-if (!string.IsNullOrWhiteSpace(corsPolicy) && corsPolicy == "DevAll")
+// Ensure routing middleware is enabled so endpoint routing features (CORS, Authorization)
+// can be applied by subsequent middleware. This must run before UseCors()/UseAuthorization().
+app.UseRouting();
+
+// Enable CORS only in development (production should use reverse proxy for CORS)
+if (app.Environment.IsDevelopment())
 {
-    app.UseCors("DevAll");
+    app.UseCors("DevOnly");
 }
-else
-{
-    app.UseCors("AllowVueApp");
-}
-    // Enable authentication middleware
-    app.UseAuthentication();
+    // Session-based authentication middleware
+    app.UseMiddleware<Listenarr.Api.Middleware.SessionAuthenticationMiddleware>();
     // API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
     app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
     // Enforce authentication based on startup config
@@ -336,7 +340,6 @@ else
     // Validate antiforgery tokens for unsafe methods
     app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
     app.UseAuthorization();
-app.UseAuthorization();
 
 app.MapControllers();
 

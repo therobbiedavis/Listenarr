@@ -110,7 +110,7 @@
                   <td class="col-age">{{ formatAge(result.publishedDate) }}</td>
                   <td class="col-title">
                     <div class="title-cell">
-                      <span class="title-text">{{ result.title }}</span>
+                      <span class="title-text">{{ safeText(result.title) }}</span>
                     </div>
                   </td>
                   <td class="col-indexer">
@@ -182,10 +182,12 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
+import { safeText } from '@/utils/textUtils'
 
 interface Props {
   isOpen: boolean
@@ -437,6 +439,7 @@ function buildSearchQuery(): string {
 
 async function downloadResult(result: SearchResult) {
   downloading.value[result.id] = true
+  const toast = useToast()
   
   try {
     // Check if this is a DDL
@@ -482,7 +485,8 @@ async function downloadResult(result: SearchResult) {
       userMessage = 'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
     }
     
-    alert(userMessage)
+    // Show error as a non-blocking toast instead of a modal alert
+    toast.error('Download failed', userMessage)
     delete downloading.value[result.id]
   }
 }

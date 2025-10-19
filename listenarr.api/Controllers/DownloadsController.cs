@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Api.Models;
+using Listenarr.Api.Services;
+using System.Linq;
 
 namespace Listenarr.Api.Controllers;
 
@@ -10,11 +12,13 @@ public class DownloadsController : ControllerBase
 {
     private readonly ListenArrDbContext _dbContext;
     private readonly ILogger<DownloadsController> _logger;
+    private readonly IConfigurationService _configurationService;
 
-    public DownloadsController(ListenArrDbContext dbContext, ILogger<DownloadsController> logger)
+    public DownloadsController(ListenArrDbContext dbContext, ILogger<DownloadsController> logger, IConfigurationService configurationService)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _configurationService = configurationService;
     }
 
     /// <summary>
@@ -39,8 +43,10 @@ public class DownloadsController : ControllerBase
                 .OrderByDescending(d => d.StartedAt)
                 .ToListAsync();
 
+            var enhancedDownloads = await EnhanceDownloadsWithClientNames(downloads);
+            
             _logger.LogInformation("Retrieved {Count} downloads", downloads.Count);
-            return Ok(downloads);
+            return Ok(enhancedDownloads);
         }
         catch (Exception ex)
         {
@@ -64,7 +70,28 @@ public class DownloadsController : ControllerBase
                 return NotFound(new { error = "Download not found", id });
             }
 
-            return Ok(download);
+            // Remove downloadPath before returning to client
+            var downloadObj = new
+            {
+                id = download.Id,
+                audiobookId = download.AudiobookId,
+                title = download.Title,
+                artist = download.Artist,
+                album = download.Album,
+                originalUrl = download.OriginalUrl,
+                status = download.Status.ToString(),
+                progress = download.Progress,
+                totalSize = download.TotalSize,
+                downloadedSize = download.DownloadedSize,
+                finalPath = download.FinalPath,
+                startedAt = download.StartedAt,
+                completedAt = download.CompletedAt,
+                errorMessage = download.ErrorMessage,
+                downloadClientId = download.DownloadClientId,
+                metadata = download.Metadata
+            };
+
+            return Ok(downloadObj);
         }
         catch (Exception ex)
         {
@@ -88,8 +115,10 @@ public class DownloadsController : ControllerBase
                 .OrderByDescending(d => d.StartedAt)
                 .ToListAsync();
 
+            var enhancedActiveDownloads = await EnhanceDownloadsWithClientNames(activeDownloads);
+            
             _logger.LogInformation("Retrieved {Count} active downloads", activeDownloads.Count);
-            return Ok(activeDownloads);
+            return Ok(enhancedActiveDownloads);
         }
         catch (Exception ex)
         {
@@ -174,5 +203,55 @@ public class DownloadsController : ControllerBase
             _logger.LogError(ex, "Error clearing failed downloads");
             return StatusCode(500, new { error = "Failed to clear failed downloads", message = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Enhance downloads with resolved client names
+    /// </summary>
+    private async Task<List<object>> EnhanceDownloadsWithClientNames(List<Download> downloads)
+    {
+        var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+        var clientLookup = downloadClients.ToDictionary(c => c.Id, c => c.Name);
+        
+        return downloads.Select(d => {
+            // Remove any client-local content path information before returning to the frontend.
+            // Server keeps `DownloadPath`/metadata internally for mapping/monitoring, but must not transmit
+            // client-local paths (for example ClientContentPath) to user browsers.
+            object? sanitizedMetadata = null;
+            if (d.Metadata != null)
+            {
+                var dict = new Dictionary<string, object>();
+                foreach (var kvp in d.Metadata)
+                {
+                    if (!string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dict[kvp.Key] = kvp.Value!;
+                    }
+                }
+                sanitizedMetadata = dict;
+            }
+
+            return new
+            {
+                id = d.Id,
+                audiobookId = d.AudiobookId,
+                title = d.Title,
+                artist = d.Artist,
+                album = d.Album,
+                originalUrl = d.OriginalUrl,
+                status = d.Status.ToString(),
+                progress = d.Progress,
+                totalSize = d.TotalSize,
+                downloadedSize = d.DownloadedSize,
+                finalPath = d.FinalPath,
+                startedAt = d.StartedAt,
+                completedAt = d.CompletedAt,
+                errorMessage = d.ErrorMessage,
+                downloadClientId = d.DownloadClientId,
+                downloadClientName = d.DownloadClientId == "DDL" ? "Direct Download" : 
+                                   clientLookup.TryGetValue(d.DownloadClientId, out var clientName) ? clientName : "Unknown Client",
+                metadata = sanitizedMetadata
+            };
+        }).Cast<object>().ToList();
     }
 }

@@ -24,6 +24,15 @@ namespace Listenarr.Api.Middleware
                 else authRequired = cfg.AuthenticationRequired?.ToLower() == "enabled";
             }
 
+            // Log logout requests specifically
+            var path = context.Request.Path.Value ?? string.Empty;
+            if (path.StartsWith("/api/account/logout"))
+            {
+                var logger = context.RequestServices.GetService<ILogger<AuthenticationEnforcerMiddleware>>();
+                logger?.LogInformation("Logout request detected - Method: {Method}, Path: {Path}, User: {User}, Authenticated: {Authenticated}", 
+                    context.Request.Method, path, context.User?.Identity?.Name ?? "Anonymous", context.User?.Identity?.IsAuthenticated ?? false);
+            }
+
             // If endpoint explicitly allows anonymous, skip enforcement
             var endpoint = context.GetEndpoint();
             if (endpoint?.Metadata?.GetMetadata<Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute>() != null)
@@ -33,7 +42,6 @@ namespace Listenarr.Api.Middleware
             }
 
             // Allow some public paths used by SPA and startup (swagger/ui, antiforgery token, startup config, initial API key generation, and account login/register)
-            var path = context.Request.Path.Value ?? string.Empty;
             if (path.StartsWith("/swagger") || path.StartsWith("/api/antiforgery") || path.StartsWith("/api/configuration/startupconfig") || path.StartsWith("/api/configuration/apikey/generate-initial") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register"))
             {
                 await _next(context);

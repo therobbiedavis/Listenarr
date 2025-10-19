@@ -2,9 +2,9 @@ name: CI - Build & Artifacts
 
 on:
   push:
-    branches: [ develop, main ]
+    branches: [ develop, main, canary ]
   pull_request:
-    branches: [ develop, main ]
+    branches: [ develop, main, canary ]
 
 jobs:
   build:
@@ -29,8 +29,7 @@ jobs:
           cache: 'npm'
 
       - name: Restore .NET
-        working-directory: ./listenarr.api
-        run: dotnet restore
+        run: dotnet restore listenarr.sln
 
       - name: Build solution
         run: dotnet build listenarr.sln -c Release --no-restore

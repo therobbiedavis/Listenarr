@@ -98,8 +98,9 @@ namespace Listenarr.Api.Services
                 UrlBase = "/",
                 BindAddress = "*",
                 ApiKey = apiKey, // Auto-generated on first run
-                AuthenticationMethod = "None",
-                AuthenticationRequired = "Disabled",
+                // Authentication: Set to "true" to require login, "false" for open access
+                // When enabled, uses secure session-based authentication with Bearer tokens
+                AuthenticationRequired = "false",
                 UpdateMechanism = "BuiltIn",
                 LaunchBrowser = true,
                 Branch = "main",
@@ -134,6 +135,7 @@ namespace Listenarr.Api.Services
             {
                 SaveConfigFile(_config);
                 _logger.LogInformation("Default config.json created at {Path}", _configPath);
+                _logger.LogInformation("Authentication is DISABLED by default. Set 'AuthenticationRequired' to 'true' in config.json to enable secure login.");
             }
             catch (Exception ex)
             {

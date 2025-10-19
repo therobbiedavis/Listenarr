@@ -98,6 +98,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import type { Audiobook, QualityProfile } from '@/types'
 
@@ -183,7 +184,8 @@ async function handleSave() {
     close()
   } catch (error) {
     console.error('Failed to save audiobook edits:', error)
-    alert('Failed to save changes. Please try again.')
+    const toast = useToast()
+    toast.error('Save failed', 'Failed to save changes. Please try again.')
   } finally {
     saving.value = false
   }

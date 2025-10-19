@@ -24,7 +24,7 @@ namespace Listenarr.Api.Services
             int? chapterNumber = null, 
             string originalExtension = ".m4b")
         {
-            var settings = await _configService.GetApplicationSettingsAsync();
+            var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
             var pattern = settings.FileNamingPattern;
             var outputPath = settings.OutputPath;
 
@@ -33,18 +33,64 @@ namespace Listenarr.Api.Services
                 pattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
             }
 
+            // Helper to pick the first non-empty value
+            string FirstNonEmpty(params string?[] candidates)
+            {
+                foreach (var c in candidates)
+                {
+                    if (!string.IsNullOrWhiteSpace(c)) return c!;
+                }
+                return string.Empty;
+            }
+
             // Build variable dictionary
+            // Heuristic: sometimes metadata.Artist can contain the title/series (noisy tags).
+            // Prefer an AlbumArtist or alternate artist value if the primary artist looks like the title/series.
+            string ChooseAuthor(AudioMetadata md)
+            {
+                var primary = FirstNonEmpty(md.Artist, md.AlbumArtist);
+                var alternate = FirstNonEmpty(md.AlbumArtist, md.Artist);
+
+                if (!string.IsNullOrWhiteSpace(primary) && !string.IsNullOrWhiteSpace(md.Title))
+                {
+                    // If the primary artist contains the title or equals the series/title, prefer the alternate.
+                    if (primary.IndexOf(md.Title, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        (!string.IsNullOrWhiteSpace(md.Series) && string.Equals(primary, md.Series, StringComparison.OrdinalIgnoreCase)) ||
+                        string.Equals(primary, md.Title, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.IsNullOrWhiteSpace(alternate)) return alternate;
+                        return primary;
+                    }
+                }
+
+                return string.IsNullOrWhiteSpace(primary) ? alternate : primary;
+            }
+
             var variables = new Dictionary<string, object>
             {
-                { "Author", SanitizePathComponent(metadata.Artist ?? metadata.AlbumArtist ?? "Unknown Author") },
-                { "Series", SanitizePathComponent(metadata.Series ?? metadata.Album ?? metadata.Title ?? "Unknown Series") },
-                { "Title", SanitizePathComponent(metadata.Title ?? "Unknown Title") },
-                { "SeriesNumber", metadata.SeriesPosition?.ToString() ?? metadata.TrackNumber?.ToString() ?? "" },
-                { "Year", metadata.Year?.ToString() ?? "" },
-                { "Quality", $"{metadata.Bitrate}kbps {metadata.Format}".Trim() },
-                { "DiskNumber", diskNumber?.ToString() ?? metadata.DiscNumber?.ToString() ?? "" },
-                { "ChapterNumber", chapterNumber?.ToString() ?? metadata.TrackNumber?.ToString() ?? "" }
+                // Keep multi-word author names as a single folder name (e.g. "Jane Austen")
+                { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor(metadata), "Unknown Author")) },
+                // For Series we must not fallback to Album or Title - when Series is blank we want
+                // the variable to be empty so ApplyNamingPattern can remove any adjacent separators
+                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
+                { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
+                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
+                { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
+                { "Quality", FirstNonEmpty((metadata.Bitrate.HasValue ? metadata.Bitrate.ToString() + "kbps" : null), metadata.Format) },
+                { "DiskNumber", FirstNonEmpty(diskNumber?.ToString(), metadata.DiscNumber?.ToString()) },
+                { "ChapterNumber", FirstNonEmpty(chapterNumber?.ToString(), metadata.TrackNumber?.ToString()) }
             };
+
+            // Diagnostic logging: record the variables used for pattern replacement
+            try
+            {
+                var dbg = string.Join(", ", variables.Select(kv => $"{kv.Key}='{kv.Value}'"));
+                _logger.LogInformation("FileNamingService variables: {Vars}", dbg);
+            }
+            catch
+            {
+                // ignore logging errors
+            }
 
             // Apply the naming pattern
             var relativePath = ApplyNamingPattern(pattern, variables);
@@ -65,9 +111,99 @@ namespace Listenarr.Api.Services
         }
 
         /// <summary>
+        /// Apply the configured file naming pattern to generate the final file path with a specific output path
+        /// </summary>
+        public async Task<string> GenerateFilePathAsync(
+            AudioMetadata metadata, 
+            string outputPath,
+            int? diskNumber = null, 
+            int? chapterNumber = null, 
+            string originalExtension = ".m4b")
+        {
+            var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
+            var pattern = settings.FileNamingPattern;
+
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                pattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+            }
+
+            // Helper to pick the first non-empty value
+            string FirstNonEmpty(params string?[] candidates)
+            {
+                foreach (var c in candidates)
+                {
+                    if (!string.IsNullOrWhiteSpace(c)) return c!;
+                }
+                return string.Empty;
+            }
+
+            // Build variable dictionary
+            string ChooseAuthor2(AudioMetadata md)
+            {
+                var primary = FirstNonEmpty(md.Artist, md.AlbumArtist);
+                var alternate = FirstNonEmpty(md.AlbumArtist, md.Artist);
+
+                if (!string.IsNullOrWhiteSpace(primary) && !string.IsNullOrWhiteSpace(md.Title))
+                {
+                    if (primary.IndexOf(md.Title, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        (!string.IsNullOrWhiteSpace(md.Series) && string.Equals(primary, md.Series, StringComparison.OrdinalIgnoreCase)) ||
+                        string.Equals(primary, md.Title, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.IsNullOrWhiteSpace(alternate)) return alternate;
+                        return primary;
+                    }
+                }
+
+                return string.IsNullOrWhiteSpace(primary) ? alternate : primary;
+            }
+
+            var variables = new Dictionary<string, object>
+            {
+                { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor2(metadata), "Unknown Author")) },
+                // Same behavior for overload with custom outputPath: do not fallback for Series
+                { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },
+                { "Title", SanitizePathComponent(FirstNonEmpty(metadata.Title, "Unknown Title")) },
+                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(), metadata.TrackNumber?.ToString()) },
+                { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
+                { "Quality", FirstNonEmpty((metadata.Bitrate.HasValue ? metadata.Bitrate.ToString() + "kbps" : null), metadata.Format) },
+                { "DiskNumber", FirstNonEmpty(diskNumber?.ToString(), metadata.DiscNumber?.ToString()) },
+                { "ChapterNumber", FirstNonEmpty(chapterNumber?.ToString(), metadata.TrackNumber?.ToString()) }
+            };
+
+            // Diagnostic logging: record the variables used for pattern replacement (custom outputPath overload)
+            try
+            {
+                var dbg = string.Join(", ", variables.Select(kv => $"{kv.Key}='{kv.Value}'"));
+                _logger.LogInformation("FileNamingService variables (custom outputPath): {Vars}", dbg);
+            }
+            catch
+            {
+                // ignore logging errors
+            }
+
+            // Apply the naming pattern
+            var relativePath = ApplyNamingPattern(pattern, variables);
+            
+            // Ensure it has the correct extension
+            if (!relativePath.EndsWith(originalExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                relativePath += originalExtension;
+            }
+
+            // Combine with the provided output path
+            var fullPath = string.IsNullOrWhiteSpace(outputPath) 
+                ? relativePath 
+                : Path.Combine(outputPath, relativePath);
+
+            _logger.LogInformation("Generated file path with custom output path: {FilePath}", fullPath);
+            return fullPath;
+        }
+
+        /// <summary>
         /// Parse a naming pattern and replace variables with actual values
         /// </summary>
-        public string ApplyNamingPattern(string pattern, Dictionary<string, object> variables)
+        public string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false)
         {
             if (string.IsNullOrWhiteSpace(pattern))
             {
@@ -79,6 +215,9 @@ namespace Listenarr.Api.Services
             // Regex to match variables: {VariableName} or {VariableName:Format}
             var variableRegex = new Regex(@"\{(\w+)(?::([^}]+))?\}", RegexOptions.IgnoreCase);
             
+            // Replace variables. If a variable is empty, emit a sentinel so we can clean up surrounding
+            // punctuation and separators (for example: remove "{Series}/" when Series is empty).
+            const string EmptySentinel = "__EMPTY_VAR__";
             result = variableRegex.Replace(result, match =>
             {
                 var variableName = match.Groups[1].Value;
@@ -89,7 +228,7 @@ namespace Listenarr.Api.Services
                     // Handle empty values
                     if (value == null || string.IsNullOrWhiteSpace(value.ToString()))
                     {
-                        return "";
+                        return EmptySentinel;
                     }
 
                     // Apply formatting if specified
@@ -106,21 +245,64 @@ namespace Listenarr.Api.Services
                         }
                     }
 
-                    return value.ToString() ?? "";
+                    return value.ToString() ?? string.Empty;
                 }
 
-                // Variable not found, return empty string
+                // Variable not found, return sentinel so we can optionally remove surrounding chars
                 _logger.LogWarning("Variable {VariableName} not found in naming pattern", variableName);
-                return "";
+                return EmptySentinel;
             });
+
+            // Cleanup: remove empty sentinel inside any brackets (e.g. "(__EMPTY_VAR__)" -> "")
+            result = Regex.Replace(result, @"[\(\[\{]\s*" + EmptySentinel + @"\s*[\)\]\}]", string.Empty);
+
+            // Remove common separators adjacent to the sentinel (e.g. " - __EMPTY_VAR__" or "__EMPTY_VAR__ - ")
+            result = Regex.Replace(result, @"\s*[-–—:_]\s*" + EmptySentinel, string.Empty);
+            result = Regex.Replace(result, EmptySentinel + @"\s*[-–—:_]\s*", string.Empty);
+
+            // Remove sentinel next to slashes
+            result = Regex.Replace(result, @"/?" + EmptySentinel + @"/?", "/");
+
+            // Finally remove any remaining sentinels
+            result = result.Replace(EmptySentinel, string.Empty);
 
             // Clean up multiple consecutive slashes or spaces
             result = Regex.Replace(result, @"[\\/]{2,}", "/");
             result = Regex.Replace(result, @"\s{2,}", " ");
-            
-            // Remove leading/trailing slashes and spaces from each path component
-            var parts = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
-            result = string.Join(Path.DirectorySeparatorChar.ToString(), parts.Select(p => p.Trim()));
+
+            if (treatAsFilename)
+            {
+                // If we're generating a filename (not a path), ensure no directory separators remain.
+                // Split on any slashes and take the last segment to avoid creating directories from tokens.
+                var partsForFilename = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                result = partsForFilename.Length > 0 ? partsForFilename.Last().Trim() : result.Trim();
+
+                // Remove any stray separators and sanitize the filename component
+                result = result.Replace("/", string.Empty).Replace("\\", string.Empty);
+                result = SanitizePathComponent(result);
+            }
+            else
+            {
+                // Remove leading/trailing slashes and spaces from each path component
+                var parts = result.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim())
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .ToList();
+
+                // Collapse adjacent duplicate components (case-insensitive) to avoid
+                // patterns producing repeated folders like "Title/Title (...)/Title"
+                for (int i = parts.Count - 1; i > 0; i--)
+                {
+                    if (string.Equals(parts[i], parts[i - 1], StringComparison.OrdinalIgnoreCase))
+                    {
+                        parts.RemoveAt(i);
+                    }
+                }
+
+                // Sanitize each path component to remove invalid characters
+                var sanitizedParts = parts.Select(p => SanitizePathComponent(p)).ToList();
+                result = string.Join(Path.DirectorySeparatorChar.ToString(), sanitizedParts);
+            }
 
             return result;
         }

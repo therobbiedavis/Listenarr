@@ -110,7 +110,23 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var configs = await _configurationService.GetDownloadClientConfigurationsAsync();
-                return Ok(configs);
+                // Redact client-local DownloadPath before returning to frontend
+                var response = configs.Select(c => new
+                {
+                    c.Id,
+                    c.Name,
+                    c.Type,
+                    c.Host,
+                    c.Port,
+                    c.Username,
+                    // Do not include DownloadPath - client should decide its local path
+                    c.UseSSL,
+                    c.IsEnabled,
+                    Settings = c.Settings,
+                    c.CreatedAt
+                }).ToList();
+
+                return Ok(response);
             }
             catch (Exception ex)
             {
@@ -129,7 +145,24 @@ namespace Listenarr.Api.Controllers
                 {
                     return NotFound();
                 }
-                return Ok(config);
+
+                // Redact client-local DownloadPath before returning
+                var response = new
+                {
+                    config.Id,
+                    config.Name,
+                    config.Type,
+                    config.Host,
+                    config.Port,
+                    config.Username,
+                    // Do not include DownloadPath
+                    config.UseSSL,
+                    config.IsEnabled,
+                    Settings = config.Settings,
+                    config.CreatedAt
+                };
+
+                return Ok(response);
             }
             catch (Exception ex)
             {
@@ -143,7 +176,73 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                var id = await _configurationService.SaveDownloadClientConfigurationAsync(config);
+                if (config == null)
+                {
+                    return BadRequest("Missing download client configuration");
+                }
+                // If updating an existing configuration, avoid overwriting sensitive fields
+                // with blank values from the incoming payload. Fetch existing config
+                // and copy username/password and any client-specific apiKey when missing.
+                if (!string.IsNullOrWhiteSpace(config?.Id))
+                {
+                    var existing = await _configurationService.GetDownloadClientConfigurationAsync(config.Id);
+                    if (existing != null)
+                    {
+                        // Preserve username/password if incoming values are empty
+                        if (string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(existing.Username))
+                        {
+                            config.Username = existing.Username;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(config.Password) && !string.IsNullOrWhiteSpace(existing.Password))
+                        {
+                            config.Password = existing.Password;
+                        }
+
+                        // Preserve SABnzbd API key (stored in Settings["apiKey"]) if not provided
+                        try
+                        {
+                            if (existing.Settings != null)
+                            {
+                                if (!config.Settings?.ContainsKey("apiKey") ?? true)
+                                {
+                                    if (existing.Settings.TryGetValue("apiKey", out var existingApiKeyObj))
+                                    {
+                                        var existingApiKey = existingApiKeyObj?.ToString();
+                                        if (!string.IsNullOrWhiteSpace(existingApiKey))
+                                        {
+                                            if (config.Settings == null)
+                                                config.Settings = new System.Collections.Generic.Dictionary<string, object>();
+                                            config.Settings["apiKey"] = existingApiKey;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // If config.Settings contains apiKey but it's blank, preserve existing
+                                    if (config.Settings != null && config.Settings.TryGetValue("apiKey", out var incomingApiKeyObj))
+                                    {
+                                        var incomingApiKey = incomingApiKeyObj?.ToString();
+                                        if (string.IsNullOrWhiteSpace(incomingApiKey) && existing.Settings.TryGetValue("apiKey", out var exKey))
+                                        {
+                                            var existingApiKey = exKey?.ToString();
+                                            if (!string.IsNullOrWhiteSpace(existingApiKey))
+                                            {
+                                                config.Settings["apiKey"] = existingApiKey;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Non-fatal: if Settings isn't a dictionary or unexpected structure, ignore and proceed
+                        }
+                    }
+                }
+
+                var id = await _configurationService.SaveDownloadClientConfigurationAsync(config!);
                 return Ok(new { id });
             }
             catch (Exception ex)
@@ -168,6 +267,30 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        // Test a download client configuration (accepts full config payload so credentials can be included)
+        [HttpPost("download-clients/test")]
+        public async Task<ActionResult<object>> TestDownloadClientConfiguration([FromBody] DownloadClientConfiguration config)
+        {
+            try
+            {
+                // Delegate to download service to perform protocol-specific lightweight tests
+                var downloadService = HttpContext.RequestServices.GetService(typeof(IDownloadService)) as IDownloadService;
+                if (downloadService == null)
+                {
+                    _logger.LogError("DownloadService not available to perform client test");
+                    return StatusCode(500, new { success = false, message = "Server misconfiguration: download service unavailable" });
+                }
+
+                var (Success, Message, Client) = await downloadService.TestDownloadClientAsync(config);
+                return Ok(new { success = Success, message = Message, client = Client });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error testing download client configuration");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
         // Application Settings endpoints
         [HttpGet("settings")]
         public async Task<ActionResult<ApplicationSettings>> GetApplicationSettings()
@@ -189,15 +312,23 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                _logger.LogDebug("Saving application settings");
                 await _configurationService.SaveApplicationSettingsAsync(settings);
+                
                 // Return the saved settings to confirm what was persisted
                 var savedSettings = await _configurationService.GetApplicationSettingsAsync();
+                
+                // Clear sensitive admin credentials from response (they are [NotMapped] but let's be safe)
+                savedSettings.AdminUsername = null;
+                savedSettings.AdminPassword = null;
+                
+                _logger.LogDebug("Application settings saved successfully");
                 return Ok(savedSettings);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error saving application settings");
-                return StatusCode(500, "Internal server error");
+                return StatusCode(500, new { error = "Failed to save application settings", message = ex.Message });
             }
         }
 

@@ -253,22 +253,33 @@ namespace Listenarr.Api.Services
                 {
                     if (!string.IsNullOrWhiteSpace(settings.AdminUsername) && !string.IsNullOrWhiteSpace(settings.AdminPassword))
                     {
+                        _logger.LogDebug("Processing admin user credentials: {Username}", settings.AdminUsername);
+                        
                         var existingUser = await _userService.GetByUsernameAsync(settings.AdminUsername!);
                         if (existingUser == null)
                         {
+                            _logger.LogInformation("Creating new admin user: {Username}", settings.AdminUsername);
                             await _userService.CreateUserAsync(settings.AdminUsername!, settings.AdminPassword!, null, true);
+                            _logger.LogInformation("Admin user created successfully: {Username}", settings.AdminUsername);
                         }
                         else
                         {
+                            _logger.LogInformation("Updating existing admin user password: {Username}", settings.AdminUsername);
                             // Update password to provided value
                             await _userService.UpdatePasswordAsync(settings.AdminUsername!, settings.AdminPassword!);
+                            _logger.LogInformation("Admin user password updated successfully: {Username}", settings.AdminUsername);
                         }
+                    }
+                    else
+                    {
+                        _logger.LogDebug("No admin credentials provided in settings update");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to create or update admin user from application settings");
+                    _logger.LogError(ex, "Failed to create or update admin user '{Username}' from application settings. Settings will still be saved.", settings.AdminUsername);
                     // Do not fail saving settings if user creation fails; log and continue
+                    // This prevents the 500 error and allows settings to be saved even if user operations fail
                 }
             }
             catch (Exception ex)

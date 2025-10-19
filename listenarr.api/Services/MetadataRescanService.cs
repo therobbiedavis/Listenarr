@@ -50,34 +50,55 @@ namespace Listenarr.Api.Services
                     foreach (var f in candidates)
                     {
                         await _sem.WaitAsync(stoppingToken);
+
+                        // Capture loop variable
+                        var file = f;
+
+                        // Start work without passing the stopping token into Task.Run to avoid
+                        // TaskCanceledException bubbling up from the runtime; handle cancellation inside.
                         tasks.Add(Task.Run(async () =>
                         {
                             try
                             {
-                                _logger.LogInformation("Re-extracting metadata for file id={Id} path={Path}", f.Id, f.Path);
-                                var meta = await metadataService.ExtractFileMetadataAsync(f.Path ?? string.Empty);
+                                _logger.LogInformation("Re-extracting metadata for file id={Id} path={Path}", file.Id, file.Path);
+
+                                // Bail early if cancellation requested
+                                if (stoppingToken.IsCancellationRequested)
+                                {
+                                    _logger.LogDebug("Cancellation requested before extracting metadata for file id={Id}", file.Id);
+                                    return;
+                                }
+
+                                var meta = await metadataService.ExtractFileMetadataAsync(file.Path ?? string.Empty);
                                 if (meta != null)
                                 {
-                                    var fi = new System.IO.FileInfo(f.Path ?? string.Empty);
-                                    f.Size = fi.Exists ? fi.Length : f.Size;
-                                    f.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : f.DurationSeconds;
-                                    f.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : f.Format;
-                                    f.Bitrate = meta.Bitrate != 0 ? meta.Bitrate : f.Bitrate;
-                                    f.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : f.SampleRate;
-                                    f.Channels = meta.Channels != 0 ? meta.Channels : f.Channels;
+                                    var fi = new System.IO.FileInfo(file.Path ?? string.Empty);
+                                    file.Size = fi.Exists ? fi.Length : file.Size;
+                                    file.DurationSeconds = meta.Duration.TotalSeconds != 0 ? meta.Duration.TotalSeconds : file.DurationSeconds;
+                                    file.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : file.Format;
+                                    file.Bitrate = meta.Bitrate != 0 ? meta.Bitrate : file.Bitrate;
+                                    file.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : file.SampleRate;
+                                    file.Channels = meta.Channels != 0 ? meta.Channels : file.Channels;
+
+                                    // Save changes; respect cancellation
                                     await db.SaveChangesAsync(stoppingToken);
-                                    _logger.LogInformation("Updated metadata for file id={Id}", f.Id);
+                                    _logger.LogInformation("Updated metadata for file id={Id}", file.Id);
                                 }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                // Cancellation requested - ignore and let the service shutdown gracefully
+                                _logger.LogDebug("Metadata rescan cancelled for file id={Id}", file.Id);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to rescan metadata for file id={Id} path={Path}", f.Id, f.Path);
+                                _logger.LogWarning(ex, "Failed to rescan metadata for file id={Id} path={Path}", file.Id, file.Path);
                             }
                             finally
                             {
                                 _sem.Release();
                             }
-                        }, stoppingToken));
+                        }));
                     }
 
                     await Task.WhenAll(tasks);

@@ -22,13 +22,11 @@ using Listenarr.Api.Models;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Cors;
 
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/audible")]
-    [EnableCors("AllowVueApp")]
     public class AudibleController : ControllerBase
     {
         private readonly IAudibleMetadataService _audibleMetadataService;

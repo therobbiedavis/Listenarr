@@ -6,7 +6,7 @@ import type { Download, QueueItem, Audiobook } from '@/types'
 // In DEV use localhost. In production prefer configured VITE_API_BASE_URL origin;
 // fall back to same-origin by using a relative '/api' which implies current host.
 const API_BASE_URL = import.meta.env.DEV
-  ? 'http://localhost:5146'
+  ? 'http://localhost:5000'
   : (import.meta.env.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL.replace('/api', '') : '')
 
 type DownloadUpdateCallback = (downloads: Download[]) => void
@@ -28,6 +28,7 @@ class SignalRService {
   private scanJobCallbacks: Set<ScanJobCallback> = new Set()
   private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
   private searchProgressCallbacks: Set<(payload: { message: string; asin?: string | null }) => void> = new Set()
+  private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
   private pingInterval: number | null = null
 
   async connect(): Promise<void> {
@@ -40,10 +41,23 @@ class SignalRService {
     
     try {
       // Using SignalR protocol over WebSocket
-      const hubUrl = `${wsUrl}/hubs/downloads`
-      
+      let hubUrl = `${wsUrl}/hubs/downloads`
+      try {
+        // Try to include API key as access_token if the startup config contains one
+        // This will allow the server-side ApiKeyMiddleware to accept the websocket handshake
+        const { getStartupConfigCached } = await import('./startupConfigCache')
+        const sc = await getStartupConfigCached(2000)
+        const apiKey = sc?.apiKey
+        if (apiKey) {
+          const sep = hubUrl.includes('?') ? '&' : '?'
+          hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(apiKey)}`
+        }
+      } catch (e) {
+        // ignore errors while reading startup config (log debug info)
+        try { console.debug('[SignalR] startupConfig read failed', e) } catch {}
+      }
+
       console.log('[SignalR] Connecting to:', hubUrl)
-      
       this.connection = new WebSocket(hubUrl)
       
       this.connection.onopen = () => {
@@ -171,6 +185,12 @@ class SignalRService {
           this.searchProgressCallbacks.forEach(cb => cb(payload))
         }
         break
+      case 'ToastMessage':
+        if (args && args[0]) {
+          const payload = args[0] as { level: string; title: string; message: string; timeoutMs?: number }
+          this.toastCallbacks.forEach(cb => cb(payload))
+        }
+        break
     }
   }
 
@@ -272,6 +292,12 @@ class SignalRService {
   onSearchProgress(callback: (payload: { message: string; asin?: string | null }) => void): () => void {
     this.searchProgressCallbacks.add(callback)
     return () => { this.searchProgressCallbacks.delete(callback) }
+  }
+
+  // Subscribe to server-sent toast messages
+  onToast(callback: (payload: { level: string; title: string; message: string; timeoutMs?: number }) => void): () => void {
+    this.toastCallbacks.add(callback)
+    return () => { this.toastCallbacks.delete(callback) }
   }
 
   // Subscribe to files removed notifications

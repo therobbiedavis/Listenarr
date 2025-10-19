@@ -233,6 +233,15 @@
                 >
                   <i class="ph ph-pencil"></i>
                 </button>
+                <button
+                  @click="testClient(client)"
+                  class="icon-button"
+                  title="Test"
+                  :disabled="testingClient === client.id"
+                >
+                  <i v-if="testingClient === client.id" class="ph ph-spinner ph-spin"></i>
+                  <i v-else class="ph ph-check-circle"></i>
+                </button>
                 <button 
                   @click="confirmDeleteClient(client)" 
                   class="icon-button danger"
@@ -264,7 +273,7 @@
               <div class="detail-row">
                 <i class="ph ph-folder"></i>
                 <span class="detail-label">Download Path:</span>
-                <span class="detail-value">{{ client.downloadPath }}</span>
+                <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
               </div>
               <div class="detail-row">
                 <i class="ph ph-check-circle"></i>
@@ -273,6 +282,80 @@
                   {{ client.isEnabled ? 'Enabled' : 'Disabled' }}
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Remote Path Mappings Section -->
+        <div class="section-header" style="margin-top: 2rem;">
+          <h3>Remote Path Mappings</h3>
+          <button @click="openMappingForm()" class="add-button">
+            <i class="ph ph-plus"></i>
+            Add Mapping
+          </button>
+        </div>
+
+        <div v-if="remotePathMappings.length === 0" class="empty-state">
+          <i class="ph ph-link-simple"></i>
+          <p>No remote path mappings configured. Add a mapping to translate client remote paths to local paths the server can access.</p>
+        </div>
+
+        <div v-else class="config-list">
+          <div v-for="mapping in remotePathMappings" :key="mapping.id" class="config-card">
+            <div class="config-info">
+              <h4>{{ mapping.name || mapping.remotePath }}</h4>
+              <div class="detail-row">
+                <i class="ph ph-browser"></i>
+                <span class="detail-label">Remote Path:</span>
+                <span class="detail-value">{{ mapping.remotePath }}</span>
+              </div>
+              <div class="detail-row">
+                <i class="ph ph-folder"></i>
+                <span class="detail-label">Local Path:</span>
+                <span class="detail-value">{{ mapping.localPath }}</span>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button @click="editMapping(mapping)" class="edit-button" title="Edit">
+                <i class="ph ph-pencil"></i>
+              </button>
+              <button @click="deleteMapping(mapping.id)" class="delete-button" title="Delete">
+                <i class="ph ph-trash"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Remote Path Mapping Modal -->
+        <div v-if="showMappingForm" class="modal-overlay" @click="closeMappingForm()">
+          <div class="modal-content" @click.stop>
+            <div class="modal-header">
+              <h3>{{ mappingToEdit ? 'Edit' : 'Add' }} Remote Path Mapping</h3>
+              <button @click="closeMappingForm()" class="modal-close"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label>Mapping Name (optional)</label>
+                <input v-model="mappingToEditData.name" type="text" placeholder="Friendly name for this mapping" />
+              </div>
+              <div class="form-group">
+                <label>Download Client</label>
+                <select v-model="mappingToEditData.downloadClientId">
+                  <option v-for="c in configStore.downloadClientConfigurations" :key="c.id" :value="c.id">{{ c.name }} ({{ c.type }})</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Remote Path (from client)</label>
+                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/path/to/complete/downloads" />
+              </div>
+              <div class="form-group">
+                <label>Local Path (server)</label>
+                <FolderBrowser v-model="mappingToEditData.localPath" placeholder="Select a local path..." />
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
+              <button @click="saveMapping()" class="save-button"><i class="ph ph-check"></i> Save</button>
             </div>
           </div>
         </div>
@@ -471,6 +554,15 @@
                 <code>{Quality}</code> - Audio quality
               </span>
             </div>
+
+            <div class="form-group">
+              <label>Completed File Action</label>
+              <select v-model="settings.completedFileAction">
+                <option value="Move">Move (default)</option>
+                <option value="Copy">Copy</option>
+              </select>
+              <span class="form-help">Choose whether completed downloads should be moved into the library output path or copied and left in the client's folder.</span>
+            </div>
           </div>
 
           <div class="form-section">
@@ -545,18 +637,18 @@
               <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
             </div>
 
-            <div class="form-group">
-              <label>Initial Admin Account</label>
+            <div v-if="authEnabled" class="form-group">
+              <label>Admin Account Management</label>
               <div class="admin-credentials">
-                <input v-model="settings.adminUsername" type="text" placeholder="Admin username (optional)" class="admin-input" />
+                <input v-model="settings.adminUsername" type="text" placeholder="Admin username" class="admin-input" />
                 <div class="password-field">
-                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="Admin password (optional)" class="admin-input password-input" />
+                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
                   <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
                     <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
                   </button>
                 </div>
               </div>
-              <span class="form-help">Optionally provide an initial admin username and password. When you save settings, the server will create the user if it doesn't exist or update the password if the user already exists.</span>
+              <span class="form-help">Manage the admin account. Enter a new password to update the admin user's password when you save settings. The username field shows the current admin username. This section is only available when authentication is enabled.</span>
             </div>
 
             <div class="form-group">
@@ -753,18 +845,18 @@ import { ref, onMounted, watch } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
-import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile } from '@/types'
+import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
 import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
-import { useNotification } from '@/composables/useNotification'
-import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile } from '@/services/api'
+import { useToast } from '@/services/toastService'
+import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile, getRemotePathMappings, createRemotePathMapping, updateRemotePathMapping, deleteRemotePathMapping, testDownloadClient as apiTestDownloadClient } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
-const { success, error: showError, info } = useNotification()
+const toast = useToast()
 const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general'>('indexers')
 const showApiForm = ref(false)
 const showClientForm = ref(false)
@@ -813,7 +905,7 @@ const regenerateApiKey = async () => {
       try {
         resp = await apiService.generateInitialApiKey()
         startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
-        info(resp.message || 'API key generated - copied to clipboard')
+        toast.info('API key', resp.message || 'API key generated - copied to clipboard')
         try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
         return
       } catch (initialErr) {
@@ -825,16 +917,16 @@ const regenerateApiKey = async () => {
     // Fall back to authenticated regeneration
     resp = await apiService.regenerateApiKey()
     startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
-    info('API key regenerated - copied to clipboard')
+    toast.info('API key', 'API key regenerated - copied to clipboard')
     try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
   } catch (err) {
     console.error('Failed to generate/regenerate API key', err)
     // If server returns 401/403, suggest logging in as admin
     const status = (err && typeof err === 'object' && err !== null && 'status' in err) ? (err as { status: number }).status : 0
     if (status === 401 || status === 403) {
-      showError('You must be logged in as an administrator to regenerate the API key. Please login and try again.')
+      toast.error('Permission denied', 'You must be logged in as an administrator to regenerate the API key. Please login and try again.')
     } else {
-      showError('Failed to generate/regenerate API key')
+      toast.error('API key failed', 'Failed to generate/regenerate API key')
     }
   } finally {
     loadingApiKey.value = false
@@ -843,11 +935,15 @@ const regenerateApiKey = async () => {
 const authEnabled = ref(false)
 const indexers = ref<Indexer[]>([])
 const qualityProfiles = ref<QualityProfile[]>([])
+const remotePathMappings = ref<RemotePathMapping[]>([])
 const testingIndexer = ref<number | null>(null)
+const testingClient = ref<string | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
+const showMappingForm = ref(false)
+const mappingToEdit = ref<RemotePathMapping | null>(null)
 
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
@@ -914,11 +1010,11 @@ const deleteApiConfig = async (id: string) => {
   if (confirm('Are you sure you want to delete this API configuration?')) {
     try {
       await configStore.deleteApiConfiguration(id)
-      success('API configuration deleted successfully')
+      toast.success('API', 'API configuration deleted successfully')
     } catch (error) {
       console.error('Failed to delete API configuration:', error)
       const errorMessage = formatApiError(error)
-      showError(errorMessage)
+      toast.error('API delete failed', errorMessage)
     }
   }
 }
@@ -933,15 +1029,41 @@ const executeDeleteClient = async (id?: string) => {
   const clientId = id || clientToDelete.value?.id
   if (!clientId) return
   
-  try {
+    try {
     await configStore.deleteDownloadClientConfiguration(clientId)
-    success('Download client deleted successfully')
+    toast.success('Download client', 'Download client deleted successfully')
   } catch (error) {
     console.error('Failed to delete download client:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Delete failed', errorMessage)
   } finally {
     clientToDelete.value = null
+  }
+}
+
+// Test a download client configuration (include credentials in payload)
+const testClient = async (client: DownloadClientConfiguration) => {
+  testingClient.value = client.id
+  try {
+    // Send full client config to server for testing (credentials included)
+    const result = await apiTestDownloadClient(client)
+    if (result && result.success) {
+      toast.success('Download client', result.message || 'Test succeeded')
+      // Update local list if server returned an updated client object
+      if (result.client) {
+        const idx = configStore.downloadClientConfigurations.findIndex(c => c.id === result.client!.id)
+        if (idx !== -1) configStore.downloadClientConfigurations[idx] = result.client as DownloadClientConfiguration
+      }
+    } else {
+      const message = (result && result.message) ? result.message : 'Test failed'
+      toast.error('Download client test failed', message)
+    }
+  } catch (err) {
+    console.error('Failed to test download client:', err)
+    const errorMessage = formatApiError(err)
+    toast.error('Download client test failed', errorMessage)
+  } finally {
+    testingClient.value = null
   }
 }
 
@@ -957,7 +1079,7 @@ const getClientTypeClass = (type: string): string => {
 
 const saveApiConfig = () => {
   // Placeholder for API config save
-  info('API configuration form would be implemented here')
+  toast.info('API', 'API configuration form would be implemented here')
   showApiForm.value = false
   editingApi.value = null
 }
@@ -966,18 +1088,33 @@ const saveSettings = async () => {
   if (!settings.value) return
   
   try {
-    await configStore.saveApplicationSettings(settings.value)
-    success('Settings saved successfully')
+    // Create a copy of settings, excluding empty admin fields
+    const settingsToSave = { ...settings.value }
+    
+    // Only include adminUsername if it's not empty
+    if (!settingsToSave.adminUsername || settingsToSave.adminUsername.trim() === '') {
+      delete settingsToSave.adminUsername
+    }
+    
+    // Only include adminPassword if it's not empty
+    if (!settingsToSave.adminPassword || settingsToSave.adminPassword.trim() === '') {
+      delete settingsToSave.adminPassword
+    }
+    
+  await configStore.saveApplicationSettings(settingsToSave)
+  toast.success('Settings', 'Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
       const original = startupConfig.value || {}
-      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'Enabled' : 'Disabled' }
-        try {
+      // Persist authenticationRequired as string 'true'/'false' so it's explicit and
+      // consistent with expectations from the UI (was previously 'Enabled'/'Disabled').
+      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'true' : 'false' }
+          try {
           await apiService.saveStartupConfig(newCfg)
-          success('Startup configuration saved (config.json)')
+          toast.success('Startup config', 'Startup configuration saved (config.json)')
         } catch {
           // If server can't persist startup config (e.g., permission denied), offer a fallback download of the config JSON
-          info('Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.')
+          toast.info('Startup config', 'Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.')
           try {
             const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
             const url = URL.createObjectURL(blob)
@@ -988,19 +1125,19 @@ const saveSettings = async () => {
             a.click()
             a.remove()
             URL.revokeObjectURL(url)
-            info('Download started. Save the file to the server config directory to persist the change.')
+            toast.info('Startup config', 'Download started. Save the file to the server config directory to persist the change.')
           } catch {
-            info('Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.')
+            toast.info('Startup config', 'Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.')
           }
         }
     } catch {
       // Not fatal - write may not be allowed in some deployments
-      info('Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
+      toast.info('Startup config', 'Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
     }
   } catch (error) {
     console.error('Failed to save settings:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Save failed', errorMessage)
   }
 }
 
@@ -1011,7 +1148,7 @@ const loadIndexers = async () => {
   } catch (error) {
     console.error('Failed to load indexers:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Load failed', errorMessage)
   }
 }
 
@@ -1022,11 +1159,11 @@ const toggleIndexerFunc = async (id: number) => {
     if (index !== -1) {
       indexers.value[index] = updatedIndexer
     }
-    success(`Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
+    toast.success('Indexer', `Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
   } catch (error) {
     console.error('Failed to toggle indexer:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Toggle failed', errorMessage)
   }
 }
 
@@ -1035,7 +1172,7 @@ const testIndexerFunc = async (id: number) => {
   try {
     const result = await apiTestIndexer(id)
     if (result.success) {
-      success(`Indexer tested successfully: ${result.message}`)
+      toast.success('Indexer test', `Indexer tested successfully: ${result.message}`)
       // Update the indexer with test results
       const index = indexers.value.findIndex(i => i.id === id)
       if (index !== -1) {
@@ -1043,7 +1180,7 @@ const testIndexerFunc = async (id: number) => {
       }
     } else {
       const errorMessage = formatApiError({ response: { data: result.error || result.message } })
-      showError(errorMessage)
+      toast.error('Indexer test failed', errorMessage)
       // Still update to show failed test status
       const index = indexers.value.findIndex(i => i.id === id)
       if (index !== -1) {
@@ -1053,7 +1190,7 @@ const testIndexerFunc = async (id: number) => {
   } catch (error) {
     console.error('Failed to test indexer:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Indexer test failed', errorMessage)
   } finally {
     testingIndexer.value = null
   }
@@ -1072,13 +1209,13 @@ const executeDeleteIndexer = async () => {
   if (!indexerToDelete.value) return
   
   try {
-    await deleteIndexer(indexerToDelete.value.id)
-    indexers.value = indexers.value.filter(i => i.id !== indexerToDelete.value!.id)
-    success('Indexer deleted successfully')
-  } catch (error) {
+  await deleteIndexer(indexerToDelete.value.id)
+  indexers.value = indexers.value.filter(i => i.id !== indexerToDelete.value!.id)
+  toast.success('Indexer', 'Indexer deleted successfully')
+    } catch (error) {
     console.error('Failed to delete indexer:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Delete failed', errorMessage)
   } finally {
     indexerToDelete.value = null
   }
@@ -1091,7 +1228,68 @@ const loadQualityProfiles = async () => {
   } catch (error) {
     console.error('Failed to load quality profiles:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Load failed', errorMessage)
+  }
+}
+
+// Remote Path Mappings state
+const mappingToEditData = ref<{ downloadClientId: string; remotePath: string; localPath: string; name?: string }>({ downloadClientId: '', remotePath: '', localPath: '', name: '' })
+
+// Remote Path Mappings functions
+const openMappingForm = (mapping?: RemotePathMapping) => {
+  mappingToEdit.value = mapping || null
+  if (mapping) {
+    mappingToEditData.value = { ...mapping }
+  } else {
+    mappingToEditData.value = { downloadClientId: configStore.downloadClientConfigurations[0]?.id || '', remotePath: '', localPath: '', name: '' }
+  }
+  showMappingForm.value = true
+}
+
+const closeMappingForm = () => {
+  showMappingForm.value = false
+  mappingToEdit.value = null
+  mappingToEditData.value = { downloadClientId: '', remotePath: '', localPath: '', name: '' }
+}
+
+const saveMapping = async () => {
+  try {
+    const payload: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'> = {
+      downloadClientId: mappingToEditData.value.downloadClientId || '',
+      remotePath: mappingToEditData.value.remotePath || '',
+      localPath: mappingToEditData.value.localPath || '',
+      name: mappingToEditData.value.name || ''
+    }
+
+      if (mappingToEdit.value && mappingToEdit.value.id) {
+      const updated = await updateRemotePathMapping(mappingToEdit.value.id, payload)
+      const idx = remotePathMappings.value.findIndex(m => m.id === updated.id)
+      if (idx !== -1) remotePathMappings.value[idx] = updated
+      toast.success('Remote path mapping', 'Remote path mapping updated')
+    } else {
+      const created = await createRemotePathMapping(payload)
+      remotePathMappings.value.push(created)
+      toast.success('Remote path mapping', 'Remote path mapping created')
+    }
+
+    closeMappingForm()
+  } catch (err) {
+    console.error('Failed to save mapping', err)
+    toast.error('Save failed', 'Failed to save mapping')
+  }
+}
+
+const editMapping = (mapping: RemotePathMapping) => openMappingForm(mapping)
+
+const deleteMapping = async (id: number) => {
+  if (!confirm('Delete this remote path mapping?')) return
+  try {
+    await deleteRemotePathMapping(id)
+    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== id)
+    toast.success('Remote path mapping', 'Remote path mapping deleted')
+  } catch (err) {
+    console.error('Failed to delete mapping', err)
+    toast.error('Delete failed', 'Failed to delete mapping')
   }
 }
 
@@ -1101,7 +1299,7 @@ const loadAdminUsers = async () => {
   } catch (error) {
     console.error('Failed to load admin users:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Load failed', errorMessage)
   }
 }
 
@@ -1125,11 +1323,11 @@ const executeDeleteProfile = async () => {
   try {
     await deleteQualityProfile(profileToDelete.value.id!)
     qualityProfiles.value = qualityProfiles.value.filter(p => p.id !== profileToDelete.value!.id)
-    success('Quality profile deleted successfully')
+    toast.success('Quality profile', 'Quality profile deleted successfully')
   } catch (error: unknown) {
     console.error('Failed to delete quality profile:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Delete failed', errorMessage)
   } finally {
     profileToDelete.value = null
   }
@@ -1137,26 +1335,26 @@ const executeDeleteProfile = async () => {
 
 const saveQualityProfile = async (profile: QualityProfile) => {
   try {
-    if (profile.id) {
+      if (profile.id) {
       // Update existing profile
       const updated = await updateQualityProfile(profile.id, profile)
       const index = qualityProfiles.value.findIndex(p => p.id === profile.id)
       if (index !== -1) {
         qualityProfiles.value[index] = updated
       }
-      success('Quality profile updated successfully')
+      toast.success('Quality profile', 'Quality profile updated successfully')
     } else {
       // Create new profile
       const created = await createQualityProfile(profile)
       qualityProfiles.value.push(created)
-      success('Quality profile created successfully')
+      toast.success('Quality profile', 'Quality profile created successfully')
     }
     showQualityProfileForm.value = false
     editingQualityProfile.value = null
-  } catch (error: unknown) {
+    } catch (error: unknown) {
     console.error('Failed to save quality profile:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Save failed', errorMessage)
   }
 }
 
@@ -1172,11 +1370,11 @@ const setDefaultProfile = async (profile: QualityProfile) => {
       isDefault: p.id === profile.id
     }))
     
-    success(`${profile.name} set as default quality profile`)
+    toast.success('Quality profile', `${profile.name} set as default quality profile`)
   } catch (error: unknown) {
     console.error('Failed to set default profile:', error)
     const errorMessage = formatApiError(error)
-    showError(errorMessage)
+    toast.error('Set default failed', errorMessage)
   }
 }
 
@@ -1211,12 +1409,18 @@ onMounted(async () => {
     configStore.loadApiConfigurations(),
     configStore.loadDownloadClientConfigurations(),
     configStore.loadApplicationSettings(),
+    // load remote path mappings
+    (async () => { try { remotePathMappings.value = await getRemotePathMappings() } catch (e) { console.debug('Failed to load remote path mappings', e) } })(),
     loadIndexers(),
     loadQualityProfiles(),
     loadAdminUsers()
   ])
   
   settings.value = configStore.applicationSettings
+  // Ensure completedFileAction has a sensible default
+  if (settings.value && !settings.value.completedFileAction) {
+    settings.value.completedFileAction = 'Move'
+  }
   // Load startup config (optional) to determine AuthenticationRequired
   try {
     startupConfig.value = await apiService.getStartupConfig()
@@ -1569,7 +1773,8 @@ onMounted(async () => {
 }
 
 .form-group input[type="text"],
-.form-group input[type="number"] {
+.form-group input[type="number"],
+.form-group select {
   padding: 0.75rem;
   background-color: #2a2a2a;
   border: 1px solid #555;
@@ -1580,7 +1785,8 @@ onMounted(async () => {
 }
 
 .form-group input[type="text"]:focus,
-.form-group input[type="number"]:focus {
+.form-group input[type="number"]:focus,
+.form-group select:focus {
   outline: none;
   border-color: #007acc;
   box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);

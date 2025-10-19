@@ -28,6 +28,7 @@ using System;
 using System.Text.Json;
 using System.Reflection;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace Listenarr.Api.Controllers
 {
@@ -40,7 +41,8 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<LibraryController> _logger;
         private readonly ListenArrDbContext _dbContext;
         private readonly IServiceProvider _serviceProvider;
-            private readonly IScanQueueService? _scanQueueService;
+        private readonly IScanQueueService? _scanQueueService;
+        private readonly IFileNamingService _fileNamingService;
         
         public LibraryController(
             IAudiobookRepository repo, 
@@ -48,6 +50,7 @@ namespace Listenarr.Api.Controllers
             ILogger<LibraryController> logger,
             ListenArrDbContext dbContext,
             IServiceProvider serviceProvider,
+            IFileNamingService fileNamingService,
             IScanQueueService? scanQueueService = null)
         {
             _repo = repo;
@@ -55,6 +58,7 @@ namespace Listenarr.Api.Controllers
             _logger = logger;
             _dbContext = dbContext;
             _serviceProvider = serviceProvider;
+            _fileNamingService = fileNamingService;
             _scanQueueService = scanQueueService;
         }
 
@@ -67,6 +71,25 @@ namespace Listenarr.Api.Controllers
         public async Task<IActionResult> AddToLibrary([FromBody] AddToLibraryRequest request)
         {
             var metadata = request.Metadata;
+            
+            _logger.LogInformation("AddToLibrary received metadata: Title={Title}, Asin={Asin}, PublishYear={PublishYear}, Authors={Authors}, Series={Series}",
+                metadata.Title, metadata.Asin, metadata.PublishYear, 
+                metadata.Authors != null ? string.Join(", ", metadata.Authors) : "null",
+                metadata.Series);
+            
+            // If metadata doesn't have PublishYear but we have search result with publishedDate, try to extract year
+            if (string.IsNullOrWhiteSpace(metadata.PublishYear) && request.SearchResult != null)
+            {
+                try
+                {
+                    metadata.PublishYear = request.SearchResult.PublishedDate.Year.ToString();
+                    _logger.LogInformation("Extracted publish year from search result publishedDate: {Year}", metadata.PublishYear);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to extract publish year from search result publishedDate");
+                }
+            }
             
             // Check if audiobook already exists in library
             if (!string.IsNullOrEmpty(metadata.Asin))
@@ -136,6 +159,9 @@ namespace Listenarr.Api.Controllers
                 Monitored = request.Monitored  // Use custom monitored setting
             };
             
+            _logger.LogInformation("Created Audiobook entity: Title={Title}, Asin={Asin}, PublishYear={PublishYear}",
+                audiobook.Title, audiobook.Asin, audiobook.PublishYear);
+            
             // Assign quality profile - use custom if provided, otherwise default
             if (request.QualityProfileId.HasValue)
             {
@@ -164,6 +190,57 @@ namespace Listenarr.Api.Controllers
             }
             
             await _repo.AddAsync(audiobook);
+            
+            // Create the expected directory structure for the audiobook (but don't set FilePath)
+            // FilePath should only be set when actual files are found during scanning
+            try
+            {
+                using (var scope = _serviceProvider.CreateScope())
+                {
+                    var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                    var settings = await configService.GetApplicationSettingsAsync();
+                    
+                    if (!string.IsNullOrEmpty(settings.OutputPath))
+                    {
+                        // Compute expected base directory from root + file naming pattern
+                        var directoryPath = ComputeAudiobookBaseDirectoryFromPattern(audiobook, settings.OutputPath, settings.FileNamingPattern);
+
+                        // Create the directory if it doesn't exist
+                        if (!Directory.Exists(directoryPath))
+                        {
+                            Directory.CreateDirectory(directoryPath);
+                            _logger.LogInformation("Created directory for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Directory already exists for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                        }
+
+                        // Persist a sensible BasePath for this audiobook so the UI can display
+                        // the intended library root right away (even before any files exist).
+                        try
+                        {
+                            audiobook.BasePath = directoryPath;
+                            _dbContext.Audiobooks.Update(audiobook);
+                            await _dbContext.SaveChangesAsync();
+                            _logger.LogInformation("Set BasePath for new audiobook '{Title}' using naming pattern: {BasePath}", audiobook.Title, directoryPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to persist BasePath for new audiobook '{Title}'", audiobook.Title);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No output path configured, skipping directory creation for new audiobook '{Title}'", audiobook.Title);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create directory for new audiobook '{Title}'", audiobook.Title);
+                // Continue with the rest of the process even if directory creation fails
+            }
             
             // Log history entry for the added audiobook
             var historyEntry = new History
@@ -198,17 +275,29 @@ namespace Listenarr.Api.Controllers
             {
                 id = a.Id,
                 title = a.Title,
+                subtitle = a.Subtitle,
                 authors = a.Authors,
+                publishYear = a.PublishYear,
+                series = a.Series,
+                seriesNumber = a.SeriesNumber,
                 description = a.Description,
+                genres = a.Genres,
+                tags = a.Tags,
+                narrators = a.Narrators,
+                isbn = a.Isbn,
+                asin = a.Asin,
+                publisher = a.Publisher,
+                language = a.Language,
+                runtime = a.Runtime,
+                version = a.Version,
+                @explicit = a.Explicit,
+                abridged = a.Abridged,
                 imageUrl = a.ImageUrl,
                 filePath = a.FilePath,
                 fileSize = a.FileSize,
-                runtime = a.Runtime,
+                basePath = a.BasePath,
                 monitored = a.Monitored,
                 quality = a.Quality,
-                series = a.Series,
-                seriesNumber = a.SeriesNumber,
-                tags = a.Tags,
                 files = a.Files?.Select(f => new {
                     id = f.Id,
                     path = f.Path,
@@ -269,6 +358,7 @@ namespace Listenarr.Api.Controllers
                 imageUrl = updated.ImageUrl,
                 filePath = updated.FilePath,
                 fileSize = updated.FileSize,
+                basePath = updated.BasePath,
                 runtime = updated.Runtime,
                 monitored = updated.Monitored,
                 quality = updated.Quality,
@@ -384,172 +474,6 @@ namespace Listenarr.Api.Controllers
             return StatusCode(500, new { message = "Failed to delete audiobook" });
         }
 
-        [HttpPost("delete-bulk")]
-        public async Task<IActionResult> DeleteBulk([FromBody] BulkDeleteRequest request)
-        {
-            if (request.Ids == null || !request.Ids.Any())
-            {
-                return BadRequest(new { message = "No IDs provided for deletion" });
-            }
-
-            // Get audiobooks to delete (for image cleanup)
-            var audiobooks = new List<Audiobook>();
-            foreach (var id in request.Ids)
-            {
-                var audiobook = await _repo.GetByIdAsync(id);
-                if (audiobook != null)
-                {
-                    audiobooks.Add(audiobook);
-                }
-            }
-
-            // Delete associated images from cache
-            var deletedImagesCount = 0;
-            foreach (var audiobook in audiobooks)
-            {
-                if (!string.IsNullOrEmpty(audiobook.Asin))
-                {
-                    try
-                    {
-                        var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
-                        if (imagePath != null)
-                        {
-                            var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
-                            if (System.IO.File.Exists(fullPath))
-                            {
-                                System.IO.File.Delete(fullPath);
-                                deletedImagesCount++;
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
-                        // Continue with deletion even if image cleanup fails
-                    }
-                }
-            }
-
-            var deletedCount = await _repo.DeleteBulkAsync(request.Ids);
-            
-            _logger.LogInformation("Bulk delete: {DeletedCount} audiobooks and {ImageCount} images deleted", deletedCount, deletedImagesCount);
-            
-            return Ok(new 
-            { 
-                message = $"Successfully deleted {deletedCount} audiobook(s)", 
-                deletedCount,
-                deletedImagesCount,
-                ids = request.Ids 
-            });
-        }
-
-    [HttpPost("bulk-update")]
-    public async Task<IActionResult> BulkUpdate([FromBody] BulkUpdateRequest request)
-        {
-            if (request.Ids == null || !request.Ids.Any())
-            {
-                return BadRequest(new { message = "No IDs provided for update" });
-            }
-            if (request.Updates == null || !request.Updates.Any())
-            {
-                return BadRequest(new { message = "No updates provided" });
-            }
-
-            var results = new List<object>();
-            foreach (var id in request.Ids)
-            {
-                var audiobook = await _repo.GetByIdAsync(id);
-                if (audiobook == null)
-                {
-                    results.Add(new { id, success = false, error = "Audiobook not found" });
-                    continue;
-                }
-
-                bool anySuccess = false;
-                var errors = new List<string>();
-                foreach (var kvp in request.Updates)
-                {
-                    var prop = typeof(Audiobook).GetProperty(kvp.Key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    if (prop == null || !prop.CanWrite)
-                    {
-                        errors.Add($"Property '{kvp.Key}' not found or not writable");
-                        continue;
-                    }
-                    try
-                    {
-                        var converted = ConvertUpdateValue(kvp.Value, prop.PropertyType);
-                        prop.SetValue(audiobook, converted);
-                        anySuccess = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        var incomingType = kvp.Value?.GetType().FullName ?? "null";
-                        var raw = kvp.Value is JsonElement j ? j.GetRawText() : kvp.Value?.ToString();
-                        var msg = $"Failed to set '{kvp.Key}': {ex.Message} (incomingType={incomingType}, raw={raw})";
-                        errors.Add(msg);
-                        _logger.LogError(ex, "Bulk update conversion error for property {Property} on audiobook {Id}: {Msg}", kvp.Key, id, msg);
-                    }
-                }
-                if (anySuccess)
-                {
-                    await _repo.UpdateAsync(audiobook);
-                }
-                results.Add(new { id, success = anySuccess, errors });
-            }
-            return Ok(new { message = "Bulk update completed", results });
-        }
-
-        [HttpPost("{id}/search")]
-        public async Task<IActionResult> TriggerAutomaticSearch(int id)
-        {
-            var audiobook = await _repo.GetByIdAsync(id);
-            if (audiobook == null)
-            {
-                return NotFound(new { message = "Audiobook not found" });
-            }
-
-            if (!audiobook.Monitored)
-            {
-                return BadRequest(new { message = "Audiobook is not monitored" });
-            }
-
-            if (audiobook.QualityProfile == null)
-            {
-                return BadRequest(new { message = "Audiobook has no quality profile assigned" });
-            }
-
-            try
-            {
-                // Get required services
-                using var scope = _serviceProvider.CreateScope();
-                var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
-                var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
-                var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-
-                // Process the audiobook using the same logic as AutomaticSearchService
-                var downloadsQueued = await ProcessAudiobookForSearchAsync(
-                    audiobook, searchService, qualityProfileService, downloadService, _dbContext);
-
-                // Update last search time
-                audiobook.LastSearchTime = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogInformation("Manual search triggered for audiobook '{Title}' - queued {QueuedCount} downloads",
-                    audiobook.Title, downloadsQueued);
-
-                return Ok(new { 
-                    message = $"Search completed for audiobook '{audiobook.Title}'", 
-                    downloadsQueued,
-                    audiobookId = id
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during manual search for audiobook '{Title}' (ID: {Id})", audiobook.Title, id);
-                return StatusCode(500, new { message = "Error during search", error = ex.Message });
-            }
-        }
-
         /// <summary>
         /// Scan the filesystem for files belonging to this audiobook, extract metadata (ffprobe) and persist AudiobookFile records.
         /// Optional body: { path: "C:\\some\\folder" } to scan a specific folder instead of the configured output path.
@@ -590,19 +514,31 @@ namespace Listenarr.Api.Controllers
                 }
             }
 
-            // Determine scan root: request.Path or application settings output path
+            // Determine scan root: request.Path, audiobook.BasePath, or application settings output path
             string? scanRoot = null;
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                 var settings = await configService.GetApplicationSettingsAsync();
-                scanRoot = request?.Path ?? settings.OutputPath;
+                // If audiobook has a BasePath configured, always scan that path for safety
+                // Do not fall back to the global output path when a BasePath is present.
+                if (!string.IsNullOrEmpty(audiobook.BasePath))
+                {
+                    scanRoot = audiobook.BasePath;
+                    _logger.LogDebug("Audiobook has BasePath; using it as scan root: {ScanRoot}", scanRoot);
+                }
+                else
+                {
+                    // No BasePath yet - allow explicit request path, otherwise fall back to configured output path
+                    scanRoot = request?.Path ?? settings.OutputPath;
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read application settings for scan; falling back to request path");
-                scanRoot = request?.Path;
+                _logger.LogWarning(ex, "Failed to read application settings for scan; falling back to request path or basePath");
+                // If BasePath exists prefer it, otherwise use request path (settings not available here)
+                scanRoot = !string.IsNullOrEmpty(audiobook.BasePath) ? audiobook.BasePath : request?.Path;
             }
 
             if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
@@ -691,6 +627,10 @@ namespace Listenarr.Api.Controllers
                 return Ok(new { message = "No files found during scan", scannedPath = scanRoot, found = 0 });
             }
 
+            // Calculate base path for the audiobook files
+            var basePath = CalculateBasePath(foundFiles);
+            _logger.LogInformation("Calculated base path for audiobook '{Title}': {BasePath}", audiobook.Title, basePath);
+
             var created = new List<AudiobookFile>();
 
             // Extract metadata and persist
@@ -703,10 +643,13 @@ namespace Listenarr.Api.Controllers
                 {
                     try
                     {
-                        var existing = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == audiobook.Id && f.Path == filePath);
+                        // Calculate relative path from base path
+                        var relativePath = Path.GetRelativePath(basePath, filePath);
+                        
+                        var existing = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == audiobook.Id && f.Path == relativePath);
                         if (existing != null)
                         {
-                            _logger.LogInformation("Skipping existing AudiobookFile for audiobook {AudiobookId}: {Path}", audiobook.Id, filePath);
+                            _logger.LogInformation("Skipping existing AudiobookFile for audiobook {AudiobookId}: {Path}", audiobook.Id, relativePath);
                             continue;
                         }
 
@@ -724,7 +667,7 @@ namespace Listenarr.Api.Controllers
                         var fileRecord = new AudiobookFile
                         {
                             AudiobookId = audiobook.Id,
-                            Path = filePath,
+                            Path = relativePath, // Store relative path
                             Size = fi.Length,
                             Source = "scan",
                             CreatedAt = DateTime.UtcNow,
@@ -744,7 +687,12 @@ namespace Listenarr.Api.Controllers
                     }
                 }
 
-                await db.SaveChangesAsync();
+                // Update audiobook base path only when we have a non-empty value.
+                if (!string.IsNullOrEmpty(basePath))
+                {
+                    audiobook.BasePath = basePath;
+                    await db.SaveChangesAsync();
+                }
 
                 // Add history entries for newly scanned files
                 foreach (var fileRecord in created)
@@ -768,6 +716,132 @@ namespace Listenarr.Api.Controllers
                     db.History.Add(historyEntry);
                 }
                 await db.SaveChangesAsync();
+
+                // Remove AudiobookFile DB rows for files that no longer exist on disk
+                try
+                {
+                    var existingFiles = await db.AudiobookFiles
+                        .Where(f => f.AudiobookId == audiobook.Id)
+                        .ToListAsync();
+
+                    var foundSet = new HashSet<string>(foundFiles.Select(f => Path.GetRelativePath(basePath, f)), StringComparer.OrdinalIgnoreCase);
+                    var toRemove = existingFiles
+                        .Where(f => f.Path != null && !foundSet.Contains(f.Path))
+                        .ToList();
+
+                    List<object> removedFilesDto = new();
+                    if (toRemove.Count > 0)
+                    {
+                        foreach (var rem in toRemove)
+                        {
+                            try
+                            {
+                                removedFilesDto.Add(new { id = rem.Id, path = rem.Path });
+                                db.AudiobookFiles.Remove(rem);
+                                _logger.LogInformation("Removing missing AudiobookFile DB row Id={Id} Path={Path}", rem.Id, rem.Path);
+
+                                // Add history entry for removed file
+                                var historyEntry = new History
+                                {
+                                    AudiobookId = audiobook.Id,
+                                    AudiobookTitle = audiobook.Title ?? "Unknown",
+                                    EventType = "File Removed",
+                                    Message = $"File removed (no longer exists): {Path.GetFileName(rem.Path)}",
+                                    Source = "Scan",
+                                    Data = JsonSerializer.Serialize(new
+                                    {
+                                        FilePath = rem.Path,
+                                        FileSize = rem.Size,
+                                        Format = rem.Format,
+                                        Source = rem.Source
+                                    }),
+                                    Timestamp = DateTime.UtcNow
+                                };
+                                db.History.Add(historyEntry);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to remove AudiobookFile Id={Id} Path={Path}", rem.Id, rem.Path);
+                            }
+                        }
+
+                        await db.SaveChangesAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to reconcile audiobook files after scan for audiobook {AudiobookId}", audiobook.Id);
+                }
+
+                // Handle legacy filePath field migration
+                try
+                {
+                    var needsUpdate = false;
+                    if (!string.IsNullOrEmpty(audiobook.FilePath))
+                    {
+                        // Check if the legacy filePath exists
+                        if (System.IO.File.Exists(audiobook.FilePath))
+                        {
+                            // File exists - check if we already have an AudiobookFile record for it
+                            var existingFileRecord = await db.AudiobookFiles
+                                .FirstOrDefaultAsync(f => f.AudiobookId == audiobook.Id && f.Path == audiobook.FilePath);
+
+                            if (existingFileRecord == null)
+                            {
+                                // Create AudiobookFile record for the legacy filePath
+                                try
+                                {
+                                    using var afScope = _serviceProvider.CreateScope();
+                                    var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
+                                    var migrated = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, audiobook.FilePath, "scan-legacy");
+                                    if (migrated)
+                                    {
+                                        _logger.LogInformation("Migrated legacy filePath to AudiobookFile record for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
+                                        created.Add(new AudiobookFile { Path = audiobook.FilePath }); // Add to created list for response
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to migrate legacy filePath for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // File doesn't exist - clear the legacy filePath and related fields
+                            audiobook.FilePath = null;
+                            audiobook.FileSize = null;
+                            needsUpdate = true;
+                            _logger.LogInformation("Cleared missing legacy filePath for audiobook {AudiobookId}: {Path}", audiobook.Id, audiobook.FilePath);
+
+                            // Add history entry for cleared filePath
+                            var historyEntry = new History
+                            {
+                                AudiobookId = audiobook.Id,
+                                AudiobookTitle = audiobook.Title ?? "Unknown",
+                                EventType = "File Removed",
+                                Message = $"Legacy file path cleared (file no longer exists)",
+                                Source = "Scan",
+                                Data = JsonSerializer.Serialize(new
+                                {
+                                    FilePath = audiobook.FilePath,
+                                    Source = "legacy-migration"
+                                }),
+                                Timestamp = DateTime.UtcNow
+                            };
+                            db.History.Add(historyEntry);
+                        }
+                    }
+
+                    if (needsUpdate)
+                    {
+                        await db.SaveChangesAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to handle legacy filePath migration for audiobook {AudiobookId}", audiobook.Id);
+                }
 
                 // Reload audiobook with files to return
                 var updated = await db.Audiobooks.Include(a => a.Files).FirstOrDefaultAsync(a => a.Id == audiobook.Id);
@@ -1260,6 +1334,154 @@ namespace Listenarr.Api.Controllers
             return value;
         }
 
+        private string ComputeAudiobookBaseDirectoryFromPattern(Audiobook audiobook, string rootPath, string fileNamingPattern)
+        {
+            // Create a directory pattern that includes Author, Series (if present), Title, and Year
+            // This provides a consistent folder structure for audiobooks
+            string directoryPattern;
+            if (!string.IsNullOrWhiteSpace(audiobook.Series))
+            {
+                // Series book: {Author}/{Series}/{Title} ({Year})
+                directoryPattern = "{Author}/{Series}/{Title} ({Year})";
+            }
+            else
+            {
+                // Non-series book: {Author}/{Title} ({Year})
+                directoryPattern = "{Author}/{Title} ({Year})";
+            }
+
+            // Build variables for naming pattern using audiobook-level metadata
+            var variables = new Dictionary<string, object>
+            {
+                { "Author", SanitizeDirectoryName(audiobook.Authors?.FirstOrDefault() ?? "Unknown Author") },
+                { "Series", SanitizeDirectoryName(!string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series! : string.Empty) },
+                { "Title", SanitizeDirectoryName(audiobook.Title ?? "Unknown Title") },
+                { "SeriesNumber", audiobook.SeriesNumber ?? string.Empty },
+                { "Year", audiobook.PublishYear ?? string.Empty },
+                { "Quality", string.Empty },
+                { "DiskNumber", string.Empty },
+                { "ChapterNumber", string.Empty }
+            };
+
+            // Apply the directory pattern to get the relative directory path
+            var relative = _fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
+
+            // Combine with root path
+            var combined = string.IsNullOrWhiteSpace(rootPath) ? relative : Path.Combine(rootPath, relative);
+
+            return combined;
+        }
+        
+        private string CalculateBasePath(List<string> filePaths)
+        {
+            if (!filePaths.Any())
+                return string.Empty;
+
+            // Convert all paths to directory paths (get parent directory for each file)
+            var directories = filePaths.Select(p => Path.GetDirectoryName(p) ?? p).Distinct().ToList();
+
+            if (directories.Count == 1)
+            {
+                // All files are in the same directory
+                return directories[0];
+            }
+
+            // Find the common ancestor directory where there are no longer <=1 things stored
+            var commonPath = GetCommonPath(directories);
+            
+            // Walk up the directory tree until we find a directory that has more than 1 subdirectory or file
+            var currentPath = commonPath;
+            while (!string.IsNullOrEmpty(currentPath))
+            {
+                try
+                {
+                    var parent = Directory.GetParent(currentPath)?.FullName;
+                    if (string.IsNullOrEmpty(parent))
+                        break;
+
+                    // Count subdirectories and files in parent
+                    var subDirs = Directory.GetDirectories(parent).Length;
+                    var files = Directory.GetFiles(parent).Length;
+                    
+                    // If parent has more than 1 thing (subdirs + files), we've found our base path
+                    if (subDirs + files > 1)
+                    {
+                        return currentPath;
+                    }
+
+                    currentPath = parent;
+                }
+                catch
+                {
+                    // If we can't access the directory, stop here
+                    break;
+                }
+            }
+
+            return commonPath;
+        }
+
+        private string GetCommonPath(List<string> paths)
+        {
+            if (!paths.Any())
+                return string.Empty;
+
+            var firstPath = paths[0];
+            var commonPath = firstPath;
+
+            foreach (var path in paths.Skip(1))
+            {
+                var minLength = Math.Min(commonPath.Length, path.Length);
+                var commonLength = 0;
+
+                for (int i = 0; i < minLength; i++)
+                {
+                    if (commonPath[i] == path[i])
+                        commonLength++;
+                    else
+                        break;
+                }
+
+                // Ensure we don't break in the middle of a directory name
+                if (commonLength < commonPath.Length)
+                {
+                    var lastSep = commonPath.LastIndexOf(Path.DirectorySeparatorChar, commonLength - 1);
+                    if (lastSep >= 0)
+                        commonLength = lastSep + 1;
+                    else
+                        commonLength = 0;
+                }
+
+                commonPath = commonPath.Substring(0, commonLength);
+                
+                if (string.IsNullOrEmpty(commonPath))
+                    break;
+            }
+
+            // Ensure it's a valid directory path
+            if (!string.IsNullOrEmpty(commonPath) && !Directory.Exists(commonPath))
+            {
+                var parent = Directory.GetParent(commonPath)?.FullName;
+                return parent ?? commonPath;
+            }
+
+            return commonPath;
+        }
+
+        private string SanitizeDirectoryName(string name)
+        {
+            // Remove or replace characters that are invalid in directory names
+            var invalidChars = Path.GetInvalidFileNameChars();
+            foreach (var c in invalidChars)
+            {
+                name = name.Replace(c, '_');
+            }
+            
+            // Also replace some additional characters that might cause issues
+            name = name.Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
+            
+            // Trim whitespace and return
+            return name.Trim();
         }
 
     public class BulkDeleteRequest
@@ -1279,5 +1501,7 @@ namespace Listenarr.Api.Controllers
         public bool Monitored { get; set; } = true;
         public int? QualityProfileId { get; set; }
         public bool AutoSearch { get; set; } = false;
+        public SearchResult? SearchResult { get; set; }
     }
+}
 }

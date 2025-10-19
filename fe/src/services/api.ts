@@ -21,7 +21,8 @@ import type {
   SearchSortDirection,
   AudibleBookMetadata
 } from '@/types'
-import { getStartupConfigCached } from './startupConfigCache'
+import { getStartupConfigCached, getCachedStartupConfig } from './startupConfigCache'
+import { sessionTokenManager } from '@/utils/sessionToken'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
 // In production, prefer a configured VITE_API_BASE_URL but fall back to a relative '/api'
@@ -62,6 +63,13 @@ class ApiService {
         config.headers = { ...(hdrs || {}), 'X-Api-Key': apiKey }
       }
     } catch {}
+
+    // Attach session token if available
+    const sessionToken = sessionTokenManager.getToken()
+    if (sessionToken) {
+      const hdrs = config.headers as Record<string, string> | undefined
+      config.headers = { ...(hdrs || {}), 'Authorization': `Bearer ${sessionToken}` }
+    }
 
     // Auto-attach antiforgery token for unsafe HTTP methods when not already provided.
     try {
@@ -295,6 +303,14 @@ class ApiService {
     return this.request<boolean>(`/configuration/download-clients/${id}`, { method: 'DELETE' })
   }
 
+  async testDownloadClient(config: DownloadClientConfiguration): Promise<{ success: boolean; message: string; client?: DownloadClientConfiguration }>
+  {
+    return this.request<{ success: boolean; message: string; client?: DownloadClientConfiguration }>('/configuration/download-clients/test', {
+      method: 'POST',
+      body: JSON.stringify(config)
+    })
+  }
+
   // Application Settings
   async getApplicationSettings(): Promise<ApplicationSettings> {
     return this.request<ApplicationSettings>('/configuration/settings')
@@ -354,12 +370,13 @@ class ApiService {
     return this.request<Audiobook[]>('/library')
   }
 
-  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean }): Promise<{ message: string; audiobook: Audiobook }> {
+  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean; searchResult?: SearchResult }): Promise<{ message: string; audiobook: Audiobook }> {
     const request = {
       metadata,
       monitored: options?.monitored ?? true,
       qualityProfileId: options?.qualityProfileId,
-      autoSearch: options?.autoSearch ?? false
+      autoSearch: options?.autoSearch ?? false,
+      searchResult: options?.searchResult
     }
     return this.request<{ message: string; audiobook: Audiobook }>('/library/add', {
       method: 'POST',
@@ -429,6 +446,19 @@ class ApiService {
     return this.request(`/filesystem/validate?path=${encodeURIComponent(path)}`)
   }
 
+  // Manual import preview / start
+  async previewManualImport(path: string): Promise<{ items: Array<any> }> {
+    const params = path ? `?path=${encodeURIComponent(path)}` : ''
+    return this.request(`/library/manual-import/preview${params}`)
+  }
+
+  async startManualImport(request: { path: string; mode: 'automatic' | 'interactive'; items?: Array<any>; inputMode?: 'move' | 'copy' }): Promise<{ importedCount: number }> {
+    return this.request<{ importedCount: number }>(`/library/manual-import`, {
+      method: 'POST',
+      body: JSON.stringify(request)
+    })
+  }
+
   // Helper to convert relative image URLs to absolute
   getImageUrl(imageUrl: string | undefined): string {
     if (!imageUrl) return ''
@@ -436,8 +466,22 @@ class ApiService {
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       return imageUrl
     }
-    // Convert relative URL to absolute
-    return `${BACKEND_BASE_URL}${imageUrl}`
+      // Convert relative URL to absolute and append access_token if an API key is present
+      const absolute = `${BACKEND_BASE_URL}${imageUrl}`
+
+      // Use synchronous cached startup config getter to avoid async/await here
+      try {
+        const cfg = getCachedStartupConfig()
+        const apiKey = cfg?.apiKey
+        if (apiKey) {
+          const sep = absolute.includes('?') ? '&' : '?'
+          return `${absolute}${sep}access_token=${encodeURIComponent(apiKey)}`
+        }
+      } catch {
+        // ignore and return plain absolute URL
+      }
+
+      return absolute
   }
 
   // History API
@@ -662,7 +706,7 @@ class ApiService {
     }
   }
 
-  // Account login - expects server to set auth cookie
+  // Account login - uses session-based authentication
   async login(username: string, password: string, rememberMe: boolean, csrfToken?: string): Promise<void> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (csrfToken) headers['X-XSRF-TOKEN'] = csrfToken
@@ -695,6 +739,19 @@ class ApiService {
       (err as ErrorWithStatus).status = resp.status
       throw err
     }
+
+    // Handle session token response (only expected when authentication is required)
+    const responseData = await resp.json()
+    if (responseData.sessionToken) {
+      sessionTokenManager.setToken(responseData.sessionToken)
+      console.log('[ApiService] Session token received and stored')
+    } else if (responseData.authType === 'none') {
+      // Authentication not required - clear any existing token
+      sessionTokenManager.clearToken()
+      console.log('[ApiService] Authentication not required - no session token needed')
+    } else {
+      throw new Error('Login succeeded but expected session token or auth type not received')
+    }
   }
 
   // Current authenticated user (me)
@@ -703,7 +760,18 @@ class ApiService {
   }
 
   async logout(): Promise<void> {
-    await this.request<void>('/account/logout', { method: 'POST' })
+    console.log('[ApiService] Making logout request to /account/logout')
+    try {
+      await this.request<void>('/account/logout', { method: 'POST' })
+      console.log('[ApiService] Logout request completed successfully')
+    } catch (error) {
+      console.error('[ApiService] Logout request failed:', error)
+      throw error
+    } finally {
+      // Always clear session token on logout, regardless of API call success
+      sessionTokenManager.clearToken()
+      console.log('[ApiService] Session token cleared')
+    }
   }
 
   // Admin users
@@ -747,5 +815,8 @@ export const createQualityProfile = (profile: Omit<QualityProfile, 'id' | 'creat
 export const updateQualityProfile = (id: number, profile: Partial<QualityProfile>) => apiService.updateQualityProfile(id, profile)
 export const deleteQualityProfile = (id: number) => apiService.deleteQualityProfile(id)
 export const scoreSearchResults = (profileId: number, searchResults: SearchResult[]) => apiService.scoreSearchResults(profileId, searchResults)
+
+// Download client helpers
+export const testDownloadClient = (config: DownloadClientConfiguration) => apiService.testDownloadClient(config)
 
 

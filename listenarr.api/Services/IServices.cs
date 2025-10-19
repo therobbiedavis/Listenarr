@@ -21,6 +21,16 @@ namespace Listenarr.Api.Services
         Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null);
         Task<List<QueueItem>> GetQueueAsync();
         Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
+        // Exposed for processing completed downloads (move/copy + DB updates)
+        Task ProcessCompletedDownloadAsync(string downloadId, string finalPath);
+        
+        // Reprocessing methods for existing downloads
+        Task<string?> ReprocessDownloadAsync(string downloadId);
+        Task<List<ReprocessResult>> ReprocessDownloadsAsync(List<string> downloadIds);
+        Task<List<ReprocessResult>> ReprocessAllCompletedDownloadsAsync(bool includeProcessed = false, TimeSpan? maxAge = null);
+
+        // Test a download client configuration (returns success flag, message and optionally the client back)
+        Task<(bool Success, string Message, Listenarr.Api.Models.DownloadClientConfiguration? Client)> TestDownloadClientAsync(Listenarr.Api.Models.DownloadClientConfiguration client);
     }
 
     public interface IMetadataService
@@ -94,9 +104,20 @@ namespace Listenarr.Api.Services
         Task<string> GenerateFilePathAsync(AudioMetadata metadata, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
         
         /// <summary>
-        /// Parse a naming pattern and replace variables with actual values
+        /// Apply the configured file naming pattern to generate the final file path with a specific output path
         /// </summary>
-        string ApplyNamingPattern(string pattern, Dictionary<string, object> variables);
+        /// <param name="metadata">Audiobook metadata</param>
+        /// <param name="outputPath">Specific output path to use</param>
+        /// <param name="diskNumber">Optional disk/part number</param>
+        /// <param name="chapterNumber">Optional chapter number</param>
+        /// <param name="originalExtension">File extension (e.g., ".m4b", ".mp3")</param>
+        /// <returns>Full file path using the naming pattern</returns>
+        Task<string> GenerateFilePathAsync(AudioMetadata metadata, string outputPath, int? diskNumber = null, int? chapterNumber = null, string originalExtension = ".m4b");
+        
+    /// <summary>
+    /// Parse a naming pattern and replace variables with actual values
+    /// </summary>
+    string ApplyNamingPattern(string pattern, Dictionary<string, object> variables, bool treatAsFilename = false);
     }
 
     public interface IAudioFileService

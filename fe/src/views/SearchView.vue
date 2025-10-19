@@ -47,9 +47,9 @@
           class="result-card"
         >
           <div class="result-info">
-            <h4>{{ result.title }}</h4>
-            <p class="result-artist">{{ result.artist }}</p>
-            <p class="result-album">{{ result.album }}</p>
+            <h4>{{ safeText(result.title) }}</h4>
+            <p class="result-artist">{{ safeText(result.artist) }}</p>
+            <p class="result-album">{{ safeText(result.album) }}</p>
             
             <!-- Quality Score Badge -->
             <div v-if="getResultScore(result.id)" class="quality-score">
@@ -74,14 +74,14 @@
             <!-- Audiobook metadata -->
             <div v-if="result.narrator || result.runtime || result.series" class="audiobook-meta">
               <p v-if="result.narrator" class="meta-narrator">
-                Narrated by {{ result.narrator }}
+                Narrated by {{ safeText(result.narrator) }}
               </p>
               <div class="meta-details">
                 <span v-if="result.runtime" class="meta-runtime">
                   ⏱ {{ formatRuntime(result.runtime) }}
                 </span>
                 <span v-if="result.series" class="meta-series">
-                  Series: {{ result.series }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
+                  Series: {{ safeText(result.series) }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
                 </span>
               </div>
             </div>
@@ -122,13 +122,14 @@ import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
 import type { SearchResult, AudibleBookMetadata, QualityScore, QualityProfile } from '@/types'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
+import { safeText } from '@/utils/textUtils'
 
 const searchStore = useSearchStore()
 const libraryStore = useLibraryStore()
-const { success, error: showError, warning } = useNotification()
+const toast = useToast()
 
 console.log('SearchView component loaded')
 console.log('searchStore:', searchStore)
@@ -253,7 +254,7 @@ const addToLibrary = async (result: SearchResult) => {
   
   if (!result.asin) {
     console.warn('No ASIN available for result:', result)
-    warning('Cannot add to library: No ASIN available for this result')
+    toast.warning('Cannot add', 'Cannot add to library: No ASIN available for this result')
     return
   }
 
@@ -267,10 +268,10 @@ const addToLibrary = async (result: SearchResult) => {
     
     // Add to library
     console.log('Adding to library via /api/library/add')
-    await apiService.addToLibrary(metadata)
+    await apiService.addToLibrary(metadata, { searchResult: result })
     
-    console.log('Successfully added to library')
-    success(`"${metadata.title}" has been added to your library!`)
+  console.log('Successfully added to library')
+  toast.success('Added to library', `"${metadata.title}" has been added to your library!`)
     
     // Mark this result as added
     addedResults.value.add(result.id)
@@ -279,10 +280,10 @@ const addToLibrary = async (result: SearchResult) => {
     const errorMessage = error instanceof Error ? error.message : String(error)
     
     // Check if it's a conflict (already exists)
-    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
-      warning('This audiobook is already in your library.')
+      if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
+      toast.warning('Already exists', 'This audiobook is already in your library.')
     } else {
-      showError('Failed to add audiobook. Please try again.')
+      toast.error('Add failed', 'Failed to add audiobook. Please try again.')
     }
   } finally {
     isAddingToLibrary.value = false

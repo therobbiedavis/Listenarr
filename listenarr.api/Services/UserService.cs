@@ -32,21 +32,38 @@ namespace Listenarr.Api.Services
 
         public async Task<User> CreateUserAsync(string username, string password, string? email = null, bool isAdmin = false)
         {
-            var existing = await GetByUsernameAsync(username);
-            if (existing != null) throw new InvalidOperationException("User already exists");
-
-            var hash = HashPassword(password);
-            var user = new User
+            try
             {
-                Username = username,
-                PasswordHash = hash,
-                Email = email,
-                IsAdmin = isAdmin
-            };
+                _logger.LogDebug("Attempting to create user: {Username} (IsAdmin: {IsAdmin})", username, isAdmin);
+                
+                var existing = await GetByUsernameAsync(username);
+                if (existing != null)
+                {
+                    _logger.LogWarning("User creation failed - user already exists: {Username}", username);
+                    throw new InvalidOperationException($"User '{username}' already exists");
+                }
 
-            _db.Users.Add(user);
-            await _db.SaveChangesAsync();
-            return user;
+                var hash = HashPassword(password);
+                var user = new User
+                {
+                    Username = username,
+                    PasswordHash = hash,
+                    Email = email,
+                    IsAdmin = isAdmin,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync();
+                
+                _logger.LogInformation("User created successfully: {Username} (IsAdmin: {IsAdmin})", username, isAdmin);
+                return user;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating user: {Username}", username);
+                throw;
+            }
         }
 
         public async Task<bool> ValidateCredentialsAsync(string username, string password)
@@ -58,11 +75,28 @@ namespace Listenarr.Api.Services
 
         public async Task UpdatePasswordAsync(string username, string newPassword)
         {
-            var user = await GetByUsernameAsync(username);
-            if (user == null) throw new InvalidOperationException("User not found");
-            user.PasswordHash = HashPassword(newPassword);
-            _db.Users.Update(user);
-            await _db.SaveChangesAsync();
+            try
+            {
+                _logger.LogDebug("Attempting to update password for user: {Username}", username);
+                
+                var user = await GetByUsernameAsync(username);
+                if (user == null)
+                {
+                    _logger.LogWarning("Password update failed - user not found: {Username}", username);
+                    throw new InvalidOperationException($"User '{username}' not found");
+                }
+                
+                user.PasswordHash = HashPassword(newPassword);
+                _db.Users.Update(user);
+                await _db.SaveChangesAsync();
+                
+                _logger.LogInformation("Password updated successfully for user: {Username}", username);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating password for user: {Username}", username);
+                throw;
+            }
         }
 
         public async Task<List<User>> GetAdminUsersAsync()

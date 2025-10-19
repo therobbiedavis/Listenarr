@@ -81,25 +81,27 @@
             </div>
           </div>
         </div>
-        <template v-if="auth.user.authenticated">
-          <div class="nav-user" ref="navUserRef">
-            <button
-              class="nav-btn nav-user-btn"
-              @click="toggleUserMenu"
-              :aria-expanded="userMenuOpen"
-              aria-haspopup="true"
-              title="Account"
-            >
-              <i class="ph ph-users nav-user-icon"></i>
-            </button>
+        <template v-if="authEnabled">
+          <template v-if="auth.user.authenticated">
+            <div class="nav-user" ref="navUserRef">
+              <button
+                class="nav-btn nav-user-btn"
+                @click="toggleUserMenu"
+                :aria-expanded="userMenuOpen"
+                aria-haspopup="true"
+                title="Account"
+              >
+                <i class="ph ph-users nav-user-icon"></i>
+              </button>
 
-            <div v-if="userMenuOpen" class="user-menu" role="menu">
-              <button class="user-menu-item" role="menuitem" @click="logout">Logout</button>
+              <div v-if="userMenuOpen" class="user-menu" role="menu">
+                <button class="user-menu-item" role="menuitem" @click="logout">Logout</button>
+              </div>
             </div>
-          </div>
-        </template>
-        <template v-else>
-          <RouterLink to="/login" class="nav-btn">Login</RouterLink>
+          </template>
+          <template v-else>
+            <RouterLink to="/login" class="nav-btn">Login</RouterLink>
+          </template>
         </template>
       </div>
     </header>
@@ -175,6 +177,9 @@
       :auto-close="notification.autoClose"
       @close="closeNotification"
     />
+
+    <!-- Global toast notifications -->
+    <GlobalToast />
   </div>
 </template>
 
@@ -190,8 +195,10 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
 import { ref as vueRef2, reactive } from 'vue'
+import GlobalToast from '@/components/GlobalToast.vue'
+import { useToast } from '@/services/toastService'
 
-const { notification, close: closeNotification, info } = useNotification()
+const { notification, close: closeNotification } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
@@ -224,15 +231,21 @@ const systemIssues = ref(0)
 // Activity count: combines downloads (SignalR) + queue (SignalR)
 // All real-time, no polling!
 const activityCount = computed(() => {
-  const downloadsActive = downloadsStore.activeDownloads.length
-  const queueActive = queueItems.value.filter(item =>
-    item.status === 'downloading' ||
-    item.status === 'paused' ||
-    item.status === 'queued'
-  ).length
+  // Only count downloads that are actually active (not paused/completed/failed)
+  const trulyActiveDownloads = downloadsStore.activeDownloads.filter(d => 
+    d.status === 'Downloading' || 
+    d.status === 'Queued' || 
+    d.status === 'Processing'
+  )
+  
+  const downloadsActive = trulyActiveDownloads.length
+  const queueActive = queueItems.value.filter(item => {
+    const s = (item.status || '').toString().toLowerCase()
+    return s === 'downloading' || s === 'paused' || s === 'queued'
+  }).length
   
   // Count DDL downloads separately (they never appear in queue)
-  const ddlDownloads = downloadsStore.activeDownloads.filter(d => d.downloadClientId === 'DDL').length
+  const ddlDownloads = trulyActiveDownloads.filter(d => d.downloadClientId === 'DDL').length
   
   // Count external client downloads (may be in both downloads and queue)
   const externalDownloads = downloadsActive - ddlDownloads
@@ -425,8 +438,43 @@ const applyFirstResult = () => {
 onMounted(async () => {
   console.log('[App] Initializing real-time updates via SignalR...')
   
+  // Import session debugging utilities
+  const { logSessionState, clearAllAuthData } = await import('@/utils/sessionDebug')
+  
+  // Log initial session state for debugging
+  logSessionState('App Mount - Initial State')
+  
+  // Verify session is valid before proceeding
+  console.log('[App] Verifying session state...')
+  try {
+    // Check if we have valid session/authentication
+    const sessionCheck = await apiService.getServiceHealth()
+    console.log('[App] Session verification successful:', sessionCheck)
+  } catch (sessionError) {
+    console.warn('[App] Session verification failed:', sessionError)
+    // If we get 401/403, clear any stale auth state
+    const status = (sessionError && typeof sessionError === 'object' && 'status' in sessionError) ? sessionError.status : 0
+    if (status === 401 || status === 403) {
+      console.log('[App] Clearing stale authentication state due to session error')
+      auth.user.authenticated = false
+      // Use the comprehensive clear function
+      clearAllAuthData()
+    }
+  }
+  
   // Load current auth state before touching protected endpoints
   await auth.loadCurrentUser()
+
+  // Ensure SignalR connects (or reconnects) after auth state is loaded so any
+  // session cookie or API key can be applied to the handshake.
+  try {
+    await signalRService.connect()
+  } catch (e) {
+    console.debug('[App] SignalR connect after auth failed (will retry):', e)
+  }
+  
+  // Log session state after authentication attempt
+  logSessionState('App Mount - After Auth Load')
 
   // If authenticated, load protected resources and enable real-time updates
     if (auth.user.authenticated) {
@@ -439,12 +487,15 @@ onMounted(async () => {
       queueItems.value = queue
     })
 
+    // Prepare toast helper for this mounted scope
+    const toast = useToast()
+
     // Subscribe to files-removed notifications so we can inform the user
     unsubscribeFilesRemoved = signalRService.onFilesRemoved((payload) => {
       try {
         const removed = Array.isArray(payload?.removed) ? payload.removed.map(r => r.path) : []
         const display = removed.length > 0 ? removed.join(', ') : 'Files were removed from a library item.'
-        info(display, 'Files removed', 6000)
+        toast.info('Files removed', display, 6000)
         // Refresh wanted badge in case monitored items lost files
         refreshWantedBadge()
         // Push into recent notifications
@@ -458,6 +509,20 @@ onMounted(async () => {
       } catch (err) {
         console.error('Error handling FilesRemoved payload', err)
       }
+    })
+
+    // Subscribe to server-sent toast messages and forward to toastService
+    signalRService.onToast((payload) => {
+      try {
+        const lvl = (payload?.level || 'info').toLowerCase()
+        const title = payload?.title || ''
+        const msg = payload?.message || ''
+        const timeout = payload?.timeoutMs
+        if (lvl === 'success') toast.success(title, msg, timeout)
+        else if (lvl === 'warning') toast.warning(title, msg, timeout)
+        else if (lvl === 'error') toast.error(title, msg, timeout)
+        else toast.info(title, msg, timeout)
+      } catch (e) { console.error('Toast dispatch error', e) }
     })
 
     // Subscribe to audiobook updates (for wanted badge refresh only, no notifications)
@@ -538,9 +603,12 @@ onMounted(async () => {
   
   console.log('[App] ✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
   // Fetch startup config (do this regardless of auth so header/login visibility can be known)
-  try {
+    try {
     const cfg = await apiService.getStartupConfig()
-    const v = cfg?.authenticationRequired
+  // Accept both camelCase and PascalCase variants from backend (some responses use PascalCase)
+  const obj = cfg as Record<string, unknown> | null
+  const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
+  const v = raw as unknown
     authEnabled.value = (typeof v === 'boolean') ? v : (typeof v === 'string' ? (v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true') : false)
     if (import.meta.env.DEV) {
       try { console.debug('[App] startup config fetched', { authEnabled: authEnabled.value, cfg }) } catch {}
@@ -582,8 +650,17 @@ onUnmounted(() => {
 })
 
 const logout = async () => {
-  await auth.logout()
-  window.location.reload()
+  try {
+    console.log('[App] Logout button clicked')
+    await auth.logout()
+    console.log('[App] Auth logout completed, redirecting to login')
+    // Instead of reloading, redirect to login - the router guard will handle authentication
+    await router.push({ name: 'login' })
+  } catch (error) {
+    console.error('[App] Error during logout:', error)
+    // Force redirect to login even if logout fails
+    await router.push({ name: 'login' })
+  }
 }
 
 const route = useRoute()

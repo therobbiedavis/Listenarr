@@ -26,7 +26,8 @@ namespace Listenarr.Api.Models
         Completed,
         Failed,
         Processing,
-        Ready
+        Ready,
+        Moved // Added to track completed moves
     }
 
     public class Download
@@ -36,6 +37,16 @@ namespace Listenarr.Api.Models
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
         public string Album { get; set; } = string.Empty;
+        
+        // Enhanced identifying metadata for better matching
+        public string? Asin { get; set; } // Amazon identifier - most reliable
+        public string? Isbn { get; set; } // ISBN - very reliable
+        public string? Series { get; set; } // Series name
+        public string? SeriesNumber { get; set; } // Book number in series
+        public string? Publisher { get; set; }
+        public string? Language { get; set; }
+        public int? Runtime { get; set; } // Runtime in minutes
+        public long? ExpectedFileSize { get; set; } // Expected file size from search result
         public string OriginalUrl { get; set; } = string.Empty;
         public DownloadStatus Status { get; set; }
         public decimal Progress { get; set; }

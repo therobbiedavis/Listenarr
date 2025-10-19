@@ -257,7 +257,7 @@
 import { ref, watch } from 'vue'
 import type { Indexer } from '@/types'
 import { createIndexer, updateIndexer, testIndexer as apiTestIndexer } from '@/services/api'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 
 interface Props {
   visible: boolean
@@ -271,7 +271,7 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
-const { success, error: showError } = useNotification()
+const toast = useToast()
 
 const saving = ref(false)
 const testing = ref(false)
@@ -384,7 +384,7 @@ const closeModal = () => {
 
 const testConnection = async () => {
   if (!props.editingIndexer) {
-    showError('Please save the indexer first before testing')
+    toast.error('Save required', 'Please save the indexer first before testing')
     return
   }
 
@@ -392,13 +392,13 @@ const testConnection = async () => {
   try {
     const result = await apiTestIndexer(props.editingIndexer.id)
     if (result.success) {
-      success(`Test successful: ${result.message}`)
+      toast.success('Test successful', result.message || '')
     } else {
-      showError(`Test failed: ${result.error || result.message}`)
+      toast.error('Test failed', result.error || result.message || '')
     }
-  } catch (error) {
+    } catch (error) {
     console.error('Failed to test indexer:', error)
-    showError('Failed to test indexer connection')
+    toast.error('Test failed', 'Failed to test indexer connection')
   } finally {
     testing.value = false
   }
@@ -431,18 +431,18 @@ const handleSubmit = async () => {
     if (props.editingIndexer) {
       // Update existing indexer
       await updateIndexer(props.editingIndexer.id, submitData)
-      success('Indexer updated successfully')
+      toast.success('Indexer saved', 'Indexer updated successfully')
     } else {
       // Create new indexer
       await createIndexer(submitData)
-      success('Indexer created successfully')
+      toast.success('Indexer saved', 'Indexer created successfully')
     }
     
     emit('saved')
     closeModal()
   } catch (error) {
     console.error('Failed to save indexer:', error)
-    showError('Failed to save indexer')
+    toast.error('Save failed', 'Failed to save indexer')
   } finally {
     saving.value = false
   }

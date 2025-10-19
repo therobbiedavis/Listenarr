@@ -33,7 +33,7 @@
             id="remotePath"
             v-model="formData.remotePath"
             type="text"
-            placeholder="/downloads/audiobooks"
+            placeholder="/path/to/downloads"
             class="form-control"
             required
           />

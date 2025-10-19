@@ -580,21 +580,24 @@ const closeModal = () => {
   emit('close')
 }
 
+import { useToast } from '@/services/toastService'
+
 const handleSubmit = () => {
+  const toast = useToast()
   // Validate at least one quality is selected
   if (!formData.value.qualities.some(q => q.allowed)) {
-    alert('Please select at least one quality')
+    toast.error('Validation', 'Please select at least one quality')
     return
   }
 
   // Validate cutoff quality is selected and allowed
   if (!formData.value.cutoffQuality) {
-    alert('Please select a cutoff quality')
+    toast.error('Validation', 'Please select a cutoff quality')
     return
   }
 
   if (!formData.value.qualities.some(q => q.quality === formData.value.cutoffQuality && q.allowed)) {
-    alert('Cutoff quality must be one of the allowed qualities')
+    toast.error('Validation', 'Cutoff quality must be one of the allowed qualities')
     return
   }
 

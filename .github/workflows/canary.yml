@@ -1,0 +1,358 @@
+name: Canary — build executables & Docker (canary)
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  push:
+    branches: [ canary ]
+
+jobs:
+  canary-build:
+    if: github.actor != 'github-actions'
+    runs-on: ubuntu-latest
+    env:
+      API_PROJECT: listenarr.api/Listenarr.Api.csproj
+      FRONTEND_DIR: fe
+      API_OUTPUT: listenarr.api/publish
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve and bump version (patch)
+        id: resolve-version
+        run: |
+          set -euo pipefail
+          CSProj=${{ env.API_PROJECT }}
+          # Read <Version> from csproj
+          VERSION=$(sed -n "s:.*<Version>\(.*\)</Version>.*:\1:p" "$CSProj" 2>/dev/null || true)
+          if [ -z "${VERSION}" ]; then
+            VERSION=$(node -p "require('./fe/package.json').version" 2>/dev/null || echo "0.0.0")
+          fi
+          echo "Found base version: ${VERSION}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION}"
+          PATCH=${PATCH:-0}
+          NEWPATCH=$((PATCH + 1))
+          NEWVERSION="${MAJOR}.${MINOR}.${NEWPATCH}"
+          echo "Bumped canary version: ${NEWVERSION}"
+          echo "VERSION=${NEWVERSION}" >> $GITHUB_OUTPUT
+
+      - name: Restore .NET
+        run: dotnet restore listenarr.sln
+
+      - name: Persist bumped version to csproj (for build)
+        if: steps.resolve-version.outputs.VERSION != ''
+        env:
+          NEW_VERSION: ${{ steps.resolve-version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          echo "Updating csproj to version $NEW_VERSION"
+          cat > update_version.py <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          path = 'listenarr.api/Listenarr.Api.csproj'
+          new = os.environ['NEW_VERSION']
+          tree = ET.parse(path)
+          root = tree.getroot()
+          # Update Version
+          found_version = False
+          for elem in root.findall('.//Version'):
+              elem.text = new
+              found_version = True
+              break
+          if not found_version:
+              pg = root.find('PropertyGroup')
+              if pg is None:
+                  pg = ET.SubElement(root, 'PropertyGroup')
+              ET.SubElement(pg, 'Version').text = new
+          # Update AssemblyVersion
+          found_assembly = False
+          for elem in root.findall('.//AssemblyVersion'):
+              elem.text = new
+              found_assembly = True
+              break
+          if not found_assembly:
+              pg = root.find('PropertyGroup')
+              if pg is None:
+                  pg = ET.SubElement(root, 'PropertyGroup')
+              ET.SubElement(pg, 'AssemblyVersion').text = new
+          tree.write(path, encoding='utf-8', xml_declaration=True)
+          print('Wrote new version and assembly version to csproj')
+          PY
+          python3 update_version.py
+
+      - name: Create Pull Request for version bump
+        id: create_pr
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          commit-message: "[skip ci] Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          branch: "ci/canary-version-bump-${{ steps.resolve-version.outputs.VERSION }}"
+          base: canary
+          title: "Bump version to ${{ steps.resolve-version.outputs.VERSION }}"
+          body: |
+            This PR bumps the application version to ${{ steps.resolve-version.outputs.VERSION }}.
+            The change was produced automatically by the CI canary workflow.
+          labels: automated,version-bump
+
+      - name: Merge version bump PR (skip CI)
+        uses: actions/github-script@v6
+        env:
+          PR_NUMBER: ${{ steps.create_pr.outputs['pull-request-number'] }}
+          NEW_VERSION: ${{ steps.resolve-version.outputs.VERSION }}
+        with:
+          script: |
+            const pr = parseInt(process.env.PR_NUMBER, 10);
+            if (!pr) throw new Error('PR number missing');
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr,
+              merge_method: 'merge',
+              commit_title: `[skip ci] Merge pull request ${pr} - Bump version to ${process.env.NEW_VERSION}`,
+              commit_message: `[skip ci] Merge: Bump version to ${process.env.NEW_VERSION}`
+            });
+            // Optionally delete the branch
+            try {
+              const prInfo = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+              const branch = prInfo.data.head.ref;
+              if (branch && branch.startsWith('ci/')) {
+                await github.rest.git.deleteRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `heads/${branch}` });
+              }
+            } catch (err) {
+              console.log(`Branch delete skipped or failed: ${err.message}`);
+            }
+
+      - name: Build solution
+        run: dotnet build listenarr.sln -c Release --no-restore
+
+      - name: Publish API (linux-x64)
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/linux-x64
+
+      - name: Publish API (win-x64)
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o ${{ env.API_OUTPUT }}/win-x64
+
+      - name: Zip Linux artifact
+        run: |
+          mkdir -p artifacts
+          cd listenarr.api/publish/linux-x64
+          zip -r ../../../artifacts/listenarr-linux-x64.zip .
+
+      - name: Zip Windows artifact
+        run: |
+          mkdir -p artifacts
+          cd listenarr.api/publish/win-x64
+          zip -r ../../../artifacts/listenarr-win-x64.zip .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-artifacts
+          path: artifacts/*.zip
+      - name: Show resolved version
+        run: |
+          echo "Resolved version: ${{ steps.resolve-version.outputs.VERSION }}"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image name
+        id: set-tags
+        run: |
+          # Use repository owner as namespace (avoids embedding secrets into names)
+          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
+
+      - name: Find triggering Pull Request
+        id: find_triggering_pr
+        run: |
+          # Find merged PRs associated with this commit, excluding version bump PRs
+          # Use a simpler approach: get recent merged PRs to canary and find the right one
+          PR_DATA=$(gh api graphql -f query='
+            query($owner: String!, $repo: String!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequests(first: 20, states: MERGED, baseRefName: "canary", orderBy: {field: UPDATED_AT, direction: DESC}) {
+                  edges {
+                    node {
+                      number
+                      title
+                      body
+                      baseRefName
+                      mergeCommit {
+                        oid
+                      }
+                      labels(first: 10) {
+                        nodes {
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' -f owner='${{ github.repository_owner }}' -f repo='${{ github.event.repository.name }}')
+          
+          # Filter out version bump PRs and find the first non-version-bump PR
+          FILTERED_PR=$(echo "$PR_DATA" | jq -r '
+            [.data.repository.pullRequests.edges[] |
+            select(
+              (.node.title | test("[Bb]ump version|[Vv]ersion bump|\\[skip ci\\]"; "i") | not) and
+              (.node.labels.nodes | map(.name) | any(. == "version-bump" or . == "automated") | not)
+            ) |
+            .node | 
+            {number, title, body, baseRefName}][0] // null
+          ')
+          
+          # Debug: Show what PRs we found
+          echo "Recent PRs found:"
+          echo "$PR_DATA" | jq -r '.data.repository.pullRequests.edges[:5][] | "PR #\(.node.number): \(.node.title)"'
+          
+          # Extract PR details from the filtered result
+          if [ "$FILTERED_PR" != "" ] && [ "$FILTERED_PR" != "null" ]; then
+            PR_NUMBER=$(echo "$FILTERED_PR" | jq -r '.number // ""')
+            PR_TITLE=$(echo "$FILTERED_PR" | jq -r '.title // ""')
+            PR_BODY_RAW=$(echo "$FILTERED_PR" | jq -r '.body // ""')
+            PR_BASE_REF=$(echo "$FILTERED_PR" | jq -r '.baseRefName // ""')
+            
+            echo "✅ Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
+          else
+            echo "⚠️ No non-version-bump PR found, using fallback"
+            PR_NUMBER=""
+            PR_TITLE="Canary changes"
+            PR_BODY_RAW="Recent canary changes merged to canary branch."
+            PR_BASE_REF="canary"
+          fi
+          
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "PR_TITLE=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "PR_BASE_REF=$PR_BASE_REF" >> $GITHUB_OUTPUT
+          
+          # Store raw PR body for sanitization
+          echo "PR_BODY_RAW<<EOF_PR_BODY" >> $GITHUB_OUTPUT
+          echo "$PR_BODY_RAW" >> $GITHUB_OUTPUT
+          echo "EOF_PR_BODY" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sanitize PR body and create release notes
+        id: sanitize_pr_body
+        run: |
+          # Sanitize PR body - remove potential malicious content, limit length
+          python3 << 'PYTHON_SCRIPT'
+          import os
+          import re
+          import html
+          
+          # Get the raw PR body
+          pr_body_raw = os.environ.get('PR_BODY_RAW', '')
+          
+          # Basic sanitization
+          # 1. HTML escape to prevent injection
+          sanitized = html.escape(pr_body_raw)
+          
+          # 2. Remove script tags and other potentially dangerous content
+          sanitized = re.sub(r'<script[^>]*>.*?</script>', '', sanitized, flags=re.IGNORECASE | re.DOTALL)
+          sanitized = re.sub(r'<iframe[^>]*>.*?</iframe>', '', sanitized, flags=re.IGNORECASE | re.DOTALL)
+          sanitized = re.sub(r'javascript:', '', sanitized, flags=re.IGNORECASE)
+          
+          # 3. Limit length to prevent overly long descriptions (max 2000 chars)
+          if len(sanitized) > 2000:
+              sanitized = sanitized[:1997] + '...'
+          
+          # 4. Clean up excessive whitespace
+          sanitized = re.sub(r'\n\s*\n\s*\n', '\n\n', sanitized)
+          sanitized = sanitized.strip()
+          
+          # If empty after sanitization, provide a default
+          if not sanitized:
+              sanitized = "No description provided."
+          
+          print(f"Sanitized PR body (length: {len(sanitized)} chars)")
+          
+          # Create the full body for the release
+          full_body = f"""{sanitized}
+          
+          ---
+          
+          **Automated canary build**
+          
+          - Version: {os.environ.get('VERSION', 'unknown')}
+          - Commit: {os.environ.get('GITHUB_SHA', 'unknown')}
+          - Original PR: #{os.environ.get('PR_NUMBER', 'unknown')}"""
+          
+          # Output the sanitized content
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"SANITIZED_PR_BODY<<EOF_SANITIZED\n{sanitized}\nEOF_SANITIZED\n")
+              f.write(f"FULL_RELEASE_BODY<<EOF_FULL\n{full_body}\nEOF_FULL\n")
+          
+          PYTHON_SCRIPT
+        env:
+          PR_BODY_RAW: ${{ steps.find_triggering_pr.outputs.PR_BODY_RAW }}
+          VERSION: ${{ steps.resolve-version.outputs.VERSION }}
+          GITHUB_SHA: ${{ github.sha }}
+          PR_NUMBER: ${{ steps.find_triggering_pr.outputs.PR_NUMBER }}
+
+      - name: Create GitHub Pre-Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.resolve-version.outputs.VERSION }}
+          name: Canary ${{ steps.resolve-version.outputs.VERSION }}
+          body: ${{ steps.sanitize_pr_body.outputs.FULL_RELEASE_BODY }}
+          prerelease: true
+          files: artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Publish API for runtime image
+        run: |
+          dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -o listenarr.api/publish
+        # Ensures Listenarr.Api.dll is at listenarr.api/publish/ for Dockerfile.runtime
+
+      - name: Build and push API image (canary + sha)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: listenarr.api/Dockerfile.runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.set-tags.outputs.API_IMAGE }}:canary
+            ${{ steps.set-tags.outputs.API_IMAGE }}:canary-${{ steps.resolve-version.outputs.VERSION }}
+            ${{ steps.set-tags.outputs.API_IMAGE }}:${{ github.sha }}
+
+      - name: Notify Discord
+        uses: rjstone/discord-webhook-notify@v2.2.1
+        if: ${{ github.repository_owner == 'therobbiedavis' }}
+        with:
+            severity: info
+            description: v${{steps.resolve-version.outputs.VERSION}} - ${{ steps.find_triggering_pr.outputs.PR_TITLE }}
+            details: '${{ steps.sanitize_pr_body.outputs.SANITIZED_PR_BODY }}'
+            text: A new canary build has been released for docker.
+            webhookUrl: ${{ secrets.DISCORD_DOCKER_UPDATE_URL }}
+
+      # version bump was pushed via PR+auto-merge above
+
+      # Skipped: separate Web image. The API image contains the frontend in wwwroot.

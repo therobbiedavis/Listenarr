@@ -5,7 +5,7 @@ services:
     image: docker.io/therobbiedavis/listenarr:latest  # Or use :stable for releases, :nightly for pre-releases
     container_name: listenarr
     ports:
-      - "5000:5000"  # Map host port 5000 to container port 5000
+      - "5000:5000"  # Map host port 5000 to container port 5000 (standard ASP.NET Core port)
     volumes:
       - listenarr_data:/app/config  # Mount for SQLite database (listenarr.db) and any config
     restart: unless-stopped

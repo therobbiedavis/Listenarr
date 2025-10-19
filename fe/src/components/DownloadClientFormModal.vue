@@ -69,6 +69,17 @@
               />
             </div>
 
+            <div class="form-group">
+              <label for="downloadPath">Download Path</label>
+              <input 
+                id="downloadPath" 
+                v-model="formData.downloadPath" 
+                type="text" 
+                placeholder="Leave blank to use client's default"
+              />
+              <small>Optional: Override the download client's default save path. Leave blank to use the client's configured download directory.</small>
+            </div>
+
             <div class="checkbox-group">
               <label>
                 <input type="checkbox" v-model="formData.useSSL" />
@@ -276,7 +287,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type { DownloadClientConfiguration } from '@/types'
-import { useNotification } from '@/composables/useNotification'
+import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
 import RemotePathMappingsManager from './RemotePathMappingsManager.vue'
 
@@ -294,7 +305,7 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 const configStore = useConfigurationStore()
-const { success, error: showError } = useNotification()
+const toast = useToast()
 
 const saving = ref(false)
 const testing = ref(false)
@@ -307,7 +318,7 @@ const defaultFormData = {
   username: '',
   password: '',
   apiKey: '',
-  downloadPath: '/downloads',
+  downloadPath: '',
   useSSL: false,
   isEnabled: true,
   category: '',
@@ -387,7 +398,7 @@ watch(() => props.editingClient, (newClient) => {
       username: newClient.username || '',
       password: newClient.password || '',
       apiKey: (settings?.apiKey as string) || '',
-      downloadPath: newClient.downloadPath,
+  downloadPath: newClient.downloadPath,
       useSSL: newClient.useSSL,
       isEnabled: newClient.isEnabled,
       category: (settings?.category as string) || '',
@@ -417,10 +428,10 @@ const testConnection = async () => {
   try {
     // TODO: Implement actual test endpoint
     await new Promise(resolve => setTimeout(resolve, 1000))
-    success('Connection test successful')
+    toast.success('Test successful', 'Connection test successful')
   } catch (error) {
     console.error('Failed to test download client:', error)
-    showError('Failed to test download client connection')
+    toast.error('Test failed', 'Failed to test download client connection')
   } finally {
     testing.value = false
   }
@@ -442,7 +453,7 @@ const handleSubmit = async () => {
       port: formData.value.port,
       username: formData.value.username || '',
       password: formData.value.password || '',
-      downloadPath: formData.value.downloadPath || '/downloads',
+  downloadPath: formData.value.downloadPath || '',
       useSSL: formData.value.useSSL,
       isEnabled: formData.value.isEnabled,
       settings: {
@@ -460,15 +471,15 @@ const handleSubmit = async () => {
       }
     }
 
-    console.log('Saving download client configuration:', clientConfig)
-    await configStore.saveDownloadClientConfiguration(clientConfig)
-    success(`Download client ${props.editingClient ? 'updated' : 'created'} successfully`)
+  console.log('Saving download client configuration:', clientConfig)
+  await configStore.saveDownloadClientConfiguration(clientConfig)
+  toast.success('Saved', `Download client ${props.editingClient ? 'updated' : 'created'} successfully`)
     
     emit('saved')
     closeModal()
   } catch (error) {
-    console.error('Failed to save download client:', error)
-    showError(`Failed to save download client: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  console.error('Failed to save download client:', error)
+  toast.error('Save failed', `Failed to save download client: ${error instanceof Error ? error.message : 'Unknown error'}`)
   } finally {
     saving.value = false
   }
