@@ -234,10 +234,10 @@ public class ManualImportController : ControllerBase
         }
     }
 
-    private Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
+    private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
     {
-        // For manual import, we place the file directly in the audiobook's base path
-        // with a simple filename based on the audiobook title and disc/chapter info
+        // For manual import, use the FileNamingService to create proper folder structure
+        // within the audiobook's base path
         
         // Get the file extension from the source file (preserve original extension)
         var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
@@ -246,31 +246,28 @@ public class ManualImportController : ControllerBase
             extension = ".m4b"; // Fallback if no extension
         }
 
-        // Create a simple filename: "Title" or "Title - DiscNumber - ChapterNumber"
-        var filename = audiobook.Title ?? "Unknown Title";
-        
-        // Add disc/chapter info if available
-        var parts = new List<string> { filename };
-        if (metadata.DiscNumber.HasValue && metadata.DiscNumber > 1)
+        // Create metadata for the naming service
+        var namingMetadata = new AudioMetadata
         {
-            parts.Add($"Disc {metadata.DiscNumber:00}");
-        }
-        if (metadata.TrackNumber.HasValue)
-        {
-            parts.Add($"Chapter {metadata.TrackNumber:00}");
-        }
-        
-        var finalFilename = string.Join(" - ", parts) + extension;
-        
-        // Combine with audiobook's base path
-        var basePath = audiobook.BasePath;
-        if (string.IsNullOrWhiteSpace(basePath))
-        {
-            // This should have been checked earlier, but fallback to empty string
-            basePath = string.Empty;
-        }
-        
-        return Task.FromResult(Path.Combine(basePath, finalFilename));
+            Title = audiobook.Title ?? "Unknown Title",
+            Artist = audiobook.Authors?.FirstOrDefault() ?? "Unknown Author",
+            AlbumArtist = audiobook.Authors?.FirstOrDefault() ?? "Unknown Author",
+            Series = audiobook.Series,
+            SeriesPosition = decimal.TryParse(audiobook.SeriesNumber, out var seriesPos) ? seriesPos : null,
+            Year = int.TryParse(audiobook.PublishYear, out var year) ? year : null,
+            DiscNumber = metadata.DiscNumber,
+            TrackNumber = metadata.TrackNumber
+        };
+
+        // Use the FileNamingService to generate the path within the base path
+        var relativePath = await _fileNamingService.GenerateFilePathAsync(
+            namingMetadata, 
+            audiobook.BasePath ?? string.Empty,
+            metadata.DiscNumber, 
+            metadata.TrackNumber, 
+            extension);
+
+        return relativePath;
     }
 
     private static string FormatSize(long bytes)
