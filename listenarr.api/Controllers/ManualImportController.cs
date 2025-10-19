@@ -192,7 +192,7 @@ public class ManualImportController : ControllerBase
             }
 
             // Generate destination path using only disc/chapter components
-            var destinationPath = await GenerateManualImportPathAsync(audiobook, metadata);
+            var destinationPath = await GenerateManualImportPathAsync(audiobook, metadata, item.FullPath);
             
             // Ensure destination directory exists
             var destinationDir = Path.GetDirectoryName(destinationPath);
@@ -234,46 +234,34 @@ public class ManualImportController : ControllerBase
         }
     }
 
-    private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata)
+    private Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
     {
-        // For manual import, we only use disc and chapter components from the naming pattern
-        // The base path comes from the audiobook's BasePath
+        // For manual import, we place the file directly in the audiobook's base path
+        // with a simple filename based on the audiobook title and disc/chapter info
         
-        var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
-        var pattern = settings.FileNamingPattern;
-
-        if (string.IsNullOrWhiteSpace(pattern))
-        {
-            pattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
-        }
-
-        // Create a simplified pattern that only includes disc and chapter components
-        // We need to extract just the disc/chapter parts from the full pattern
-        var discChapterPattern = ExtractDiscChapterPattern(pattern);
-        
-        // Build variables dictionary with only disc/chapter data
-        var variables = new Dictionary<string, object>
-        {
-            { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
-            { "ChapterNumber", metadata.TrackNumber?.ToString() ?? string.Empty }
-        };
-
-        // Apply the simplified pattern
-        var relativePath = _fileNamingService.ApplyNamingPattern(discChapterPattern, variables);
-        
-        // Get file extension
-        var extension = Path.GetExtension(metadata.Title ?? "unknown").ToLowerInvariant();
+        // Get the file extension from the source file (preserve original extension)
+        var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
         if (string.IsNullOrEmpty(extension))
         {
-            extension = ".m4b"; // Default extension
-        }
-        
-        // Ensure the relative path has the correct extension
-        if (!relativePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
-        {
-            relativePath += extension;
+            extension = ".m4b"; // Fallback if no extension
         }
 
+        // Create a simple filename: "Title" or "Title - DiscNumber - ChapterNumber"
+        var filename = audiobook.Title ?? "Unknown Title";
+        
+        // Add disc/chapter info if available
+        var parts = new List<string> { filename };
+        if (metadata.DiscNumber.HasValue && metadata.DiscNumber > 1)
+        {
+            parts.Add($"Disc {metadata.DiscNumber:00}");
+        }
+        if (metadata.TrackNumber.HasValue)
+        {
+            parts.Add($"Chapter {metadata.TrackNumber:00}");
+        }
+        
+        var finalFilename = string.Join(" - ", parts) + extension;
+        
         // Combine with audiobook's base path
         var basePath = audiobook.BasePath;
         if (string.IsNullOrWhiteSpace(basePath))
@@ -282,36 +270,7 @@ public class ManualImportController : ControllerBase
             basePath = string.Empty;
         }
         
-        return Path.Combine(basePath, relativePath);
-    }
-
-    private string ExtractDiscChapterPattern(string fullPattern)
-    {
-        // Extract only the disc and chapter related parts from the pattern
-        // Look for {DiskNumber} and {ChapterNumber}/{TrackNumber} tokens and build a minimal pattern
-        
-        var parts = new List<string>();
-        var hasDisk = fullPattern.Contains("{DiskNumber");
-        var hasChapter = fullPattern.Contains("{ChapterNumber") || fullPattern.Contains("{TrackNumber");
-        
-        if (hasDisk)
-        {
-            parts.Add("{DiskNumber:00}");
-        }
-        
-        if (hasChapter)
-        {
-            if (parts.Count > 0) parts.Add(" - ");
-            parts.Add("{ChapterNumber:00}");
-        }
-        
-        // If no disc/chapter components found, use a default
-        if (parts.Count == 0)
-        {
-            return "{DiskNumber:00} - {ChapterNumber:00}";
-        }
-        
-        return string.Join("", parts);
+        return Task.FromResult(Path.Combine(basePath, finalFilename));
     }
 
     private static string FormatSize(long bytes)
