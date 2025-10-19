@@ -30,7 +30,7 @@ namespace Listenarr.Api.Tests
             };
 
             var rootPath = "/server/mnt/drive/Audiobooks";
-            var fileNamingPattern = "{Author}/{Title} ({Year})"; // This shouldn't matter for directory creation
+            var fileNamingPattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"; // Default pattern
 
             // Mock dependencies
             var mockRepo = new Mock<IAudiobookRepository>();
@@ -48,11 +48,10 @@ namespace Listenarr.Api.Tests
                 .Setup(x => x.ApplyNamingPattern(It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), false))
                 .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
                 {
-                    // For the non-series book test, the pattern should be derived from "{Author}/{Title} ({Year})"
-                    // which becomes "{Author}/{Title} ({Year})" (no change since no file-specific vars)
+                    // For non-series book, the method now uses fixed pattern "{Author}/{Title} ({Year})"
                     if (pattern == "{Author}/{Title} ({Year})")
                     {
-                        return $"Stephen Graham Jones/The Buffalo Hunter Hunter (2025)";
+                        return "Stephen Graham Jones/The Buffalo Hunter Hunter (2025)";
                     }
                     return pattern;
                 });
@@ -95,7 +94,7 @@ namespace Listenarr.Api.Tests
             };
 
             var rootPath = "/server/mnt/drive/Audiobooks";
-            var fileNamingPattern = "{Author}/{Series}/{Title} ({Year})"; // This shouldn't matter for directory creation
+            var fileNamingPattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"; // Default pattern
 
             // Mock dependencies
             var mockRepo = new Mock<IAudiobookRepository>();
@@ -113,11 +112,10 @@ namespace Listenarr.Api.Tests
                 .Setup(x => x.ApplyNamingPattern(It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), false))
                 .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
                 {
-                    // For the series book test, the pattern should be derived from "{Author}/{Series}/{Title} ({Year})"
-                    // which becomes "{Author}/{Series}/{Title} ({Year})" (no change since no file-specific vars)
+                    // For series book, the method now uses fixed pattern "{Author}/{Series}/{Title} ({Year})"
                     if (pattern == "{Author}/{Series}/{Title} ({Year})")
                     {
-                        return $"Stephen King/The Dark Tower/The Gunslinger (1982)";
+                        return "Stephen King/The Dark Tower/The Gunslinger (1982)";
                     }
                     return pattern;
                 });

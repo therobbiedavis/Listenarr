@@ -1327,11 +1327,11 @@ namespace Listenarr.Api.Services
                 
                 listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
                 
-                _logger.LogInformation("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)", 
+                _logger.LogDebug("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)", 
                     listenarrDownloads.Count, ddlToShow.Count, externalDownloads.Count);
                 foreach (var dl in listenarrDownloads)
                 {
-                    _logger.LogInformation("Including download: {Id}, Status: {Status}, Client: {Client}, Title: '{Title}'", 
+                    _logger.LogDebug("Including download: {Id}, Status: {Status}, Client: {Client}, Title: '{Title}'", 
                         dl.Id, dl.Status, dl.DownloadClientId, dl.Title);
                 }
             }
@@ -1350,18 +1350,18 @@ namespace Listenarr.Api.Services
                     };
 
                     // Filter to only include items that Listenarr initiated
-                    _logger.LogInformation("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name, clientQueue.Count);
-                    _logger.LogInformation("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
+                    _logger.LogDebug("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name, clientQueue.Count);
+                    _logger.LogDebug("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
                     
                     foreach (var download in listenarrDownloads)
                     {
-                        _logger.LogInformation("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}", 
+                        _logger.LogDebug("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}", 
                             download.Id, download.Title, download.DownloadClientId, download.Status);
                     }
                     
                     foreach (var queueItem in clientQueue.Take(3)) // Just show first 3 to avoid spam
                     {
-                        _logger.LogInformation("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'", 
+                        _logger.LogDebug("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'", 
                             queueItem.Id, queueItem.Title, queueItem.DownloadClientId);
                     }
                     
@@ -1400,7 +1400,7 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
                 {
                     titleMatch = IsMatchingTitle(download.Title, queueItem.Title);
-                    _logger.LogInformation("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}", 
+                    _logger.LogDebug("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}", 
                         download.Id, download.Title, queueItem.Title, titleMatch);
                 }
             }
@@ -1409,7 +1409,7 @@ namespace Listenarr.Api.Services
                             var clientMatch = download.DownloadClientId == client.Id;
                             var overallMatch = clientMatch && (idMatch || hashMatch || titleMatch);
                             
-                            _logger.LogInformation("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}", 
+                            _logger.LogDebug("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}", 
                                 download.Id, queueItem.Id, clientMatch, idMatch, hashMatch, titleMatch, overallMatch);
                             
                             return overallMatch;
@@ -1447,7 +1447,7 @@ namespace Listenarr.Api.Services
 
                     queueItems.AddRange(mappedFiltered);
                     
-                    _logger.LogInformation("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", 
+                    _logger.LogDebug("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", 
                         client.Name, clientQueue.Count, mappedFiltered.Count);
 
                     // Purge orphaned download records that are no longer in the client's queue

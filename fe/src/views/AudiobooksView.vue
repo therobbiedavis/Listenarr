@@ -116,8 +116,8 @@
             class="audiobook-poster"
           />
           <div class="status-overlay">
-            <div class="audiobook-title">{{ audiobook.title }}</div>
-            <div class="audiobook-author">{{ audiobook.authors?.join(', ') || 'Unknown Author' }}</div>
+            <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+            <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
             <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
               <i class="ph ph-star"></i>
               {{ getQualityProfileName(audiobook.qualityProfileId) }}
@@ -206,6 +206,7 @@ import { apiService } from '@/services/api'
 import BulkEditModal from '@/components/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import type { Audiobook, QualityProfile } from '@/types'
+import { safeText } from '@/utils/textUtils'
 
 const router = useRouter()
 const libraryStore = useLibraryStore()

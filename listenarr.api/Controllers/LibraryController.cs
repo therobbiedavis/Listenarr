@@ -1336,22 +1336,19 @@ namespace Listenarr.Api.Controllers
 
         private string ComputeAudiobookBaseDirectoryFromPattern(Audiobook audiobook, string rootPath, string fileNamingPattern)
         {
-            // Derive directory pattern from file naming pattern by removing file-specific variables
-            // File-specific variables that should be removed for directory structure
-            var fileSpecificVars = new[] { "DiskNumber", "ChapterNumber" };
-
-            string directoryPattern = fileNamingPattern;
-            foreach (var fileVar in fileSpecificVars)
+            // Create a directory pattern that includes Author, Series (if present), Title, and Year
+            // This provides a consistent folder structure for audiobooks
+            string directoryPattern;
+            if (!string.IsNullOrWhiteSpace(audiobook.Series))
             {
-                // Remove patterns like {DiskNumber}, {DiskNumber:00}, {ChapterNumber}, etc.
-                directoryPattern = Regex.Replace(directoryPattern, $@"\{{{fileVar}(?::[^}}]+)?\}}", "", RegexOptions.IgnoreCase);
-                // Also remove any resulting empty path segments (double slashes, etc.)
-                directoryPattern = Regex.Replace(directoryPattern, @"//+", "/", RegexOptions.IgnoreCase);
+                // Series book: {Author}/{Series}/{Title} ({Year})
+                directoryPattern = "{Author}/{Series}/{Title} ({Year})";
             }
-
-            // Clean up any trailing or leading slashes and empty segments
-            directoryPattern = directoryPattern.Trim('/');
-            directoryPattern = Regex.Replace(directoryPattern, @"/+", "/", RegexOptions.IgnoreCase);
+            else
+            {
+                // Non-series book: {Author}/{Title} ({Year})
+                directoryPattern = "{Author}/{Title} ({Year})";
+            }
 
             // Build variables for naming pattern using audiobook-level metadata
             var variables = new Dictionary<string, object>

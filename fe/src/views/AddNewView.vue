@@ -70,14 +70,14 @@
           </div>
           <div class="result-info">
             <h3>
-              {{ audibleResult.title }}
+              {{ safeText(audibleResult.title) }}
               <span v-if="audibleResult.language" class="language-badge">{{ audibleResult.language }}</span>
             </h3>
             <p class="result-author">
-              by {{ (audibleResult.authors || []).join(', ') || 'Unknown Author' }}
+              by {{ (audibleResult.authors || []).map(author => safeText(author)).join(', ') || 'Unknown Author' }}
             </p>
             <p v-if="audibleResult.narrators?.length" class="result-narrator">
-              Narrated by {{ audibleResult.narrators.join(', ') }}
+              Narrated by {{ audibleResult.narrators.map(narrator => safeText(narrator)).join(', ') }}
             </p>
               <div class="result-stats">
               <span v-if="audibleResult.runtime" class="stat-item">
@@ -93,10 +93,10 @@
               <div class="result-meta">
               <span v-if="audibleResult.publishYear">{{ audibleResult.publishYear }}</span>
               <span v-if="audibleResult.language">{{ audibleResult.language }}</span>
-              <span v-if="audibleResult.publisher">Publisher: {{ decodeHtml(audibleResult.publisher) }}</span>
+              <span v-if="audibleResult.publisher">Publisher: {{ safeText(audibleResult.publisher) }}</span>
               <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
               <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
-              <span v-if="audibleResult.series">Series: {{ audibleResult.series }}</span>
+              <span v-if="audibleResult.series">Series: {{ safeText(audibleResult.series) }}</span>
               <span v-if="audibleResult.explicit">Explicit</span>
               <span v-if="audibleResult.abridged">Abridged</span>
             </div>
@@ -141,14 +141,14 @@
             </div>
             <div class="result-info">
               <h3>
-                {{ book.title }}
+                {{ safeText(book.title) }}
                 <span v-if="book.searchResult?.language" class="language-badge">{{ book.searchResult?.language }}</span>
               </h3>
               <p class="result-author">by {{ formatAuthors(book) }}</p>
               
               <!-- Audiobook metadata from search results -->
               <p v-if="book.searchResult?.narrator" class="result-narrator">
-                Narrated by {{ book.searchResult.narrator }}
+                Narrated by {{ safeText(book.searchResult.narrator) }}
               </p>
               
               <div class="result-stats">
@@ -158,13 +158,13 @@
                 </span>
                 <span v-if="book.searchResult?.series" class="stat-item">
                   <i class="ph ph-book-bookmark"></i>
-                  {{ book.searchResult.series }}<span v-if="book.searchResult.seriesNumber"> #{{ book.searchResult.seriesNumber }}</span>
+                  {{ safeText(book.searchResult.series) }}<span v-if="book.searchResult.seriesNumber"> #{{ book.searchResult.seriesNumber }}</span>
                 </span>
               </div>
               
               <p v-if="book.first_publish_year" class="result-year">Published: {{ book.first_publish_year }}</p>
               <p v-if="book.publisher?.length" class="result-publisher">
-                Publisher: {{ decodeHtml(book.publisher[0]) }}
+                Publisher: {{ safeText(book.publisher[0]) }}
               </p>
               
               <div class="result-meta">
@@ -272,6 +272,7 @@ import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
 import { useToast } from '@/services/toastService'
+import { safeText } from '@/utils/textUtils'
 
 // Extended type for title search results that includes search metadata
 type TitleSearchResult = OpenLibraryBook & { searchResult?: SearchResult }
@@ -282,15 +283,15 @@ const libraryStore = useLibraryStore()
 const toast = useToast()
 
 // Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
-const decodeHtml = (input?: string | null): string => {
-  if (!input) return ''
-  return input
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-}
+// const decodeHtml = (input?: string | null): string => {
+//   if (!input) return ''
+//   return input
+//     .replace(/&amp;/g, '&')
+//     .replace(/&lt;/g, '<')
+//     .replace(/&gt;/g, '>')
+//     .replace(/&quot;/g, '"')
+//     .replace(/&#39;/g, "'")
+// }
 
 console.log('AddNewView component loaded')
 console.log('libraryStore:', libraryStore)
