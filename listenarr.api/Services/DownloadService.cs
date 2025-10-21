@@ -2759,288 +2759,19 @@ namespace Listenarr.Api.Services
                                 // Only process if metadata processing is enabled
                                 if (settings.EnableMetadataProcessing)
                                 {
-                                    _logger.LogInformation("DDL download [{DownloadId}] processing with file naming pattern...", downloadId);
+                                    _logger.LogInformation("DDL download [{DownloadId}] queuing for background processing...", downloadId);
                                     
-                                    // Try to get audiobook metadata if linked
-                                    Audiobook? audiobook = null;
-                                    using (var lookupScope = _serviceScopeFactory.CreateScope())
+                                    // Queue DDL download for background processing instead of immediate processing
+                                    using var queueScope = _serviceScopeFactory.CreateScope();
+                                    var processingQueueService = queueScope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                                    if (processingQueueService != null)
                                     {
-                                        var dbContext = lookupScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-                                        var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
-                                        if (completedDownload?.AudiobookId != null)
-                                        {
-                                            audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                                            if (audiobook != null)
-                                            {
-                                                _logger.LogInformation("DDL download [{DownloadId}] Found linked audiobook: {Title} by {Authors}", 
-                                                    downloadId, audiobook.Title, string.Join(", ", audiobook.Authors ?? new List<string>()));
-                                            }
-                                            else
-                                            {
-                                                _logger.LogWarning("DDL download [{DownloadId}] AudiobookId {AudiobookId} not found in database", 
-                                                    downloadId, completedDownload.AudiobookId);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            _logger.LogInformation("DDL download [{DownloadId}] No audiobook linked, using search result data", downloadId);
-                                        }
-                                    }
-                                    
-                                    // Build metadata from audiobook if available, otherwise use search result
-                                    var metadata = new AudioMetadata();
-                                    
-                                    if (audiobook != null)
-                                    {
-                                        // Use audiobook metadata (preferred source)
-                                        metadata.Title = audiobook.Title ?? searchResult.Title;
-                                        metadata.Artist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
-                                        metadata.Album = audiobook.Series ?? audiobook.Title ?? searchResult.Album ?? searchResult.Title;
-                                        metadata.AlbumArtist = audiobook.Authors?.FirstOrDefault() ?? searchResult.Artist ?? "Unknown Author";
-                                        metadata.Series = string.IsNullOrWhiteSpace(audiobook.Series) ? string.Empty : audiobook.Series;
-                                        metadata.SeriesPosition = !string.IsNullOrEmpty(audiobook.SeriesNumber) && decimal.TryParse(audiobook.SeriesNumber, out var pos) ? pos : null;
-                                        metadata.Narrator = audiobook.Narrators?.FirstOrDefault();
-                                        metadata.Publisher = audiobook.Publisher;
-                                        metadata.Isbn = audiobook.Isbn;
-                                        metadata.Asin = audiobook.Asin;
-                                        metadata.Year = !string.IsNullOrEmpty(audiobook.PublishYear) && int.TryParse(audiobook.PublishYear, out var year) ? year : null;
-                                        metadata.Description = audiobook.Description;
-                                        metadata.Language = audiobook.Language;
-                                        
-                                        _logger.LogInformation("DDL download [{DownloadId}] Using audiobook metadata: Title='{Title}', Author='{Author}', Series='{Series}'", 
-                                            downloadId, metadata.Title, metadata.Artist, metadata.Series);
+                                        var jobId = await processingQueueService.QueueDownloadProcessingAsync(downloadId, tempFilePath, "DDL");
+                                        _logger.LogInformation("DDL download [{DownloadId}] queued for background processing with job {JobId}", downloadId, jobId);
                                     }
                                     else
                                     {
-                                        // Fallback to search result data
-                                        metadata.Title = searchResult.Title;
-                                        metadata.Artist = searchResult.Artist ?? "Unknown Author";
-                                        metadata.Album = searchResult.Album ?? searchResult.Title;
-                                        metadata.AlbumArtist = searchResult.Artist ?? "Unknown Author";
-                                        metadata.Series = string.IsNullOrWhiteSpace(searchResult.Album) ? string.Empty : searchResult.Album;
-                                        
-                                        _logger.LogInformation("DDL download [{DownloadId}] Using search result metadata: Title='{Title}', Artist='{Artist}', Series='{Series}'", 
-                                            downloadId, metadata.Title, metadata.Artist, metadata.Series);
-                                    }
-
-                                    // Try to extract existing metadata from file (only supplement missing fields)
-                                    try
-                                    {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Extracting metadata from file: {FilePath}", downloadId, tempFilePath);
-                                        var existingMetadata = await metadataService.ExtractFileMetadataAsync(tempFilePath);
-                                        if (existingMetadata != null)
-                                        {
-                                            // Only use file metadata to fill in missing fields, preserve audiobook/search result data
-                                            if (audiobook == null)
-                                            {
-                                                // If no audiobook linked, use file metadata as primary source
-                                                metadata.Title = existingMetadata.Title ?? metadata.Title;
-                                                metadata.Artist = existingMetadata.Artist ?? metadata.Artist;
-                                                metadata.Album = existingMetadata.Album ?? metadata.Album;
-                                                metadata.AlbumArtist = existingMetadata.AlbumArtist ?? metadata.AlbumArtist;
-                                                metadata.Series = existingMetadata.Series ?? metadata.Series;
-                                                metadata.Year = existingMetadata.Year ?? metadata.Year;
-                                            }
-                                            // Always use file metadata for track/disc numbers (these are per-file)
-                                            metadata.TrackNumber = existingMetadata.TrackNumber;
-                                            metadata.DiscNumber = existingMetadata.DiscNumber;
-                                            
-                                            _logger.LogInformation("DDL download [{DownloadId}] File metadata extracted - Track: {Track}, Disc: {Disc}", 
-                                                downloadId, metadata.TrackNumber, metadata.DiscNumber);
-                                        }
-                                    }
-                                    catch (Exception metaEx)
-                                    {
-                                        _logger.LogWarning(metaEx, "DDL download [{DownloadId}] Failed to extract metadata from {FilePath}, using audiobook/search result data", downloadId, tempFilePath);
-                                    }
-
-                                    // Generate final path using naming pattern
-                                    _logger.LogInformation("DDL download [{DownloadId}] Generating final path with pattern: {Pattern}", downloadId, settings.FileNamingPattern);
-                                    
-                                    // Ensure we have an output path for file operations
-                                    var effectiveOutputPath = settings.OutputPath;
-                                    if (string.IsNullOrWhiteSpace(effectiveOutputPath))
-                                    {
-                                        effectiveOutputPath = "./completed";
-                                        _logger.LogDebug("DDL download [{DownloadId}] No output path configured, using default: {DefaultPath}", downloadId, effectiveOutputPath);
-                                    }
-                                    
-                                    var extension = Path.GetExtension(tempFilePath);
-                                    finalPath = await fileNamingService.GenerateFilePathAsync(
-                                        metadata, 
-                                        effectiveOutputPath,
-                                        metadata.DiscNumber, 
-                                        metadata.TrackNumber, 
-                                        extension
-                                    );
-
-                                    // Enforce subfolder policy: only allow subfolders when pattern includes DiskNumber or ChapterNumber
-                                    try
-                                    {
-                                        var fullPattern = settings.FileNamingPattern ?? string.Empty;
-                                        var patternAllowsSubfolders = fullPattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                            || fullPattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                                        if (!patternAllowsSubfolders)
-                                        {
-                                            // Collapse to output root + filename (no subfolders)
-                                            var fileOnly = Path.GetFileName(finalPath) ?? Path.GetFileName(tempFilePath) ?? ($"ddl_download_{downloadId}{extension}");
-                                            var collapsed = Path.Combine(effectiveOutputPath, fileOnly);
-                                            _logger.LogInformation("DDL download [{DownloadId}] Pattern does not allow subfolders. Collapsing generated path to: {Collapsed}", downloadId, collapsed);
-                                            finalPath = collapsed;
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to enforce subfolder policy for DDL download [{DownloadId}]", downloadId);
-                                    }
-
-                                    // Defensive: collapse any duplicate adjacent path components that may have been produced
-                                    try
-                                    {
-                                        var parts = finalPath.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries).ToList();
-                                        for (int i = parts.Count - 1; i > 0; i--)
-                                        {
-                                            if (string.Equals(parts[i], parts[i - 1], StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                // remove duplicate component
-                                                parts.RemoveAt(i);
-                                            }
-                                        }
-                                        // Rebuild path preserving root (drive or UNC) if present
-                                        var root = Path.GetPathRoot(finalPath) ?? string.Empty;
-                                        var rebuilt = root;
-                                        if (parts.Any())
-                                        {
-                                            // If root is a drive letter like 'C:\', avoid duplicating separators
-                                            if (!string.IsNullOrEmpty(root) && (root.EndsWith(Path.DirectorySeparatorChar) || root.EndsWith(Path.AltDirectorySeparatorChar)))
-                                                rebuilt = root + string.Join(Path.DirectorySeparatorChar.ToString(), parts.Skip(root == string.Empty ? 0 : (root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Split(Path.DirectorySeparatorChar).Length)));
-                                            else
-                                                rebuilt = Path.Combine(new[] { root }.Concat(parts).Where(s => !string.IsNullOrEmpty(s)).ToArray());
-                                        }
-
-                                        if (!string.Equals(rebuilt, finalPath, StringComparison.Ordinal))
-                                        {
-                                            _logger.LogDebug("DDL download [{DownloadId}] Collapsed duplicate path components: {Old} -> {New}", downloadId, finalPath, rebuilt);
-                                            finalPath = rebuilt;
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to collapse duplicate path components for DDL download [{DownloadId}]", downloadId);
-                                    }
-
-                                    // Validate the generated path - if it's empty or invalid, fall back to simple naming
-                                    if (string.IsNullOrWhiteSpace(finalPath) || 
-                                        string.IsNullOrWhiteSpace(Path.GetFileName(finalPath)))
-                                    {
-                                        _logger.LogWarning("DDL download [{DownloadId}] Generated path is invalid or empty, falling back to simple naming", downloadId);
-                                        var fileName = Path.GetFileName(tempFilePath);
-                                        if (string.IsNullOrWhiteSpace(fileName))
-                                        {
-                                            fileName = $"ddl_download_{downloadId}{extension}";
-                                        }
-                                        finalPath = Path.Combine(effectiveOutputPath, fileName);
-                                        _logger.LogInformation("DDL download [{DownloadId}] Using fallback final path: {FinalPath}", downloadId, finalPath);
-                                    }
-                                    else
-                                    {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Generated final path: {FinalPath}", downloadId, finalPath);
-                                    }
-
-                                    // Create directory if it doesn't exist
-                                    var finalDirectory = Path.GetDirectoryName(finalPath);
-                                    if (!string.IsNullOrEmpty(finalDirectory) && !Directory.Exists(finalDirectory))
-                                    {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Creating directory: {Directory}", downloadId, finalDirectory);
-                                        Directory.CreateDirectory(finalDirectory);
-                                    }
-
-                                    // Move file to final location
-                                    if (tempFilePath != finalPath && File.Exists(tempFilePath))
-                                    {
-                                        // If the tempFilePath is a path to a file inside a temp folder that itself contains a single top-level folder
-                                        // (common for torrents that extract as 'Title/…'), avoid moving the container folder into the destination which would create an extra nesting.
-                                        try
-                                        {
-                                            var tempDirectory = Path.GetDirectoryName(tempFilePath);
-                                            if (Directory.Exists(tempDirectory))
-                                            {
-                                                var topLevelEntries = Directory.GetFileSystemEntries(tempDirectory);
-                                                if (topLevelEntries.Length == 1 && Directory.Exists(topLevelEntries[0]))
-                                                {
-                                                    // Found a single child folder - flatten by moving files from inside that folder into the final destination
-                                                    var singleChild = topLevelEntries[0];
-                                                    _logger.LogDebug("DDL download [{DownloadId}] Detected single-child container folder in temp dir: {Child}. Flattening contents into destination.", downloadId, singleChild);
-                                                    // Move files from child to final directory (create final directory first)
-                                                    var destDir = Path.GetDirectoryName(finalPath) ?? effectiveOutputPath;
-                                                    if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
-                                                    var files = Directory.GetFiles(singleChild, "*", SearchOption.AllDirectories);
-                                                    // If only one file and it matches the tempFilePath filename, move it to finalPath
-                                                    if (files.Length == 1 && string.Equals(Path.GetFileName(files[0]), Path.GetFileName(tempFilePath), StringComparison.OrdinalIgnoreCase))
-                                                    {
-                                                        _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, files[0], finalPath);
-                                                        File.Move(files[0], finalPath, overwrite: true);
-                                                    }
-                                                    else
-                                                    {
-                                                        // multiple files - try to flatten by copying/moving each into the destDir
-                                                        foreach (var f in files)
-                                                        {
-                                                            var relative = Path.GetRelativePath(singleChild, f);
-                                                            var target = Path.Combine(destDir, relative);
-                                                            var targetDir = Path.GetDirectoryName(target);
-                                                            if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
-                                                            _logger.LogInformation("DDL download [{DownloadId}] Moving file from {Source} to {Target}", downloadId, f, target);
-                                                            File.Move(f, target, overwrite: true);
-                                                        }
-                                                    }
-                                                    // Cleanup the now-empty container
-                                                    try { Directory.Delete(singleChild, recursive: true); } catch { }
-                                                    // Cleanup the original temp file if it still exists
-                                                    if (File.Exists(tempFilePath)) File.Delete(tempFilePath);
-                                                }
-                                                else
-                                                {
-                                                    _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
-                                                    File.Move(tempFilePath, finalPath, overwrite: true);
-                                                    // Mark download as moved
-                                                    using (var moveScope = _serviceScopeFactory.CreateScope())
-                                                    {
-                                                        var dbContext = moveScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
-                                                        var movedDownload = await dbContext.Downloads.FindAsync(downloadId);
-                                                        if (movedDownload != null)
-                                                        {
-                                                            movedDownload.Status = DownloadStatus.Moved;
-                                                            dbContext.Downloads.Update(movedDownload);
-                                                            await dbContext.SaveChangesAsync();
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            else
-                                            {
-                                                _logger.LogInformation("DDL download [{DownloadId}] Moving file from {SourcePath} to {FinalPath}", downloadId, tempFilePath, finalPath);
-                                                File.Move(tempFilePath, finalPath, overwrite: true);
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _logger.LogWarning(ex, "DDL download [{DownloadId}] Failed to move files; attempting simple move", downloadId);
-                                            File.Move(tempFilePath, finalPath, overwrite: true);
-                                        }
-                                        _logger.LogInformation("DDL download [{DownloadId}] ✅ File moved successfully to: {FinalPath}", downloadId, finalPath);
-                                        
-                                        // Clean up temp file after successful move
-                                        CleanupTempFile(tempFilePath);
-                                    }
-                                    else if (tempFilePath == finalPath)
-                                    {
-                                        _logger.LogInformation("DDL download [{DownloadId}] Source and destination paths are the same, no move needed: {Path}", downloadId, tempFilePath);
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning("DDL download [{DownloadId}] Source file does not exist: {FilePath}", downloadId, tempFilePath);
+                                        _logger.LogWarning("DDL download [{DownloadId}] processing queue service not available, keeping file at original location", downloadId);
                                     }
                                 }
                                 else
@@ -3051,15 +2782,32 @@ namespace Listenarr.Api.Services
                         }
                         catch (Exception processEx)
                         {
-                            _logger.LogError(processEx, "DDL download [{DownloadId}] ❌ Failed to process file with naming pattern, keeping original location: {FilePath}", downloadId, tempFilePath);
+                            _logger.LogError(processEx, "DDL download [{DownloadId}] ❌ Failed to queue for background processing, keeping original location: {FilePath}", downloadId, tempFilePath);
                             finalPath = tempFilePath; // Keep original path if processing fails
                         }
                         
-                        // Update database with completion status and final path
-                        // Defer to shared completion handler (testable)
-                        await ProcessCompletedDownloadAsync(downloadId, finalPath);
-
-                        _logger.LogInformation("DDL download [{DownloadId}] finalized at: {FinalPath}", downloadId, finalPath);
+                        // Update database with completion status - DDL downloads are now queued for background processing
+                        using (var updateScope = _serviceScopeFactory.CreateScope())
+                        {
+                            var dbContext = updateScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                            var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
+                            if (completedDownload != null)
+                            {
+                                completedDownload.Status = DownloadStatus.Completed;
+                                completedDownload.Progress = 100;
+                                completedDownload.FinalPath = finalPath;
+                                completedDownload.CompletedAt = DateTime.UtcNow;
+                                if (File.Exists(finalPath))
+                                {
+                                    var ddlFileInfo = new FileInfo(finalPath);
+                                    completedDownload.DownloadedSize = ddlFileInfo.Length;
+                                }
+                                dbContext.Downloads.Update(completedDownload);
+                                await dbContext.SaveChangesAsync();
+                                
+                                _logger.LogInformation("DDL download [{DownloadId}] marked as completed and queued for background processing", downloadId);
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -3192,6 +2940,30 @@ namespace Listenarr.Api.Services
                 var completedDownload = await dbContext.Downloads.FindAsync(downloadId);
                 if (completedDownload != null)
                 {
+                    // Check if this download is already being processed by the background service
+                    var processingQueueService = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                    if (processingQueueService != null)
+                    {
+                        var existingJobs = await processingQueueService.GetJobsForDownloadAsync(downloadId);
+                        var activeJobs = existingJobs?.Where(j => j.Status == ProcessingJobStatus.Pending || 
+                                                                 j.Status == ProcessingJobStatus.Processing || 
+                                                                 j.Status == ProcessingJobStatus.Retry).ToList();
+                        
+                        if (activeJobs != null && activeJobs.Any())
+                        {
+                            _logger.LogInformation("Download {DownloadId} is already being processed by background service (job {JobId}), skipping duplicate processing", 
+                                downloadId, activeJobs.First().Id);
+                            return;
+                        }
+                        
+                        // Also check if download has already been moved/processed
+                        if (completedDownload.Status == DownloadStatus.Moved)
+                        {
+                            _logger.LogInformation("Download {DownloadId} has already been processed (status: Moved), skipping duplicate processing", downloadId);
+                            return;
+                        }
+                    }
+                    
                     // Get application settings for file operations (be defensive: tests may provide a mock that returns null)
                     ApplicationSettings settings;
                     try

@@ -583,6 +583,30 @@ namespace Listenarr.Api.Services
                 var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
 
+                // Check if this download is already being processed by the background service
+                var queueService = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                if (queueService != null)
+                {
+                    var existingJobs = await queueService.GetJobsForDownloadAsync(download.Id);
+                    var activeJobs = existingJobs?.Where(j => j.Status == ProcessingJobStatus.Pending || 
+                                                             j.Status == ProcessingJobStatus.Processing || 
+                                                             j.Status == ProcessingJobStatus.Retry).ToList();
+                    
+                    if (activeJobs != null && activeJobs.Any())
+                    {
+                        _logger.LogInformation("Download {DownloadId} is already being processed by background service (job {JobId}), skipping duplicate finalization", 
+                            download.Id, activeJobs.First().Id);
+                        return;
+                    }
+                    
+                    // Also check if download has already been moved/processed
+                    if (download.Status == DownloadStatus.Moved)
+                    {
+                        _logger.LogInformation("Download {DownloadId} has already been processed (status: Moved), skipping duplicate finalization", download.Id);
+                        return;
+                    }
+                }
+
                 var settings = await configService.GetApplicationSettingsAsync();
                 _logger.LogDebug("Application settings: OutputPath='{OutputPath}', EnableMetadataProcessing={EnableMetadata}, CompletedFileAction={Action}", 
                     settings.OutputPath, settings.EnableMetadataProcessing, settings.CompletedFileAction);

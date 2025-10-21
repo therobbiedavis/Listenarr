@@ -348,6 +348,14 @@ namespace Listenarr.Api.Services
                                         Artist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
                                         AlbumArtist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : metadata.Artist,
                                         Series = audiobook.Series,
+                                        // Prefer audiobook's publish year when available
+                                        Year = int.TryParse(audiobook.PublishYear, out var py) ? py : (int?)null,
+                                        // Series position / number
+                                        SeriesPosition = !string.IsNullOrWhiteSpace(audiobook.SeriesNumber) && decimal.TryParse(audiobook.SeriesNumber, out var sp) ? sp : (decimal?)null,
+                                        // Quality string from audiobook record
+                                        // Map into Bitrate/Format heuristically if useful; for now store textual quality
+                                        // We'll put it into AdditionalData so FileNamingService can use Format/Bitrate/Quality
+                                        AdditionalData = new Dictionary<string, object> { { "Quality", audiobook.Quality ?? string.Empty } }
                                     };
 
                                     job.AddLogEntry($"Using audiobook metadata for naming: {namingMetadata.Title} by {namingMetadata.Artist}");
