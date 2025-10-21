@@ -21,17 +21,43 @@
         <!-- Results Table -->
         <div v-if="displayResults.length > 0 || !searching" class="results-container">
           <div class="results-header">
-            <div class="results-count">
-              {{ displayResults.length }} result{{ displayResults.length !== 1 ? 's' : '' }} found
+            <!-- Search Bar -->
+            <div class="search-bar">
+              <div class="search-input-wrapper">
+                <i class="ph ph-magnifying-glass search-icon"></i>
+                <input
+                  v-model="searchQuery"
+                  type="text"
+                  class="search-input"
+                  placeholder="Search for audiobooks..."
+                  @keyup.enter="search"
+                  :disabled="searching"
+                />
+                <button 
+                  class="search-btn"
+                  @click="search"
+                  :disabled="searching || !searchQuery.trim()"
+                >
+                  <i v-if="!searching" class="ph ph-magnifying-glass"></i>
+                  <i v-else class="ph ph-spinner ph-spin"></i>
+                  Search
+                </button>
+              </div>
             </div>
-            <button 
-              v-if="!searching" 
-              class="btn btn-secondary btn-sm"
-              @click="search"
-            >
-              <i class="ph ph-arrow-clockwise"></i>
-              Refresh
-            </button>
+            
+            <div class="results-controls">
+              <div class="results-count">
+                {{ displayResults.length }} result{{ displayResults.length !== 1 ? 's' : '' }} found
+              </div>
+              <button 
+                v-if="!searching" 
+                class="btn btn-secondary btn-sm"
+                @click="search"
+              >
+                <i class="ph ph-arrow-clockwise"></i>
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div v-if="displayResults.length === 0 && !searching" class="no-results">
@@ -209,9 +235,12 @@ const qualityScores = ref<Map<string, QualityScore>>(new Map())
 const qualityProfile = ref<QualityProfile | null>(null)
 const sortBy = ref<SearchSortBy | 'Score'>('Score')
 const sortDirection = ref<SearchSortDirection>('Descending')
+const searchQuery = ref('')
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen && props.audiobook) {
+    // Initialize search query with default query and auto-search
+    searchQuery.value = buildSearchQuery()
     search()
   }
 })
@@ -317,8 +346,8 @@ async function search() {
     const enabledIndexers = await apiService.getEnabledIndexers()
     totalIndexers.value = enabledIndexers.length
     
-    // Build search query from title and author
-    const query = buildSearchQuery()
+    // Build search query from title and author (fallback if no manual query)
+    const query = searchQuery.value.trim() || buildSearchQuery()
     
     // Search each indexer individually to show progress
     const allResults: SearchResult[] = []
@@ -655,14 +684,109 @@ function getScoreClass(score: number): string {
 
 .results-header {
   display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.results-controls {
+  display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 1rem;
 }
 
 .results-count {
   color: #ccc;
   font-size: 0.9rem;
+}
+
+.search-bar {
+  width: 100%;
+}
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: stretch; /* ensure input and button match height */
+  gap: 0.5rem;
+  max-width: 600px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8a8a8a;
+  font-size: 1rem;
+  z-index: 2;
+  pointer-events: none; /* make icon non-interactive so clicks go to the input */
+}
+
+.search-input {
+  flex: 1;
+  padding: 0.5rem 1rem 0.5rem 2.5rem;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: white;
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  height: 40px;
+  box-sizing: border-box;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+}
+
+.search-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.search-btn {
+  padding: 0 1rem;
+  white-space: nowrap;
+  min-width: 96px;
+  background-color: #007acc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+  height: 40px; /* match input height */
+  box-sizing: border-box;
+}
+
+.search-btn:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.search-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Ensure icon color follows button color (spinner inherits text color) */
+.search-btn .ph {
+  color: inherit;
+}
+
+.btn-primary {
+  background-color: #007acc;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #0056b3;
 }
 
 .btn {

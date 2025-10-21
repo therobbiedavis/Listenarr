@@ -628,6 +628,38 @@ namespace Listenarr.Api.Services
             // Update the download record with the final path
             await downloadService.ProcessCompletedDownloadAsync(job.DownloadId, job.DestinationPath);
             job.AddLogEntry($"Updated download record with final path: {job.DestinationPath}");
+
+            // If the download was linked to an Audiobook, enqueue a scan for that audiobook
+            try
+            {
+                using var scope = _serviceScopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetService<ListenArrDbContext>();
+                var scanQueue = scope.ServiceProvider.GetService<IScanQueueService>();
+
+                if (scanQueue != null && dbContext != null)
+                {
+                    var dl = await dbContext.Downloads.FindAsync(job.DownloadId);
+                    if (dl != null && dl.AudiobookId != null)
+                    {
+                        try
+                        {
+                            // Enqueue a scan for the audiobook using the destination path so the scanner
+                            // can focus on the moved/copied file location if appropriate.
+                            var jobId = await scanQueue.EnqueueScanAsync(dl.AudiobookId.Value, job.DestinationPath);
+                            job.AddLogEntry($"Enqueued scan job {jobId} for audiobook {dl.AudiobookId} path={job.DestinationPath}");
+                            _logger.LogInformation("Enqueued scan job {JobId} for audiobook {AudiobookId} after processing download {DownloadId}", jobId, dl.AudiobookId, job.DownloadId);
+                        }
+                        catch (Exception ex)
+                        {
+                            job.AddLogEntry($"Failed to enqueue scan job: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                job.AddLogEntry($"Failed to attempt enqueueing scan job: {ex.Message}");
+            }
         }
     }
 }

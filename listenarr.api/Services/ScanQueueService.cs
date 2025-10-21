@@ -18,6 +18,32 @@ namespace Listenarr.Api.Services
 
         public async Task<Guid> EnqueueScanAsync(int audiobookId, string? path = null)
         {
+            // Deduplicate: if there's already a job for the same audiobook and path that is
+            // queued/processing/completed, return that job id instead of creating a duplicate.
+            try
+            {
+                var existing = _jobs.Values.FirstOrDefault(j => j.AudiobookId == audiobookId && (
+                    (j.Path == null && path == null) || (j.Path != null && path != null && string.Equals(j.Path, path, StringComparison.OrdinalIgnoreCase))));
+
+                if (existing != null)
+                {
+                    // Only dedupe when an existing job is actively queued or processing.
+                    // If a previous job Completed or Failed, allow a new job to be created so
+                    // explicit re-scans can be scheduled.
+                    if (string.Equals(existing.Status, "Queued", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(existing.Status, "Processing", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogInformation("Found active scan job {JobId} for audiobook {AudiobookId} (path: {Path}) with status {Status}; deduping and returning existing job id", existing.Id, audiobookId, path, existing.Status);
+                        return existing.Id;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // If dedupe check fails for any reason, fall back to enqueueing a new job
+                _logger.LogWarning(ex, "Failed while checking existing scan jobs for dedupe; will enqueue new job");
+            }
+
             var job = new ScanJob { AudiobookId = audiobookId, Path = path };
             _jobs[job.Id] = job;
             _logger.LogInformation("Enqueueing scan job {JobId} for audiobook {AudiobookId} (path: {Path})", job.Id, audiobookId, path);
