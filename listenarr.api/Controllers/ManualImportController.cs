@@ -16,19 +16,22 @@ public class ManualImportController : ControllerBase
     private readonly IMetadataService _metadataService;
     private readonly IFileNamingService _fileNamingService;
     private readonly IConfigurationService _configService;
+    private readonly IScanQueueService _scanQueueService;
 
     public ManualImportController(
         ILogger<ManualImportController> logger,
         IAudiobookRepository audiobookRepository,
         IMetadataService metadataService,
         IFileNamingService fileNamingService,
-        IConfigurationService configService)
+        IConfigurationService configService,
+        IScanQueueService scanQueueService)
     {
         _logger = logger;
         _audiobookRepository = audiobookRepository;
         _metadataService = metadataService;
         _fileNamingService = fileNamingService;
         _configService = configService;
+        _scanQueueService = scanQueueService;
     }
 
     [HttpGet("preview")]
@@ -211,6 +214,23 @@ public class ManualImportController : ControllerBase
             {
                 System.IO.File.Copy(item.FullPath, destinationPath);
                 _logger.LogInformation("Copied file {Source} to {Destination}", item.FullPath, destinationPath);
+            }
+            // After a successful move/copy, enqueue a focused scan for the matched audiobook
+            try
+            {
+                if (_scanQueueService != null)
+                {
+                    var scanJobId = await _scanQueueService.EnqueueScanAsync(audiobook.Id, destinationPath);
+                    _logger.LogInformation("Enqueued focused scan {ScanJobId} for audiobook {AudiobookId} (path: {Path}) after manual import", scanJobId, audiobook.Id, destinationPath);
+                }
+                else
+                {
+                    _logger.LogDebug("IScanQueueService not available - skipping enqueue of focused scan for audiobook {AudiobookId}", audiobook.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to enqueue scan for audiobook {AudiobookId} after manual import", audiobook.Id);
             }
 
             return new ManualImportResult 

@@ -812,17 +812,30 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                // Parse apiId as indexer ID (not API configuration ID)
-                if (!int.TryParse(apiId, out var indexerId))
+                Indexer? indexer = null;
+
+                // Try parsing apiId as numeric indexer ID first
+                if (int.TryParse(apiId, out var indexerId))
                 {
-                    _logger.LogWarning("Invalid indexer ID format: {ApiId}", apiId);
+                    indexer = await _dbContext.Indexers.FindAsync(indexerId);
+                }
+                else
+                {
+                    // If not numeric, try to find an indexer by name (case-insensitive)
+                    indexer = await _dbContext.Indexers
+                        .Where(i => i.Name.Equals(apiId, StringComparison.OrdinalIgnoreCase))
+                        .FirstOrDefaultAsync();
+                }
+
+                if (indexer == null)
+                {
+                    _logger.LogWarning("Indexer not found for apiId: {ApiId}", apiId);
                     return new List<SearchResult>();
                 }
 
-                var indexer = await _dbContext.Indexers.FindAsync(indexerId);
-                if (indexer == null || !indexer.IsEnabled)
+                if (!indexer.IsEnabled)
                 {
-                    _logger.LogWarning("Indexer {IndexerId} not found or not enabled", indexerId);
+                    _logger.LogWarning("Indexer {IndexerName} (apiId: {ApiId}) is not enabled", indexer.Name, apiId);
                     return new List<SearchResult>();
                 }
 
