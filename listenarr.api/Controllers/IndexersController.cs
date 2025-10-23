@@ -181,6 +181,16 @@ namespace Listenarr.Api.Controllers
                     return await TestMyAnonamouse(indexer);
                 }
 
+                // Normalize and persist the indexer URL to avoid common misconfigurations
+                var normalized = NormalizeIndexerUrl(indexer.Url);
+                if (!string.Equals(normalized, indexer.Url, StringComparison.Ordinal))
+                {
+                    _logger.LogInformation("Normalizing indexer URL from '{Old}' to '{New}'", indexer.Url, normalized);
+                    indexer.Url = normalized;
+                    indexer.UpdatedAt = DateTime.UtcNow;
+                    await _dbContext.SaveChangesAsync();
+                }
+
                 // Build test URL (caps endpoint for capabilities) - for Torznab/Newznab
                 var url = indexer.Url.TrimEnd('/');
                 var apiPath = indexer.Implementation.ToLower() switch
@@ -203,6 +213,22 @@ namespace Listenarr.Api.Controllers
                 // Make test request
                 var response = await _httpClient.GetAsync(testUrl);
                 var content = await response.Content.ReadAsStringAsync();
+
+                // Defensive checks: redirects or HTML login pages are common misconfigurations
+                if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
+                {
+                    var location = response.Headers.Location?.ToString() ?? "(none)";
+                    throw new Exception($"Unexpected redirect (HTTP {(int)response.StatusCode}) to '{location}'. The indexer URL may point to a UI/login page instead of the API endpoint.");
+                }
+
+                // If the server returned text/html, it's likely an HTML login or error page rather than Torznab XML
+                if (response.Content.Headers.ContentType != null && response.Content.Headers.ContentType.MediaType != null
+                    && response.Content.Headers.ContentType.MediaType.Contains("html", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Truncate content for the error message
+                    var snippet = content?.Length > 512 ? content.Substring(0, 512) + "..." : content;
+                    throw new Exception($"Indexer returned HTML (Content-Type: {response.Content.Headers.ContentType}). Likely a login page or UI. Sample: {snippet}");
+                }
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -510,6 +536,37 @@ namespace Listenarr.Api.Controllers
                 .ToListAsync();
 
             return Ok(indexers);
+        }
+
+        /// <summary>
+        /// Normalize indexer URL by removing duplicate or trailing '/api' segments and ensuring a scheme
+        /// </summary>
+        private string NormalizeIndexerUrl(string? rawUrl)
+        {
+            if (string.IsNullOrWhiteSpace(rawUrl)) return rawUrl ?? string.Empty;
+
+            var url = rawUrl.Trim();
+
+            // Add scheme if missing (assume https)
+            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                url = "https://" + url;
+            }
+
+            // Remove repeated '/api/api' or trailing '/api'
+            // Normalize multiple slashes
+            while (url.Contains("/api/api", StringComparison.OrdinalIgnoreCase))
+            {
+                url = url.Replace("/api/api", "/api", StringComparison.OrdinalIgnoreCase);
+            }
+
+            // If the url ends with '/api', remove it so we can append the correct apiPath later
+            if (url.EndsWith("/api", StringComparison.OrdinalIgnoreCase))
+            {
+                url = url.Substring(0, url.Length - 4);
+            }
+
+            return url.TrimEnd('/');
         }
     }
 }
