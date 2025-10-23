@@ -117,12 +117,14 @@ npm run dev:web      # Start only frontend web
 
 Listenarr uses GitHub Actions for automated building and deployment:
 
+- **Canary Builds** (on `canary` pushes): Builds self-contained executables (Linux x64, Windows x64) and Docker images. Creates GitHub pre-releases with downloadable zips and pushes Docker images tagged as `canary` and `canary-X.Y.Z`.
 - **Nightly Builds** (on `develop` pushes): Builds self-contained executables (Linux x64, Windows x64) and Docker images. Creates GitHub pre-releases with downloadable zips and pushes Docker images tagged as `nightly` and `nightly-X.Y.Z`.
 - **Release Builds** (on version tags): Builds executables for Linux x64, Windows x64, and macOS x64. Creates GitHub releases with artifacts and pushes Docker images tagged as `stable`, `latest`, and `X.Y.Z`.
 
 Version numbers are automatically incremented:
-- Nightly: Patch version +1
-- Release: Minor version +1, patch reset to 0
+- Canary: Patch version +1
+- Nightly: Minor version +1, patch reset to 0
+- Release: Major version +1, minor and patch reset to 0
 
 All builds are CI-first: `dotnet publish` automatically builds the frontend and includes it in the API's `wwwroot`.
 
