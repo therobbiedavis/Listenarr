@@ -11,6 +11,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - README improvements
 - Tutorial videos or blog posts
 
+- Canonical contributor guidance and AI-agent rules: see `.github/AGENTS.md`, `.github/CLAUDE.md` and `.github/RULES.md`
 ## Development
 
 ### Tools Required
@@ -20,7 +21,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - **VS Code** (recommended for frontend) ([https://code.visualstudio.com/](https://code.visualstudio.com/))
 - **Git** ([https://git-scm.com/downloads](https://git-scm.com/downloads))
 - **Node.js** (Node 20.x or higher) ([https://nodejs.org/](https://nodejs.org/))
-- **.NET 7.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
+- **.NET 8.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
 
 ### Getting Started
 
@@ -47,30 +48,26 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
    cd ..
    ```
 6. **Start development servers**
-   
-   Option 1 - Single command (from root):
-   ```bash
-   npm run dev
-   ```
-   
-   Option 2 - Use startup scripts:
-   - Windows: `start-dev.bat` or `.\start-dev.ps1`
-   - Linux/macOS: `./start-dev.sh`
-   
-   Option 3 - Start separately:
-   ```bash
-   # Terminal 1 - Backend
-   cd listenarr.api
-   dotnet run --urls http://localhost:5146
-   
-   # Terminal 2 - Frontend
-   cd fe
-   npm run dev
+  Option A - Single command (recommended, runs both API and web):
+  ```bash
+  npm run dev
+  ```
+
+  Option B - Start services separately (useful for backend debugging):
+  ```bash
+  # Terminal 1 - Backend (fast restart on code changes)
+  cd listenarr.api
+  dotnet watch run
+
+  # Terminal 2 - Frontend
+  cd fe
+  npm run dev
+  ```
    ```
 
 7. **Open your browser**
    - Frontend: [http://localhost:5173](http://localhost:5173)
-   - Backend API: [http://localhost:5146](http://localhost:5146)
+   - Backend API: [http://localhost:5000](http://localhost:5000)
 
 ### Debugging
 
@@ -78,7 +75,9 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 1. Open `listenarr.sln` in Visual Studio or Rider
 2. Set `listenarr.api` as the startup project
 3. Press F5 to start debugging
-4. The API will be available at [http://localhost:5146](http://localhost:5146)
+4. The API will be available at [http://localhost:5000](http://localhost:5000)
+
+Note: there is also a `watch` task available in the workspace tasks that runs `dotnet watch run` across the solution when you prefer a single task for backend hot-reloads.
 
 #### VS Code
 1. Open the root folder in VS Code
@@ -87,7 +86,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 
 #### Debugging on Mobile/Other Devices
 - Update the API URL in `fe/src/services/api.ts` to use your development machine's IP address instead of `localhost`
-- Example: `http://192.168.1.100:5146` instead of `http://localhost:5146`
+- Example: `http://192.168.1.100:5000` instead of `http://localhost:5000`
 
 ### Contributing Code
 
@@ -97,7 +96,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - If adding something not already requested, please create an issue first to discuss it
 - Reach out on [Discussions](https://github.com/therobbiedavis/Listenarr/discussions) if you have questions
 
-**Code guidelines:**
+ - Run frontend tests: `cd fe && npm test` (the frontend uses Vitest/Vite; check `fe/package.json` for exact scripts)
 - Rebase from Listenarr's `develop` branch, don't merge
 - Make meaningful commits, or squash them before submitting PR
 - Feel free to make a pull request before work is complete (mark as draft) - this lets us see progress and provide feedback
@@ -136,8 +135,8 @@ Bad examples:
 - `develop`
 
 **PR process:**
-1. **Target branch**: Only make pull requests to `develop`, never `main`
-   - PRs to `main` will be commented on and closed
+1. **Target branch**: Only make pull requests to `canary`, never `main` or `develop`
+   - PRs to `main` and `develop` will be commented on and closed
 2. **Description**: Provide a clear description of what your PR does
    - Reference related issues (e.g., "Fixes #123")
    - Include screenshots for UI changes
@@ -157,7 +156,7 @@ Bad examples:
 - [ ] All tests pass
 - [ ] No console errors or warnings
 - [ ] Documentation updated (if needed)
-- [ ] Rebased on latest `develop` branch
+- [ ] Rebased on latest `canary` branch
 
 ### API Documentation
 
@@ -168,7 +167,7 @@ If you want to explore the API using Swagger:
    cd listenarr.api
    dotnet run
    ```
-2. Navigate to [http://localhost:5146/swagger](http://localhost:5146/swagger)
+2. Navigate to [http://localhost:5000/swagger](http://localhost:5000/swagger)
 3. You can test all API endpoints directly from the Swagger UI
 
 ### Project Structure
@@ -199,7 +198,7 @@ Listenarr/
 **Backend:**
 - ASP.NET Core Web API
 - Entity Framework Core with SQLite
-- C# 12 / .NET 7.0+
+- C# 12 / .NET 8.0+
 
 **Frontend:**
 - Vue 3 (Composition API)
