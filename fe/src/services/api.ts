@@ -54,11 +54,20 @@ class ApiService {
       ...options,
     }
 
-    // Attach API key from startup config if present (cached call)
+    // Attach API key from startup config if present (cached call).
+    // IMPORTANT: only attach the API key automatically when the server has
+    // authentication disabled. If authentication is enabled, the presence of
+    // an API key would authenticate the SPA itself and bypass login/logout.
     try {
       const sc = await getStartupConfigCached(2000)
       const apiKey = sc?.apiKey
-      if (apiKey) {
+      // Accept both camelCase and PascalCase variants for compatibility
+  const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
+      const authEnabled = typeof rawAuth === 'boolean'
+        ? rawAuth
+        : (typeof rawAuth === 'string' ? (rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true') : false)
+
+      if (apiKey && !authEnabled) {
         const hdrs = config.headers as Record<string, string> | undefined
         config.headers = { ...(hdrs || {}), 'X-Api-Key': apiKey }
       }
