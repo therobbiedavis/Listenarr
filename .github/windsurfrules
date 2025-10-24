@@ -1,0 +1,41 @@
+---
+trigger: glob
+description: Enforce secure coding practices for .NET applications built with ASP.NET Core by addressing common CWEs.
+globs: **/*.cs, **/*.csproj, **/*.json, **/*.xml
+---
+
+As a security-aware developer, generate secure .NET code using ASP.NET Core that inherently prevents top security weaknesses.
+Focus on making the implementation inherently safe rather than merely renaming methods with "secure_" prefixes.
+Use inline comments to clearly highlight critical security controls, implemented measures, and any security assumptions made in the code.
+Adhere strictly to best practices from OWASP, with particular consideration for the OWASP ASVS guidelines.
+**Avoid Slopsquatting**: Be careful when referencing or importing packages. Do not guess if a package exists. Comment on any low reputation or uncommon packages you have included.
+
+**Memory Safety Note:** .NET is a memory-managed language. The .NET Common Language Runtime (CLR) handles memory allocation and deallocation, inherently mitigating common memory safety issues like buffer overflows, use-after-free, and double-free vulnerabilities typically found in unmanaged languages (e.g., C/C++).
+
+### CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+**Summary:** XSS occurs when an application includes untrusted data in a web page without proper neutralization, allowing malicious scripts to execute in the user's browser.
+**Mitigation Rule:** Always HTML-encode all untrusted input before rendering it in HTML using `System.Text.Encodings.Web.HtmlEncoder.Default` or Razor's automatic encoding. Ensure all data passed into JavaScript contexts is JSON-encoded using `JsonSerializer.Serialize` or URL-encoded using `Uri.EscapeDataString` as appropriate.
+
+### CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')
+**Summary:** SQL Injection occurs when untrusted input is improperly concatenated into a SQL query, allowing attackers to manipulate the query and access or modify unauthorized data.
+**Mitigation Rule:** Use parameterized queries (e.g., `SqlCommand` with `SqlParameter`, Entity Framework Core LINQ queries, or Dapper with anonymous objects) for all database interactions. Never concatenate user-supplied input directly into SQL statements.
+
+### CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')
+**Summary:** Path Traversal allows an attacker to access files and directories outside of the intended directory by manipulating file paths.
+**Mitigation Rule:** Validate and sanitize all user-supplied file paths and names. Use `System.IO.Path.GetFullPath` and `System.IO.Path.Combine` to create safe, canonical paths, and explicitly verify that the resulting path is strictly within an allowed base directory by checking for prefixes or direct equality.
+
+### CWE-502: Deserialization of Untrusted Data
+**Summary:** Deserializing untrusted or malicious data can lead to remote code execution, denial-of-service, or data tampering.
+**Mitigation Rule:** Avoid deserializing untrusted data, especially complex object graphs, from unknown or untrusted sources. If deserialization is unavoidable, use secure serializers like `System.Text.Json` with appropriate `JsonSerializerOptions` (e.g., `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault` and `AllowTrailingCommas = false`) and consider `JsonStringEnumConverter` for enums. Never use insecure formatters like `BinaryFormatter` or `NetDataContractSerializer` with untrusted inputs.
+
+### CWE-522: Insufficiently Protected Credentials / Hardcoded Secrets
+**Summary:** Credentials and sensitive configuration stored directly in code or insecure locations can be exposed and exploited.
+**Mitigation Rule:** Never hardcode secrets, API keys, connection strings, or credentials directly in source code. Utilize ASP.NET Core's configuration system, storing sensitive information in environment variables, Azure Key Vault, AWS Secrets Manager, HashiCorp Vault, or user secrets during development. Access configuration using `IConfiguration`.
+
+### CWE-352: Cross-Site Request Forgery (CSRF)
+**Summary:** CSRF forces an end-user to execute unwanted actions on a web application in which they're currently authenticated.
+**Mitigation Rule:** Apply the `[AutoValidateAntiforgeryToken]` attribute globally (e.g., via `AddControllersWithViews(options => options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()))` in `Program.cs`) or specifically to HTTP POST actions using `[ValidateAntiForgeryToken]`. Ensure AJAX calls correctly include the anti-forgery token in the request header or form data.
+
+### CWE-327: Use of a Broken or Risky Cryptographic Algorithm
+**Summary:** Using outdated, weak, or insecure cryptographic algorithms can compromise data confidentiality and integrity.
+**Mitigation Rule:** Use modern, strong, and industry-recommended cryptographic algorithms and protocols (e.g., AES-256 for symmetric encryption, SHA-256/SHA-512 for hashing, PBKDF2 or Argon2 for password hashing via `Microsoft.AspNetCore.Identity.PasswordHasher`). Avoid deprecated or known-weak algorithms like MD5, SHA1, DES, and RC4. Ensure proper salt generation and secure key management using `System.Security.Cryptography.RandomNumberGenerator`.
