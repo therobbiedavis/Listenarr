@@ -63,7 +63,6 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
   cd fe
   npm run dev
   ```
-   ```
 
 7. **Open your browser**
    - Frontend: [http://localhost:5173](http://localhost:5173)
