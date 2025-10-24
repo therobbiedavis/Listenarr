@@ -942,6 +942,20 @@ const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
+
+  // Expose a toggle function for unit tests and template interactions that
+  // prefer a method instead of inline assignment. Tests call
+  // `wrapper.vm.toggleShowPassword()` so we expose it here.
+  const toggleShowPassword = () => {
+    showPassword.value = !showPassword.value
+  }
+
+  // Make the function available on the component instance for Vue Test Utils
+  // and any external consumers that expect an instance method.
+  // `defineExpose` is a compiler macro available in <script setup>.
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  defineExpose({ toggleShowPassword })
 const showMappingForm = ref(false)
 const mappingToEdit = ref<RemotePathMapping | null>(null)
 

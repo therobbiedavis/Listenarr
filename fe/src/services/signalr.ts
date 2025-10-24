@@ -44,11 +44,18 @@ class SignalRService {
       let hubUrl = `${wsUrl}/hubs/downloads`
       try {
         // Try to include API key as access_token if the startup config contains one
-        // This will allow the server-side ApiKeyMiddleware to accept the websocket handshake
+        // ONLY when server-side authentication is disabled. If authentication is
+        // enabled, appending the API key would authenticate the SPA and bypass
+        // normal login/logout flows.
         const { getStartupConfigCached } = await import('./startupConfigCache')
         const sc = await getStartupConfigCached(2000)
         const apiKey = sc?.apiKey
-        if (apiKey) {
+        const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
+        const authEnabled = typeof rawAuth === 'boolean'
+          ? rawAuth
+          : (typeof rawAuth === 'string' ? (rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true') : false)
+
+        if (apiKey && !authEnabled) {
           const sep = hubUrl.includes('?') ? '&' : '?'
           hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(apiKey)}`
         }
