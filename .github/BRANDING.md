@@ -74,7 +74,7 @@ The Listenarr logo combines three key elements that represent the core functiona
 
 ### Design Principles
 - Clean and modern design
-- Scalable vector graphics (SVG)
+- Prefer scalable vector graphics (SVG) when available. Note: this repository currently contains PNG/ICO assets only; SVG source files are not included here.
 - Works well on light and dark backgrounds
 - Maintains recognizability at small sizes
 
@@ -94,14 +94,14 @@ The Listenarr logo combines three key elements that represent the core functiona
 
 ## File Formats
 
-All logos are provided in PNG format for:
-- High-quality raster graphics
-- Transparency support (alpha channel)
-- Universal compatibility across browsers and platforms
-- Optimal for web and print use
-- Multiple sizes for different use cases (16px to 512px)
+PNG/ICO are the canonical assets included in this repository. The files in `fe/public` and `.github` are provided as high-quality raster assets and favicons and should be considered the primary sources for the web app and documentation.
 
-Note: SVG versions are also available in the public folder for scalability if needed.
+Why PNG/ICO here?
+- Broad browser and platform compatibility
+- Transparency support where needed
+- Favicons (ICO/PNG) are required for some browsers
+
+If you have the original SVG/source vector files, please add them to `fe/public` and/or `.github` and note them here; SVGs are preferred for downstream exports and high-DPI scaling but are not currently included in the repo.
 
 ### Icon Sizes Available
 - **16×16** - Browser favicon

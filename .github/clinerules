@@ -1,0 +1,42 @@
+As a security-aware developer, generate secure .NET code using ASP.NET Core that inherently prevents top security weaknesses.
+Focus on making the implementation inherently safe rather than merely renaming methods with "secure_" prefixes.
+Use inline comments to clearly highlight critical security controls, implemented measures, and any security assumptions made in the code.
+Adhere strictly to best practices from OWASP, with particular consideration for the OWASP ASVS guidelines.
+**Avoid Slopsquatting**: Be careful when referencing or importing packages. Do not guess if a package exists. Comment on any low reputation or uncommon packages you have included.
+
+---
+
+### Memory Safety Considerations for .NET
+.NET is a memory-managed language with automatic garbage collection. This inherently mitigates many common memory safety issues like buffer overflows, use-after-free, and double-free vulnerabilities that are prevalent in unmanaged languages. Focus on proper disposal of unmanaged resources (e.g., IDisposable pattern) and efficient memory usage to prevent performance issues rather than low-level memory corruption.
+
+### CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')
+**Summary:** SQL Injection occurs when untrusted input is incorporated directly into SQL queries, allowing attackers to manipulate database commands.
+**Mitigation Rule:** Always use parameterized queries or secure Object-Relational Mappers (ORMs) like Entity Framework Core for all database interactions. Never concatenate user input directly into SQL strings.
+
+### CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+**Summary:** XSS vulnerabilities arise when untrusted data is displayed in a web page without proper encoding, enabling attackers to inject malicious scripts.
+**Mitigation Rule:** Automatically HTML-encode all user-supplied data before rendering it in HTML using `System.Web.HttpUtility.HtmlEncode` or leverage ASP.NET Core's Razor Pages/MVC, which provide automatic encoding by default. Implement a strict Content Security Policy (CSP) to restrict allowed content sources.
+
+### CWE-502: Deserialization of Untrusted Data
+**Summary:** Insecure deserialization can lead to remote code execution when an application deserializes untrusted, malicious data.
+**Mitigation Rule:** Avoid deserializing untrusted data, especially using general-purpose formatters like `BinaryFormatter`. If deserialization is unavoidable, use secure, constrained deserializers (e.g., `System.Text.Json` with appropriate `JsonSerializerOptions` to prevent polymorphic deserialization) and validate incoming data thoroughly before deserialization.
+
+### CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')
+**Summary:** Path traversal allows attackers to access arbitrary files and directories on a server by manipulating file paths.
+**Mitigation Rule:** Always use `Path.Combine` when constructing file paths and rigorously validate all user-supplied path segments to ensure they remain within an intended directory, explicitly checking for `..` or directory separator characters (`/`, `\`). Utilize `VirtualFileProvider` or similar abstractions where appropriate.
+
+### CWE-287: Improper Authentication
+**Summary:** Improper authentication vulnerabilities occur when an application fails to correctly verify the identity of a user, leading to unauthorized access.
+**Mitigation Rule:** Implement authentication using robust, well-established frameworks like ASP.NET Core Identity. Ensure strong password policies, multi-factor authentication (MFA) capabilities, secure password hashing (e.g., PBKDF2 with sufficient iterations via `Microsoft.AspNetCore.Identity.PasswordHasher`), and secure session management with appropriate timeouts and invalidation.
+
+### CWE-276: Incorrect Default Permissions (Broken Access Control)
+**Summary:** Broken access control allows users to perform actions for which they are not authorized, often due to improper permission checks.
+**Mitigation Rule:** Enforce authorization rigorously at all layers (UI, API, data access). Use ASP.NET Core's built-in authorization mechanisms (e.g., `[Authorize]` attribute, policy-based authorization) and implement explicit access checks for every resource and sensitive operation based on the principle of least privilege.
+
+### CWE-77: Improper Neutralization of Special Elements used in a Command ('Command Injection')
+**Summary:** Command injection occurs when an attacker can execute arbitrary commands on the host operating system through an application.
+**Mitigation Rule:** Avoid executing external operating system commands from user input. If unavoidable, use safe APIs like `System.Diagnostics.ProcessStartInfo` with strict input validation and ensure the command and arguments are explicitly separated, never concatenated. Do not allow shell interpretation.
+
+### Hardcoded Secrets and Credentials
+**Summary:** Storing sensitive information like API keys, connection strings, or cryptographic keys directly in code or configuration files.
+**Mitigation Rule:** Never hardcode secrets, credentials, or sensitive configuration data directly into source code or committed configuration files. Utilize secure configuration providers (e.g., ASP.NET Core's built-in configuration, Azure Key Vault, AWS Secrets Manager, HashiCorp Vault) and environment variables for managing sensitive information securely.
