@@ -23,6 +23,7 @@ using Listenarr.Api.Middleware;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.DataProtection;
 using Serilog;
 
 // Check for special CLI helpers before building the web host
@@ -178,8 +179,6 @@ if (builder.Environment.IsDevelopment())
                 policy.WithOrigins(
                         "http://localhost:5173",
                         "https://localhost:5173",
-                        "http://localhost:3000",
-                        "https://localhost:3000",
                         "http://127.0.0.1:5173",
                         "https://127.0.0.1:5173"
                     )
@@ -226,8 +225,26 @@ if (builder.Environment.IsDevelopment())
         options.HeaderName = "X-XSRF-TOKEN";
         // Allow the antiforgery cookie to be sent over plain HTTP during local dev
         options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
-        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+    // During local development the frontend often runs on a different origin
+    // (Vite dev server). Use SameSite=Lax so the browser will accept the
+    // cookie for same-site requests to the Vite dev server while avoiding
+    // the requirement to set Secure (which would require HTTPS). In our
+    // setup the dev server proxies /api requests, so Lax is sufficient and
+    // more compatible with local HTTP development.
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     });
+}
+
+// Persist Data Protection keys to disk so antiforgery tokens/cookies remain valid
+// across process restarts and between instances during local development.
+// This avoids issues where tokens are protected with an ephemeral key ring and
+// cannot be validated later.
+{
+    var keyDir = Path.Combine(builder.Environment.ContentRootPath, "config", "dataprotection-keys");
+    if (!System.IO.Directory.Exists(keyDir)) System.IO.Directory.CreateDirectory(keyDir);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new System.IO.DirectoryInfo(keyDir))
+        .SetApplicationName("Listenarr");
 }
 
 var app = builder.Build();

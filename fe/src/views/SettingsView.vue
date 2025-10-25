@@ -1059,6 +1059,16 @@ const executeDeleteClient = async (id?: string) => {
 const testClient = async (client: DownloadClientConfiguration) => {
   testingClient.value = client.id
   try {
+    // Ensure antiforgery token is issued for the current auth principal.
+    // This prevents failures when a token was fetched while anonymous and
+    // later reused after authentication ("meant for a different claims-based user").
+    try {
+      await apiService.ensureAntiforgeryForCurrentAuth()
+    } catch (e) {
+      // Non-fatal: we'll still attempt the test request and surface any server error
+      console.debug('ensureAntiforgeryForCurrentAuth failed', e)
+    }
+
     // Send full client config to server for testing (credentials included)
     const result = await apiTestDownloadClient(client)
     if (result && result.success) {

@@ -1,5 +1,7 @@
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace Listenarr.Api.Middleware
 {
@@ -7,11 +9,13 @@ namespace Listenarr.Api.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly IStartupConfigService _startupConfigService;
+        private readonly ILogger<AuthenticationEnforcerMiddleware> _logger;
 
-        public AuthenticationEnforcerMiddleware(RequestDelegate next, IStartupConfigService startupConfigService)
+        public AuthenticationEnforcerMiddleware(RequestDelegate next, IStartupConfigService startupConfigService, ILogger<AuthenticationEnforcerMiddleware> logger)
         {
             _next = next;
             _startupConfigService = startupConfigService;
+            _logger = logger;
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -24,13 +28,30 @@ namespace Listenarr.Api.Middleware
                 else authRequired = cfg.AuthenticationRequired?.ToLower() == "enabled";
             }
 
-            // Log logout requests specifically
+            // Log logout requests specifically and include masked principal diagnostics
             var path = context.Request.Path.Value ?? string.Empty;
             if (path.StartsWith("/api/account/logout"))
             {
-                var logger = context.RequestServices.GetService<ILogger<AuthenticationEnforcerMiddleware>>();
-                logger?.LogInformation("Logout request detected - Method: {Method}, Path: {Path}, User: {User}, Authenticated: {Authenticated}", 
-                    context.Request.Method, path, context.User?.Identity?.Name ?? "Anonymous", context.User?.Identity?.IsAuthenticated ?? false);
+                try
+                {
+                    var authenticated = context.User?.Identity?.IsAuthenticated ?? false;
+                    string? nameMask = null;
+                    int claimsCount = 0;
+                    try
+                    {
+                        claimsCount = context.User?.Claims?.Count() ?? 0;
+                        if (authenticated)
+                        {
+                            var pname = context.User?.Identity?.Name ?? context.User?.FindFirst("sub")?.Value ?? context.User?.FindFirst("name")?.Value;
+                            if (!string.IsNullOrEmpty(pname)) nameMask = pname.Length <= 8 ? pname : pname.Substring(0, 8);
+                        }
+                    }
+                    catch { }
+
+                    _logger?.LogInformation("Logout request detected - Method: {Method}, Path: {Path}, Authenticated={Authenticated}, PrincipalNameMask={NameMask}, PrincipalClaims={ClaimsCount}",
+                        context.Request.Method, path, authenticated, nameMask, claimsCount);
+                }
+                catch { }
             }
 
             // If endpoint explicitly allows anonymous, skip enforcement

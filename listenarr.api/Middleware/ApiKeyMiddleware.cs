@@ -13,11 +13,13 @@ namespace Listenarr.Api.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly IStartupConfigService _startupConfigService;
+        private readonly Microsoft.Extensions.Logging.ILogger<ApiKeyMiddleware> _logger;
 
-        public ApiKeyMiddleware(RequestDelegate next, IStartupConfigService startupConfigService)
+        public ApiKeyMiddleware(RequestDelegate next, IStartupConfigService startupConfigService, Microsoft.Extensions.Logging.ILogger<ApiKeyMiddleware> logger)
         {
             _next = next;
             _startupConfigService = startupConfigService;
+            _logger = logger;
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -56,17 +58,38 @@ namespace Listenarr.Api.Middleware
                         }
                     }
 
-                    if (!string.IsNullOrWhiteSpace(provided) && provided == configuredKey)
+                    if (!string.IsNullOrWhiteSpace(provided))
                     {
-                        // Create a minimal authenticated principal for downstream checks
-                        var claims = new List<Claim>
+                        // Log that a key was provided (mask the prefix only)
+                        try
                         {
-                            new Claim(ClaimTypes.Name, "ApiKey"),
-                            new Claim("AuthMethod", "ApiKey")
-                        };
+                            var providedPrefix = provided.Length <= 8 ? provided : provided.Substring(0, 8);
+                            _logger?.LogDebug("ApiKeyMiddleware: provided API key prefix={ProvidedPrefix}", providedPrefix);
+                        }
+                        catch { }
 
-                        var identity = new ClaimsIdentity(claims, "ApiKey");
-                        context.User = new ClaimsPrincipal(identity);
+                        if (provided == configuredKey)
+                        {
+                            // Create a minimal authenticated principal for downstream checks
+                            var claims = new List<Claim>
+                            {
+                                new Claim(ClaimTypes.Name, "ApiKey"),
+                                new Claim("AuthMethod", "ApiKey")
+                            };
+
+                            var identity = new ClaimsIdentity(claims, "ApiKey");
+                            context.User = new ClaimsPrincipal(identity);
+
+                            try
+                            {
+                                _logger?.LogInformation("ApiKeyMiddleware: API key accepted, principal set. PrincipalNameMask={NameMask}, ClaimsCount={ClaimsCount}", "ApiKey", context.User?.Claims?.Count() ?? 0);
+                            }
+                            catch { }
+                        }
+                        else
+                        {
+                            try { _logger?.LogDebug("ApiKeyMiddleware: API key provided but did not match configured key"); } catch { }
+                        }
                     }
                 }
             }
