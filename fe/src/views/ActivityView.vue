@@ -183,6 +183,7 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
   else if (download.status === 'Failed') status = 'failed'
   else if (download.status === 'Downloading' || download.status === 'Processing') status = 'downloading'
 
+  const clientName = ((download as unknown) as Record<string, unknown>)['downloadClientName'] as string | undefined
   return {
     id: download.id,
     title: download.title,
@@ -193,7 +194,7 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
     downloadSpeed: 0, // Not tracked for DDL
     eta: undefined, // Not available for DDL
     quality: '',
-    downloadClient: (download as any).downloadClientName || download.downloadClientId || 'Unknown Client',
+    downloadClient: clientName ?? download.downloadClientId ?? 'Unknown Client',
     downloadClientId: download.downloadClientId,
     downloadClientType: download.downloadClientId === 'DDL' ? 'DDL' : 'external',
     addedAt: download.startedAt,

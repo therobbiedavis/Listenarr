@@ -309,7 +309,7 @@ namespace Listenarr.Api.Services
             return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-        private async Task<List<SearchResult>> IntelligentSearchAsync(string query)
+    public async Task<List<SearchResult>> IntelligentSearchAsync(string query)
         {
             var results = new List<SearchResult>();
 

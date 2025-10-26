@@ -191,7 +191,20 @@ if (builder.Environment.IsDevelopment())
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    // Try to include XML comments if available
+    try
+    {
+        var xmlFile = System.Reflection.Assembly.GetExecutingAssembly().GetName().Name + ".xml";
+        var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+        if (File.Exists(xmlPath))
+        {
+            options.IncludeXmlComments(xmlPath);
+        }
+    }
+    catch { }
+});
 
 // Authentication: Session-based (default)
 // No additional authentication scheme configuration needed for sessions
