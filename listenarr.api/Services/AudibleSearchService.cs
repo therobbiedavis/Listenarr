@@ -29,6 +29,26 @@ namespace Listenarr.Api.Services
     // New: detect navigation/header noise and generic site labels like 'Audible'
     private static readonly string[] HeaderNoisePhrases = new[] { "English - USD", "Language", "Currency", "Sign in", "Account & Lists", "Audible", "Audible.com" };
 
+    // Detect common locale/geo redirect messages (examples include German audible.de redirect text)
+    private static readonly string[] RedirectNoisePhrases = new[]
+    {
+        // English
+        "have redirected you",
+        "we have redirected",
+        // German
+        "aufgrund deines standorts haben wir dich zu",
+        "haben wir dich zu audible.de weitergeleitet",
+        // French
+        "nous vous avons redirigé",
+        // Spanish
+        "te hemos redirigido",
+        // Italian
+        "ti abbiamo reindirizzato",
+        // generic
+        "redirected to",
+        "you to audible",
+    };
+
         public AudibleSearchService(HttpClient httpClient, ILogger<AudibleSearchService> logger)
         {
             _httpClient = httpClient;
@@ -154,6 +174,8 @@ namespace Listenarr.Api.Services
             // If the title is exactly one of the header phrases or is very short/one-word generic like 'Audible', treat as noise
             if (HeaderNoisePhrases.Any(p => string.Equals(t, p, StringComparison.OrdinalIgnoreCase))) return true;
             if (HeaderNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0 && t.Length < 40)) return true;
+            // If the title contains any known locale/geo redirect phrasing, treat as noise
+            if (RedirectNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
             // repeated blocks like header duplicated
             if (t.Count(c => c == '\n') > 3 && t.Length > 120) return true;
             return false;
@@ -166,8 +188,33 @@ namespace Listenarr.Api.Services
             {
                 var html = await GetHtmlAsync(productUrl);
                 if (string.IsNullOrEmpty(html)) return null;
+                // If the fetched HTML contains known redirect/locale messages, treat as noise and skip
+                var lowerHtml = html.ToLowerInvariant();
+                if (RedirectNoisePhrases.Any(p => lowerHtml.Contains(p)))
+                {
+                    var snippet = html.Length > 300 ? html.Substring(0, 300) : html;
+                    _logger.LogWarning("Detected locale/redirect noise in product page for {Asin}, skipping title. Snippet: {Snippet}", asin, snippet);
+                    return null;
+                }
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
+                // Prefer og:title or <title> before falling back to H1 — more reliable across locales and templates
+                var metaOg = doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", null);
+                if (!string.IsNullOrWhiteSpace(metaOg))
+                {
+                    _logger.LogDebug("Found og:title for {Asin}: {OgTitle}", asin, metaOg);
+                    return metaOg.Trim();
+                }
+
+                var pageTitle = doc.DocumentNode.SelectSingleNode("//title")?.InnerText?.Trim();
+                if (!string.IsNullOrWhiteSpace(pageTitle))
+                {
+                    _logger.LogDebug("Found <title> for {Asin}: {PageTitle}", asin, pageTitle);
+                    // Strip site suffixes like "| Audible" if present
+                    var clean = Regex.Replace(pageTitle, "\\|.*$", "", RegexOptions.None).Trim();
+                    if (!string.IsNullOrWhiteSpace(clean)) return clean;
+                }
+
                 var titleNode = doc.DocumentNode.SelectSingleNode("//h1 | //h1//span | //div[contains(@class,'title')]//h1 | //h1[contains(@class,'bc-heading')]" );
                 var title = titleNode?.InnerText?.Trim();
                 if (!string.IsNullOrWhiteSpace(title))
