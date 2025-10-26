@@ -393,3 +393,46 @@ export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Sou
 
 export type SearchSortDirection = 'Ascending' | 'Descending'
 
+// Manual import types (correspond to server ManualImport DTOs)
+export interface ManualImportPreviewItem {
+  relativePath: string
+  fullPath: string
+  size: string
+  series?: string | null
+  season?: string | null
+  episodes?: string | null
+  quality?: string | null
+  languages: string[]
+  releaseType?: string
+}
+
+export interface ManualImportPreviewResponse {
+  items: ManualImportPreviewItem[]
+}
+
+export interface ManualImportRequestItem {
+  relativePath?: string
+  fullPath: string
+  matchedAudiobookId?: number
+  releaseGroup?: string | null
+  qualityProfileId?: number | null
+  language?: string | null
+  size?: string | null
+}
+
+export interface ManualImportRequest {
+  path: string
+  mode?: 'automatic' | 'interactive'
+  inputMode?: 'move' | 'copy'
+  items?: ManualImportRequestItem[]
+}
+
+export interface ManualImportResult {
+  success: boolean
+  filePath?: string
+  destinationPath?: string
+  audiobookId?: number
+  audiobookTitle?: string
+  error?: string
+}
+

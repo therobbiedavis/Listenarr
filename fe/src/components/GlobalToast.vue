@@ -11,10 +11,10 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, reactive } from 'vue'
+import { onUnmounted } from 'vue'
 import { useToast } from '@/services/toastService'
 
-const { subscribe, toasts: toastsRef, dismiss } = useToast()
+const { toasts: toastsRef, dismiss } = useToast()
 const toasts = toastsRef
 
 onUnmounted(() => {

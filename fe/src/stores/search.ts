@@ -19,7 +19,8 @@ export const useSearchStore = defineStore('search', () => {
     selectedApiIds.value = apiIds || []
     
     try {
-      const results = await apiService.search(query, category, apiIds)
+      // Default to intelligent (Amazon + Audible enrichment) search for unified searches
+      const results = await apiService.intelligentSearch(query, category)
       console.log('Search results received:', results)
       console.log('First result:', results[0])
       searchResults.value = results

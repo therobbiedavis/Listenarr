@@ -529,8 +529,8 @@ const searchByTitle = async (query: string) => {
   
   searchStatus.value = ''
   try {
-    // Use backend search API which now searches Amazon/Audible directly
-    const searchResults = await apiService.search(query)
+  // Use backend intelligent search API (Amazon + Audible enrichment only)
+  const searchResults = await apiService.intelligentSearch(query)
     
     searchStatus.value = 'Processing search results...'
     

@@ -91,6 +91,77 @@ namespace Listenarr.Api.Controllers
             }
         }
 
+        [HttpGet("intelligent")]
+        /// <summary>
+        /// Run the intelligent Amazon + Audible enrichment search and return only enriched results.
+        /// </summary>
+        /// <param name="query">Search query</param>
+        /// <param name="category">Optional category filter</param>
+        /// <returns>List of enriched SearchResult objects</returns>
+        [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<List<SearchResult>>> IntelligentSearch(
+            [FromQuery] string query,
+            [FromQuery] string? category = null)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(query))
+                {
+                    return BadRequest("Query parameter is required");
+                }
+
+                _logger.LogInformation("IntelligentSearch called for query: {Query}", query);
+                var results = await _searchService.IntelligentSearchAsync(query);
+                _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results.Count, query);
+                return Ok(results);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error performing intelligent search for query: {Query}", query);
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        [HttpGet("indexers")]
+        /// <summary>
+        /// Search enabled indexers and return combined results.
+        /// </summary>
+        /// <param name="query">Search query</param>
+        /// <param name="category">Optional category filter</param>
+        /// <param name="sortBy">Sort criteria</param>
+        /// <param name="sortDirection">Sort direction</param>
+        /// <param name="isAutomaticSearch">When true, respect indexer automatic search flags</param>
+        [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<List<SearchResult>>> IndexersSearch(
+            [FromQuery] string query,
+            [FromQuery] string? category = null,
+            [FromQuery] SearchSortBy sortBy = SearchSortBy.Seeders,
+            [FromQuery] SearchSortDirection sortDirection = SearchSortDirection.Descending,
+            [FromQuery] bool isAutomaticSearch = false)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(query))
+                {
+                    return BadRequest("Query parameter is required");
+                }
+
+                _logger.LogInformation("IndexersSearch called for query: {Query}, isAutomaticSearch={IsAutomatic}", query, isAutomaticSearch);
+                var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+                _logger.LogInformation("IndexersSearch returning {Count} results for query: {Query}", results.Count, query);
+                return Ok(results);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
         [HttpPost("test/{apiId}")]
         public async Task<ActionResult<bool>> TestApiConnection(string apiId)
         {

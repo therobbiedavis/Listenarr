@@ -20,6 +20,7 @@ import type {
   SearchSortBy,
   SearchSortDirection,
   AudibleBookMetadata
+  , ManualImportPreviewResponse, ManualImportRequest, ManualImportResult
 } from '@/types'
 import { getStartupConfigCached, getCachedStartupConfig } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -213,12 +214,12 @@ class ApiService {
   }
 
   // Search API
-  async search(query: string, category?: string, apiIds?: string[]): Promise<SearchResult[]> {
+  // Deprecated compatibility shim removed. Use `intelligentSearch`, `searchIndexers`, or `searchByApi`.
+
+  async intelligentSearch(query: string, category?: string): Promise<SearchResult[]> {
     const params = new URLSearchParams({ query })
     if (category) params.append('category', category)
-    if (apiIds) apiIds.forEach(id => params.append('apiIds', id))
-    
-    return this.request<SearchResult[]>(`/search?${params}`)
+    return this.request<SearchResult[]>(`/search/intelligent?${params}`)
   }
 
   async searchIndexers(query: string, category?: string, sortBy?: SearchSortBy, sortDirection?: SearchSortDirection): Promise<SearchResult[]> {
@@ -535,13 +536,13 @@ class ApiService {
   }
 
   // Manual import preview / start
-  async previewManualImport(path: string): Promise<{ items: Array<any> }> {
+  async previewManualImport(path: string): Promise<ManualImportPreviewResponse> {
     const params = path ? `?path=${encodeURIComponent(path)}` : ''
-    return this.request(`/library/manual-import/preview${params}`)
+    return this.request<ManualImportPreviewResponse>(`/library/manual-import/preview${params}`)
   }
 
-  async startManualImport(request: { path: string; mode: 'automatic' | 'interactive'; items?: Array<any>; inputMode?: 'move' | 'copy' }): Promise<{ importedCount: number }> {
-    return this.request<{ importedCount: number }>(`/library/manual-import`, {
+  async startManualImport(request: ManualImportRequest): Promise<{ importedCount: number; totalCount?: number; results?: ManualImportResult[] }> {
+    return this.request<{ importedCount: number; totalCount?: number; results?: ManualImportResult[] }>(`/library/manual-import`, {
       method: 'POST',
       body: JSON.stringify(request)
     })

@@ -4,6 +4,16 @@
 
 import { sessionTokenManager } from './sessionToken'
 
+declare global {
+  interface Window {
+    __debugSession?: {
+      logState: (context?: string) => void
+      clearAuth: () => void
+    }
+  }
+
+}
+
 export const logSessionState = (context: string = 'Unknown') => {
   try {
     console.group(`[Session Debug] ${context}`)
@@ -78,7 +88,7 @@ export const clearAllAuthData = () => {
 
 // Make debugging functions available globally in development
 if (import.meta.env.DEV) {
-  (window as any).__debugSession = {
+  window.__debugSession = {
     logState: logSessionState,
     clearAuth: clearAllAuthData
   }

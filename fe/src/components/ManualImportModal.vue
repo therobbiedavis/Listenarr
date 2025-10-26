@@ -205,6 +205,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
+import type { ManualImportRequest } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
 import { apiService } from '@/services/api'
 import { useLibraryStore } from '@/stores/library'
@@ -392,8 +393,7 @@ const loadPreview = async () => {
   try {
     const resp = await apiService.previewManualImport(selectedPath.value)
     // resp.items expected to be an array of detected files with metadata
-    const respObj = resp as Record<string, unknown> | null
-    const items = respObj && Array.isArray(respObj.items) ? respObj.items as unknown[] : []
+    const items = Array.isArray(resp?.items) ? resp.items as unknown[] : []
     // only include common audio file extensions
     const audioExts = ['.mp3', '.m4b', '.m4a', '.flac', '.aac', '.ogg', '.wav', '.wma', '.opus']
     const filtered = items.filter(it => {
@@ -436,10 +436,9 @@ const startAutomaticImport = async () => {
   loading.value = true
   try {
     // When running automatic import, send minimal request; backend will handle scanning
-  type AutoPayload = { path: string; mode: 'automatic'; inputMode?: 'move' | 'copy' }
-  const autoPayload: AutoPayload = { path: selectedPath.value, mode: 'automatic' }
-  if (inputMode.value === 'move' || inputMode.value === 'copy') autoPayload.inputMode = inputMode.value
-  const resp = await apiService.startManualImport(autoPayload)
+    const autoPayload: ManualImportRequest = { path: selectedPath.value, mode: 'automatic' }
+    if (inputMode.value === 'move' || inputMode.value === 'copy') autoPayload.inputMode = inputMode.value
+    const resp = await apiService.startManualImport(autoPayload)
     // resp should contain import summary
     emit('imported', { imported: resp.importedCount ?? 0 })
     close()
@@ -463,20 +462,21 @@ const importSelected = async () => {
   if (selected.length === 0) return
   loading.value = true
   try {
-    // Map items to the payload the backend expects
-    const payloadItems = selected.map(i => ({
-      relativePath: i.relativePath,
-      fullPath: i.fullPath,
-      matchedAudiobookId: i.matchedAudiobookId,
-      releaseGroup: i.releaseGroup,
-      qualityProfileId: i.qualityProfileId,
-      language: i.language,
-      size: i.size
-    }))
+    // Map items to the payload the backend expects and ensure required fields are present
+    const payloadItems = selected
+      .filter(i => i.fullPath && i.fullPath.length > 0)
+      .map(i => ({
+        relativePath: i.relativePath,
+        fullPath: i.fullPath as string,
+        matchedAudiobookId: i.matchedAudiobookId ?? undefined,
+        releaseGroup: i.releaseGroup ?? undefined,
+        qualityProfileId: i.qualityProfileId ?? undefined,
+        language: i.language ?? undefined,
+        size: i.size ?? undefined
+      }))
 
-  type ManualPayload = { path: string; mode: 'interactive'; items: Array<Record<string, unknown>>; inputMode?: 'move' | 'copy' }
-  const manualPayload: ManualPayload = { path: selectedPath.value, mode: 'interactive', items: payloadItems as Array<Record<string, unknown>>, inputMode: inputMode.value || 'copy' }
-  const resp = await apiService.startManualImport(manualPayload)
+    const manualPayload: ManualImportRequest = { path: selectedPath.value, mode: 'interactive', items: payloadItems, inputMode: inputMode.value || 'copy' }
+    const resp = await apiService.startManualImport(manualPayload)
     emit('imported', { imported: resp.importedCount ?? selected.length })
     close()
   } catch (err) {
