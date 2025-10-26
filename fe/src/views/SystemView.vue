@@ -135,6 +135,30 @@
             </div>
           </div>
         </div>
+
+        <div class="status-card">
+          <div class="status-header">
+            <div class="card-title">
+              <i class="ph ph-wifi"></i>
+              <h3>WebSockets</h3>
+            </div>
+            <span :class="['status-badge', isConnected ? 'healthy' : 'error']">
+              {{ isConnected ? 'Connected' : 'Disconnected' }}
+            </span>
+          </div>
+          <div class="status-details">
+            <div class="detail-row">
+              <i class="ph ph-broadcast"></i>
+              <span class="label">Real-time:</span>
+              <span class="value">{{ isConnected ? 'Active' : 'Inactive' }}</span>
+            </div>
+            <div class="detail-row">
+              <i class="ph ph-activity"></i>
+              <span class="label">Status:</span>
+              <span class="value">{{ isConnected ? 'Receiving updates' : 'Not connected' }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -218,6 +242,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useSignalR } from '@/composables/useSignalR'
 import { useRouter } from 'vue-router'
 import { getSystemInfo, getStorageInfo, getServiceHealth, getLogs, downloadLogs as downloadLogsApi } from '@/services/api'
 import type { SystemInfo, StorageInfo, ServiceHealth, LogEntry } from '@/types'
@@ -346,6 +371,9 @@ const viewFullLogs = () => {
 const downloadLogs = () => {
   downloadLogsApi()
 }
+
+// SignalR state for backend connectivity indicator
+const { isConnected } = useSignalR()
 
 // Load data on mount
 onMounted(() => {

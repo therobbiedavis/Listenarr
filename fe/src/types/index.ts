@@ -141,6 +141,8 @@ export interface ApplicationSettings {
   allowedFileExtensions: string[]
   // Action to perform for completed downloads: 'Move' or 'Copy'
   completedFileAction?: 'Move' | 'Copy'
+  // Show completed external downloads (torrents/NZBs) in the Activity view
+  showCompletedExternalDownloads?: boolean
   // Optional admin credentials used when saving settings to create/update an initial admin user
   adminUsername?: string
   adminPassword?: string

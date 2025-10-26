@@ -623,6 +623,16 @@
                 </span>
               </label>
             </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.showCompletedExternalDownloads" type="checkbox">
+                <span>
+                  <strong>Show completed external downloads in Activity</strong>
+                  <small>When enabled, completed torrents/NZBs from external clients will remain visible in the Activity view. When disabled, completed external items will be hidden to reduce clutter.</small>
+                </span>
+              </label>
+            </div>
           </div>
 
           <div class="form-section">

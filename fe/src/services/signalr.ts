@@ -1,4 +1,6 @@
 import type { Download, QueueItem, Audiobook } from '@/types'
+import { sessionTokenManager } from '@/utils/sessionToken'
+import { setConnected, setLastError, setReconnectAttempts } from './signalrEvents'
 
 // SignalR client for real-time download updates
 // Using native WebSocket with fallback to long polling
@@ -15,6 +17,26 @@ type QueueUpdateCallback = (queue: QueueItem[]) => void
 type ScanJobCallback = (job: { jobId: string; audiobookId: number; status: string; found?: number; created?: number; error?: string }) => void
 
 class SignalRService {
+  constructor() {
+    // Reconnect when the session token changes so the WebSocket upgrade can
+    // include the new token as an access_token query param. This ensures the
+    // hub connection is always authenticated as the current SPA principal.
+    try {
+      sessionTokenManager.onTokenChange((token) => {
+        try { console.debug('[SignalR] session token changed, reconnecting', { hasToken: !!token }) } catch {}
+        // If a connection exists, close it and reconnect after a short delay
+        // to avoid racing with other connection lifecycle events.
+        try {
+          if (this.connection) {
+            this.disconnect()
+          }
+        } catch {}
+        setTimeout(() => {
+          try { this.connect() } catch {}
+        }, 150)
+      })
+    } catch {}
+  }
   private connection: WebSocket | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
@@ -30,6 +52,9 @@ class SignalRService {
   private searchProgressCallbacks: Set<(payload: { message: string; asin?: string | null }) => void> = new Set()
   private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
   private pingInterval: number | null = null
+  // Connection state listeners (for UI to subscribe to connect/disconnect events)
+  private connectedListeners: Set<() => void> = new Set()
+  private disconnectedListeners: Set<() => void> = new Set()
 
   async connect(): Promise<void> {
     if (this.connection?.readyState === WebSocket.OPEN || this.isConnecting) {
@@ -43,25 +68,36 @@ class SignalRService {
       // Using SignalR protocol over WebSocket
       let hubUrl = `${wsUrl}/hubs/downloads`
       try {
-        // Try to include API key as access_token if the startup config contains one
-        // ONLY when server-side authentication is disabled. If authentication is
-        // enabled, appending the API key would authenticate the SPA and bypass
-        // normal login/logout flows.
-        const { getStartupConfigCached } = await import('./startupConfigCache')
-        const sc = await getStartupConfigCached(2000)
-        const apiKey = sc?.apiKey
-        const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
-        const authEnabled = typeof rawAuth === 'boolean'
-          ? rawAuth
-          : (typeof rawAuth === 'string' ? (rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true') : false)
+        // Prefer using the current session token (if present) for SignalR
+        // WebSocket connections. Browsers can't send custom headers on the
+        // WebSocket upgrade handshake, so the client should include the token
+        // as an "access_token" query parameter. The backend accepts that
+        // parameter for hub endpoints.
+        try {
+          const sess = sessionTokenManager.getToken()
+          if (sess) {
+            const sep = hubUrl.includes('?') ? '&' : '?'
+            hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(sess)}`
+          } else {
+            // Fallback: if authentication is disabled, include the server API key
+            const { getStartupConfigCached } = await import('./startupConfigCache')
+            const sc = await getStartupConfigCached(2000)
+            const apiKey = sc?.apiKey
+            const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
+            const authEnabled = typeof rawAuth === 'boolean'
+              ? rawAuth
+              : (typeof rawAuth === 'string' ? (rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true') : false)
 
-        if (apiKey && !authEnabled) {
-          const sep = hubUrl.includes('?') ? '&' : '?'
-          hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(apiKey)}`
+            if (apiKey && !authEnabled) {
+              const sep = hubUrl.includes('?') ? '&' : '?'
+              hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(apiKey)}`
+            }
+          }
+        } catch (e) {
+          console.debug('[SignalR] startupConfig or session read failed', e)
         }
-      } catch (e) {
-        // ignore errors while reading startup config (log debug info)
-        try { console.debug('[SignalR] startupConfig read failed', e) } catch {}
+      } catch {
+        // swallow outer errors
       }
 
       console.log('[SignalR] Connecting to:', hubUrl)
@@ -73,6 +109,13 @@ class SignalRService {
         this.isConnecting = false
         this.sendHandshake()
         this.startPingInterval()
+        try {
+          for (const cb of Array.from(this.connectedListeners)) {
+            try { cb() } catch {}
+          }
+        } catch {}
+        try { setConnected(true) } catch {}
+        try { setReconnectAttempts(0) } catch {}
       }
 
       this.connection.onmessage = (event) => {
@@ -81,6 +124,7 @@ class SignalRService {
 
       this.connection.onerror = (error) => {
         console.error('[SignalR] WebSocket error:', error)
+        try { setLastError(String(error)) } catch {}
       }
 
       this.connection.onclose = () => {
@@ -88,6 +132,12 @@ class SignalRService {
         this.isConnecting = false
         this.stopPingInterval()
         this.attemptReconnect()
+        try {
+          for (const cb of Array.from(this.disconnectedListeners)) {
+            try { cb() } catch {}
+          }
+        } catch {}
+        try { setConnected(false) } catch {}
       }
     } catch (error) {
       console.error('[SignalR] Failed to connect:', error)
@@ -233,8 +283,8 @@ class SignalRService {
       console.error('[SignalR] Max reconnect attempts reached')
       return
     }
-
     this.reconnectAttempts++
+    try { setReconnectAttempts(this.reconnectAttempts) } catch {}
     const delay = this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1)
     
     console.log(`[SignalR] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
@@ -251,6 +301,23 @@ class SignalRService {
       this.connection = null
     }
     this.isConnecting = false
+    try {
+      for (const cb of Array.from(this.disconnectedListeners)) {
+        try { cb() } catch {}
+      }
+    } catch {}
+    try { setConnected(false) } catch {}
+  }
+
+  // Public hooks for consumers to react to connection state changes.
+  onConnected(cb: () => void): () => void {
+    this.connectedListeners.add(cb)
+    return () => { this.connectedListeners.delete(cb) }
+  }
+
+  onDisconnected(cb: () => void): () => void {
+    this.disconnectedListeners.add(cb)
+    return () => { this.disconnectedListeners.delete(cb) }
   }
 
   // Subscribe to download updates
