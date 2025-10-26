@@ -1336,6 +1336,20 @@ namespace Listenarr.Api.Services
                 }
             }
 
+            // Load application settings once to determine whether to include completed
+            // external downloads even when they are not tracked in the Listenarr DB.
+            ApplicationSettings? appSettings = null;
+            try
+            {
+                appSettings = await _configurationService.GetApplicationSettingsAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to load application settings while building queue (non-fatal)");
+            }
+
+            var includeCompletedExternal = appSettings != null && appSettings.ShowCompletedExternalDownloads;
+
             foreach (var client in enabledClients)
             {
                 try
@@ -1446,6 +1460,56 @@ namespace Listenarr.Api.Services
                     }
 
                     queueItems.AddRange(mappedFiltered);
+
+                    // If configured, also include completed items that appear in the
+                    // client queue but are not tracked in Listenarr's DB (user wants
+                    // to see completed torrents/NZBs even when the client has removed
+                    // or Listenarr didn't create a DB record for them).
+                    if (includeCompletedExternal)
+                    {
+                        var existingIds = queueItems.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                        var unmatchedCompleted = clientQueue
+                            .Where(q => (q.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
+                            .Where(q => !existingIds.Contains(q.Id))
+                            .ToList();
+
+                        foreach (var uc in unmatchedCompleted)
+                        {
+                            // Normalize client type/name if available
+                            var clientName = client.Name ?? uc.DownloadClient ?? client.Id;
+                            var clientType = client.Type?.ToLowerInvariant() ?? uc.DownloadClientType ?? "external";
+
+                            // Avoid adding duplicates again
+                            if (existingIds.Contains(uc.Id)) continue;
+
+                            queueItems.Add(new QueueItem
+                            {
+                                Id = uc.Id,
+                                Title = uc.Title ?? "Unknown",
+                                Quality = uc.Quality ?? "Unknown",
+                                Status = "completed",
+                                Progress = 100,
+                                Size = uc.Size,
+                                Downloaded = uc.Downloaded,
+                                DownloadSpeed = 0,
+                                Eta = null,
+                                DownloadClient = clientName,
+                                DownloadClientId = client.Id,
+                                DownloadClientType = clientType,
+                                AddedAt = uc.AddedAt,
+                                CanPause = false,
+                                CanRemove = true,
+                                RemotePath = uc.RemotePath,
+                                LocalPath = uc.LocalPath,
+                                Seeders = uc.Seeders,
+                                Leechers = uc.Leechers,
+                                Ratio = uc.Ratio
+                            });
+
+                            existingIds.Add(uc.Id);
+                        }
+                    }
                     
                     _logger.LogDebug("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", 
                         client.Name, clientQueue.Count, mappedFiltered.Count);
@@ -1489,6 +1553,56 @@ namespace Listenarr.Api.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error getting queue from download client {ClientName}", client.Name);
+                }
+            }
+            // If configured, include completed external downloads from the DB
+            // that are not represented in the queueItems list (Listenarr-created
+            // external downloads that are no longer present in the client queue).
+            if (includeCompletedExternal)
+            {
+                try
+                {
+                    var existingIds = queueItems.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    var completedExternal = listenarrDownloads
+                        .Where(d => d.DownloadClientId != "DDL" && d.Status == DownloadStatus.Completed)
+                        .ToList();
+
+                    foreach (var d in completedExternal)
+                    {
+                        if (existingIds.Contains(d.Id)) continue;
+
+                        var clientCfg = enabledClients.FirstOrDefault(c => c.Id == d.DownloadClientId);
+                        var clientName = clientCfg?.Name ?? d.DownloadClientId ?? "External Client";
+                        var clientType = clientCfg?.Type?.ToLowerInvariant() ?? "external";
+
+                        queueItems.Add(new QueueItem
+                        {
+                            Id = d.Id,
+                            Title = d.Title ?? "Unknown",
+                            Quality = d.Metadata != null && d.Metadata.TryGetValue("Quality", out var q) ? (q?.ToString() ?? "Unknown") : "Unknown",
+                            Status = "completed",
+                            Progress = 100,
+                            Size = d.TotalSize,
+                            Downloaded = d.DownloadedSize,
+                            DownloadSpeed = 0,
+                            Eta = null,
+                            DownloadClient = clientName,
+                            DownloadClientId = d.DownloadClientId ?? string.Empty,
+                            DownloadClientType = clientType,
+                            AddedAt = d.StartedAt,
+                            CanPause = false,
+                            CanRemove = true,
+                            RemotePath = d.DownloadPath,
+                            LocalPath = d.FinalPath
+                        });
+
+                        existingIds.Add(d.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error while appending completed external downloads to queue (non-fatal)");
                 }
             }
 

@@ -8,6 +8,7 @@
         <span v-if="version && version.length > 0" class="version">v{{ version }}</span>
       </div>
       <div class="nav-actions">
+        <!-- Backend connection indicator moved to System view -->
         <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
           <input
             v-model="searchQuery"
@@ -186,6 +187,7 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+// SignalR indicator moved to System view; session token handled where needed
 import { useRoute, useRouter } from 'vue-router'
 import NotificationModal from '@/components/NotificationModal.vue'
 import { useNotification } from '@/composables/useNotification'
@@ -668,6 +670,8 @@ const hideLayout = computed(() => {
   const meta = route.meta as Record<string, unknown> | undefined
   return !!(meta && meta.hideLayout)
 })
+
+// Note: Backend connection indicator was moved to the System view.
 </script>
 
 <style scoped>
@@ -797,6 +801,29 @@ const hideLayout = computed(() => {
   background-color: #3a3a3a;
   color: white;
 }
+
+/* SignalR indicator styles */
+.signalr-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: #c7cfd6;
+  font-size: 12px;
+}
+.signalr-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 6px rgba(0,0,0,0.6);
+}
+.signalr-dot.connected { background: #4caf50; box-shadow: 0 0 6px rgba(76,175,80,0.4); }
+.signalr-dot.disconnected { background: #9e9e9e; opacity: 0.6 }
+.signalr-text { font-size: 12px; color: #bfc8cf }
+.signalr-auth { font-size: 11px; color: #9aa0a6; margin-left: 6px }
 
 .avatar {
   width: 32px;

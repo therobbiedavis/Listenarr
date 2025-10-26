@@ -623,6 +623,16 @@
                 </span>
               </label>
             </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.showCompletedExternalDownloads" type="checkbox">
+                <span>
+                  <strong>Show completed external downloads in Activity</strong>
+                  <small>When enabled, completed torrents/NZBs from external clients will remain visible in the Activity view. When disabled, completed external items will be hidden to reduce clutter.</small>
+                </span>
+              </label>
+            </div>
           </div>
 
           <div class="form-section">
@@ -1059,6 +1069,16 @@ const executeDeleteClient = async (id?: string) => {
 const testClient = async (client: DownloadClientConfiguration) => {
   testingClient.value = client.id
   try {
+    // Ensure antiforgery token is issued for the current auth principal.
+    // This prevents failures when a token was fetched while anonymous and
+    // later reused after authentication ("meant for a different claims-based user").
+    try {
+      await apiService.ensureAntiforgeryForCurrentAuth()
+    } catch (e) {
+      // Non-fatal: we'll still attempt the test request and surface any server error
+      console.debug('ensureAntiforgeryForCurrentAuth failed', e)
+    }
+
     // Send full client config to server for testing (credentials included)
     const result = await apiTestDownloadClient(client)
     if (result && result.success) {

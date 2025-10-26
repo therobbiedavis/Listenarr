@@ -160,9 +160,11 @@ import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { useDownloadsStore } from '@/stores/downloads'
+import { useConfigurationStore } from '@/stores/configuration'
 import type { QueueItem, Download } from '@/types'
 
 const downloadsStore = useDownloadsStore()
+const configStore = useConfigurationStore()
 const selectedTab = ref('all')
 const queue = ref<QueueItem[]>([])
 const loading = ref(false)
@@ -200,6 +202,9 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
   }
 }
 
+// Read user preference from configuration store: show completed external downloads
+const showCompletedExternalDownloads = computed(() => configStore.applicationSettings?.showCompletedExternalDownloads ?? false)
+
 // Merge queue items and active downloads (DDL) into unified list
 const allActivityItems = computed(() => {
   // Get queue items from external clients (these are already filtered by backend to only show Listenarr-managed downloads)
@@ -210,16 +215,22 @@ const allActivityItems = computed(() => {
     .filter(d => d.downloadClientId === 'DDL')
     .map(convertDownloadToQueueItem)
   
-  console.log('[ActivityView] 🔍 allActivityItems computed:', {
-    totalActiveDownloads: downloadsStore.activeDownloads.length,
-    ddlDownloads: downloadsStore.activeDownloads.filter(d => d.downloadClientId === 'DDL').length,
-    ddlDownloadItems: ddlDownloadItems.length,
-    queueItems: queueItems.length,
-    totalMerged: ddlDownloadItems.length + queueItems.length
-  })
-  
   // Combine queue items (external clients managed by Listenarr) and DDL downloads
-  return [...queueItems, ...ddlDownloadItems]
+  // Filter out completed items from external download clients (torrents/NZBs)
+  // to avoid cluttering the activity view with finished transfers that are
+  // already processed. Keep completed DDL downloads (internal) visible.
+  const combined = [...queueItems, ...ddlDownloadItems]
+  // Read user preference from configuration store: show completed external downloads
+  const userPref = showCompletedExternalDownloads.value
+  if (userPref) return combined
+
+  const filtered = combined.filter(it => {
+    // if item is from external client and completed, omit it
+    if ((it.downloadClientType || '').toString().toLowerCase() !== 'ddl' && it.status === 'completed') return false
+    return true
+  })
+
+  return filtered
 })
 
 const filterTabs = computed(() => [
@@ -337,42 +348,19 @@ const formatSize = (bytes: number): string => {
 
 // Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
-  console.log('[ActivityView] 📱 Subscribing to real-time updates via SignalR...')
-  
   // Load initial downloads (includes DDL)
-  console.log('[ActivityView] 📥 Loading initial downloads...')
   await downloadsStore.loadDownloads()
-  console.log('[ActivityView] ✅ Downloads loaded:', downloadsStore.downloads.length, 'total,', downloadsStore.activeDownloads.length, 'active')
-  console.log('[ActivityView] 📋 Downloads details:', downloadsStore.downloads.map(d => ({
-    id: d.id,
-    title: d.title,
-    status: d.status,
-    clientId: d.downloadClientId,
-    progress: d.progress
-  })))
-  console.log('[ActivityView] 📊 Download status breakdown:', {
-    Queued: downloadsStore.downloads.filter(d => d.status === 'Queued').length,
-    Downloading: downloadsStore.downloads.filter(d => d.status === 'Downloading').length,
-    Paused: downloadsStore.downloads.filter(d => d.status === 'Paused').length,
-    Processing: downloadsStore.downloads.filter(d => d.status === 'Processing').length,
-    Completed: downloadsStore.downloads.filter(d => d.status === 'Completed').length,
-    Failed: downloadsStore.downloads.filter(d => d.status === 'Failed').length,
-    Ready: downloadsStore.downloads.filter(d => d.status === 'Ready').length,
-  })
+  
+  // Load application settings to ensure filtering works
+  await configStore.loadApplicationSettings()
   
   // Subscribe to queue updates (external clients)
   unsubscribeQueue = signalRService.onQueueUpdate((updatedQueue) => {
-    console.log('[ActivityView] 📨 Received queue update:', updatedQueue.length, 'items')
     queue.value = updatedQueue
   })
   
   // Load initial queue state
-  console.log('[ActivityView] 📥 Loading initial queue...')
   await refreshQueue()
-  console.log('[ActivityView] ✅ Queue loaded:', queue.value.length, 'items')
-  
-  console.log('[ActivityView] ✅ Real-time updates enabled! (Downloads + Queue)')
-  console.log('[ActivityView] 📊 Total activity items:', allActivityItems.value.length)
 })
 
 onUnmounted(() => {

@@ -9,11 +9,13 @@ namespace Listenarr.Api.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly IAntiforgery _antiforgery;
+        private readonly Microsoft.Extensions.Logging.ILogger<AntiforgeryValidationMiddleware> _logger;
 
-        public AntiforgeryValidationMiddleware(RequestDelegate next, IAntiforgery antiforgery)
+        public AntiforgeryValidationMiddleware(RequestDelegate next, IAntiforgery antiforgery, Microsoft.Extensions.Logging.ILogger<AntiforgeryValidationMiddleware> logger)
         {
             _next = next;
             _antiforgery = antiforgery;
+            _logger = logger;
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -44,8 +46,56 @@ namespace Listenarr.Api.Middleware
                 {
                     await _antiforgery.ValidateRequestAsync(context);
                 }
-                catch (AntiforgeryValidationException)
+                catch (AntiforgeryValidationException ex)
                 {
+                    // Log safe debug info to help diagnose antiforgery mismatches during development.
+                    try
+                    {
+                        var hdr = context.Request.Headers["X-XSRF-TOKEN"].FirstOrDefault();
+                        var hdrLen = hdr?.Length ?? 0;
+                        var cookieNames = string.Join(',', context.Request.Cookies.Keys);
+                        // Try to capture the antiforgery cookie value prefix (masked) for diagnosis.
+                        string? cookiePrefix = null;
+                        try
+                        {
+                            var afCookie = context.Request.Cookies.FirstOrDefault(kv => kv.Key?.StartsWith(".AspNetCore.Antiforgery") == true);
+                            var cookieVal = afCookie.Value;
+                            if (!string.IsNullOrEmpty(cookieVal))
+                            {
+                                cookiePrefix = cookieVal.Length <= 8 ? cookieVal : cookieVal.Substring(0, 8);
+                            }
+                        }
+                        catch { /* ignore cookie read errors */ }
+
+                        var headerPrefix = string.Empty;
+                        if (!string.IsNullOrEmpty(hdr))
+                        {
+                            headerPrefix = hdr.Length <= 8 ? hdr : hdr.Substring(0, 8);
+                        }
+
+                        var equalPrefixes = string.Equals(headerPrefix, cookiePrefix, System.StringComparison.Ordinal);
+
+                        // Capture a masked view of the current principal for diagnostics
+                        bool principalAuthenticated = false;
+                        string? principalNameMask = null;
+                        int principalClaims = 0;
+                        try
+                        {
+                            var user = context.User;
+                            principalAuthenticated = user?.Identity?.IsAuthenticated ?? false;
+                            principalClaims = user?.Claims?.Count() ?? 0;
+                            if (principalAuthenticated)
+                            {
+                                var pname = user?.Identity?.Name ?? user?.FindFirst("sub")?.Value ?? user?.FindFirst("name")?.Value;
+                                if (!string.IsNullOrEmpty(pname)) principalNameMask = pname.Length <= 8 ? pname : pname.Substring(0, 8);
+                            }
+                        }
+                        catch { }
+
+                        _logger?.LogWarning(ex, "Antiforgery validation failed. HeaderLength={HeaderLength}, CookieNames={CookieNames}, HeaderPrefix={HeaderPrefix}, CookiePrefix={CookiePrefix}, PrefixesEqual={PrefixesEqual}, PrincipalAuthenticated={PrincipalAuthenticated}, PrincipalNameMask={PrincipalNameMask}, PrincipalClaims={PrincipalClaims}", hdrLen, cookieNames, headerPrefix, cookiePrefix, equalPrefixes, principalAuthenticated, principalNameMask, principalClaims);
+                    }
+                    catch { /* ignore logging errors */ }
+
                     context.Response.StatusCode = StatusCodes.Status400BadRequest;
                     await context.Response.WriteAsJsonAsync(new { message = "Invalid or missing CSRF token" });
                     return;

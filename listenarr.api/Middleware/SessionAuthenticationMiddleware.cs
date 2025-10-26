@@ -82,6 +82,24 @@ namespace Listenarr.Api.Middleware
                 return sessionHeader;
             }
 
+            // For WebSocket (SignalR) connections browsers can't send custom headers on the
+            // initial upgrade request. The client will send the token as a query string
+            // parameter named "access_token" when using the accessTokenFactory approach.
+            // Accept that here for hub endpoints so SignalR connections can authenticate.
+            try
+            {
+                var qs = context.Request.Query;
+                if (qs.ContainsKey("access_token"))
+                {
+                    var provided = qs["access_token"].FirstOrDefault();
+                    if (!string.IsNullOrEmpty(provided)) return provided;
+                }
+            }
+            catch
+            {
+                // ignore any query-parsing issues and fall through to null
+            }
+
             return null;
         }
     }
