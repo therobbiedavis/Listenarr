@@ -27,7 +27,7 @@
             @click="toggleSearch"
             @keydown.enter.prevent="toggleSearch"
           >
-          <i class="ph ph-magnifying-glass search-inline-icon"></i>
+          <PhMagnifyingGlass class="search-inline-icon" />
         </button>
           <div class="inline-spinner" v-if="searching" aria-hidden="true"></div>
           <!-- Results overlay: shows suggestions, or a searching/no-results state with spinner -->
@@ -53,7 +53,7 @@
         </div>
         <div class="notification-wrapper" ref="notificationRef">
           <button class="nav-btn" @click="toggleNotifications" aria-haspopup="true" :aria-expanded="notificationsOpen">
-            <i class="ph ph-bell"></i>
+            <PhBell />
             <span class="notification-badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
           </button>
           <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
@@ -63,7 +63,10 @@
             </div>
             <ul class="notification-list">
               <li v-for="item in recentNotifications.filter(n => !n.dismissed)" :key="item.id" class="notification-item">
-                <div class="notif-icon"><i :class="item.icon"></i></div>
+                <div class="notif-icon">
+                  <component v-if="notificationIconComponent(item.icon)" :is="notificationIconComponent(item.icon)" />
+                  <i v-else :class="item.icon"></i>
+                </div>
                 <div class="notif-content">
                   <div class="notif-title">{{ item.title }}</div>
                   <div class="notif-message">{{ item.message }}</div>
@@ -71,7 +74,7 @@
                 </div>
                 <div class="notif-actions">
                   <button class="dismiss-btn" @click.stop="dismissNotification(item.id)" title="Dismiss">
-                    <i class="ph ph-x"></i>
+                    <PhX />
                   </button>
                 </div>
               </li>
@@ -92,7 +95,7 @@
                 aria-haspopup="true"
                 title="Account"
               >
-                <i class="ph ph-users nav-user-icon"></i>
+                <PhUsers class="nav-user-icon" />
               </button>
 
               <div v-if="userMenuOpen" class="user-menu" role="menu">
@@ -112,16 +115,16 @@
       <aside v-if="!hideLayout" class="sidebar">
         <nav class="sidebar-nav">
           <div class="nav-section">
-            <RouterLink to="/" class="nav-item">
-              <i class="ph ph-books"></i>
+            <RouterLink to="/" class="nav-item" @mouseenter="preload('home')" @focus="preload('home')" @touchstart.passive="preload('home')">
+              <PhBooks />
               <span>Audiobooks</span>
             </RouterLink>
-            <RouterLink to="/add-new" class="nav-item">
-              <i class="ph ph-plus"></i>
+            <RouterLink to="/add-new" class="nav-item" @mouseenter="preload('add-new')" @focus="preload('add-new')" @touchstart.passive="preload('add-new')">
+              <PhPlus />
               <span>Add New</span>
             </RouterLink>
             <!-- <RouterLink to="/library-import" class="nav-item">
-              <i class="ph ph-folder-open"></i>
+              <PhFolderOpen />
               <span>Library Import</span>
             </RouterLink> -->
           </div>
@@ -129,28 +132,28 @@
           <div class="nav-section">
             <!-- Calendar temporarily hidden -->
             <!-- <RouterLink to="/calendar" class="nav-item">
-              <i class="ph ph-calendar"></i>
+              <PhCalendar />
               <span>Calendar</span>
             </RouterLink> -->
-            <RouterLink to="/activity" class="nav-item">
-              <i class="ph ph-activity"></i>
+            <RouterLink to="/activity" class="nav-item" @mouseenter="preload('activity')" @focus="preload('activity')" @touchstart.passive="preload('activity')">
+              <PhActivity />
               <span>Activity</span>
               <span class="badge" v-if="activityCount > 0">{{ activityCount }}</span>
             </RouterLink>
-            <RouterLink to="/wanted" class="nav-item">
-              <i class="ph ph-heart"></i>
+            <RouterLink to="/wanted" class="nav-item" @mouseenter="preload('wanted')" @focus="preload('wanted')" @touchstart.passive="preload('wanted')">
+              <PhHeart />
               <span>Wanted</span>
               <span class="badge" v-if="wantedCount > 0">{{ wantedCount }}</span>
             </RouterLink>
           </div>
 
           <div class="nav-section">
-            <RouterLink to="/settings" class="nav-item">
-              <i class="ph ph-gear"></i>
+            <RouterLink to="/settings" class="nav-item" @mouseenter="preload('settings')" @focus="preload('settings')" @touchstart.passive="preload('settings')">
+              <PhGear />
               <span>Settings</span>
             </RouterLink>
-            <RouterLink to="/system" class="nav-item">
-              <i class="ph ph-monitor"></i>
+            <RouterLink to="/system" class="nav-item" @mouseenter="preload('system')" @focus="preload('system')" @touchstart.passive="preload('system')">
+              <PhMonitor />
               <span>System</span>
               <span class="badge error" v-if="systemIssues > 0">{{ systemIssues }}</span>
             </RouterLink>
@@ -186,7 +189,9 @@
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
+import { PhMagnifyingGlass, PhBell, PhX, PhUsers, PhBooks, PhPlus, PhActivity, PhHeart, PhGear, PhMonitor, PhFileMinus, PhDownload, PhCheckCircle } from '@phosphor-icons/vue'
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { preloadRoute } from '@/router'
 // SignalR indicator moved to System view; session token handled where needed
 import { useRoute, useRouter } from 'vue-router'
 import NotificationModal from '@/components/NotificationModal.vue'
@@ -207,6 +212,42 @@ const authEnabled = ref(false)
 
 // Version from API
 const version = ref('')
+
+// Preload helper for route components on user intent (hover/focus/touch)
+function preload(name: string) {
+  try { preloadRoute(name) } catch { }
+}
+
+// Idle prefetch: warm up non-critical routes when the browser is idle.
+// Respects Data Saver and slow connections to avoid wasting bandwidth.
+function scheduleIdlePrefetch(names: string[]) {
+  try {
+    const connection = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+    if (connection && (connection.saveData || /2g/.test(connection.effectiveType || ''))) {
+      // Device on data-saver or very slow network: skip prefetch
+      return
+    }
+  } catch {
+    // ignore
+  }
+
+  const doPrefetch = () => {
+    for (const n of names) {
+      try { preload(n) } catch { }
+    }
+  }
+
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => void }).requestIdleCallback
+  if (typeof ric === 'function') {
+    try {
+      ric(doPrefetch, { timeout: 3000 })
+    } catch {
+      setTimeout(doPrefetch, 1500)
+    }
+  } else {
+    setTimeout(doPrefetch, 1500)
+  }
+}
 
 // User menu (people icon) state
 const userMenuOpen = ref(false)
@@ -323,9 +364,62 @@ function formatTime(ts: string) {
   }
 }
 
+// Map legacy notification icon class strings to Ph components when possible.
+function notificationIconComponent(icon?: string) {
+  if (!icon) return null
+  switch (icon) {
+    case 'ph ph-file-remove':
+      return PhFileMinus
+    case 'ph ph-download':
+      return PhDownload
+    case 'ph ph-check-circle':
+      return PhCheckCircle
+    default:
+      return null
+  }
+}
+
 let wantedBadgeRefreshInterval: number | undefined
 let unsubscribeQueue: (() => void) | null = null
 let unsubscribeFilesRemoved: (() => void) | null = null
+let wantedBadgeVisibilityHandler: (() => void) | null = null
+
+function startWantedBadgePolling() {
+  if (wantedBadgeRefreshInterval) return
+  // Refresh immediately then start interval (only when page is visible)
+  if (!document.hidden) {
+    refreshWantedBadge()
+    wantedBadgeRefreshInterval = window.setInterval(refreshWantedBadge, 60000)
+  }
+
+  if (!wantedBadgeVisibilityHandler) {
+    wantedBadgeVisibilityHandler = () => {
+      if (document.hidden) {
+        if (wantedBadgeRefreshInterval) {
+          clearInterval(wantedBadgeRefreshInterval)
+          wantedBadgeRefreshInterval = undefined
+        }
+      } else {
+        if (!wantedBadgeRefreshInterval) {
+          refreshWantedBadge()
+          wantedBadgeRefreshInterval = window.setInterval(refreshWantedBadge, 60000)
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', wantedBadgeVisibilityHandler)
+  }
+}
+
+function stopWantedBadgePolling() {
+  if (wantedBadgeRefreshInterval) {
+    clearInterval(wantedBadgeRefreshInterval)
+    wantedBadgeRefreshInterval = undefined
+  }
+  if (wantedBadgeVisibilityHandler) {
+    document.removeEventListener('visibilitychange', wantedBadgeVisibilityHandler)
+    wantedBadgeVisibilityHandler = null
+  }
+}
 
 // Fetch wanted badge count (library changes less frequently - minimal polling)
 const refreshWantedBadge = async () => {
@@ -600,8 +694,7 @@ onMounted(async () => {
   }
   
   // Only poll "Wanted" badge (library changes infrequently)
-  refreshWantedBadge()
-  wantedBadgeRefreshInterval = window.setInterval(refreshWantedBadge, 60000) // Every minute
+  startWantedBadgePolling()
   
   console.log('[App] ✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
   // Fetch startup config (do this regardless of auth so header/login visibility can be known)
@@ -627,6 +720,14 @@ onMounted(async () => {
     console.warn('[App] Failed to fetch version from API:', err)
   }
 
+  // Schedule idle-time prefetch for non-critical routes (low-priority)
+  try {
+    // Prefetch settings and system plus downloads and activity which are common
+    scheduleIdlePrefetch(['settings', 'system', 'downloads', 'activity'])
+  } catch {
+    /* noop */
+  }
+
   // Click-outside handler for user menu
   document.addEventListener('click', handleDocumentClick)
   // Click-outside handler for the header search
@@ -643,9 +744,7 @@ onUnmounted(() => {
     if (unsubscribeFilesRemoved) {
       unsubscribeFilesRemoved()
     }
-  if (wantedBadgeRefreshInterval) {
-    clearInterval(wantedBadgeRefreshInterval)
-  }
+  stopWantedBadgePolling()
   document.removeEventListener('click', handleDocumentClick)
   document.removeEventListener('click', handleSearchDocumentClick)
   document.removeEventListener('click', handleNotificationDocumentClick)

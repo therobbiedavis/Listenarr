@@ -2,7 +2,7 @@
   <div class="settings-page">
     <div class="settings-header">
       <h1>
-        <i class="ph ph-gear"></i>
+        <PhGear />
         Settings
       </h1>
       <p>Configure your APIs, download clients, and application settings</p>
@@ -14,7 +14,7 @@
         :class="{ active: activeTab === 'indexers' }"
         class="tab-button"
       >
-        <i class="ph ph-list-magnifying-glass"></i>
+  <PhListMagnifyingGlass />
         Indexers
       </button>
       <button 
@@ -22,7 +22,7 @@
         :class="{ active: activeTab === 'apis' }"
         class="tab-button"
       >
-        <i class="ph ph-cloud"></i>
+  <PhCloud />
         API Sources
       </button>
       <button 
@@ -30,7 +30,7 @@
         :class="{ active: activeTab === 'clients' }"
         class="tab-button"
       >
-        <i class="ph ph-download"></i>
+  <PhDownload />
         Download Clients
       </button>
       <button 
@@ -38,7 +38,7 @@
         :class="{ active: activeTab === 'quality-profiles' }"
         class="tab-button"
       >
-        <i class="ph ph-star"></i>
+  <PhStar />
         Quality Profiles
       </button>
       <button 
@@ -46,7 +46,7 @@
         :class="{ active: activeTab === 'general' }"
         class="tab-button"
       >
-        <i class="ph ph-sliders"></i>
+  <PhSliders />
         General Settings
       </button>
     </div>
@@ -57,13 +57,13 @@
         <div class="section-header">
           <h3>Indexers</h3>
           <button @click="showIndexerForm = true" class="add-button">
-            <i class="ph ph-plus"></i>
+            <PhPlus />
             Add Indexer
           </button>
         </div>
 
         <div v-if="indexers.length === 0" class="empty-state">
-          <i class="ph ph-list-magnifying-glass"></i>
+          <PhListMagnifyingGlass />
           <p>No indexers configured. Add Newznab or Torznab indexers to search for audiobooks.</p>
         </div>
 
@@ -87,7 +87,12 @@
                   class="icon-button"
                   :title="indexer.isEnabled ? 'Disable' : 'Enable'"
                 >
-                  <i :class="indexer.isEnabled ? 'ph ph-toggle-right' : 'ph ph-toggle-left'"></i>
+                  <template v-if="indexer.isEnabled">
+                    <PhToggleRight />
+                  </template>
+                  <template v-else>
+                    <PhToggleLeft />
+                  </template>
                 </button>
                 <button 
                   @click="testIndexerFunc(indexer.id)" 
@@ -95,34 +100,38 @@
                   title="Test"
                   :disabled="testingIndexer === indexer.id"
                 >
-                  <i v-if="testingIndexer === indexer.id" class="ph ph-spinner ph-spin"></i>
-                  <i v-else class="ph ph-check-circle"></i>
+                  <template v-if="testingIndexer === indexer.id">
+                    <PhSpinner class="ph-spin" />
+                  </template>
+                  <template v-else>
+                    <PhCheckCircle />
+                  </template>
                 </button>
                 <button 
                   @click="editIndexer(indexer)" 
                   class="icon-button"
                   title="Edit"
                 >
-                  <i class="ph ph-pencil"></i>
+                  <PhPencil />
                 </button>
                 <button 
                   @click="confirmDeleteIndexer(indexer)" 
                   class="icon-button danger"
                   title="Delete"
                 >
-                  <i class="ph ph-trash"></i>
+                  <PhTrash />
                 </button>
               </div>
             </div>
 
             <div class="indexer-details">
               <div class="detail-row">
-                <i class="ph ph-link"></i>
+                <PhLink />
                 <span class="detail-label">URL:</span>
                 <span class="detail-value">{{ indexer.url }}</span>
               </div>
               <div class="detail-row">
-                <i class="ph ph-list-checks"></i>
+                <PhListChecks />
                 <span class="detail-label">Features:</span>
                 <div class="feature-badges">
                   <span v-if="indexer.enableRss" class="badge">RSS</span>
@@ -131,16 +140,20 @@
                 </div>
               </div>
               <div class="detail-row" v-if="indexer.lastTestedAt">
-                <i class="ph ph-clock"></i>
+                <PhClock />
                 <span class="detail-label">Last Tested:</span>
                 <span class="detail-value" :class="{ success: indexer.lastTestSuccessful, error: indexer.lastTestSuccessful === false }">
                   {{ formatDate(indexer.lastTestedAt) }}
-                  <i v-if="indexer.lastTestSuccessful" class="ph ph-check-circle success"></i>
-                  <i v-else-if="indexer.lastTestSuccessful === false" class="ph ph-x-circle error"></i>
+                  <template v-if="indexer.lastTestSuccessful">
+                    <PhCheckCircle class="success" />
+                  </template>
+                  <template v-else-if="indexer.lastTestSuccessful === false">
+                    <PhXCircle class="error" />
+                  </template>
                 </span>
               </div>
               <div class="detail-row error-row" v-if="indexer.lastTestError">
-                <i class="ph ph-warning"></i>
+                <PhWarning />
                 <span class="detail-value error">{{ indexer.lastTestError }}</span>
               </div>
             </div>
@@ -153,13 +166,13 @@
         <div class="section-header">
           <h3>API Sources</h3>
           <button @click="showApiForm = true" class="add-button">
-            <i class="ph ph-plus"></i>
+            <PhPlus />
             Add API Source
           </button>
         </div>
 
         <div v-if="configStore.apiConfigurations.length === 0" class="empty-state">
-          <i class="ph ph-cloud-slash"></i>
+          <PhCloudSlash />
           <p>No API sources configured. Add one to start searching for media.</p>
         </div>
 
@@ -175,21 +188,21 @@
               <div class="config-meta">
                 <span class="config-type">{{ api.type.toUpperCase() }}</span>
                 <span class="config-status" :class="{ enabled: api.isEnabled }">
-                  <i :class="api.isEnabled ? 'ph ph-check-circle' : 'ph ph-x-circle'"></i>
+                  <component :is="api.isEnabled ? PhCheckCircle : PhXCircle" :class="api.isEnabled ? 'success' : 'error'" />
                   {{ api.isEnabled ? 'Enabled' : 'Disabled' }}
                 </span>
                 <span class="config-priority">
-                  <i class="ph ph-arrow-up"></i>
+                  <PhArrowUp />
                   Priority: {{ api.priority }}
                 </span>
               </div>
             </div>
-            <div class="config-actions">
+              <div class="config-actions">
               <button @click="editApiConfig(api)" class="edit-button" title="Edit">
-                <i class="ph ph-pencil"></i>
+                <PhPencil />
               </button>
               <button @click="deleteApiConfig(api.id)" class="delete-button" title="Delete">
-                <i class="ph ph-trash"></i>
+                <PhTrash />
               </button>
             </div>
           </div>
@@ -201,13 +214,13 @@
         <div class="section-header">
           <h3>Download Clients</h3>
           <button @click="showClientForm = true; editingClient = null" class="add-button">
-            <i class="ph ph-plus"></i>
+            <PhPlus />
             Add Download Client
           </button>
         </div>
 
         <div v-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
-          <i class="ph ph-download-simple"></i>
+          <PhDownloadSimple />
           <p>No download clients configured. Add qBittorrent, Transmission, SABnzbd, or NZBGet to download audiobooks.</p>
         </div>
 
@@ -231,7 +244,7 @@
                   class="icon-button"
                   title="Edit"
                 >
-                  <i class="ph ph-pencil"></i>
+                  <PhPencil />
                 </button>
                 <button
                   @click="testClient(client)"
@@ -239,44 +252,48 @@
                   title="Test"
                   :disabled="testingClient === client.id"
                 >
-                  <i v-if="testingClient === client.id" class="ph ph-spinner ph-spin"></i>
-                  <i v-else class="ph ph-check-circle"></i>
+                  <template v-if="testingClient === client.id">
+                    <PhSpinner class="ph-spin" />
+                  </template>
+                  <template v-else>
+                    <PhCheckCircle />
+                  </template>
                 </button>
                 <button 
                   @click="confirmDeleteClient(client)" 
                   class="icon-button danger"
                   title="Delete"
                 >
-                  <i class="ph ph-trash"></i>
+                  <PhTrash />
                 </button>
               </div>
             </div>
 
             <div class="indexer-details">
               <div class="detail-row">
-                <i class="ph ph-link"></i>
+                <PhLink />
                 <span class="detail-label">Host:</span>
                 <span class="detail-value">{{ client.host }}:{{ client.port }}</span>
               </div>
               <div class="detail-row">
-                <i class="ph ph-shield-check"></i>
+                <PhShieldCheck />
                 <span class="detail-label">Security:</span>
                 <div class="feature-badges">
                   <span class="badge" v-if="client.useSSL">
-                    <i class="ph ph-lock"></i> SSL
+                    <PhLock /> SSL
                   </span>
                   <span class="badge" v-else>
-                    <i class="ph ph-lock-open"></i> No SSL
+                    <PhLockOpen /> No SSL
                   </span>
                 </div>
               </div>
               <div class="detail-row">
-                <i class="ph ph-folder"></i>
+                <PhFolder />
                 <span class="detail-label">Download Path:</span>
                 <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
               </div>
               <div class="detail-row">
-                <i class="ph ph-check-circle"></i>
+                <PhCheckCircle />
                 <span class="detail-label">Status:</span>
                 <span class="detail-value" :class="{ success: client.isEnabled, error: !client.isEnabled }">
                   {{ client.isEnabled ? 'Enabled' : 'Disabled' }}
@@ -290,13 +307,13 @@
         <div class="section-header" style="margin-top: 2rem;">
           <h3>Remote Path Mappings</h3>
           <button @click="openMappingForm()" class="add-button">
-            <i class="ph ph-plus"></i>
+            <PhPlus />
             Add Mapping
           </button>
         </div>
 
         <div v-if="remotePathMappings.length === 0" class="empty-state">
-          <i class="ph ph-link-simple"></i>
+          <PhLinkSimple />
           <p>No remote path mappings configured. Add a mapping to translate client remote paths to local paths the server can access.</p>
         </div>
 
@@ -305,22 +322,22 @@
             <div class="config-info">
               <h4>{{ mapping.name || mapping.remotePath }}</h4>
               <div class="detail-row">
-                <i class="ph ph-browser"></i>
+                <PhBrowser />
                 <span class="detail-label">Remote Path:</span>
                 <span class="detail-value">{{ mapping.remotePath }}</span>
               </div>
               <div class="detail-row">
-                <i class="ph ph-folder"></i>
+                <PhFolder />
                 <span class="detail-label">Local Path:</span>
                 <span class="detail-value">{{ mapping.localPath }}</span>
               </div>
             </div>
             <div class="config-actions">
               <button @click="editMapping(mapping)" class="edit-button" title="Edit">
-                <i class="ph ph-pencil"></i>
+                <PhPencil />
               </button>
               <button @click="deleteMapping(mapping.id)" class="delete-button" title="Delete">
-                <i class="ph ph-trash"></i>
+                <PhTrash />
               </button>
             </div>
           </div>
@@ -331,7 +348,7 @@
           <div class="modal-content" @click.stop>
             <div class="modal-header">
               <h3>{{ mappingToEdit ? 'Edit' : 'Add' }} Remote Path Mapping</h3>
-              <button @click="closeMappingForm()" class="modal-close"><i class="ph ph-x"></i></button>
+              <button @click="closeMappingForm()" class="modal-close"><PhX /></button>
             </div>
             <div class="modal-body">
               <div class="form-group">
@@ -355,7 +372,7 @@
             </div>
             <div class="modal-actions">
               <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
-              <button @click="saveMapping()" class="save-button"><i class="ph ph-check"></i> Save</button>
+              <button @click="saveMapping()" class="save-button"><PhCheck /> Save</button>
             </div>
           </div>
         </div>
@@ -366,14 +383,14 @@
         <div class="section-header">
           <h3>Quality Profiles</h3>
           <button @click="openQualityProfileForm()" class="add-button">
-            <i class="ph ph-plus"></i>
+            <PhPlus />
             Add Quality Profile
           </button>
         </div>
 
         <!-- Empty State -->
         <div v-if="qualityProfiles.length === 0" class="empty-state">
-          <i class="ph ph-star empty-icon"></i>
+          <PhStar class="empty-icon" />
           <p>No quality profiles configured yet.</p>
           <p class="empty-help">Quality profiles define which release qualities you want to download and prefer.</p>
         </div>
@@ -386,7 +403,7 @@
                 <div class="profile-name-row">
                   <h4>{{ profile.name }}</h4>
                   <span v-if="profile.isDefault" class="status-badge default">
-                    <i class="ph ph-check-circle"></i>
+                    <PhCheckCircle />
                     Default
                   </span>
                 </div>
@@ -394,7 +411,7 @@
               </div>
               <div class="profile-actions">
                 <button @click="editProfile(profile)" class="icon-button" title="Edit Profile">
-                  <i class="ph ph-pencil"></i>
+                  <PhPencil />
                 </button>
                 <button 
                   v-if="!profile.isDefault"
@@ -402,7 +419,7 @@
                   class="icon-button" 
                   title="Set as Default"
                 >
-                  <i class="ph ph-star"></i>
+                  <PhStar />
                 </button>
                 <button 
                   @click="confirmDeleteProfile(profile)" 
@@ -410,7 +427,7 @@
                   :disabled="profile.isDefault"
                   :title="profile.isDefault ? 'Cannot delete default profile' : 'Delete Profile'"
                 >
-                  <i class="ph ph-trash"></i>
+                  <PhTrash />
                 </button>
               </div>
             </div>
@@ -418,7 +435,7 @@
             <div class="profile-content">
               <!-- Qualities Section -->
               <div v-if="profile.qualities && profile.qualities.filter(q => q.allowed).length > 0" class="profile-section">
-                <h5><i class="ph ph-check-square"></i> Allowed Qualities</h5>
+                <h5><PhCheckSquare /> Allowed Qualities</h5>
                 <div class="quality-badges">
                   <span 
                     v-for="quality in profile.qualities.filter(q => q.allowed).sort((a, b) => b.priority - a.priority)"
@@ -427,14 +444,16 @@
                     :class="{ 'is-cutoff': quality.quality === profile.cutoffQuality }"
                   >
                     {{ quality.quality }}
-                    <i v-if="quality.quality === profile.cutoffQuality" class="ph ph-scissors" title="Cutoff Quality"></i>
+                      <template v-if="quality.quality === profile.cutoffQuality">
+                        <PhScissors title="Cutoff Quality" />
+                      </template>
                   </span>
                 </div>
               </div>
 
               <!-- Preferences Section -->
               <div v-if="profile.preferredFormats?.length || profile.preferredLanguages?.length" class="profile-section">
-                <h5><i class="ph ph-sliders"></i> Preferences</h5>
+                <h5><PhSliders /> Preferences</h5>
                 <div class="preferences-grid">
                   <div v-if="profile.preferredFormats && profile.preferredFormats.length > 0" class="preference-item">
                     <span class="preference-label">Formats</span>
@@ -449,22 +468,22 @@
 
               <!-- Limits Section -->
               <div v-if="profile.minimumSize || profile.maximumSize || (profile.minimumSeeders && profile.minimumSeeders > 0) || (profile.maximumAge && profile.maximumAge > 0)" class="profile-section">
-                <h5><i class="ph ph-list-checks"></i> Limits & Requirements</h5>
+                <h5><PhListChecks /> Limits & Requirements</h5>
                 <div class="limits-grid">
                   <div v-if="profile.minimumSize || profile.maximumSize" class="limit-item">
-                    <i class="ph ph-ruler"></i>
+                    <PhRuler />
                     <span class="limit-label">Size</span>
                     <span class="limit-value">
                       {{ profile.minimumSize || '0' }} - {{ profile.maximumSize || '∞' }} MB
                     </span>
                   </div>
                   <div v-if="profile.minimumSeeders && profile.minimumSeeders > 0" class="limit-item">
-                    <i class="ph ph-users"></i>
+                    <PhUsers />
                     <span class="limit-label">Seeders</span>
                     <span class="limit-value">{{ profile.minimumSeeders }}+ required</span>
                   </div>
                   <div v-if="profile.maximumAge && profile.maximumAge > 0" class="limit-item">
-                    <i class="ph ph-clock"></i>
+                    <PhClock />
                     <span class="limit-label">Max Age</span>
                     <span class="limit-value">{{ profile.maximumAge }} days</span>
                   </div>
@@ -473,11 +492,11 @@
 
               <!-- Word Filters Section -->
               <div v-if="profile.preferredWords?.length || profile.mustContain?.length || profile.mustNotContain?.length" class="profile-section">
-                <h5><i class="ph ph-text-aa"></i> Word Filters</h5>
+                <h5><PhTextAa /> Word Filters</h5>
                 <div class="word-filters">
                   <div v-if="profile.preferredWords && profile.preferredWords.length > 0" class="word-filter-group">
                     <span class="filter-type">
-                      <i class="ph ph-sparkle"></i>
+                      <PhSparkle />
                       Preferred
                     </span>
                     <div class="word-tags">
@@ -488,7 +507,7 @@
                   </div>
                   <div v-if="profile.mustContain && profile.mustContain.length > 0" class="word-filter-group">
                     <span class="filter-type">
-                      <i class="ph ph-check"></i>
+                      <PhCheck />
                       Required
                     </span>
                     <div class="word-tags">
@@ -499,7 +518,7 @@
                   </div>
                   <div v-if="profile.mustNotContain && profile.mustNotContain.length > 0" class="word-filter-group">
                     <span class="filter-type">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                       Forbidden
                     </span>
                     <div class="word-tags">
@@ -520,8 +539,12 @@
         <div class="section-header">
           <h3>General Settings</h3>
           <button @click="saveSettings" :disabled="configStore.isLoading || !isFormValid" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
-            <i v-if="configStore.isLoading" class="ph ph-spinner ph-spin"></i>
-            <i v-else class="ph ph-floppy-disk"></i>
+            <template v-if="configStore.isLoading">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else>
+              <PhFloppyDisk />
+            </template>
             {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
           </button>
         </div>
@@ -534,7 +557,7 @@
 
         <div v-if="settings" class="settings-form">
           <div class="form-section">
-            <h4><i class="ph ph-folder"></i> File Management</h4>
+            <h4><PhFolder /> File Management</h4>
             
             <div class="form-group">
               <label>Root Folder / Output Path</label>
@@ -573,7 +596,7 @@
           </div>
 
           <div class="form-section">
-            <h4><i class="ph ph-link"></i> API Configuration</h4>
+            <h4><PhLink /> API Configuration</h4>
             
             <div class="form-group">
               <label>Audnexus API URL</label>
@@ -583,7 +606,7 @@
           </div>
 
           <div class="form-section">
-            <h4><i class="ph ph-download"></i> Download Settings</h4>
+            <h4><PhDownload /> Download Settings</h4>
             
             <div class="form-group">
               <label>Max Concurrent Downloads</label>
@@ -599,7 +622,7 @@
           </div>
 
           <div class="form-section">
-            <h4><i class="ph ph-toggle-left"></i> Features</h4>
+            <h4><PhToggleLeft /> Features</h4>
             
             <div class="form-group checkbox-group">
               <label>
@@ -643,9 +666,9 @@
           </div>
 
           <div class="form-section">
-            <h4><i class="ph ph-globe"></i> External Requests / US Proxy
+            <h4><PhGlobe /> External Requests / US Proxy
               <button type="button" class="info-inline" @click.prevent="openProxySecurityModal" title="Security recommendations">
-                <i class="ph ph-info"></i>
+                <PhInfo />
               </button>
             </h4>
 
@@ -686,12 +709,17 @@
               <input v-model="settings.usProxyUsername" type="text" placeholder="username" :disabled="!settings.useUsProxy">
             </div>
 
-            <div class="form-group">
+              <div class="form-group">
               <label>US Proxy Password (optional)</label>
               <div class="password-field">
                 <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
                 <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
-                  <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
+                  <template v-if="showPassword">
+                    <PhEyeSlash />
+                  </template>
+                  <template v-else>
+                    <PhEye />
+                  </template>
                 </button>
               </div>
               <span class="form-help">Store proxy credentials here for convenience. For production, consider using a secrets manager instead of storing passwords in the application database.</span>
@@ -699,7 +727,7 @@
 
             <hr />
 
-            <h4><i class="ph ph-user-circle"></i> Authentication</h4>
+            <h4><PhUserCircle /> Authentication</h4>
             
             <div class="form-group">
               <label>Login Screen</label>
@@ -717,7 +745,12 @@
                 <div class="password-field">
                   <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
                   <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
-                    <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
+                    <template v-if="showPassword">
+                      <PhEyeSlash />
+                    </template>
+                    <template v-else>
+                      <PhEye />
+                    </template>
                   </button>
                 </div>
               </div>
@@ -737,8 +770,12 @@
                     :disabled="!startupConfig?.apiKey"
                     title="Copy API key"
                   >
-                    <i v-if="copiedApiKey" class="ph ph-check"></i>
-                    <i v-else class="ph ph-files"></i>
+                    <template v-if="copiedApiKey">
+                      <PhCheck />
+                    </template>
+                    <template v-else>
+                      <PhFiles />
+                    </template>
                   </button>
                   <button
                     type="button"
@@ -747,9 +784,15 @@
                     :disabled="loadingApiKey"
                     :title="startupConfig?.apiKey ? 'Regenerate API key' : 'Generate API key'"
                   >
-                    <i v-if="loadingApiKey" class="ph ph-spinner ph-spin"></i>
-                    <i v-else-if="startupConfig?.apiKey" class="ph ph-arrow-counter-clockwise"></i>
-                    <i v-else class="ph ph-plus"></i>
+                    <template v-if="loadingApiKey">
+                      <PhSpinner class="ph-spin" />
+                    </template>
+                    <template v-else-if="startupConfig?.apiKey">
+                      <PhArrowCounterClockwise />
+                    </template>
+                    <template v-else>
+                      <PhPlus />
+                    </template>
                     <span v-if="!loadingApiKey">{{ startupConfig?.apiKey ? 'Regenerate' : 'Generate' }}</span>
                   </button>
                 </div>
@@ -767,7 +810,7 @@
         <div class="modal-header">
           <h3>{{ editingApi ? 'Edit' : 'Add' }} API Source</h3>
           <button @click="showApiForm = false" class="modal-close">
-            <i class="ph ph-x"></i>
+            <PhX />
           </button>
         </div>
         <div class="modal-body">
@@ -775,11 +818,11 @@
         </div>
         <div class="modal-actions">
           <button @click="showApiForm = false" class="cancel-button">
-            <i class="ph ph-x"></i>
+            <PhX />
             Cancel
           </button>
           <button @click="saveApiConfig" class="save-button">
-            <i class="ph ph-check"></i>
+            <PhCheck />
             Save
           </button>
         </div>
@@ -817,23 +860,23 @@
     <div class="modal-content" @click.stop>
       <div class="modal-header">
         <h3>
-          <i class="ph ph-warning-circle"></i>
+          <PhWarningCircle />
           Delete Download Client
         </h3>
         <button @click="clientToDelete = null" class="modal-close">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
       <div class="modal-body">
         <p>Are you sure you want to delete the download client <strong>{{ clientToDelete.name }}</strong>?</p>
         <p>This action cannot be undone.</p>
       </div>
-      <div class="modal-actions">
+        <div class="modal-actions">
         <button @click="clientToDelete = null" class="cancel-button">
           Cancel
         </button>
         <button @click="executeDeleteClient()" class="delete-button">
-          <i class="ph ph-trash"></i>
+          <PhTrash />
           Delete
         </button>
       </div>
@@ -843,25 +886,25 @@
   <!-- Delete Indexer Confirmation Modal -->
   <div v-if="indexerToDelete" class="modal-overlay" @click="indexerToDelete = null">
     <div class="modal-content" @click.stop>
-      <div class="modal-header">
+        <div class="modal-header">
         <h3>
-          <i class="ph ph-warning-circle"></i>
+          <PhWarningCircle />
           Delete Indexer
         </h3>
         <button @click="indexerToDelete = null" class="modal-close">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
       <div class="modal-body">
         <p>Are you sure you want to delete the indexer <strong>{{ indexerToDelete.name }}</strong>?</p>
         <p>This action cannot be undone.</p>
       </div>
-      <div class="modal-actions">
+        <div class="modal-actions">
         <button @click="indexerToDelete = null" class="cancel-button">
           Cancel
         </button>
         <button @click="executeDeleteIndexer" class="delete-button">
-          <i class="ph ph-trash"></i>
+          <PhTrash />
           Delete
         </button>
       </div>
@@ -879,24 +922,24 @@
   <!-- Delete Quality Profile Confirmation Modal -->
   <div v-if="profileToDelete" class="modal-overlay" @click="profileToDelete = null">
     <div class="modal-content" @click.stop>
-      <div class="modal-header">
+        <div class="modal-header">
         <h3>
-          <i class="ph ph-warning-circle"></i>
+          <PhWarningCircle />
           Delete Quality Profile
         </h3>
         <button @click="profileToDelete = null" class="modal-close">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
       <div class="modal-body">
         <p>Are you sure you want to delete the quality profile <strong>{{ profileToDelete.name }}</strong>?</p>
         <p v-if="profileToDelete.isDefault" class="warning-text">
-          <i class="ph ph-warning"></i>
+          <PhWarning />
           This is the default profile and cannot be deleted. Please set another profile as default first.
         </p>
         <p>This action cannot be undone.</p>
       </div>
-      <div class="modal-actions">
+        <div class="modal-actions">
         <button @click="profileToDelete = null" class="cancel-button">
           Cancel
         </button>
@@ -905,7 +948,7 @@
           class="delete-button"
           :disabled="profileToDelete.isDefault"
         >
-          <i class="ph ph-trash"></i>
+          <PhTrash />
           Delete
         </button>
       </div>
@@ -913,14 +956,14 @@
   </div>
 
   <!-- Proxy Security Modal -->
-  <div v-if="showProxySecurityModal" class="modal-overlay" @click="closeProxySecurityModal()">
+      <div v-if="showProxySecurityModal" class="modal-overlay" @click="closeProxySecurityModal()">
     <div class="modal-content" @click.stop>
       <div class="modal-header">
         <h3>
-          <i class="ph ph-shield-check"></i>
+          <PhShieldCheck />
           Proxy security recommendations
         </h3>
-        <button @click="closeProxySecurityModal()" class="modal-close"><i class="ph ph-x"></i></button>
+        <button @click="closeProxySecurityModal()" class="modal-close"><PhX /></button>
       </div>
       <div class="modal-body">
         <p>Storing proxy credentials in the application database is convenient but has security implications. Consider the following:</p>
@@ -940,12 +983,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
+import { PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink, PhListChecks, PhClock, PhXCircle, PhWarning, PhCloudSlash, PhArrowUp, PhDownloadSimple, PhShieldCheck, PhLock, PhLockOpen, PhFolder, PhLinkSimple, PhBrowser, PhCheck, PhX, PhWarningCircle, PhCheckSquare, PhRuler, PhUsers, PhTextAa, PhSparkle, PhGlobe, PhInfo, PhUserCircle, PhFloppyDisk, PhFiles, PhArrowCounterClockwise, PhEye, PhEyeSlash, PhScissors } from '@phosphor-icons/vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
 import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
@@ -1572,57 +1616,107 @@ watch(() => route.hash, () => {
   syncTabFromHash()
 })
 
+// Track which tab data has been loaded to avoid duplicate requests
+const loaded = reactive({
+  indexers: false,
+  apis: false,
+  clients: false,
+  profiles: false,
+  admins: false,
+  mappings: false,
+  general: false
+})
+
+async function loadTabContents(tab: string) {
+  try {
+    switch (tab) {
+      case 'indexers':
+        if (!loaded.indexers) {
+          await loadIndexers()
+          loaded.indexers = true
+        }
+        break
+      case 'apis':
+        if (!loaded.apis) {
+          await configStore.loadApiConfigurations()
+          loaded.apis = true
+        }
+        break
+      case 'clients':
+        if (!loaded.clients) {
+          await configStore.loadDownloadClientConfigurations()
+          loaded.clients = true
+        }
+        break
+      case 'quality-profiles':
+        if (!loaded.profiles) {
+          await loadQualityProfiles()
+          loaded.profiles = true
+        }
+        break
+      case 'general':
+        if (!loaded.general) {
+          // General needs application settings, admin users and remote path mappings
+          await configStore.loadApplicationSettings()
+          settings.value = configStore.applicationSettings
+          // Ensure sensible default
+          if (settings.value && !settings.value.completedFileAction) settings.value.completedFileAction = 'Move'
+
+          try {
+            remotePathMappings.value = await getRemotePathMappings()
+            loaded.mappings = true
+          } catch (e) {
+            console.debug('Failed to load remote path mappings', e)
+          }
+
+          try {
+            await loadAdminUsers()
+            loaded.admins = true
+            if (adminUsers.value.length > 0 && settings.value) {
+              const firstAdmin = adminUsers.value[0]
+              if (firstAdmin) settings.value.adminUsername = firstAdmin.username
+            }
+          } catch (e) {
+            console.debug('Failed to load admin users', e)
+          }
+
+          loaded.general = true
+        }
+        break
+      default:
+        // default to indexers
+        if (!loaded.indexers) {
+          await loadIndexers()
+          loaded.indexers = true
+        }
+    }
+  } catch (err) {
+    console.error('Failed to load tab contents for', tab, err)
+  }
+}
+
 onMounted(async () => {
   // Set initial tab from URL hash
   syncTabFromHash()
-  
-  await Promise.all([
-    configStore.loadApiConfigurations(),
-    configStore.loadDownloadClientConfigurations(),
-    configStore.loadApplicationSettings(),
-    // load remote path mappings
-    (async () => { try { remotePathMappings.value = await getRemotePathMappings() } catch (e) { console.debug('Failed to load remote path mappings', e) } })(),
-    loadIndexers(),
-    loadQualityProfiles(),
-    loadAdminUsers()
-  ])
-  
-  settings.value = configStore.applicationSettings
-  // Ensure completedFileAction has a sensible default
-  if (settings.value && !settings.value.completedFileAction) {
-    settings.value.completedFileAction = 'Move'
-  }
-  // Load startup config (optional) to determine AuthenticationRequired
+
+  // Load only the data needed for the active tab; other tabs load on demand
+  await loadTabContents(activeTab.value)
+
+  // Load startup config (optional) to determine AuthenticationRequired — keep this lightweight
   try {
     startupConfig.value = await apiService.getStartupConfig()
-    // Accept both camelCase and PascalCase keys coming from the API JSON
-    function extractAuthRequired(obj: unknown): string | boolean | undefined {
-      if (!obj || typeof obj !== 'object') return undefined
-      const o = obj as Record<string, unknown>
-      const v = o['authenticationRequired'] ?? o['AuthenticationRequired']
-      if (typeof v === 'string' || typeof v === 'boolean') return v
-      return undefined
-    }
-
-    const authVal = extractAuthRequired(startupConfig.value)
-    if (typeof authVal === 'string') {
-      authEnabled.value = authVal.toLowerCase() === 'enabled' || authVal.toLowerCase() === 'true'
-    } else if (typeof authVal === 'boolean') {
-      authEnabled.value = authVal
-    }
+    const obj = startupConfig.value as Record<string, unknown> | null
+    const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
+    const v = raw as unknown
+    authEnabled.value = (typeof v === 'boolean') ? v : (typeof v === 'string' ? (v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true') : false)
   } catch {
-    // ignore - server may not expose startup config in some deployments
+    authEnabled.value = false
   }
 
-  // Pre-populate admin credentials from the first admin user
-  if (adminUsers.value.length > 0 && settings.value) {
-    const firstAdmin = adminUsers.value[0]
-    if (firstAdmin) {
-      settings.value.adminUsername = firstAdmin.username
-      // Note: We don't populate the password field for security reasons
-      // Users will need to enter the password when changing it
-    }
-  }
+  // Watch for tab changes and fetch content on-demand
+  watch(activeTab, (t) => {
+    void loadTabContents(t)
+  })
 })
 </script>
 

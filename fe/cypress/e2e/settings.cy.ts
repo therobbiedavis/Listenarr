@@ -114,26 +114,17 @@ describe('Settings UI - e2e', () => {
   cy.get('#app', { timeout: 10000 }).should('exist')
   cy.log('Home page loaded successfully')
 
-  // Wait a bit for the page to stabilize
-  cy.wait(2000)
+  // Wait for the main navigation to appear so the app has mounted and initial requests completed
+  cy.contains('Settings', { timeout: 10000 }).should('be.visible')
 
-  // Test navigation to another page first (add-new)
-  cy.visit('/add-new', { timeout: 10000 })
-  cy.url({ timeout: 10000 }).should('include', '/add-new')
-  cy.log('Navigation to /add-new works')
+  // Wait for the SPA startup requests (startup config + settings) so the app is initialized
+  cy.wait(['@getStartupConfig', '@getSettings'], { timeout: 20000 })
 
-  // Wait for navigation
-  cy.wait(2000)
+  // Click the Settings link in the sidebar (visible) to navigate via the app UI
+  cy.contains('Settings', { timeout: 10000 }).should('be.visible').click()
 
-  // Navigate back to home and then click the settings link in the sidebar
-  cy.visit('/', { timeout: 10000 })
-  cy.wait(2000)
-
-  // Click the settings link in the sidebar
-  cy.contains('Settings').click()
-
-  // Wait for navigation to complete
-  cy.wait(3000)
+  // Ensure the settings page DOM is present
+  cy.get('.settings-page', { timeout: 20000 }).should('exist')
 
   // Check that the app is still mounted
   cy.get('#app', { timeout: 10000 }).should('exist')
@@ -143,11 +134,8 @@ describe('Settings UI - e2e', () => {
   cy.url({ timeout: 10000 }).should('include', '/settings')
   cy.log('URL includes /settings')
 
-  // Wait more time for component to render
-  cy.wait(2000)
-
-  // Ensure the settings page is rendered
-  cy.get('.main-content').should('exist')
+  // Ensure the settings page main content is rendered
+  cy.get('.main-content', { timeout: 20000 }).should('exist')
   cy.log('Main content exists')
 
   // Check what's in the main content
@@ -157,15 +145,11 @@ describe('Settings UI - e2e', () => {
 
   cy.get('.settings-page').should('exist')
 
-    // Click on the "General Settings" tab to show the form
-    cy.contains('General Settings').click()
-
-    // Wait for the tab to switch
-    cy.wait(1000)
-
-    // Ensure the general settings form is rendered by checking the output-path input
-    // Increase timeout as the SPA may take longer to fetch required data.
-    cy.get('input[placeholder="Select a folder for audiobooks..."]', { timeout: 20000 }).should('exist')
+  // Click on the "General Settings" tab to show the form and wait for the form input to appear
+  cy.contains('General Settings').click()
+  // Ensure the general settings form is rendered by checking the output-path input
+  // Increase timeout as the SPA may take longer to fetch required data.
+  cy.get('input[placeholder="Select a folder for audiobooks..."]', { timeout: 20000 }).should('exist')
 
 
     // Output path: use the folder browser input

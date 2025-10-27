@@ -2,12 +2,12 @@
   <div class="activity-view">
     <div class="page-header">
       <h1>
-        <i class="ph ph-activity"></i>
+        <PhActivity />
         Activity
       </h1>
       <div class="activity-actions">
         <button class="btn btn-secondary" @click="refreshQueue" :disabled="loading">
-          <i class="ph" :class="loading ? 'ph-spinner ph-spin' : 'ph-arrow-clockwise'"></i>
+          <component :is="loading ? PhSpinner : PhArrowClockwise" />
           Refresh
         </button>
       </div>
@@ -35,7 +35,7 @@
         class="queue-item"
       >
         <div class="queue-icon">
-          <i class="ph ph-download-simple"></i>
+          <PhDownloadSimple />
         </div>
         
         <div class="queue-info">
@@ -45,7 +45,7 @@
           
           <div class="queue-meta">
             <span v-if="item.downloadClient" class="queue-client">
-              <i class="ph ph-desktop"></i>
+              <PhDesktop />
               {{ item.downloadClient }}
             </span>
             <span v-if="item.quality && item.quality !== '*'" class="queue-quality">{{ item.quality }}</span>
@@ -56,11 +56,11 @@
               <span class="progress-text">{{ item.progress.toFixed(1) }}%</span>
               <span class="size-info">{{ formatSize(item.downloaded) }} / {{ formatSize(item.size) }}</span>
               <span v-if="item.downloadSpeed > 0" class="download-speed">
-                <i class="ph ph-arrow-down"></i>
+                <PhArrowDown />
                 {{ formatSpeed(item.downloadSpeed) }}
               </span>
               <span v-if="item.eta" class="eta">
-                <i class="ph ph-clock"></i>
+                <PhClock />
                 {{ formatEta(item.eta) }}
               </span>
             </div>
@@ -87,7 +87,7 @@
             @click="removeFromQueue(item)"
             title="Remove from Queue"
           >
-            <i class="ph ph-x"></i>
+            <PhX />
           </button>
         </div>
       </div>
@@ -96,7 +96,7 @@
     <!-- Empty State -->
     <div class="empty-state" v-else-if="!loading">
       <div class="empty-icon">
-        <i class="ph ph-queue"></i>
+        <PhQueue />
       </div>
       <h2>No Active Downloads</h2>
       <p>Downloads will appear here when you send items to your download clients.</p>
@@ -104,7 +104,7 @@
 
     <!-- Loading State -->
     <div class="loading-state" v-if="loading && queue.length === 0">
-      <i class="ph ph-spinner ph-spin"></i>
+      <PhSpinner class="ph-spin" />
       <p>Loading queue...</p>
     </div>
 
@@ -113,11 +113,11 @@
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <h3>
-            <i class="ph ph-warning-circle"></i>
+            <PhWarningCircle />
             Remove from Queue
           </h3>
           <button class="modal-close" @click="showRemoveModal = false">
-            <i class="ph ph-x"></i>
+            <PhX />
           </button>
         </div>
         <div class="modal-body">
@@ -126,17 +126,17 @@
             <strong>{{ itemToRemove?.title }}</strong>
             <div class="item-details">
               <span v-if="itemToRemove?.downloadClient">
-                <i class="ph ph-desktop"></i>
+                <PhDesktop />
                 {{ itemToRemove.downloadClient }}
               </span>
               <span>
-                <i class="ph ph-chart-bar"></i>
+                <PhChartBar />
                 {{ itemToRemove?.progress.toFixed(1) }}% complete
               </span>
             </div>
           </div>
           <p class="warning-text">
-            <i class="ph ph-info"></i>
+            <PhInfo />
             This will remove the download from your download client. Files may or may not be deleted depending on your client settings.
           </p>
         </div>
@@ -145,7 +145,7 @@
             Cancel
           </button>
           <button class="btn btn-danger" @click="confirmRemove" :disabled="removing">
-            <i class="ph" :class="removing ? 'ph-spinner ph-spin' : 'ph-trash'"></i>
+            <component :is="removing ? PhSpinner : PhTrash" />
             {{ removing ? 'Removing...' : 'Remove' }}
           </button>
         </div>
@@ -156,6 +156,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { PhActivity, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhDesktop, PhArrowDown, PhClock, PhX, PhQueue, PhWarningCircle, PhInfo, PhChartBar, PhTrash } from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'

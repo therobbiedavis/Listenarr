@@ -17,11 +17,11 @@
  */
 
 import './assets/main.css'
-
-// Import Phosphor Icons locally (CSS webfonts)
-import '@phosphor-icons/web/regular'
-import '@phosphor-icons/web/bold'
-import '@phosphor-icons/web/fill'
+// Restore legacy Phosphor CSS classes (e.g. <i class="ph ph-grid-four">)
+// This provides the `.ph` + `.ph-<name>` mappings that many templates use.
+// We keep component-based `@phosphor-icons/vue` for new code, but
+// re-importing the web CSS ensures existing markup still displays icons.
+// Legacy web font import removed now that components are used everywhere.
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

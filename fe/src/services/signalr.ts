@@ -52,6 +52,7 @@ class SignalRService {
   private searchProgressCallbacks: Set<(payload: { message: string; asin?: string | null }) => void> = new Set()
   private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
   private pingInterval: number | null = null
+  private visibilityListener: (() => void) | null = null
   // Connection state listeners (for UI to subscribe to connect/disconnect events)
   private connectedListeners: Set<() => void> = new Set()
   private disconnectedListeners: Set<() => void> = new Set()
@@ -264,17 +265,42 @@ class SignalRService {
 
   private startPingInterval() {
     this.stopPingInterval()
+    // If the page is hidden, delay starting the ping interval until visible
+    if (typeof document !== 'undefined' && document.hidden) {
+      if (!this.visibilityListener) {
+        this.visibilityListener = () => {
+          if (!document.hidden) {
+            this.startPingInterval()
+          }
+        }
+        document.addEventListener('visibilitychange', this.visibilityListener)
+      }
+      return
+    }
+
     // Send ping every 15 seconds to keep connection alive
     this.pingInterval = window.setInterval(() => {
       const ping = { type: 6 }
       this.send(JSON.stringify(ping) + '\x1e')
     }, 15000)
+
+    // Ensure we have a listener to stop pings when the page becomes hidden
+    if (!this.visibilityListener) {
+      this.visibilityListener = () => {
+        if (document.hidden) this.stopPingInterval()
+      }
+      document.addEventListener('visibilitychange', this.visibilityListener)
+    }
   }
 
   private stopPingInterval() {
     if (this.pingInterval) {
       clearInterval(this.pingInterval)
       this.pingInterval = null
+    }
+    if (this.visibilityListener) {
+      document.removeEventListener('visibilitychange', this.visibilityListener)
+      this.visibilityListener = null
     }
   }
 

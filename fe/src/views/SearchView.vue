@@ -34,7 +34,7 @@
     </div>
 
     <div v-if="searchStore.isSearching" class="loading">
-      <i class="ph ph-spinner ph-spin"></i>
+      <PhSpinner class="ph-spin" />
       <p>Searching...</p>
     </div>
 
@@ -60,11 +60,11 @@
                     class="score-badge rejected"
                     :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
                   >
-                    <i class="ph ph-x-circle"></i>
+                    <PhXCircle />
                     Rejected
                   </span>
                   <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
-                    <i class="ph ph-star"></i>
+                    <PhStar />
                     Score: {{ getResultScore(result.id)?.totalScore }}
                   </span>
                 </template>
@@ -102,7 +102,12 @@
               :class="['add-button', { 'added': addedResults.has(result.id) }]"
               :disabled="isAddingToLibrary || addedResults.has(result.id)"
             >
-              <i :class="addedResults.has(result.id) ? 'ph ph-check' : 'ph ph-plus'"></i>
+              <template v-if="addedResults.has(result.id)">
+                <PhCheck />
+              </template>
+              <template v-else>
+                <PhPlus />
+              </template>
               {{ addedResults.has(result.id) ? 'Added' : 'Add to Library' }}
             </button>
           </div>
@@ -118,6 +123,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue'
+import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus } from '@phosphor-icons/vue'
 import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'

@@ -1,15 +1,28 @@
 import { fileURLToPath, URL } from 'node:url'
 
 import { defineConfig } from 'vite'
+import type { PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
+// Visualizer for bundle analysis. We cast to any when injecting to avoid
+// TypeScript plugin signature mismatches between rollup and vite types.
+import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     vue(),
     vueDevTools(),
+    // Generate a static treemap report after build
+    // cast to any to satisfy TypeScript when mixing rollup plugin types with Vite
+  // cast plugin to any to avoid Vite/TS signature issues
+  // Visualizer returns a Rollup plugin. Cast via unknown -> Plugin to avoid explicit `any`.
+  (visualizer({ filename: 'dist/stats.html', title: 'Listenarr bundle analysis', open: false }) as unknown as PluginOption),
   ],
+  build: {
+    // Generate sourcemaps for bundle analysis tools (source-map-explorer)
+    sourcemap: true,
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

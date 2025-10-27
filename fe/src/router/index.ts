@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import type { StartupConfig } from '@/types'
-import SettingsView from '../views/SettingsView.vue'
 
 // Module-level cache/promise for startup config to avoid repeated requests during rapid navigation
 // Use a promise so concurrent navigations share the same inflight request instead of issuing many
@@ -17,7 +16,7 @@ const routes = [
   { path: '/activity', name: 'activity', component: () => import('../views/ActivityView.vue'), meta: { requiresAuth: true } },
   { path: '/wanted', name: 'wanted', component: () => import('../views/WantedView.vue'), meta: { requiresAuth: true } },
   { path: '/downloads', name: 'downloads', component: () => import('../views/DownloadsView.vue'), meta: { requiresAuth: true } },
-  { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
+  { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { requiresAuth: true } },
   { path: '/system', name: 'system', component: () => import('../views/SystemView.vue'), meta: { requiresAuth: true } },
   { path: '/logs', name: 'logs', component: () => import('../views/LogsView.vue'), meta: { requiresAuth: true } },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { hideLayout: true } },
@@ -27,6 +26,22 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
+
+// Preload helper: given a route name or path, trigger the route's lazy component import
+// without navigating. Returns the import promise or a resolved promise when not found.
+export function preloadRoute(nameOrPath: string) {
+  // try by name first
+  const byName = routes.find(r => r.name === nameOrPath)
+  if (byName && typeof byName.component === 'function') {
+    try { return (byName.component as unknown as () => Promise<unknown>)() } catch { return Promise.resolve() }
+  }
+  // try by path
+  const byPath = routes.find(r => r.path === nameOrPath || r.path === (nameOrPath.startsWith('/') ? nameOrPath : `/${nameOrPath}`))
+  if (byPath && typeof byPath.component === 'function') {
+    try { return (byPath.component as unknown as () => Promise<unknown>)() } catch { return Promise.resolve() }
+  }
+  return Promise.resolve()
+}
 
 // Navigation guard: protect routes requiring auth and preserve redirectTo
 router.beforeEach(async (to, from, next) => {

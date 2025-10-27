@@ -1,7 +1,7 @@
 <template>
   <div class="add-new-view">
     <div class="page-header">
-      <h1><i class="ph ph-plus-circle"></i> Add New Audiobook</h1>
+  <h1><PhPlusCircle /> Add New Audiobook</h1>
     </div>
 
     <!-- Unified Search -->
@@ -27,14 +27,18 @@
           :disabled="isSearching || !searchQuery.trim()"
           class="search-btn"
         >
-          <i v-if="isSearching" class="ph ph-spinner ph-spin"></i>
-          <i v-else class="ph ph-magnifying-glass"></i>
+          <template v-if="isSearching">
+            <PhSpinner class="ph-spin" />
+          </template>
+          <template v-else>
+            <PhMagnifyingGlass />
+          </template>
           {{ isSearching ? 'Searching...' : 'Search' }}
         </button>
       </div>
       
       <div class="search-hint">
-        <i class="ph ph-info"></i>
+        <PhInfo />
         <span v-if="searchType === 'asin'">Searching by ASIN</span>
         <span v-else-if="searchType === 'title'">Searching by title/author</span>
         <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
@@ -42,7 +46,7 @@
       </div>
       
       <div v-if="searchError" class="error-message">
-        <i class="ph ph-warning-circle"></i>
+        <PhWarningCircle />
         {{ searchError }}
       </div>
     </div>
@@ -50,7 +54,7 @@
     <!-- Loading State -->
     <div v-if="isSearching && !hasResults" class="loading-results">
       <div class="loading-spinner">
-        <i class="ph ph-spinner ph-spin"></i>
+        <PhSpinner class="ph-spin" />
         <p>Searching for audiobooks...</p>
         <p v-if="searchStatus" class="search-status">{{ searchStatus }}</p>
       </div>
@@ -65,7 +69,7 @@
           <div class="result-poster">
             <img v-if="audibleResult.imageUrl" :src="apiService.getImageUrl(audibleResult.imageUrl)" :alt="audibleResult.title" />
             <div v-else class="placeholder-cover">
-              <i class="ph ph-image"></i>
+              <PhImage />
             </div>
           </div>
           <div class="result-info">
@@ -81,11 +85,11 @@
             </p>
               <div class="result-stats">
               <span v-if="audibleResult.runtime" class="stat-item">
-                <i class="ph ph-clock"></i>
+                <PhClock />
                 {{ formatRuntime(audibleResult.runtime) }}
               </span>
               <span v-if="audibleResult.language" class="stat-item">
-                <i class="ph ph-globe"></i>
+                <PhGlobe />
                 {{ audibleResult.language }}
               </span>
             </div>
@@ -106,11 +110,11 @@
                 @click="addToLibrary(audibleResult)"
                 :disabled="addedAsins.has(audibleResult.asin)"
               >
-                <i :class="addedAsins.has(audibleResult.asin) ? 'ph ph-check' : 'ph ph-plus'"></i>
+                <component :is="addedAsins.has(audibleResult.asin) ? PhCheck : PhPlus" />
                 {{ addedAsins.has(audibleResult.asin) ? 'Added' : 'Add to Library' }}
               </button>
               <button class="btn btn-secondary" @click="viewDetails(audibleResult)">
-                <i class="ph ph-eye"></i>
+                <PhEye />
                 View Details
               </button>
             </div>
@@ -120,11 +124,11 @@
 
       <!-- ISBN Auto-processing Status -->
       <div v-if="searchType === 'isbn' && isSearching" class="inline-status">
-        <i class="ph ph-spinner ph-spin"></i>
+        <PhSpinner class="ph-spin" />
         <span>Searching Amazon/Audible for audiobook...</span>
       </div>
       <div v-else-if="searchType === 'isbn' && !isSearching && isbnLookupMessage" class="inline-status" :class="{ warning: isbnLookupWarning }">
-        <i :class="isbnLookupWarning ? 'ph ph-warning-circle' : 'ph ph-info'" />
+        <component :is="isbnLookupWarning ? PhWarningCircle : PhInfo" />
         <span>{{ isbnLookupMessage }}</span>
       </div>
 
@@ -133,10 +137,10 @@
         <h2>Found {{ titleResultsCount }} Book{{ titleResultsCount === 1 ? '' : 's' }}</h2>
         <div class="title-results">
           <div v-for="book in titleResults" :key="book.key" class="title-result-card">
-            <div class="result-poster">
+              <div class="result-poster">
               <img v-if="getCoverUrl(book)" :src="getCoverUrl(book)" :alt="book.title" />
               <div v-else class="placeholder-cover">
-                <i class="ph ph-book"></i>
+                <PhBook />
               </div>
             </div>
             <div class="result-info">
@@ -153,11 +157,11 @@
               
               <div class="result-stats">
                 <span v-if="book.searchResult?.runtime" class="stat-item">
-                  <i class="ph ph-clock"></i>
+                  <PhClock />
                   {{ formatRuntime(book.searchResult.runtime) }}
                 </span>
                 <span v-if="book.searchResult?.series" class="stat-item">
-                  <i class="ph ph-book-bookmark"></i>
+                  <PhBook />
                   {{ safeText(book.searchResult.series) }}<span v-if="book.searchResult.seriesNumber"> #{{ book.searchResult.seriesNumber }}</span>
                 </span>
               </div>
@@ -179,11 +183,11 @@
                 @click="selectTitleResult(book)"
                 :disabled="!!(getAsin(book) && addedAsins.has(getAsin(book)!))"
               >
-                <i :class="getAsin(book) && addedAsins.has(getAsin(book)!) ? 'ph ph-check' : 'ph ph-plus'"></i>
+                <component :is="getAsin(book) && addedAsins.has(getAsin(book)!) ? PhCheck : PhPlus" />
                 {{ getAsin(book) && addedAsins.has(getAsin(book)!) ? 'Added' : 'Add to Library' }}
               </button>
               <button class="btn btn-secondary" @click="viewTitleResultDetails(book)">
-                <i class="ph ph-eye"></i>
+                <PhEye />
                 View Details
               </button>
             </div>
@@ -193,8 +197,12 @@
         <!-- Load More Button -->
         <div v-if="canLoadMore" class="load-more">
           <button @click="loadMoreTitleResults" :disabled="isLoadingMore" class="btn btn-secondary">
-            <i v-if="isLoadingMore" class="ph ph-spinner ph-spin"></i>
-            <i v-else class="ph ph-arrow-down"></i>
+            <template v-if="isLoadingMore">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else>
+              <PhArrowDown />
+            </template>
             {{ isLoadingMore ? 'Loading...' : 'Load More' }}
           </button>
         </div>
@@ -204,13 +212,13 @@
     <!-- No Results -->
     <div v-if="searchType === 'asin' && !audibleResult && !isSearching && searchQuery" class="empty-state">
       <div class="empty-icon">
-        <i class="ph ph-magnifying-glass"></i>
+        <PhMagnifyingGlass />
       </div>
       <h2>No Audiobook Found</h2>
       <p>No audiobook was found with ASIN "{{ asinQuery }}". Please check the ASIN and try again.</p>
       <div class="quick-actions">
         <button class="btn btn-primary" @click="searchQuery = ''; searchType = 'title'">
-          <i class="ph ph-magnifying-glass"></i>
+          <PhMagnifyingGlass />
           Try Title Search
         </button>
       </div>
@@ -218,7 +226,7 @@
 
     <div v-if="searchType === 'title' && titleResults.length === 0 && !isSearching && searchQuery" class="empty-state">
       <div class="empty-icon">
-        <i class="ph ph-book"></i>
+        <PhBook />
       </div>
       <h2 v-if="!asinFilteringApplied">No Books Found</h2>
       <h2 v-else>No Audiobook Matches</h2>
@@ -229,13 +237,13 @@
     <!-- Error States -->
     <div v-if="hasError" class="error-state">
       <div class="error-icon">
-        <i class="ph ph-warning-circle"></i>
+        <PhWarningCircle />
       </div>
       <h2>Search Error</h2>
       <p>{{ errorMessage }}</p>
       <div class="quick-actions">
         <button class="btn btn-primary" @click="retrySearch">
-          <i class="ph ph-arrow-clockwise"></i>
+          <PhArrowClockwise />
           Try Again
         </button>
       </div>
@@ -261,6 +269,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
