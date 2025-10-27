@@ -91,13 +91,7 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        [HttpGet("intelligent")]
-        /// <summary>
-        /// Run the intelligent Amazon + Audible enrichment search and return only enriched results.
-        /// </summary>
-        /// <param name="query">Search query</param>
-        /// <param name="category">Optional category filter</param>
-        /// <returns>List of enriched SearchResult objects</returns>
+    [HttpGet("intelligent")]
         [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -124,15 +118,7 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-        [HttpGet("indexers")]
-        /// <summary>
-        /// Search enabled indexers and return combined results.
-        /// </summary>
-        /// <param name="query">Search query</param>
-        /// <param name="category">Optional category filter</param>
-        /// <param name="sortBy">Sort criteria</param>
-        /// <param name="sortDirection">Sort direction</param>
-        /// <param name="isAutomaticSearch">When true, respect indexer automatic search flags</param>
+    [HttpGet("indexers")]
         [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]

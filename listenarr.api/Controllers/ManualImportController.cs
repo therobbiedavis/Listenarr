@@ -254,7 +254,7 @@ public class ManualImportController : ControllerBase
         }
     }
 
-    private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
+    private Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
     {
         // For manual import, create folder structure within the audiobook's base path
         // Since basePath already represents the author's folder, we use a pattern without {Author}
@@ -302,7 +302,7 @@ public class ManualImportController : ControllerBase
             ? relativePath 
             : Path.Combine(basePath, relativePath);
 
-        return fullPath;
+        return Task.FromResult(fullPath);
     }
 
     private static string FormatSize(long bytes)

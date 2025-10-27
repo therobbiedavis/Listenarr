@@ -1,9 +1,11 @@
 using System;
 using System.Net;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Services;
+using Listenarr.Api.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -29,7 +31,7 @@ namespace Listenarr.Api.Tests
             });
 
             var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.audible.de") };
-            var svc = new AudibleSearchService(httpClient, new NullLogger<AudibleSearchService>());
+            var svc = new AudibleSearchService(httpClient, new NullLogger<AudibleSearchService>(), new TestConfigurationService());
 
             // Call internal TryFetchProductTitle directly (InternalsVisibleTo applied)
             var title = await svc.TryFetchProductTitle("https://www.audible.de/pd/test-product", "B0TESTASIN");
@@ -56,7 +58,7 @@ namespace Listenarr.Api.Tests
             });
 
             var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.amazon.de") };
-            var svc = new AmazonAsinService(httpClient, new NullLogger<AmazonAsinService>());
+            var svc = new AmazonAsinService(httpClient, new NullLogger<AmazonAsinService>(), new TestConfigurationService());
 
             // Call internal GetHtmlAsync directly (InternalsVisibleTo applied)
             var html = await svc.GetHtmlAsync("https://www.amazon.de/s?k=test", CancellationToken.None);
@@ -80,5 +82,25 @@ namespace Listenarr.Api.Tests
         {
             return _responder(request);
         }
+    }
+
+    // Minimal test IConfigurationService implementation used by these unit tests
+    internal class TestConfigurationService : IConfigurationService
+    {
+        public Task<List<ApiConfiguration>> GetApiConfigurationsAsync() => Task.FromResult(new List<ApiConfiguration>());
+        public Task<ApiConfiguration?> GetApiConfigurationAsync(string id) => Task.FromResult<ApiConfiguration?>(null);
+        public Task<string> SaveApiConfigurationAsync(ApiConfiguration config) => Task.FromResult(string.Empty);
+        public Task<bool> DeleteApiConfigurationAsync(string id) => Task.FromResult(true);
+
+        public Task<List<DownloadClientConfiguration>> GetDownloadClientConfigurationsAsync() => Task.FromResult(new List<DownloadClientConfiguration>());
+        public Task<DownloadClientConfiguration?> GetDownloadClientConfigurationAsync(string id) => Task.FromResult<DownloadClientConfiguration?>(null);
+        public Task<string> SaveDownloadClientConfigurationAsync(DownloadClientConfiguration config) => Task.FromResult(string.Empty);
+        public Task<bool> DeleteDownloadClientConfigurationAsync(string id) => Task.FromResult(true);
+
+        public Task<ApplicationSettings> GetApplicationSettingsAsync() => Task.FromResult(new ApplicationSettings());
+        public Task SaveApplicationSettingsAsync(ApplicationSettings settings) => Task.CompletedTask;
+
+        public Task<StartupConfig> GetStartupConfigAsync() => Task.FromResult(new StartupConfig());
+        public Task SaveStartupConfigAsync(StartupConfig config) => Task.CompletedTask;
     }
 }
