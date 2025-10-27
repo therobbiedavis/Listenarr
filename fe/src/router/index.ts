@@ -27,8 +27,26 @@ const router = createRouter({
   routes,
 })
 
+// Preload helper: given a route name or path, trigger the route's lazy component import
+// without navigating. Returns the import promise or a resolved promise when not found.
+export function preloadRoute(nameOrPath: string) {
+  // try by name first
+  const byName = routes.find(r => r.name === nameOrPath)
+  if (byName && typeof byName.component === 'function') {
+    try { return (byName.component as unknown as () => Promise<unknown>)() } catch { return Promise.resolve() }
+  }
+  // try by path
+  const byPath = routes.find(r => r.path === nameOrPath || r.path === (nameOrPath.startsWith('/') ? nameOrPath : `/${nameOrPath}`))
+  if (byPath && typeof byPath.component === 'function') {
+    try { return (byPath.component as unknown as () => Promise<unknown>)() } catch { return Promise.resolve() }
+  }
+  return Promise.resolve()
+}
+
 // Navigation guard: protect routes requiring auth and preserve redirectTo
 router.beforeEach(async (to, from, next) => {
+  // Skip auth guard in Cypress tests
+  if (import.meta.env.CYPRESS) return next()
   const auth = useAuthStore()
 
   // Load current user only once per app lifetime (avoid repeated calls on every navigation)

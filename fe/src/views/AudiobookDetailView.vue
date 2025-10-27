@@ -1,1064 +1,226 @@
 <template>
-  <div class="audiobook-detail" v-if="!loading && audiobook">
-    <!-- Top Navigation Bar -->
-    <div class="top-nav">
-      <button class="nav-btn" @click="goBack">
-        <i class="ph ph-arrow-left"></i>
-        Back
+  <div class="audiobook-detail">
+    <div v-if="loading" class="center">
+      <PhSpinner class="ph-spin" />
+      <p>Loading audiobook details...</p>
+    </div>
+
+    <div v-else-if="error" class="center error">
+      <PhWarningCircle />
+      <h2>Error Loading Audiobook</h2>
+      <p>{{ error }}</p>
+      <button @click="goBack" class="back-btn">
+        <PhArrowLeft />
+        Back to Library
       </button>
-      <div class="nav-actions">
-        <button class="nav-btn" @click="refresh">
-          <i class="ph ph-arrow-clockwise"></i>
-          Refresh
-        </button>
-        <button class="nav-btn" @click="toggleMonitored">
-          <i class="ph ph-bookmark" :class="{ 'ph-fill': audiobook.monitored }"></i>
-          {{ audiobook.monitored ? 'Monitored' : 'Monitor' }}
-        </button>
-        <!-- Scan button moved to top nav: enqueues a background scan and shows queued feedback -->
-        <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
-          <i v-if="scanning" class="ph ph-spinner ph-spin"></i>
-          <i v-else-if="scanQueued" class="ph ph-clock"></i>
-          <i v-else class="ph ph-magnifying-glass"></i>
-          <span v-if="scanning">Scanning...</span>
-          <span v-else-if="scanQueued">Scan queued</span>
-          <span v-else>Scan Folder</span>
-        </button>
-        <button class="nav-btn delete-btn" @click="confirmDelete">
-          <i class="ph ph-trash"></i>
-          Delete
-        </button>
-      </div>
     </div>
 
-    <!-- Hero Section -->
-    <div class="hero-section">
-      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl)})` }"></div>
-      <div class="hero-content">
-        <div class="poster-container">
-          <img 
-            :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
-            :alt="audiobook.title"
-            class="poster"
-          />
-        </div>
-        <div class="info-section">
-          <h1 class="title">{{ safeText(audiobook.title) }}</h1>
-          <div class="subtitle" v-if="audiobook.subtitle">{{ audiobook.subtitle }}</div>
-          
-          <div class="meta-info">
-            <span class="runtime" v-if="audiobook.runtime">
-              <i class="ph ph-clock"></i>
-              {{ formatRuntime(audiobook.runtime) }}
-            </span>
-            <span class="genre">{{ audiobook.genres?.join(', ') || 'Audiobook' }}</span>
-            <span class="year" v-if="audiobook.publishYear">{{ audiobook.publishYear }}</span>
-            
-          </div>
-
-          <div class="key-details">
-            <div class="detail-item" v-if="displayBasePath">
-              <i class="ph ph-folder"></i>
-              <span class="file-path">{{ displayBasePath }}</span>
-            </div>
-            <div class="detail-item" v-if="audiobook.fileSize">
-              <i class="ph ph-database"></i>
-              <span>{{ formatFileSize(audiobook.fileSize) }}</span>
-            </div>
-            <div class="detail-item" v-if="audiobook.quality">
-              <i class="ph ph-speaker-high"></i>
-              <span>{{ audiobook.quality }}</span>
-            </div>
-            <div class="detail-item" v-if="audiobook.language">
-              <i class="ph ph-globe"></i>
-              <span>{{ audiobook.language }}</span>
-            </div>
-            <div class="detail-item">
-              <i class="ph ph-tag"></i>
-              <span>{{ audiobook.abridged ? 'Abridged' : 'Unabridged' }}</span>
-            </div>
-          </div>
-
-          <div class="status-badges">
-            <span class="badge monitored" v-if="audiobook.monitored">
-              <i class="ph ph-bookmark-fill"></i>
-              Monitored
-            </span>
-            <span class="badge quality-profile" v-if="assignedProfileName">
-              <i class="ph ph-star"></i>
-              Quality: {{ assignedProfileName }}
-            </span>
-            <span class="badge language">
-              <i class="ph ph-chat-circle"></i>
-              {{ audiobook.language || 'English' }}
-            </span>
-            <span class="badge tlc" v-if="audiobook.version">
-              <i class="ph ph-music-notes"></i>
-              {{ audiobook.version }}
-            </span>
-          </div>
-
-          <div class="description" v-if="audiobook.description">
-            <div 
-              class="description-content" 
-              :class="{ expanded: showFullDescription }"
-              v-html="audiobook.description"
-            ></div>
-            <button 
-              v-if="!showFullDescription" 
-              class="show-more-btn" 
-              @click="showFullDescription = true"
-            >
-              Show More
-            </button>
-            <button 
-              v-else 
-              class="show-more-btn" 
-              @click="showFullDescription = false"
-            >
-              Show Less
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tabs Section -->
-    <div class="tabs-container">
-      <div class="tabs">
-        <button 
-          class="tab" 
-          :class="{ active: activeTab === 'details' }"
-          @click="activeTab = 'details'"
-        >
-          <i class="ph ph-info"></i>
-          Details
+    <div v-else class="content">
+      <div class="top-nav">
+        <button class="nav-btn" @click="goBack">
+          <PhArrowLeft />
+          Back
         </button>
-        <button 
-          class="tab" 
-          :class="{ active: activeTab === 'files' }"
-          @click="activeTab = 'files'"
-        >
-          <i class="ph ph-file"></i>
-          Files
-        </button>
-        <button 
-          class="tab" 
-          :class="{ active: activeTab === 'history' }"
-          @click="activeTab = 'history'"
-        >
-          <i class="ph ph-clock-counter-clockwise"></i>
-          History
-        </button>
-      </div>
-    </div>
-
-    <!-- Tab Content -->
-    <div class="tab-content">
-      <!-- Details Tab -->
-        <div id="details" v-if="activeTab === 'details'" class="details-content">
-        <div class="details-grid">
-          <div class="detail-card">
-            <h3>Author Information</h3>
-            <div class="detail-row" v-if="audiobook.authors">
-              <span class="label">Author(s):</span>
-              <span class="value">{{ audiobook.authors.map(safeText).join(', ') }}</span>
-            </div>
-            <div class="detail-row" v-if="audiobook.narrators">
-              <span class="label">Narrator(s):</span>
-              <span class="value">{{ audiobook.narrators.map(safeText).join(', ') }}</span>
-            </div>
-          </div>
-
-          <div class="detail-card">
-            <h3>Publication Details</h3>
-            <div class="detail-row" v-if="audiobook.publisher">
-              <span class="label">Publisher:</span>
-              <span class="value">{{ safeText(audiobook.publisher) }}</span>
-            </div>
-            <div class="detail-row" v-if="audiobook.publishYear">
-              <span class="label">Year:</span>
-              <span class="value">{{ audiobook.publishYear }}</span>
-            </div>
-            <div class="detail-row" v-if="audiobook.language">
-              <span class="label">Language:</span>
-              <span class="value">{{ audiobook.language }}</span>
-            </div>
-          </div>
-
-          <div class="detail-card" v-if="audiobook.series">
-            <h3>Series Information</h3>
-            <div class="detail-row">
-              <span class="label">Series:</span>
-              <span class="value">{{ safeText(audiobook.series) }}</span>
-            </div>
-            <div class="detail-row" v-if="audiobook.seriesNumber">
-              <span class="label">Book #:</span>
-              <span class="value">{{ audiobook.seriesNumber }}</span>
-            </div>
-          </div>
-
-          <div class="detail-card">
-            <h3>Identifiers</h3>
-            <div class="detail-row" v-if="audiobook.asin">
-              <span class="label">ASIN:</span>
-              <span class="value">{{ audiobook.asin }}</span>
-            </div>
-            <div class="detail-row" v-if="audiobook.isbn">
-              <span class="label">ISBN:</span>
-              <span class="value">{{ audiobook.isbn }}</span>
-            </div>
-          </div>
-
-          <div class="detail-card" v-if="audiobook.genres && audiobook.genres.length">
-            <h3>Genres</h3>
-            <div class="genre-tags">
-              <span v-for="genre in audiobook.genres" :key="genre" class="genre-tag">
-                {{ genre }}
-              </span>
-            </div>
-          </div>
-
-          <div class="detail-card" v-if="audiobook.tags && audiobook.tags.length">
-            <h3>Tags</h3>
-            <div class="genre-tags">
-              <span v-for="tag in audiobook.tags" :key="tag" class="genre-tag">
-                {{ tag }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-  <!-- Files Tab -->
-  <div id="files" v-if="activeTab === 'files'" class="files-content">
-        <div class="files-header">
-          <h3>Files</h3>
-          <div class="files-actions">
-            <!-- Scan job status (updated via SignalR) -->
-            <div v-if="scanJobId" class="scan-job-status">
-              <div class="job-row">
-                <i class="ph ph-clock"></i>
-                <strong>Scan job:</strong>
-                <span class="job-id">{{ scanJobId }}</span>
-              </div>
-              <div class="job-status">
-                <span v-if="scanQueued" class="status queued">Queued / Processing</span>
-                <span v-else class="status completed">No active scan</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div v-if="audiobook.files && audiobook.files.length" class="file-list">
-          <div v-for="f in audiobook.files" :key="f.id" class="file-item" :class="{ 'expanded': isFileAccordionExpanded(f.id) }">
-            <div class="file-header" @click="toggleFileAccordion(f.id)">
-              <div class="file-info">
-                <i class="ph ph-file-audio"></i>
-                <span class="file-name">{{ getFileName(f.path) }}</span>
-                <small class="file-meta">• {{ f.format ? f.format.toUpperCase() : '' }} {{ f.durationSeconds ? '• ' + formatDuration(f.durationSeconds) : '' }}</small>
-              </div>
-              <div class="file-actions">
-                <span class="file-size" v-if="f.size">{{ formatFileSize(f.size) }}</span>
-                <span class="file-size" v-else>Unknown size</span>
-                <i class="ph ph-chevron-down accordion-toggle" :class="{ 'rotated': isFileAccordionExpanded(f.id) }"></i>
-              </div>
-            </div>
-            <div v-if="isFileAccordionExpanded(f.id)" class="file-accordion">
-              <table class="metadata-table">
-                <tbody>
-                  <tr v-if="f.path">
-                    <td class="metadata-label">Path:</td>
-                    <td class="metadata-value">{{ getFullPath(f.path) }}</td>
-                  </tr>
-                  <tr v-if="f.size !== undefined">
-                    <td class="metadata-label">Size:</td>
-                    <td class="metadata-value">{{ formatFileSize(f.size) }}</td>
-                  </tr>
-                  <tr v-if="f.durationSeconds !== undefined">
-                    <td class="metadata-label">Duration:</td>
-                    <td class="metadata-value">{{ formatDuration(f.durationSeconds) }}</td>
-                  </tr>
-                  <tr v-if="f.format">
-                    <td class="metadata-label">Format:</td>
-                    <td class="metadata-value">{{ f.format.toUpperCase() }}</td>
-                  </tr>
-                  <tr v-if="f.container">
-                    <td class="metadata-label">Container:</td>
-                    <td class="metadata-value">{{ f.container }}</td>
-                  </tr>
-                  <tr v-if="f.codec">
-                    <td class="metadata-label">Codec:</td>
-                    <td class="metadata-value">{{ f.codec }}</td>
-                  </tr>
-                  <tr v-if="f.bitrate !== undefined">
-                    <td class="metadata-label">Bitrate:</td>
-                    <td class="metadata-value">{{ f.bitrate }} kbps</td>
-                  </tr>
-                  <tr v-if="f.sampleRate !== undefined">
-                    <td class="metadata-label">Sample Rate:</td>
-                    <td class="metadata-value">{{ f.sampleRate }} Hz</td>
-                  </tr>
-                  <tr v-if="f.channels !== undefined">
-                    <td class="metadata-label">Channels:</td>
-                    <td class="metadata-value">{{ f.channels }}</td>
-                  </tr>
-                  <tr v-if="f.createdAt">
-                    <td class="metadata-label">Created:</td>
-                    <td class="metadata-value">{{ formatDate(f.createdAt) }}</td>
-                  </tr>
-                  <tr v-if="f.source">
-                    <td class="metadata-label">Source:</td>
-                    <td class="metadata-value">{{ f.source }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <div v-else class="empty-files">
-          <i class="ph ph-file-dashed"></i>
-          <p>No files available</p>
-          <p class="hint">This audiobook hasn't been downloaded yet</p>
-        </div>
-      </div>
-
-  <!-- History Tab -->
-  <div id="history" v-if="activeTab === 'history'" class="history-content">
-        <div class="history-header">
-          <h3>History</h3>
-          <button v-if="historyEntries.length > 0" class="refresh-btn" @click="loadHistory" :disabled="historyLoading">
-            <i class="ph ph-arrow-clockwise" :class="{ 'ph-spin': historyLoading }"></i>
+        <div class="nav-actions">
+          <button class="nav-btn" @click="refresh">
+            <PhArrowClockwise />
             Refresh
           </button>
+          <button class="nav-btn" @click="toggleMonitored">
+            <PhBookmark :weight="audiobook?.monitored ? 'fill' : 'regular'" />
+            {{ audiobook?.monitored ? 'Monitored' : 'Monitor' }}
+          </button>
+          <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
+            <template v-if="scanning">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else-if="scanQueued">
+              <PhSpinner />
+            </template>
+            <template v-else>
+              <PhMagnifyingGlass />
+            </template>
+            <span v-if="scanning">Scanning...</span>
+            <span v-else-if="scanQueued">Scan queued</span>
+            <span v-else>Scan Folder</span>
+          </button>
+          <button class="nav-btn delete-btn" @click="confirmDelete">
+            <PhTrash />
+            Delete
+          </button>
         </div>
-        
-        <!-- Loading State -->
-        <div v-if="historyLoading" class="history-loading">
-          <i class="ph ph-spinner ph-spin"></i>
-          <p>Loading history...</p>
-        </div>
-        
-        <!-- Error State -->
-        <div v-else-if="historyError" class="history-error">
-          <i class="ph ph-warning-circle"></i>
-          <p>{{ historyError }}</p>
-          <button class="retry-btn" @click="loadHistory">Retry</button>
-        </div>
-        
-        <!-- History List -->
-        <div v-else-if="historyEntries.length > 0" class="history-list">
-          <div v-for="entry in historyEntries" :key="entry.id" class="history-entry">
-            <div class="history-icon" :class="getEventTypeClass(entry.eventType)">
-              <i :class="getEventIcon(entry.eventType)"></i>
-            </div>
-            <div class="history-details">
-              <div class="history-event">
-                <span class="event-type">{{ entry.eventType }}</span>
-                <span v-if="entry.source" class="event-source">from {{ entry.source }}</span>
-              </div>
-              <div v-if="entry.message" class="history-message">{{ entry.message }}</div>
-              <div class="history-time">{{ formatHistoryTime(entry.timestamp) }}</div>
-            </div>
+      </div>
+
+      <div class="hero">
+        <img :src="audiobook?.imageUrl || placeholder" alt="cover" />
+        <div class="info">
+          <h1>{{ audiobook?.title || 'Unknown Title' }}</h1>
+          <p class="meta">{{ audiobook?.authors?.join(', ') }}</p>
+          <div class="badges">
+            <span class="badge" v-if="audiobook?.abridged">Abridged</span>
+            <span class="badge" v-if="audiobook?.publishYear">{{ audiobook.publishYear }}</span>
           </div>
         </div>
-        
-        <!-- Empty State -->
-        <div v-else class="empty-history">
-          <i class="ph ph-clock-counter-clockwise"></i>
-          <p>No history available</p>
-          <p class="hint">Activity for this audiobook will appear here</p>
+      </div>
+
+      <div class="tabs">
+        <button :class="{ active: activeTab === 'details' }" @click="activeTab = 'details'">Details</button>
+        <button :class="{ active: activeTab === 'files' }" @click="activeTab = 'files'">Files</button>
+        <button :class="{ active: activeTab === 'history' }" @click="activeTab = 'history'">History</button>
+      </div>
+
+      <div class="tab-content">
+        <div v-if="activeTab === 'details'">
+          <h3>Description</h3>
+          <div v-html="audiobook?.description || '<em>No description</em>'"></div>
+        </div>
+
+        <div v-else-if="activeTab === 'files'">
+          <h3>Files</h3>
+          <div v-if="audiobook?.files && audiobook.files.length">
+            <ul>
+              <li v-for="f in audiobook.files" :key="f.id">
+                <PhFileAudio /> {{ getFileName(f.path) }} <small>• {{ f.format }}</small>
+              </li>
+            </ul>
+          </div>
+          <div v-else class="empty">No files available</div>
+        </div>
+
+        <div v-else>
+          <h3>History</h3>
+          <div v-if="historyLoading">Loading history...</div>
+          <div v-else-if="historyEntries.length === 0" class="empty">No history available</div>
+          <ul v-else>
+            <li v-for="h in historyEntries" :key="h.id">{{ h.eventType }} - {{ h.message }}</li>
+          </ul>
+        </div>
+      </div>
+
+      <div v-if="showDeleteDialog" class="dialog">
+        <div class="dialog-inner">
+          <h3><PhWarningCircle /> Confirm Deletion</h3>
+          <p>Are you sure you want to delete <strong>{{ audiobook?.title }}</strong>?</p>
+          <div class="dialog-actions">
+            <button @click="cancelDelete">Cancel</button>
+            <button class="confirm" @click="executeDelete" :disabled="deleting">{{ deleting ? 'Deleting...' : 'Delete' }}</button>
+          </div>
         </div>
       </div>
     </div>
-
-    <!-- Delete Confirmation Dialog -->
-    <div v-if="showDeleteDialog" class="dialog-overlay" @click="cancelDelete">
-      <div class="dialog" @click.stop>
-        <div class="dialog-header">
-          <h3>
-            <i class="ph ph-warning"></i>
-            Confirm Deletion
-          </h3>
-        </div>
-        <div class="dialog-body">
-          <p>Are you sure you want to delete <strong>{{ audiobook.title }}</strong>?</p>
-          <p class="warning-text">This action cannot be undone. The audiobook data and cached images will be permanently removed.</p>
-        </div>
-        <div class="dialog-actions">
-          <button class="dialog-btn cancel-btn" @click="cancelDelete">
-            Cancel
-          </button>
-          <button class="dialog-btn confirm-btn" @click="executeDelete" :disabled="deleting">
-            <i v-if="deleting" class="ph ph-spinner ph-spin"></i>
-            <i v-else class="ph ph-trash"></i>
-            {{ deleting ? 'Deleting...' : 'Delete' }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Loading State -->
-  <div v-else-if="loading" class="loading-container">
-    <i class="ph ph-spinner ph-spin"></i>
-    <p>Loading audiobook details...</p>
-  </div>
-
-  <!-- Error State -->
-  <div v-else-if="error" class="error-container">
-    <i class="ph ph-warning-circle"></i>
-    <h2>Error Loading Audiobook</h2>
-    <p>{{ error }}</p>
-    <button @click="goBack" class="back-btn">
-      <i class="ph ph-arrow-left"></i>
-      Back to Library
-    </button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
-import { useToast } from '@/services/toastService'
-import type { Audiobook as AudiobookType } from '@/types'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { PhArrowLeft, PhArrowClockwise, PhBookmark, PhSpinner, PhMagnifyingGlass, PhTrash, PhFileAudio, PhWarningCircle } from '@phosphor-icons/vue'
 import { useLibraryStore } from '@/stores/library'
-import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
-import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
-import { safeText } from '@/utils/textUtils'
 
 const route = useRoute()
 const router = useRouter()
 const libraryStore = useLibraryStore()
-const configStore = useConfigurationStore()
 
-const audiobook = ref<Audiobook | null>(null)
+const audiobook = ref(null as Audiobook | null)
 const loading = ref(true)
-const error = ref<string | null>(null)
-const activeTab = ref('details')
+const error = ref(null as string | null)
+const activeTab = ref<'details' | 'files' | 'history'>('details')
 const showDeleteDialog = ref(false)
 const deleting = ref(false)
-const showFullDescription = ref(false)
 const scanning = ref(false)
 const scanQueued = ref(false)
-const scanJobId = ref<string | null>(null)
-
-// History state
-const historyEntries = ref<History[]>([])
+const historyEntries = ref([] as History[])
 const historyLoading = ref(false)
-const historyError = ref<string | null>(null)
-const qualityProfiles = ref<import('@/types').QualityProfile[]>([])
-const expandedFileAccordions = ref<Set<number>>(new Set())
 
-const assignedProfileName = computed(() => {
-  if (!audiobook.value) return null
-  const id = audiobook.value.qualityProfileId
-  if (!id) return null
-  const p = qualityProfiles.value.find(q => q.id === id)
-  return p ? p.name : null
-})
-
-// Show a base path even when no files exist yet by falling back to configured outputPath
-const displayBasePath = computed(() => {
-  // Prefer server-provided basePath
-  const server = audiobook.value?.basePath
-  if (server && server.length > 0) return server
-
-  const settings = configStore.applicationSettings
-  if (!settings) return ''
-  const root = (settings.outputPath || '').trim()
-  const pattern = (settings.fileNamingPattern || '').trim()
-  if (!root || !pattern) return root || ''
-
-  const author = (audiobook.value?.authors && audiobook.value.authors[0]) ? audiobook.value.authors[0] : 'Unknown Author'
-  const series = audiobook.value?.series || ''
-  const title = audiobook.value?.title || 'Unknown Title'
-  const year = audiobook.value?.publishYear || ''
-  const seriesNumber = audiobook.value?.seriesNumber || ''
-
-  // Basic variable replacement mirroring server pattern keys
-  let relative = pattern
-    .replace(/\{Author(?::[^}]+)?\}/gi, sanitizePathComponent(author))
-    .replace(/\{Series(?::[^}]+)?\}/gi, sanitizePathComponent(series))
-    .replace(/\{Title(?::[^}]+)?\}/gi, sanitizePathComponent(title))
-    .replace(/\{Year(?::[^}]+)?\}/gi, year)
-    .replace(/\{SeriesNumber(?::[^}]+)?\}/gi, seriesNumber)
-
-  // Remove file-level variables (Disk/Chapter/Quality) if present
-  relative = relative
-    .replace(/\{DiskNumber(?::[^}]+)?\}/gi, '')
-    .replace(/\{ChapterNumber(?::[^}]+)?\}/gi, '')
-    .replace(/\{Quality(?::[^}]+)?\}/gi, '')
-
-  // Normalize repeated slashes and trim
-  relative = relative
-    .replace(/[\\/]{2,}/g, '/')
-    .replace(/^\/+|\/+$/g, '')
-
-  const combined = (root.endsWith('/') || root.endsWith('\\')) ? root + relative : root + '/' + relative
-  // Base path should be the directory containing the files -> strip the last segment
-  const parts = combined.split(/[/\\]+/).filter(Boolean)
-  if (parts.length <= 1) return combined
-  const dir = parts.slice(0, -1).join('/')
-  return dir
-})
-
-function sanitizePathComponent(s?: string): string {
-  if (!s) return 'Unknown'
-  // Replace invalid filename chars with underscore
-  return s.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Unknown'
-}
-
-// Watch for tab changes to load history when needed
-watch(activeTab, async (newTab) => {
-  if (newTab === 'history' && audiobook.value && historyEntries.value.length === 0) {
-    await loadHistory()
-  }
-})
-
-onMounted(async () => {
-  await loadAudiobook()
-  // subscribe to scan job updates
-  signalRService.onScanJobUpdate((job) => {
-    if (!audiobook.value) return
-    if (String(job.audiobookId) !== String(audiobook.value.id)) return
-    // update local job state
-    scanJobId.value = job.jobId
-    scanQueued.value = job.status === 'Queued' || job.status === 'Processing'
-    // if completed or failed, clear queued flag when appropriate
-    if (job.status === 'Completed' || job.status === 'Failed') {
-      // small delay to allow AudiobookUpdate to arrive and merge files
-      setTimeout(() => {
-        scanQueued.value = false
-      }, 500)
-    }
-  })
-})
-
-// If the URL contains a hash (#details/#files/#history) navigate to it
-onMounted(() => {
-  const hash = (route.hash || '').replace('#', '')
-  if (hash === 'details' || hash === 'files' || hash === 'history') {
-    activeTab.value = hash
-    // small timeout to allow DOM to render
-    // setTimeout(() => scrollToAnchor(hash), 150)
-  }
-})
-
-// When the active tab changes update the hash and scroll
-watch(activeTab, (newTab) => {
-  if (!newTab) return
-  try {
-    history.replaceState(null, '', `#${newTab}`)
-  } catch {}
-  // Scroll to anchored section
-  // setTimeout(() => scrollToAnchor(newTab), 120)
-})
-
-async function loadAudiobook() {
-  loading.value = true
-  error.value = null
-  
-  try {
-    const id = parseInt(route.params.id as string)
-    
-    // If library is already loaded, find the audiobook
-    if (libraryStore.audiobooks.length > 0) {
-      const book = libraryStore.audiobooks.find(b => b.id === id)
-      if (book) {
-        audiobook.value = book
-        await afterLoad()
-      } else {
-        error.value = 'Audiobook not found'
-      }
-    } else {
-      // Load library first
-      await libraryStore.fetchLibrary()
-      const book = libraryStore.audiobooks.find(b => b.id === id)
-      if (book) {
-        audiobook.value = book
-        await afterLoad()
-      } else {
-        error.value = 'Audiobook not found'
-      }
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load audiobook'
-    console.error('Failed to load audiobook:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-// After loading audiobook, also fetch quality profiles so we can display the assigned profile
-async function afterLoad() {
-  await loadQualityProfilesForDetail()
-}
-
-async function loadQualityProfilesForDetail() {
-  try {
-    qualityProfiles.value = await apiService.getQualityProfiles()
-  } catch (err) {
-    console.warn('Failed to load quality profiles for detail view:', err)
-  }
-}
+const placeholder = '/public/icon.png'
 
 function goBack() {
   router.push('/audiobooks')
 }
 
-async function refresh() {
-  await loadAudiobook()
-  // Reload history if history tab is active
-  if (activeTab.value === 'history') {
-    await loadHistory()
-  }
+function getFileName(path?: string) {
+  if (!path) return 'Unknown'
+  return path.split(/[\\/]/).pop() || path
 }
 
-async function loadHistory() {
+async function refresh() {
+  await loadAudiobook()
+}
+
+function toggleMonitored() {
   if (!audiobook.value) return
-  
-  historyLoading.value = true
-  historyError.value = null
-  
-  try {
-    historyEntries.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
-    console.log('Loaded history:', historyEntries.value)
-  } catch (err) {
-    historyError.value = err instanceof Error ? err.message : 'Failed to load history'
-    console.error('Failed to load history:', err)
-  } finally {
-    historyLoading.value = false
-  }
+  audiobook.value.monitored = !audiobook.value.monitored
 }
 
 async function scanFiles() {
   if (!audiobook.value) return
   scanning.value = true
-  scanQueued.value = false
-  scanJobId.value = null
   try {
-    const res = await apiService.scanAudiobook(audiobook.value.id) as { message: string; scannedPath?: string; found: number; created: number; audiobook?: AudiobookType; jobId?: string }
-    console.log('Scan result:', res)
-    // If backend enqueued the job it will return 202 Accepted with { jobId }
-    if (res?.jobId) {
-      scanQueued.value = true
-      scanJobId.value = res.jobId
-      // keep scanning spinner off - queued state shows separately
-    }
-
-    // If API returned updated audiobook (blocking fallback), apply it
-    if (res?.audiobook) {
-      audiobook.value = res.audiobook
-    } else if (!scanQueued.value) {
-      // If neither queued nor audiobook returned, refresh to pick up any changes
-      await loadAudiobook()
-    }
-  } catch (err) {
-    console.error('Scan failed:', err)
-    // Show a non-blocking toast instead of an alert
-    const toast = useToast()
-    toast.error('Scan failed', (err instanceof Error ? err.message : String(err)))
+    // fire-and-forget
+    await apiService.scanAudiobook(audiobook.value.id)
+  } catch {
+    // ignore scan errors (fire-and-forget)
   } finally {
     scanning.value = false
   }
 }
 
-// Watch library store for updates (SignalR pushes) and refresh audiobook object reactively
-watch(() => libraryStore.audiobooks, () => {
-  if (!audiobook.value) return
-  const updated = libraryStore.audiobooks.find(b => b.id === audiobook.value!.id)
-  if (updated) {
-    // Merge fields to preserve reactivity where possible
-    audiobook.value = { ...audiobook.value, ...updated }
-    // If files were added, clear queued indicators
-    if (scanQueued.value && updated.files && updated.files.length > 0) {
-      scanQueued.value = false
-      scanJobId.value = null
-    }
-  }
-}, { deep: true })
-
-function toggleMonitored() {
-  if (audiobook.value) {
-    const newMonitoredValue = !audiobook.value.monitored
-    audiobook.value = { ...audiobook.value, monitored: newMonitoredValue }
-    
-    // Persist to API
-    apiService.updateAudiobook(audiobook.value.id, { monitored: newMonitoredValue })
-      .then(() => {
-        console.log('Monitored status updated successfully')
-      })
-      .catch((err) => {
-        console.error('Failed to update monitored status:', err)
-        // Revert on error
-        if (audiobook.value) {
-          audiobook.value = { ...audiobook.value, monitored: !newMonitoredValue }
-        }
-      })
-  }
-}
-
-function confirmDelete() {
-  showDeleteDialog.value = true
-}
-
-function cancelDelete() {
-  showDeleteDialog.value = false
-}
+function confirmDelete() { showDeleteDialog.value = true }
+function cancelDelete() { showDeleteDialog.value = false }
 
 async function executeDelete() {
   if (!audiobook.value) return
-  
   deleting.value = true
   try {
     const success = await libraryStore.removeFromLibrary(audiobook.value.id)
-    if (success) {
-      // Navigate back to library after successful deletion
-      router.push('/audiobooks')
-    }
-  } catch (err) {
-    console.error('Delete failed:', err)
+    if (success) router.push('/audiobooks')
   } finally {
     deleting.value = false
     showDeleteDialog.value = false
   }
 }
 
-function formatRuntime(minutes: number): string {
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  return `${hours}h ${mins}m`
-}
-
-function formatFileSize(bytes?: number): string {
-  if (!bytes || bytes === 0) return 'Unknown'
-  
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = bytes
-  let unitIndex = 0
-  
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex++
+async function loadAudiobook() {
+  loading.value = true
+  error.value = null
+  const id = parseInt(route.params.id as string)
+  if (isNaN(id)) {
+    error.value = 'Invalid audiobook id'
+    loading.value = false
+    return
   }
-  
-  return `${size.toFixed(1)} ${units[unitIndex]}`
-}
-
-function formatHistoryTime(timestamp: string): string {
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMins / 60)
-  const diffDays = Math.floor(diffHours / 24)
-  
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`
-  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
-  if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
-  
-  return date.toLocaleDateString('en-US', { 
-    year: 'numeric', 
-    month: 'short', 
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-function getEventIcon(eventType: string): string {
-  const icons: Record<string, string> = {
-    'Added': 'ph ph-plus-circle',
-    'Downloaded': 'ph ph-download',
-    'Imported': 'ph ph-upload',
-    'Deleted': 'ph ph-trash',
-    'Updated': 'ph ph-pencil',
-    'Monitored': 'ph ph-bookmark',
-    'Unmonitored': 'ph ph-bookmark-simple',
-    'Grabbed': 'ph ph-hand-grabbing',
-    'Failed': 'ph ph-warning-circle',
-    'File Added': 'ph ph-file-plus',
-    'File Removed': 'ph ph-file-minus'
-  }
-  return icons[eventType] || 'ph ph-circle'
-}
-
-function getEventTypeClass(eventType: string): string {
-  const classes: Record<string, string> = {
-    'Added': 'event-success',
-    'Downloaded': 'event-success',
-    'Imported': 'event-info',
-    'Deleted': 'event-danger',
-    'Updated': 'event-info',
-    'Monitored': 'event-info',
-    'Unmonitored': 'event-warning',
-    'Grabbed': 'event-info',
-    'Failed': 'event-danger',
-    'File Added': 'event-success',
-    'File Removed': 'event-warning'
-  }
-  return classes[eventType] || 'event-default'
-}
-
-function getFileName(filePath?: string): string {
-  if (!filePath) return 'Unknown'
-  const parts = filePath.split(/[\\/]/)
-  const fileName = parts[parts.length - 1]
-  return fileName || 'Unknown'
-}
-
-function formatDuration(seconds?: number): string {
-  if (!seconds || seconds <= 0) return ''
-  const sec = Math.floor(seconds)
-  const hrs = Math.floor(sec / 3600)
-  const mins = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  if (hrs > 0) return `${hrs}h ${mins}m ${s}s`
-  if (mins > 0) return `${mins}m ${s}s`
-  return `${s}s`
-}
-
-function isFileAccordionExpanded(fileId: number): boolean {
-  return expandedFileAccordions.value.has(fileId)
-}
-
-function toggleFileAccordion(fileId: number): void {
-  if (expandedFileAccordions.value.has(fileId)) {
-    expandedFileAccordions.value.delete(fileId)
-  } else {
-    expandedFileAccordions.value.add(fileId)
+  try {
+    const local = libraryStore.audiobooks.find(b => b.id === id)
+    if (local) audiobook.value = local
+    else audiobook.value = await apiService.getAudiobook(id)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    loading.value = false
   }
 }
 
-function getFullPath(relativePath?: string): string {
-  if (!relativePath) return 'Unknown'
-  if (!audiobook.value?.basePath) return relativePath
-  // Combine base path with relative path
-  return audiobook.value.basePath + (audiobook.value.basePath.endsWith('/') || audiobook.value.basePath.endsWith('\\') ? '' : '/') + relativePath
-}
-
-function formatDate(dateString?: string): string {
-  if (!dateString) return 'Unknown'
-  // Ensure the date is treated as UTC by appending 'Z' if not present
-  const utcDateString = dateString.endsWith('Z') ? dateString : dateString + 'Z'
-  const date = new Date(utcDateString)
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
+onMounted(() => {
+  loadAudiobook()
+})
 </script>
 
 <style scoped>
-.audiobook-detail {
-  min-height: 100vh;
-  background-color: #1a1a1a;
-}
-
-.top-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 20px;
-  background-color: #2a2a2a;
-  border-bottom: 1px solid #333;
-}
-
-.nav-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background-color: #3a3a3a;
-  border: 1px solid #555;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.nav-btn:hover {
-  background-color: #4a4a4a;
-}
-
-.nav-btn.delete-btn {
-  background-color: #e74c3c;
-  border-color: #c0392b;
-}
-
-.nav-btn.delete-btn:hover {
-  background-color: #c0392b;
-}
-
-.hero-section {
-  position: relative;
-  padding: 40px 40px;
-  overflow: hidden;
-}
-
-@media (max-width: 768px) {
-  .hero-section {
-    padding: 40px 20px;
-  }
-}
-
-.backdrop {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-size: cover;
-  background-position: center;
-  filter: blur(20px) brightness(0.3);
-  transform: scale(1.1);
-}
-
-.hero-content {
-  position: relative;
-  display: flex;
-  gap: 40px;
-  max-width: 1600px;
-  margin: 0 auto;
-  z-index: 1;
-}
-
-@media (min-width: 1200px) {
-  .hero-content {
-    gap: 40px;
-  }
-}
-
-@media (max-width: 768px) {
-  .hero-content {
-    flex-direction: column;
-    gap: 20px;
-  }
-}
-
-.poster-container {
-  flex-shrink: 0;
-}
-
-.poster {
-  width: 350px;
-  height: 350px;
-  object-fit: cover;
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-}
-
-@media (max-width: 768px) {
-  .poster {
-    width: 250px;
-    height: 250px;
-  }
-}
-
-.info-section {
-  flex: 1;
-  color: #fff;
-  min-width: 0;
-}
-
-.title {
-  font-size: 3rem;
-  font-weight: 700;
-  margin: 0 0 12px 0;
-  color: #fff;
-  line-height: 1.2;
-}
-
-@media (max-width: 768px) {
-  .title {
-    font-size: 2rem;
-  }
-}
-
-.subtitle {
-  font-size: 1.4rem;
-  color: #ccc;
-  margin-bottom: 20px;
-}
-
-@media (max-width: 768px) {
-  .subtitle {
-    font-size: 1rem;
-  }
-}
-
-.meta-info {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  margin-bottom: 24px;
-  font-size: 15px;
-  color: #ccc;
-  flex-wrap: wrap;
-}
-
-.meta-info span {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.runtime i, .rating i {
-  color: #007acc;
-}
-
-.file-path {
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 13px;
-  color: #aaa;
-}
-
-.key-details {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.detail-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-.detail-item span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail-item i {
-  color: #007acc;
-}
-
-.status-badges {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
+.center { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:200px }
+.error { color: #e74c3c }
+.top-nav { display:flex; justify-content:space-between; align-items:center; gap:12px }
+.nav-actions { display:flex; gap:8px }
+.nav-btn { display:flex; align-items:center; gap:8px }
+.delete-btn { background:#e74c3c; color:white }
+.hero { display:flex; gap:16px; margin:16px 0 }
+.hero img { width:160px; height:240px; object-fit:cover; border-radius:6px }
+.tabs { display:flex; gap:8px; margin:12px 0 }
+.tab-content { padding:12px; background:#222; border-radius:6px }
+.dialog { position:fixed; left:0; right:0; top:0; bottom:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6) }
+.dialog-inner { background:#fff; padding:16px; border-radius:6px; width:320px }
+.dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px }
 .badge {
   display: flex;
   align-items: center;

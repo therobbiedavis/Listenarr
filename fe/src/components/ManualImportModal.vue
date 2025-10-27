@@ -2,12 +2,12 @@
   <div v-if="isOpen" class="modal-overlay" @click="close">
     <div class="modal-content" @click.stop>
       <div class="modal-header">
-        <h2>
-          <i class="ph ph-folder-open"></i>
+          <h2>
+          <PhFolderOpen />
           Manual Import - Select Folder
         </h2>
         <button class="close-btn" @click="close">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
 
@@ -26,11 +26,11 @@
         <!-- Centered action buttons like screenshots -->
         <div v-if="!showPreview" class="center-actions">
           <button class="btn btn-info" @click="startAutomaticImport" :disabled="!isPathValid || loading">
-            <i class="ph ph-rocket"></i>
+            <PhRocket />
             Automatic Import
           </button>
           <button class="btn btn-primary" @click="startInteractiveImport" :disabled="!isPathValid || loading">
-            <i class="ph ph-user"></i>
+            <PhUser />
             Interactive Import
           </button>
         </div>
@@ -46,7 +46,7 @@
   <!-- Preview area (hidden until Interactive Import is clicked) -->
   <div v-if="showPreview" class="preview-area">
           <div v-if="loading" class="loading-state">
-            <i class="ph ph-spinner ph-spin"></i>
+            <PhSpinner class="ph-spin" />
             Loading files...
           </div>
 
@@ -95,7 +95,7 @@
                   </div>
                   <div class="col col-size">{{ it.size || '' }}</div>
                   <div class="col col-action">
-                    <button class="btn-icon" @click="openMatchDialog(it)"><i class="ph ph-warning"></i></button>
+                    <button class="btn-icon" @click="openMatchDialog(it)"><PhWarning /></button>
                   </div>
                 </div>
               </div>
@@ -205,6 +205,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
+import { PhFolderOpen, PhX, PhRocket, PhUser, PhSpinner, PhWarning } from '@phosphor-icons/vue'
 import type { ManualImportRequest } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
 import { apiService } from '@/services/api'
@@ -936,7 +937,7 @@ const toggleSelectAll = (ev: Event) => {
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
 }
 
-::v-deep .browser-body {
+:deep(.browser-body) {
   max-height: unset !important;
   overflow: unset !important;
 }

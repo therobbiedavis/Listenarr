@@ -48,6 +48,8 @@
     "jsdom": "^27.0.0",
     "npm-run-all2": "^8.0.4",
     "prettier": "3.6.2",
+    "rollup-plugin-visualizer": "^5.9.0",
+    "source-map-explorer": "^2.5.3",
     "start-server-and-test": "^2.1.2",
     "typescript": "~5.9.0",
     "vite": "^7.1.11",

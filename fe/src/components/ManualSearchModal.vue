@@ -3,18 +3,18 @@
     <div class="modal-container">
       <div class="modal-header">
         <h2>
-          <i class="ph ph-magnifying-glass"></i>
+          <PhMagnifyingGlass />
           Manual Search - {{ audiobook?.title }}
         </h2>
         <button class="btn-close" @click="close">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
 
       <div class="modal-body">
         <!-- Search Status -->
         <div v-if="searching" class="search-status">
-          <i class="ph ph-spinner ph-spin"></i>
+          <PhSpinner class="ph-spin" />
           <span>Searching indexers... ({{ searchedIndexers }}/{{ totalIndexers }})</span>
         </div>
 
@@ -24,7 +24,7 @@
             <!-- Search Bar -->
             <div class="search-bar">
               <div class="search-input-wrapper">
-                <i class="ph ph-magnifying-glass search-icon"></i>
+                <PhMagnifyingGlass class="search-icon" />
                 <input
                   v-model="searchQuery"
                   type="text"
@@ -38,8 +38,12 @@
                   @click="search"
                   :disabled="searching || !searchQuery.trim()"
                 >
-                  <i v-if="!searching" class="ph ph-magnifying-glass"></i>
-                  <i v-else class="ph ph-spinner ph-spin"></i>
+                  <template v-if="!searching">
+                    <PhMagnifyingGlass />
+                  </template>
+                  <template v-else>
+                    <PhSpinner class="ph-spin" />
+                  </template>
                   Search
                 </button>
               </div>
@@ -54,14 +58,14 @@
                 class="btn btn-secondary btn-sm"
                 @click="search"
               >
-                <i class="ph ph-arrow-clockwise"></i>
+                <PhArrowClockwise />
                 Refresh
               </button>
             </div>
           </div>
 
           <div v-if="displayResults.length === 0 && !searching" class="no-results">
-            <i class="ph ph-magnifying-glass"></i>
+            <PhMagnifyingGlass />
             <p>No results found</p>
             <p class="hint">Try adjusting your indexer settings or search criteria</p>
           </div>
@@ -73,50 +77,50 @@
                   <th class="col-source sortable" @click="setSort('Source')">
                     <span class="header-content">
                       Source
-                      <i :class="getSortIcon('Source')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Source')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-age sortable" @click="setSort('PublishedDate')">
                     <span class="header-content">
                       Age
-                      <i :class="getSortIcon('PublishedDate')" class="sort-icon"></i>
+                      <component :is="getSortIcon('PublishedDate')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-title sortable" @click="setSort('Title')">
                     <span class="header-content">
                       Title
-                      <i :class="getSortIcon('Title')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Title')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-indexer sortable" @click="setSort('Source')">
                     <span class="header-content">
                       Indexer
-                      <i :class="getSortIcon('Source')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Source')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-size sortable" @click="setSort('Size')">
                     <span class="header-content">
                       Size
-                      <i :class="getSortIcon('Size')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Size')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-peers sortable" @click="setSort('Seeders')">
                     <span class="header-content">
                       Peers
-                      <i :class="getSortIcon('Seeders')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Seeders')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-language">Languages</th>
                   <th class="col-quality sortable" @click="setSort('Quality')">
                     <span class="header-content">
                       Quality
-                      <i :class="getSortIcon('Quality')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Quality')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-score sortable" @click="setSort('Score')">
                     <span class="header-content">
                       Score
-                      <i :class="getSortIcon('Score')" class="sort-icon"></i>
+                      <component :is="getSortIcon('Score')" class="sort-icon" />
                     </span>
                   </th>
                   <th class="col-actions"></th>
@@ -146,10 +150,10 @@
                   <td class="col-peers">
                     <div class="peers-cell">
                       <span class="seeders" :class="{ 'good': result.seeders > 10, 'medium': result.seeders > 0 && result.seeders <= 10 }">
-                        <i class="ph ph-arrow-up"></i> {{ result.seeders }}
+                        <PhArrowUp /> {{ result.seeders }}
                       </span>
                       <span class="leechers">
-                        <i class="ph ph-arrow-down"></i> {{ result.leechers }}
+                        <PhArrowDown /> {{ result.leechers }}
                       </span>
                     </div>
                   </td>
@@ -174,7 +178,7 @@
                             class="score-badge rejected"
                             :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
                           >
-                            <i class="ph ph-x-circle"></i>
+                            <PhXCircle />
                             Rejected
                           </span>
                           <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
@@ -192,8 +196,12 @@
                       :disabled="downloading[result.id]"
                       :title="downloading[result.id] ? 'Sending to download client...' : 'Download'"
                     >
-                      <i v-if="!downloading[result.id]" class="ph ph-download-simple"></i>
-                      <i v-else class="ph ph-spinner ph-spin"></i>
+                      <template v-if="!downloading[result.id]">
+                        <PhDownloadSimple />
+                      </template>
+                      <template v-else>
+                        <PhSpinner class="ph-spin" />
+                      </template>
                     </button>
                   </td>
                 </tr>
@@ -208,6 +216,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { PhMagnifyingGlass, PhX, PhSpinner, PhArrowClockwise, PhArrowUp, PhArrowDown, PhXCircle, PhDownloadSimple, PhArrowsDownUp } from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
@@ -294,13 +303,12 @@ function setSort(column: SearchSortBy | 'Score') {
   }
 }
 
-function getSortIcon(column: SearchSortBy | 'Score'): string {
+function getSortIcon(column: SearchSortBy | 'Score') {
+  // Return a component reference for the current sort icon state.
   if (sortBy.value !== column) {
-    return 'ph ph-arrows-down-up sort-icon-inactive'
+    return PhArrowsDownUp
   }
-  return sortDirection.value === 'Ascending' 
-    ? 'ph ph-arrow-up sort-icon-active' 
-    : 'ph ph-arrow-down sort-icon-active'
+  return sortDirection.value === 'Ascending' ? PhArrowUp : PhArrowDown
 }
 
 function sortFrontendResults() {
@@ -612,7 +620,6 @@ function getScoreClass(score: number): string {
   background-color: #1e1e1e;
   border-radius: 8px;
   width: 100%;
-  max-width: 1400px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;

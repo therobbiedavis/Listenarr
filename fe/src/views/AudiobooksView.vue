@@ -4,10 +4,10 @@
     <div class="toolbar">
       <div class="toolbar-left">
         <button class="toolbar-btn active">
-          <i class="ph ph-grid-four"></i>
+          <PhGridFour />
         </button>
         <button class="toolbar-btn" @click="refreshLibrary">
-          <i class="ph ph-arrow-clockwise"></i>
+          <PhArrowClockwise />
           Refresh
         </button>
         <button 
@@ -15,7 +15,7 @@
           class="toolbar-btn edit-btn"
           @click="showBulkEdit"
         >
-          <i class="ph ph-pencil"></i>
+          <PhPencil />
           Edit Selected
         </button>
         <button 
@@ -23,7 +23,7 @@
           class="toolbar-btn delete-btn"
           @click="confirmBulkDelete"
         >
-          <i class="ph ph-trash"></i>
+          <PhTrash />
           Delete Selected ({{ selectedCount }})
         </button>
         <button 
@@ -38,7 +38,7 @@
           class="toolbar-btn"
           @click="libraryStore.selectAll()"
         >
-          <i class="ph ph-check-square"></i>
+          <PhCheckSquare />
           Select All
         </button>
       </div>
@@ -51,31 +51,31 @@
 
     <!-- Audiobooks Grid -->
     <div v-if="loading" class="loading-state">
-      <i class="ph ph-spinner ph-spin"></i>
+      <PhSpinner class="ph-spin" />
       <p>Loading audiobooks...</p>
     </div>
     
     <div v-else-if="error" class="error-state">
       <div class="error-icon">
-        <i class="ph ph-warning-circle"></i>
+        <PhWarningCircle />
       </div>
       <h2>Error Loading Library</h2>
       <p>{{ error }}</p>
       <button @click="refreshLibrary" class="retry-button">
-        <i class="ph ph-arrow-clockwise"></i>
+        <PhArrowClockwise />
         Retry
       </button>
     </div>
     
     <div v-else-if="audiobooks.length === 0" class="empty-state">
       <div class="empty-icon">
-        <i class="ph ph-book-open"></i>
+        <PhBookOpen />
       </div>
       <template v-if="!hasRootFolderConfigured">
         <h2>Root Folder Not Configured</h2>
         <p>Please configure a root folder for your audiobook library in settings before adding audiobooks.</p>
         <router-link to="/settings" class="add-button">
-          <i class="ph ph-gear"></i>
+          <PhGear />
           Go to Settings
         </router-link>
       </template>
@@ -83,7 +83,7 @@
         <h2>No Audiobooks Yet</h2>
         <p>Your library is empty. Add audiobooks to get started!</p>
         <router-link to="/add-new" class="add-button">
-          <i class="ph ph-plus"></i>
+          <PhPlus />
           Add Audiobooks
         </router-link>
       </template>
@@ -119,11 +119,11 @@
             <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
             <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
             <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-              <i class="ph ph-star"></i>
+              <PhStar />
               {{ getQualityProfileName(audiobook.qualityProfileId) }}
             </div>
             <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-              <i :class="audiobook.monitored ? 'ph ph-eye' : 'ph ph-eye-slash'"></i>
+              <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
               {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
             </div>
           </div>
@@ -133,14 +133,14 @@
               @click.stop="openEditModal(audiobook)"
               title="Edit"
             >
-              <i class="ph ph-pencil"></i>
+              <PhPencil />
             </button>
             <button 
               class="action-btn delete-btn-small" 
               @click.stop="confirmDelete(audiobook)"
               title="Delete"
             >
-              <i class="ph ph-trash"></i>
+              <PhTrash />
             </button>
           </div>
         </div>
@@ -152,7 +152,7 @@
       <div class="dialog" @click.stop>
         <div class="dialog-header">
           <h3>
-            <i class="ph ph-warning"></i>
+            <PhWarning />
             Confirm Deletion
           </h3>
         </div>
@@ -170,8 +170,8 @@
             Cancel
           </button>
           <button class="dialog-btn confirm-btn" @click="executeDelete" :disabled="deleting">
-            <i v-if="deleting" class="ph ph-spinner ph-spin"></i>
-            <i v-else class="ph ph-trash"></i>
+            <component v-if="deleting" :is="PhSpinner" class="ph-spin" />
+            <PhTrash v-else />
             {{ deleting ? 'Deleting...' : 'Delete' }}
           </button>
         </div>
@@ -199,6 +199,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { PhGridFour, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhWarning } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'

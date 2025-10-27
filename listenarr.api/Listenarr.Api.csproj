@@ -11,6 +11,8 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
   <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  <!-- Suppress missing XML comment warnings in public API to reduce noise during CI/dev builds -->
+  <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SharpCompress" Version="0.36.0" />

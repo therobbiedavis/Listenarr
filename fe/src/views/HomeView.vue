@@ -54,7 +54,7 @@
               class="activity-item"
             >
               <div class="activity-icon">
-                <i :class="getActivityIcon(activity.type)"></i>
+                <component :is="getActivityIconComponent(activity.type)" class="ph-activity-icon" />
               </div>
               <div class="activity-content">
                 <div class="activity-title">{{ activity.title }}</div>
@@ -104,19 +104,19 @@
           <h2>Quick Actions</h2>
           <div class="quick-actions">
             <RouterLink to="/add-new" class="action-button primary">
-              <i class="icon-plus"></i>
+              <PhPlus />
               Add New Audiobook
             </RouterLink>
-                        <RouterLink to="/add-new" class="action-button">
-              <i class="ph ph-magnifying-glass"></i>
+            <RouterLink to="/add-new" class="action-button">
+              <PhMagnifyingGlass />
               <span>Search</span>
             </RouterLink>
             <RouterLink to="/library-import" class="action-button">
-              <i class="icon-import"></i>
+              <PhFolder />
               Import Library
             </RouterLink>
             <RouterLink to="/wanted" class="action-button">
-              <i class="icon-wanted"></i>
+              <PhWarning />
               Manual Search
             </RouterLink>
           </div>
@@ -155,6 +155,15 @@
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { safeText } from '@/utils/textUtils'
+import {
+  PhPlus,
+  PhMagnifyingGlass,
+  PhFolder,
+  PhWarning,
+  PhDownloadSimple,
+  PhActivity,
+  PhFileText
+} from '@phosphor-icons/vue'
 
 // Sample dashboard data
 const audiobookStats = ref({
@@ -223,14 +232,19 @@ const recentlyAdded = ref([
   }
 ])
 
-const getActivityIcon = (type: string): string => {
-  const icons = {
-    download: 'icon-download',
-    import: 'icon-import',
-    search: 'icon-search',
-    metadata: 'icon-metadata'
+const getActivityIconComponent = (type: string) => {
+  switch (type) {
+    case 'download':
+      return PhDownloadSimple
+    case 'import':
+      return PhFolder
+    case 'search':
+      return PhMagnifyingGlass
+    case 'metadata':
+      return PhFileText
+    default:
+      return PhActivity
   }
-  return icons[type as keyof typeof icons] || 'icon-activity'
 }
 
 const formatTime = (timestamp: Date): string => {
@@ -366,6 +380,11 @@ const formatTime = (timestamp: Date): string => {
   background-color: #555;
   border-radius: 50%;
   color: #ccc;
+}
+/* size svg icons inside activity */
+.ph-activity-icon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .activity-content {

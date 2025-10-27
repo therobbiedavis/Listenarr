@@ -2,16 +2,16 @@
   <div class="wanted-view">
     <div class="page-header">
       <h1>
-        <i class="ph ph-heart"></i>
+        <PhHeart />
         Wanted
       </h1>
       <div class="wanted-actions">
         <button class="btn btn-primary" @click="searchMissing" :disabled="categorizedWanted.missing.length === 0">
-          <i class="ph ph-robot"></i>
+          <PhRobot />
           Automatic Search All
         </button>
         <button class="btn btn-secondary" @click="openManualImport">
-          <i class="ph ph-folder-plus"></i>
+          <PhFolderPlus />
           Manual Import
         </button>
       </div>
@@ -33,7 +33,7 @@
 
     <!-- Loading State -->
     <div v-if="loading" class="loading-state">
-      <i class="ph ph-spinner ph-spin"></i>
+      <PhSpinner class="ph-spin" />
       <p>Loading wanted audiobooks...</p>
     </div>
 
@@ -68,7 +68,9 @@
             </template>
           </div>
           <div v-if="searchResults[item.id]" class="search-status">
-            <i v-if="searching[item.id]" class="ph ph-spinner ph-spin"></i>
+            <template v-if="searching[item.id]">
+              <PhSpinner class="ph-spin" />
+            </template>
             {{ searchResults[item.id] }}
           </div>
         </div>
@@ -84,14 +86,14 @@
             :disabled="searching[item.id]"
             title="Automatic Search"
           >
-            <i class="ph ph-robot"></i>
+            <PhRobot />
           </button>
           <button 
             class="btn-icon" 
             @click="openManualSearch(item)"
             title="Manual Search"
           >
-            <i class="ph ph-magnifying-glass"></i>
+            <PhMagnifyingGlass />
           </button>
           <button 
             class="btn-icon" 
@@ -99,7 +101,7 @@
             :disabled="searching[item.id]"
             title="Unmonitor Audiobook"
           >
-            <i class="ph ph-x"></i>
+            <PhX />
           </button>
         </div>
       </div>
@@ -108,7 +110,7 @@
     <!-- Empty State -->
     <div v-else class="empty-state">
       <div class="empty-icon">
-        <i class="ph ph-check-circle"></i>
+        <PhCheckCircle />
       </div>
       <h2>{{ getEmptyStateTitle() }}</h2>
       <p>{{ getEmptyStateMessage() }}</p>
@@ -140,6 +142,7 @@ import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
 import { safeText } from '@/utils/textUtils'
+import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle } from '@phosphor-icons/vue'
 
 const libraryStore = useLibraryStore()
 

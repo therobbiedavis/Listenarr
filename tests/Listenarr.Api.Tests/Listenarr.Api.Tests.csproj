@@ -4,8 +4,8 @@
     <IsPackable>false</IsPackable>
     <!-- Enable nullable annotations for test code to avoid CS8632 warnings -->
     <Nullable>enable</Nullable>
-    <!-- Suppress specific test-only warning about FormatterServices obsoletion -->
-    <NoWarn>$(NoWarn);SYSLIB0050</NoWarn>
+    <!-- Suppress specific test-only warning about FormatterServices obsoletion and some nullable warnings in tests -->
+    <NoWarn>$(NoWarn);SYSLIB0050;CS8602;CS8600;CS8625;CS8604;CS8605</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

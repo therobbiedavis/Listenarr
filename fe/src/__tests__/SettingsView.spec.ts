@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -36,16 +37,14 @@ vi.mock('@/services/api', () => ({
 
 describe('SettingsView', () => {
   beforeEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(apiService.getStartupConfig as any).mockReset()
+    (apiService.getStartupConfig as any).mockReset()
      // Provide a single Pinia instance for stores used by the component
      const pinia = createPinia()
      setActivePinia(pinia)
   })
 
   it('sets authEnabled when startup config AuthenticationRequired is Enabled', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(apiService.getStartupConfig as any).mockResolvedValue({ AuthenticationRequired: 'Enabled' })
+  (apiService.getStartupConfig as any).mockResolvedValue({ AuthenticationRequired: 'Enabled' })
       // create a minimal router for components that inject router/location
       const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }] })
     // Ensure router is ready before mounting (SettingsView may call router.replace during mount)
@@ -55,9 +54,8 @@ describe('SettingsView', () => {
       const wrapper = mount(SettingsView, { global: { plugins: [pinia, router], stubs: ['FolderBrowser'] } })
     // Wait for onMounted async calls to finish
     await new Promise((r) => setTimeout(r, 0))
-    // Accept both legacy 'Enabled' and new 'true' string values
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((wrapper.vm as any).authEnabled).toBe(true)
+  // Accept both legacy 'Enabled' and new 'true' string values
+  expect((wrapper.vm as any).authEnabled).toBe(true)
   })
 
   it('toggles password visibility', async () => {
@@ -66,23 +64,84 @@ describe('SettingsView', () => {
   await router.isReady().catch(() => {})
   const pinia = createPinia()
   const wrapper = mount(SettingsView, { global: { plugins: [pinia, router], stubs: ['FolderBrowser'] } })
-  // Ensure the General tab is active so the password field is rendered
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(wrapper.vm as any).activeTab = 'general'
+  // Activate the General Settings tab so the password field is rendered
+  const generalTab = wrapper.findAll('button.tab-button').find(b => b.text().includes('General Settings'))
+  expect(generalTab).toBeTruthy()
+  await generalTab!.trigger('click')
   // Provide settings so the admin password input is rendered
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(wrapper.vm as any).settings = { adminPassword: 'secret' }
   await wrapper.vm.$nextTick()
   await new Promise((r) => setTimeout(r, 0))
   // Access internal setup state to check showPassword directly (more reliable in VTU)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const setupState = (wrapper.vm as any).$?.setupState || (wrapper.vm as any).$setup || (wrapper.vm as any)
   // initial value should be false
   expect(setupState.showPassword?.value ?? setupState.showPassword).toBe(false)
   // Toggle via exposed function
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(wrapper.vm as any).toggleShowPassword()
   await wrapper.vm.$nextTick()
   expect(setupState.showPassword?.value ?? setupState.showPassword).toBe(true)
+  })
+
+  it('enables/disables proxy fields and saves proxy settings', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }] })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const wrapper = mount(SettingsView, { global: { plugins: [pinia, router], stubs: ['FolderBrowser'] } })
+
+    // Activate General Settings tab and provide initial settings
+    const generalTab = wrapper.findAll('button.tab-button').find(b => b.text().includes('General Settings'))
+    expect(generalTab).toBeTruthy()
+    await generalTab!.trigger('click')
+    ;(wrapper.vm as any).settings = {
+      preferUsDomain: false,
+      useUsProxy: false,
+      usProxyHost: '',
+      usProxyPort: 0,
+      usProxyUsername: '',
+      usProxyPassword: ''
+    }
+
+  await wrapper.vm.$nextTick()
+  // Small wait for reactive updates
+  await new Promise((r) => setTimeout(r, 0))
+  await wrapper.vm.$nextTick()
+
+    const hostInput = wrapper.find('input[placeholder="proxy.example.com"]')
+    expect(hostInput.exists()).toBe(true)
+    // When proxy is disabled inputs should be disabled
+    expect(hostInput.attributes('disabled')).toBeDefined()
+
+    // Enable proxy usage
+    ;(wrapper.vm as any).settings.useUsProxy = true
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Host input should now be enabled
+    expect(hostInput.attributes('disabled')).toBeUndefined()
+
+    // Fill in details
+    ;(wrapper.vm as any).settings.usProxyHost = 'proxy.test.local'
+    ;(wrapper.vm as any).settings.usProxyPort = 3128
+    await wrapper.vm.$nextTick()
+
+    // Spy on the configuration store save method
+    const { useConfigurationStore } = await import('@/stores/configuration')
+    const cfgStore = useConfigurationStore()
+  cfgStore.saveApplicationSettings = vi.fn().mockResolvedValue(undefined)
+
+    // Click Save Settings button
+    const saveBtn = wrapper.findAll('button.save-button').find(b => b.text().includes('Save Settings'))
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+
+    // Expect store save called
+    expect(cfgStore.saveApplicationSettings).toHaveBeenCalled()
+    const calledWith = (cfgStore.saveApplicationSettings as any).mock.calls[0][0]
+    expect(calledWith.usProxyHost).toBe('proxy.test.local')
+    expect(Number(calledWith.usProxyPort)).toBe(3128)
   })
 })

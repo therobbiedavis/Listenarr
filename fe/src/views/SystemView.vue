@@ -3,14 +3,14 @@
     <div class="page-header-with-actions">
       <div class="settings-header">
         <h1>
-          <i class="ph ph-cpu"></i>
+          <PhCpu />
           System
         </h1>
         <p>Monitor system health, resources, and service status</p>
       </div>
       <div class="page-actions">
         <button class="add-button" @click="refreshStatus" :disabled="loading">
-          <i :class="loading ? 'ph ph-spinner ph-spin' : 'ph ph-arrow-clockwise'"></i>
+          <component :is="loading ? PhSpinner : PhArrowClockwise" />
           {{ loading ? 'Refreshing...' : 'Refresh' }}
         </button>
       </div>
@@ -18,20 +18,20 @@
 
     <div class="system-status">
       <div v-if="error" class="error-message">
-        <i class="ph ph-warning"></i>
+  <PhWarning />
         {{ error }}
       </div>
 
       <div v-if="loading && !systemInfo" class="loading-state">
-        <i class="ph ph-spinner ph-spin"></i>
+        <PhSpinner class="ph-spin" />
         Loading system information...
       </div>
 
       <div v-else class="status-grid">
         <div class="status-card">
           <div class="status-header">
-            <div class="card-title">
-              <i class="ph ph-check-circle"></i>
+              <div class="card-title">
+              <PhCheckCircle />
               <h3>API Status</h3>
             </div>
             <span :class="['status-badge', apiStatus.status]">
@@ -40,12 +40,12 @@
           </div>
           <div class="status-details">
             <div class="detail-row">
-              <i class="ph ph-code"></i>
+              <PhCode />
               <span class="label">Version:</span>
               <span class="value">{{ apiStatus.version }}</span>
             </div>
             <div class="detail-row">
-              <i class="ph ph-clock"></i>
+              <PhClock />
               <span class="label">Uptime:</span>
               <span class="value">{{ apiStatus.uptime }}</span>
             </div>
@@ -54,8 +54,8 @@
 
         <div class="status-card">
           <div class="status-header">
-            <div class="card-title">
-              <i class="ph ph-download"></i>
+              <div class="card-title">
+              <PhDownload />
               <h3>Download Clients</h3>
             </div>
             <span :class="['status-badge', downloadClientsStatus.status]">
@@ -64,12 +64,12 @@
           </div>
           <div class="status-details">
             <div v-if="downloadClients.length === 0" class="empty-message">
-              <i class="ph ph-info"></i>
+          <PhInfo />
               <span>No download clients configured</span>
             </div>
             <div v-else>
               <div v-for="client in downloadClients" :key="client.name" class="client-status">
-                <i :class="client.status === 'connected' ? 'ph ph-check-circle success' : 'ph ph-x-circle error'"></i>
+                <component :is="client.status === 'connected' ? PhCheckCircle : PhXCircle" :class="client.status === 'connected' ? 'success' : 'error'" />
                 <span class="client-name">{{ client.name }}</span>
                 <span :class="['client-indicator', client.status]">{{ client.status }}</span>
               </div>
@@ -79,15 +79,15 @@
 
         <div class="status-card">
           <div class="status-header">
-            <div class="card-title">
-              <i class="ph ph-hard-drives"></i>
+              <div class="card-title">
+              <PhHardDrives />
               <h3>Storage</h3>
             </div>
             <span v-if="storageInfo" class="status-badge">
               {{ storageInfo.usedFormatted }}/{{ storageInfo.totalFormatted }}
             </span>
             <span v-else class="status-badge">
-              <i class="ph ph-spinner ph-spin"></i>
+              <PhSpinner class="ph-spin" />
             </span>
           </div>
           <div v-if="storageInfo" class="status-details">
@@ -99,12 +99,12 @@
               ></div>
             </div>
             <div class="detail-row">
-              <i class="ph ph-folder-open"></i>
+              <PhFolderOpen />
               <span class="label">Free:</span>
               <span class="value">{{ storageInfo.freeFormatted }}</span>
             </div>
             <div class="detail-row">
-              <i class="ph ph-chart-bar"></i>
+              <PhChartBar />
               <span class="label">Used:</span>
               <span class="value">{{ storageInfo.usedPercentage.toFixed(1) }}%</span>
             </div>
@@ -113,8 +113,8 @@
 
         <div class="status-card">
           <div class="status-header">
-            <div class="card-title">
-              <i class="ph ph-cloud"></i>
+              <div class="card-title">
+              <PhCloud />
               <h3>External APIs</h3>
             </div>
             <span :class="['status-badge', externalApis.status]">
@@ -123,12 +123,12 @@
           </div>
           <div class="status-details">
             <div v-if="externalApis.apis.length === 0" class="empty-message">
-              <i class="ph ph-info"></i>
+              <PhInfo />
               <span>No API sources configured</span>
             </div>
             <div v-else>
               <div v-for="api in externalApis.apis" :key="api.name" class="client-status">
-                <i :class="api.status === 'connected' ? 'ph ph-check-circle success' : 'ph ph-x-circle error'"></i>
+                <component :is="api.status === 'connected' ? PhCheckCircle : PhXCircle" :class="api.status === 'connected' ? 'success' : 'error'" />
                 <span class="client-name">{{ api.name }}</span>
                 <span :class="['client-indicator', api.status]">{{ api.status }}</span>
               </div>
@@ -138,8 +138,8 @@
 
         <div class="status-card">
           <div class="status-header">
-            <div class="card-title">
-              <i class="ph ph-wifi"></i>
+              <div class="card-title">
+              <PhWifiX />
               <h3>WebSockets</h3>
             </div>
             <span :class="['status-badge', isConnected ? 'healthy' : 'error']">
@@ -148,12 +148,12 @@
           </div>
           <div class="status-details">
             <div class="detail-row">
-              <i class="ph ph-broadcast"></i>
+              <PhBroadcast />
               <span class="label">Real-time:</span>
               <span class="value">{{ isConnected ? 'Active' : 'Inactive' }}</span>
             </div>
             <div class="detail-row">
-              <i class="ph ph-activity"></i>
+              <PhActivity />
               <span class="label">Status:</span>
               <span class="value">{{ isConnected ? 'Receiving updates' : 'Not connected' }}</span>
             </div>
@@ -166,27 +166,27 @@
       <div class="section">
         <div class="section-header">
           <h2>
-            <i class="ph ph-info"></i>
+            <PhInfo />
             System Information
           </h2>
         </div>
         <div v-if="systemInfo" class="info-grid">
           <div class="info-card">
-            <i class="ph ph-desktop-tower"></i>
+            <PhDesktopTower />
             <div class="info-content">
               <label>Operating System</label>
               <span>{{ systemInfo.operatingSystem }}</span>
             </div>
           </div>
           <div class="info-card">
-            <i class="ph ph-code"></i>
+            <PhCode />
             <div class="info-content">
               <label>Runtime</label>
               <span>{{ systemInfo.runtime }}</span>
             </div>
           </div>
           <div class="info-card">
-            <i class="ph ph-memory"></i>
+            <PhMemory />
             <div class="info-content">
               <label>Memory Usage</label>
               <span>{{ systemInfo.memory.usedFormatted }} / {{ systemInfo.memory.totalFormatted }}</span>
@@ -194,7 +194,7 @@
             </div>
           </div>
           <div class="info-card">
-            <i class="ph ph-cpu"></i>
+            <PhCpu />
             <div class="info-content">
               <label>CPU Usage</label>
               <span>{{ systemInfo.cpu.usagePercentage.toFixed(1) }}%</span>
@@ -203,7 +203,7 @@
           </div>
         </div>
         <div v-else class="loading-state">
-          <i class="ph ph-spinner ph-spin"></i>
+          <PhSpinner class="ph-spin" />
           <p>Loading system information...</p>
         </div>
       </div>
@@ -211,15 +211,15 @@
       <div class="section">
         <div class="section-header">
           <h2>
-            <i class="ph ph-file-text"></i>
+            <PhFileText />
             Recent Logs
           </h2>
-          <div class="section-actions">
+            <div class="section-actions">
             <button class="icon-button" @click="viewFullLogs" title="View Full Logs">
-              <i class="ph ph-eye"></i>
+              <PhEye />
             </button>
             <button class="icon-button" @click="downloadLogs" title="Download Logs">
-              <i class="ph ph-download-simple"></i>
+              <PhDownloadSimple />
             </button>
           </div>
         </div>
@@ -229,7 +229,7 @@
             :key="log.id"
             :class="['log-entry', log.level]"
           >
-            <i :class="getLogIcon(log.level)"></i>
+            <component :is="getLogIconComponent(log.level)" class="log-icon" />
             <span class="log-time">{{ formatLogTime(log.timestamp) }}</span>
             <span class="log-level">{{ log.level.toUpperCase() }}</span>
             <span class="log-message">{{ log.message }}</span>
@@ -242,6 +242,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { PhCpu, PhSpinner, PhArrowClockwise, PhWarning, PhCheckCircle, PhXCircle, PhCode, PhClock, PhDownload, PhInfo, PhHardDrives, PhFolderOpen, PhChartBar, PhCloud, PhWifiX, PhBroadcast, PhActivity, PhDesktopTower, PhMemory, PhFileText, PhEye, PhDownloadSimple } from '@phosphor-icons/vue'
 import { useSignalR } from '@/composables/useSignalR'
 import { useRouter } from 'vue-router'
 import { getSystemInfo, getStorageInfo, getServiceHealth, getLogs, downloadLogs as downloadLogsApi } from '@/services/api'
@@ -344,18 +345,18 @@ const formatLogTime = (timestamp: string): string => {
   return date.toLocaleTimeString()
 }
 
-const getLogIcon = (level: string): string => {
+const getLogIconComponent = (level: string) => {
   switch (level.toLowerCase()) {
     case 'info':
-      return 'ph ph-info'
+      return PhInfo
     case 'warning':
-      return 'ph ph-warning'
+      return PhWarning
     case 'error':
-      return 'ph ph-x-circle'
+      return PhXCircle
     case 'success':
-      return 'ph ph-check-circle'
+      return PhCheckCircle
     default:
-      return 'ph ph-info'
+      return PhInfo
   }
 }
 
@@ -384,7 +385,6 @@ onMounted(() => {
 <style scoped>
 .system-view {
   padding: 2rem;
-  max-width: 1400px;
   margin: 0 auto;
 }
 
@@ -873,21 +873,35 @@ onMounted(() => {
   font-size: 1.1rem;
 }
 
+/* Phosphor icon sizing for logs */
+.log-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
 .log-entry.info > i {
   color: #007acc;
 }
+
+.log-entry.info .log-icon svg { color: #007acc; }
 
 .log-entry.warning > i {
   color: #f39c12;
 }
 
+.log-entry.warning .log-icon svg { color: #f39c12; }
+
 .log-entry.error > i {
   color: #e74c3c;
 }
 
+.log-entry.error .log-icon svg { color: #e74c3c; }
+
 .log-entry.success > i {
   color: #27ae60;
 }
+
+.log-entry.success .log-icon svg { color: #27ae60; }
 
 .log-time {
   color: #666;

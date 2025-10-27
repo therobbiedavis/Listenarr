@@ -89,6 +89,14 @@ namespace Listenarr.Api.Models
         public bool EnableNotifications { get; set; } = false;
         public List<string> AllowedFileExtensions { get; set; } = new() { ".mp3", ".flac", ".m4a", ".m4b", ".ogg" };
 
+    // External request settings: control retry behavior for US-domain preference and optional HTTP proxy
+    public bool PreferUsDomain { get; set; } = true;
+    public bool UseUsProxy { get; set; } = false;
+    public string? UsProxyHost { get; set; }
+    public int UsProxyPort { get; set; } = 0;
+    public string? UsProxyUsername { get; set; }
+    public string? UsProxyPassword { get; set; }
+
     // Action to take when a download completes: "Move" or "Copy"
     public string CompletedFileAction { get; set; } = "Move";
 

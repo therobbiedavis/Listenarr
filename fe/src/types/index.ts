@@ -146,6 +146,14 @@ export interface ApplicationSettings {
   // Optional admin credentials used when saving settings to create/update an initial admin user
   adminUsername?: string
   adminPassword?: string
+
+  // External requests / proxy settings
+  preferUsDomain?: boolean
+  useUsProxy?: boolean
+  usProxyHost?: string
+  usProxyPort?: number
+  usProxyUsername?: string
+  usProxyPassword?: string
 }
 
 export interface StartupConfig {

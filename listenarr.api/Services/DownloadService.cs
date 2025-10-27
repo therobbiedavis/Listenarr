@@ -1354,7 +1354,7 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    List<QueueItem> clientQueue = client.Type.ToLower() switch
+                    List<QueueItem> clientQueue = (client.Type ?? string.Empty).ToLowerInvariant() switch
                     {
                         "qbittorrent" => await GetQBittorrentQueueAsync(client),
                         "transmission" => await GetTransmissionQueueAsync(client),
@@ -1364,7 +1364,7 @@ namespace Listenarr.Api.Services
                     };
 
                     // Filter to only include items that Listenarr initiated
-                    _logger.LogDebug("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name, clientQueue.Count);
+                    _logger.LogDebug("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
                     _logger.LogDebug("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
                     
                     foreach (var download in listenarrDownloads)
@@ -1388,7 +1388,7 @@ namespace Listenarr.Api.Services
 
                             // For qBittorrent, also check if queue item ID matches stored torrent hash
                             var hashMatch = false;
-                            if (client.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
+                            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
                             {
                                 try 
                                 {

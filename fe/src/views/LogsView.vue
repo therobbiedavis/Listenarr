@@ -1,17 +1,22 @@
 <template>
   <div class="logs-view">
     <div class="page-header">
-      <div class="header-content">
-        <h1><i class="ph ph-file-text"></i> Application Logs</h1>
+        <div class="header-content">
+        <h1><PhFileText /> Application Logs</h1>
         <p>View and search application log entries</p>
       </div>
       <div class="header-actions">
         <button class="action-button" @click="refreshLogs" :disabled="loading">
-          <i :class="loading ? 'ph ph-spinner ph-spin' : 'ph ph-arrow-clockwise'"></i>
+          <template v-if="loading">
+            <PhSpinner class="ph-spin" />
+          </template>
+          <template v-else>
+            <PhArrowClockwise />
+          </template>
           {{ loading ? 'Refreshing...' : 'Refresh' }}
         </button>
         <button class="action-button primary" @click="downloadLogs">
-          <i class="ph ph-download-simple"></i>
+          <PhDownloadSimple />
           Download Logs
         </button>
       </div>
@@ -32,7 +37,7 @@
       <div class="filter-group">
         <label>Search</label>
         <div class="search-input">
-          <i class="ph ph-magnifying-glass"></i>
+          <PhMagnifyingGlass />
           <input 
             type="text" 
             v-model="searchQuery" 
@@ -45,7 +50,7 @@
             @click="clearSearch"
             title="Clear search"
           >
-            <i class="ph ph-x"></i>
+            <PhX />
           </button>
         </div>
       </div>
@@ -53,7 +58,7 @@
 
     <!-- Error State -->
     <div v-if="error" class="error-message">
-      <i class="ph ph-warning-circle"></i>
+      <PhWarningCircle />
       <div>
         <strong>Error loading logs</strong>
         <p>{{ error }}</p>
@@ -62,7 +67,7 @@
 
     <!-- Loading State -->
     <div v-if="loading && logs.length === 0" class="loading-state">
-      <i class="ph ph-spinner ph-spin"></i>
+      <PhSpinner class="ph-spin" />
       <p>Loading logs...</p>
     </div>
 
@@ -82,7 +87,7 @@
             :class="['log-row', `level-${log.level.toLowerCase()}`]"
           >
             <div class="col-timestamp">
-              <i :class="getLogIcon(log.level)"></i>
+              <component :is="getLogIconComponent(log.level)" />
               {{ formatTimestamp(log.timestamp) }}
             </div>
             <div class="col-level">
@@ -94,7 +99,7 @@
             <div class="col-message">
               <div class="message-text">{{ log.message }}</div>
               <div v-if="log.exception" class="exception-text">
-                <i class="ph ph-warning"></i>
+                <PhWarning />
                 {{ log.exception }}
               </div>
             </div>
@@ -114,7 +119,7 @@
             :disabled="currentPage === 1"
             title="Previous page"
           >
-            <i class="ph ph-caret-left"></i>
+            <PhCaretLeft />
           </button>
           
           <button
@@ -132,7 +137,7 @@
             :disabled="currentPage === totalPages"
             title="Next page"
           >
-            <i class="ph ph-caret-right"></i>
+            <PhCaretRight />
           </button>
         </div>
         <div class="pagination-size">
@@ -149,7 +154,7 @@
 
     <!-- Empty State -->
     <div v-else class="empty-state">
-      <i class="ph ph-file-text"></i>
+      <PhFileText />
       <h3>No logs found</h3>
       <p v-if="searchQuery || selectedLevel">Try adjusting your filters</p>
       <p v-else>No log entries available</p>
@@ -159,6 +164,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { PhFileText, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhMagnifyingGlass, PhX, PhWarningCircle, PhWarning, PhBug, PhInfo, PhCaretLeft, PhCaretRight } from '@phosphor-icons/vue'
 import { getLogs, downloadLogs as downloadLogsApi } from '@/services/api'
 import type { LogEntry } from '@/types'
 
@@ -291,18 +297,18 @@ const formatTimestamp = (timestamp: string): string => {
   })
 }
 
-const getLogIcon = (level: string): string => {
+const getLogIconComponent = (level: string) => {
   switch (level.toLowerCase()) {
     case 'info':
-      return 'ph ph-info'
+      return PhInfo
     case 'warning':
-      return 'ph ph-warning'
+      return PhWarning
     case 'error':
-      return 'ph ph-x-circle'
+      return PhX
     case 'debug':
-      return 'ph ph-bug'
+      return PhBug
     default:
-      return 'ph ph-info'
+      return PhInfo
   }
 }
 
