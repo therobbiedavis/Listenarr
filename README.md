@@ -84,6 +84,8 @@ The Docker image includes both the backend API and frontend in a single containe
 
 **Available Tags:**
 - `latest` / `stable` - Latest stable release
+- `canary` - Latest canary build (pre-release)
+- `canary-X.Y.Z` - Specific canary version
 - `nightly` - Latest nightly build (pre-release)
 - `nightly-X.Y.Z` - Specific nightly version
 - `X.Y.Z` - Specific release version
