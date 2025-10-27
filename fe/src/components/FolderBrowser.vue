@@ -7,6 +7,7 @@
         :placeholder="placeholder"
         class="browser-input"
         @blur="validatePath"
+        v-bind:data-cy="props.inputDataCy"
       />
       <!-- Folder icon button opens inline browser beneath the input -->
       <button @click="toggleBrowser" class="browse-button" type="button" aria-label="Browse folders">
@@ -85,6 +86,7 @@ import { apiService } from '@/services/api'
 interface Props {
   modelValue: string
   placeholder?: string
+  inputDataCy?: string
 }
 
 interface FileSystemItem {
@@ -100,7 +102,8 @@ interface BrowserProps extends Props {
 
 const props = withDefaults(defineProps<BrowserProps>(), {
   placeholder: 'Select a folder...',
-  inline: false
+  inline: false,
+  inputDataCy: ''
 })
 
 const emit = defineEmits<{

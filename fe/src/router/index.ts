@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import type { StartupConfig } from '@/types'
+import SettingsView from '../views/SettingsView.vue'
 
 // Module-level cache/promise for startup config to avoid repeated requests during rapid navigation
 // Use a promise so concurrent navigations share the same inflight request instead of issuing many
@@ -16,7 +17,7 @@ const routes = [
   { path: '/activity', name: 'activity', component: () => import('../views/ActivityView.vue'), meta: { requiresAuth: true } },
   { path: '/wanted', name: 'wanted', component: () => import('../views/WantedView.vue'), meta: { requiresAuth: true } },
   { path: '/downloads', name: 'downloads', component: () => import('../views/DownloadsView.vue'), meta: { requiresAuth: true } },
-  { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { requiresAuth: true } },
+  { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
   { path: '/system', name: 'system', component: () => import('../views/SystemView.vue'), meta: { requiresAuth: true } },
   { path: '/logs', name: 'logs', component: () => import('../views/LogsView.vue'), meta: { requiresAuth: true } },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { hideLayout: true } },
@@ -29,6 +30,8 @@ const router = createRouter({
 
 // Navigation guard: protect routes requiring auth and preserve redirectTo
 router.beforeEach(async (to, from, next) => {
+  // Skip auth guard in Cypress tests
+  if (import.meta.env.CYPRESS) return next()
   const auth = useAuthStore()
 
   // Load current user only once per app lifetime (avoid repeated calls on every navigation)

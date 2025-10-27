@@ -20,6 +20,7 @@ using Listenarr.Api.Services;
 using Listenarr.Api.Models;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Middleware;
+using System.Net;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -163,6 +164,42 @@ builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
+
+// External request options (Prefer US domain / optional US proxy)
+builder.Services.Configure<Listenarr.Api.Services.ExternalRequestOptions>(builder.Configuration.GetSection("ExternalRequests"));
+
+// Named HttpClient for US-origin requests (can be configured to use a proxy)
+builder.Services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() =>
+{
+    var handler = new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    };
+
+    try
+    {
+        var section = builder.Configuration.GetSection("ExternalRequests");
+        var useProxy = section.GetValue<bool>("UseUsProxy");
+        if (useProxy)
+        {
+            var host = section.GetValue<string>("UsProxyHost");
+            var port = section.GetValue<int>("UsProxyPort");
+            if (!string.IsNullOrWhiteSpace(host) && port > 0)
+            {
+                var proxy = new WebProxy(host, port);
+                var user = section.GetValue<string>("UsProxyUsername");
+                var pass = section.GetValue<string>("UsProxyPassword");
+                if (!string.IsNullOrWhiteSpace(user))
+                    proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
+                handler.Proxy = proxy;
+                handler.UseProxy = true;
+            }
+        }
+    }
+    catch { }
+
+    return handler;
+});
 
 // Register Playwright page fetcher for JS-rendered pages and bot-workarounds
 // Playwright-based page fetcher removed; AudibleMetadataService will create Playwright on-demand if needed.

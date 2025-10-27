@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Net;
 using HtmlAgilityPack;
 
 namespace Listenarr.Api.Services
@@ -24,6 +25,7 @@ namespace Listenarr.Api.Services
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<AudibleSearchService> _logger;
+        private readonly IHttpClientFactory? _httpClientFactory;
         private static readonly Regex AsinRegex = new(@"/pd/[^/]+/([A-Z0-9]{10})", RegexOptions.Compiled);
         private static readonly Regex AsinFromUrlRegex = new(@"B0[A-Z0-9]{8}", RegexOptions.Compiled);
     // New: detect navigation/header noise and generic site labels like 'Audible'
@@ -49,10 +51,14 @@ namespace Listenarr.Api.Services
         "you to audible",
     };
 
-        public AudibleSearchService(HttpClient httpClient, ILogger<AudibleSearchService> logger)
+        private readonly IConfigurationService _configurationService;
+
+        public AudibleSearchService(HttpClient httpClient, ILogger<AudibleSearchService> logger, IConfigurationService configurationService, IHttpClientFactory? httpClientFactory = null)
         {
             _httpClient = httpClient;
             _logger = logger;
+            _httpClientFactory = httpClientFactory;
+            _configurationService = configurationService;
         }
 
         public async Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query)
@@ -181,7 +187,7 @@ namespace Listenarr.Api.Services
             return false;
         }
 
-        private async Task<string?> TryFetchProductTitle(string? productUrl, string asin)
+    internal async Task<string?> TryFetchProductTitle(string? productUrl, string asin)
         {
             if (string.IsNullOrEmpty(productUrl)) return null;
             try
@@ -417,7 +423,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> GetHtmlAsync(string url)
+    internal async Task<string?> GetHtmlAsync(string url)
         {
             try
             {
@@ -438,12 +444,114 @@ namespace Listenarr.Api.Services
                 var response = await _httpClient.SendAsync(request);
                 response.EnsureSuccessStatusCode();
 
-                return await response.Content.ReadAsStringAsync();
+                var html = await response.Content.ReadAsStringAsync();
+
+                // If the page looks like a geo-redirect / locale notice, try forcing a .com domain and re-request
+                var lowerHtml = html?.ToLowerInvariant() ?? string.Empty;
+                if (RedirectNoisePhrases.Any(p => lowerHtml.Contains(p)) || IsNonUsHost(url))
+                {
+                    try
+                    {
+                        var usUrl = ForceToUSDomain(url);
+                        if (!string.Equals(usUrl, url, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogDebug("Retrying Audible URL using US domain: {UsUrl}", usUrl);
+                            using var retryReq = new HttpRequestMessage(HttpMethod.Get, usUrl);
+                            // copy headers
+                            foreach (var h in request.Headers)
+                                retryReq.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                            HttpClient? usClient = null;
+                            try
+                            {
+                                // Prefer a client configured from runtime application settings so proxy can be changed by user
+                                var appSettings = await _configurationService.GetApplicationSettingsAsync();
+                                if (appSettings != null && appSettings.UseUsProxy && !string.IsNullOrWhiteSpace(appSettings.UsProxyHost) && appSettings.UsProxyPort > 0)
+                                {
+                                    var handler = new HttpClientHandler
+                                    {
+                                        AutomaticDecompression = DecompressionMethods.All
+                                    };
+                                    var proxy = new WebProxy(appSettings.UsProxyHost, appSettings.UsProxyPort);
+                                    if (!string.IsNullOrWhiteSpace(appSettings.UsProxyUsername))
+                                        proxy.Credentials = new NetworkCredential(appSettings.UsProxyUsername, appSettings.UsProxyPassword ?? string.Empty);
+                                    handler.Proxy = proxy;
+                                    handler.UseProxy = true;
+                                    usClient = new HttpClient(handler, disposeHandler: true);
+                                }
+                                else if (_httpClientFactory != null)
+                                {
+                                    usClient = _httpClientFactory.CreateClient("us");
+                                }
+                                else
+                                {
+                                    usClient = _httpClient;
+                                }
+
+                                var retryResp = await usClient.SendAsync(retryReq);
+                                if (retryResp.IsSuccessStatusCode)
+                                    return await retryResp.Content.ReadAsStringAsync();
+                            }
+                            finally
+                            {
+                                // Dispose only if we created a dedicated client here
+                                if (usClient != null && usClient != _httpClient && (_httpClientFactory == null || usClient != _httpClientFactory.CreateClient("us")))
+                                {
+                                    try { usClient.Dispose(); } catch { }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed retrying Audible URL as US domain");
+                    }
+                }
+
+                return html;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching HTML from Audible URL: {Url}", url);
                 return null;
+            }
+        }
+
+    internal static bool IsNonUsHost(string url)
+        {
+            try
+            {
+                var u = new Uri(url);
+                var host = u.Host ?? string.Empty;
+                // If host contains audible but not .com, treat as non-US
+                if (host.Contains("audible", StringComparison.OrdinalIgnoreCase) && !host.EndsWith(".com", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+    internal static string ForceToUSDomain(string url)
+        {
+            try
+            {
+                var u = new Uri(url);
+                var host = u.Host;
+                if (host.Contains("audible", StringComparison.OrdinalIgnoreCase))
+                {
+                    var builder = new UriBuilder(u)
+                    {
+                        Host = "www.audible.com"
+                    };
+                    return builder.Uri.ToString();
+                }
+                return url;
+            }
+            catch
+            {
+                return url;
             }
         }
     }

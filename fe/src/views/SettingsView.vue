@@ -519,11 +519,17 @@
       <div v-if="activeTab === 'general'" class="tab-content">
         <div class="section-header">
           <h3>General Settings</h3>
-          <button @click="saveSettings" :disabled="configStore.isLoading" class="save-button">
+          <button @click="saveSettings" :disabled="configStore.isLoading || !isFormValid" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
             <i v-if="configStore.isLoading" class="ph ph-spinner ph-spin"></i>
             <i v-else class="ph ph-floppy-disk"></i>
             {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
           </button>
+        </div>
+        <div v-if="validationErrors.length > 0" class="error-summary" role="alert">
+          <strong>Please fix the following:</strong>
+          <ul>
+            <li v-for="(e, idx) in validationErrors" :key="idx">{{ e }}</li>
+          </ul>
         </div>
 
         <div v-if="settings" class="settings-form">
@@ -535,6 +541,7 @@
               <FolderBrowser 
                 v-model="settings.outputPath" 
                 placeholder="Select a folder for audiobooks..."
+                inputDataCy="output-path"
               />
               <span class="form-help">Root folder where downloaded audiobooks will be saved. This must be set before adding audiobooks.</span>
             </div>
@@ -636,6 +643,62 @@
           </div>
 
           <div class="form-section">
+            <h4><i class="ph ph-globe"></i> External Requests / US Proxy
+              <button type="button" class="info-inline" @click.prevent="openProxySecurityModal" title="Security recommendations">
+                <i class="ph ph-info"></i>
+              </button>
+            </h4>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.preferUsDomain" type="checkbox">
+                <span>
+                  <strong>Prefer US (.com) domain for Audible/Amazon</strong>
+                  <small>When enabled, the server will attempt a retry using the US (.com) domain if a localized or redirect page is detected.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.useUsProxy" type="checkbox">
+                <span>
+                  <strong>Use HTTP proxy for US requests</strong>
+                  <small>When enabled, Audible/Amazon retries to the US domain will be routed through the proxy configured below.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Host</label>
+              <input v-model="settings.usProxyHost" type="text" placeholder="proxy.example.com" :disabled="!settings.useUsProxy" data-cy="us-proxy-host">
+              <div v-if="settings.useUsProxy && (!settings.usProxyHost || String(settings.usProxyHost).trim() === '')" class="form-error">Proxy host is required when using a proxy.</div>
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Port</label>
+              <input v-model.number="settings.usProxyPort" type="number" min="1" max="65535" :disabled="!settings.useUsProxy" data-cy="us-proxy-port">
+              <div v-if="settings.useUsProxy && (!settings.usProxyPort || Number(settings.usProxyPort) <= 0)" class="form-error">Proxy port must be between 1 and 65535.</div>
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Username (optional)</label>
+              <input v-model="settings.usProxyUsername" type="text" placeholder="username" :disabled="!settings.useUsProxy">
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Password (optional)</label>
+              <div class="password-field">
+                <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
+                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <i :class="showPassword ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
+                </button>
+              </div>
+              <span class="form-help">Store proxy credentials here for convenience. For production, consider using a secrets manager instead of storing passwords in the application database.</span>
+            </div>
+
+            <hr />
+
             <h4><i class="ph ph-user-circle"></i> Authentication</h4>
             
             <div class="form-group">
@@ -848,10 +911,36 @@
       </div>
     </div>
   </div>
+
+  <!-- Proxy Security Modal -->
+  <div v-if="showProxySecurityModal" class="modal-overlay" @click="closeProxySecurityModal()">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <h3>
+          <i class="ph ph-shield-check"></i>
+          Proxy security recommendations
+        </h3>
+        <button @click="closeProxySecurityModal()" class="modal-close"><i class="ph ph-x"></i></button>
+      </div>
+      <div class="modal-body">
+        <p>Storing proxy credentials in the application database is convenient but has security implications. Consider the following:</p>
+        <ul>
+          <li>Use an OS-level secrets manager (Vault, Azure Key Vault, AWS Secrets Manager) when possible.</li>
+          <li>Restrict access to the application database and backups.</li>
+          <li>Rotate credentials periodically and prefer short-lived credentials where supported.</li>
+          <li>If you must store secrets in the DB, ensure the server is deployed on trusted infrastructure and consider application-level encryption.</li>
+        </ul>
+        <p>This modal only provides guidance; the current implementation persists the proxy password in ApplicationSettings. For production use, consider integrating a secrets store and referencing credentials instead of storing plaintext.</p>
+      </div>
+      <div class="modal-actions">
+        <button @click="closeProxySecurityModal()" class="save-button">Close</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -952,12 +1041,49 @@ const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
+  const showProxySecurityModal = ref(false)
+  const isProxyConfigValid = computed(() => {
+    if (!settings.value) return true
+    if (!settings.value.useUsProxy) return true
+    const host = (settings.value.usProxyHost || '').toString().trim()
+    const port = Number(settings.value.usProxyPort || 0)
+    return host.length > 0 && port > 0 && port <= 65535
+  })
+
+  const isFormValid = computed(() => {
+    // Required output path
+    if (!settings.value) return false
+    const outputPathValid = !!(settings.value.outputPath && String(settings.value.outputPath).trim().length > 0)
+
+    return outputPathValid && isProxyConfigValid.value
+  })
+
+  const validationErrors = computed(() => {
+    const errs: string[] = []
+    if (!settings.value) return errs
+    if (!settings.value.outputPath || String(settings.value.outputPath).trim().length === 0) errs.push('Output path is required')
+    if (settings.value.useUsProxy) {
+      const host = (settings.value.usProxyHost || '').toString().trim()
+      const port = Number(settings.value.usProxyPort || 0)
+      if (!host) errs.push('US proxy host is required when proxy is enabled')
+      if (!port || port <= 0 || port > 65535) errs.push('US proxy port must be between 1 and 65535')
+    }
+    return errs
+  })
 
   // Expose a toggle function for unit tests and template interactions that
   // prefer a method instead of inline assignment. Tests call
   // `wrapper.vm.toggleShowPassword()` so we expose it here.
   const toggleShowPassword = () => {
     showPassword.value = !showPassword.value
+  }
+
+  const openProxySecurityModal = () => {
+    showProxySecurityModal.value = true
+  }
+
+  const closeProxySecurityModal = () => {
+    showProxySecurityModal.value = false
   }
 
   // Make the function available on the component instance for Vue Test Utils
@@ -1120,23 +1246,34 @@ const saveApiConfig = () => {
 
 const saveSettings = async () => {
   if (!settings.value) return
-  
+
+  // Validate proxy fields if proxy usage is enabled
+  if (settings.value.useUsProxy && !isProxyConfigValid.value) {
+    toast.error('Invalid proxy', 'Please provide a valid proxy host and port (1-65535) when using a proxy.')
+    return
+  }
+
   try {
     // Create a copy of settings, excluding empty admin fields
     const settingsToSave = { ...settings.value }
-    
+
     // Only include adminUsername if it's not empty
     if (!settingsToSave.adminUsername || settingsToSave.adminUsername.trim() === '') {
       delete settingsToSave.adminUsername
     }
-    
+
     // Only include adminPassword if it's not empty
     if (!settingsToSave.adminPassword || settingsToSave.adminPassword.trim() === '') {
       delete settingsToSave.adminPassword
     }
-    
-  await configStore.saveApplicationSettings(settingsToSave)
-  toast.success('Settings', 'Settings saved successfully')
+
+    // Only include proxy password if non-empty (we allow empty to clear)
+    if (settingsToSave.usProxyPassword === undefined || settingsToSave.usProxyPassword === null) {
+      delete settingsToSave.usProxyPassword
+    }
+
+    await configStore.saveApplicationSettings(settingsToSave)
+    toast.success('Settings', 'Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
       const original = startupConfig.value || {}
@@ -1966,6 +2103,34 @@ onMounted(async () => {
 .password-toggle:hover {
   color: #fff;
 }
+
+.form-error {
+  color: #ff6b6b;
+  font-size: 0.9rem;
+  margin-top: 0.4rem;
+}
+
+.info-inline {
+  background: none;
+  border: none;
+  color: #9ec9ff;
+  margin-left: 0.5rem;
+  cursor: pointer;
+}
+
+.error-summary {
+  margin-top: 1rem;
+  background: rgba(231,76,60,0.06);
+  border: 1px solid rgba(231,76,60,0.12);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  color: #ff6b6b;
+}
+
+.error-summary ul {
+  margin: 0.5rem 0 0 1.2rem;
+}
+
 
 .api-key-row {
   display: flex;

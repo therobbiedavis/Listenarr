@@ -1,0 +1,84 @@
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Listenarr.Api.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Listenarr.Api.Tests
+{
+    public class UsDomainRetryTests
+    {
+        [Fact]
+        public async Task Audible_TryFetchProductTitle_RetriesToCom_WhenLocaleRedirectDetected()
+        {
+            // Arrange: handler returns localized redirect HTML for audible.de and valid og:title for audible.com
+            var handler = new DelegatingHandlerStub(req =>
+            {
+                var host = req.RequestUri?.Host ?? string.Empty;
+                if (host.Contains("audible.de", StringComparison.OrdinalIgnoreCase) || host.Contains("audible.eu", StringComparison.OrdinalIgnoreCase))
+                {
+                    var html = "<html><body><h1>Aufgrund deines Standorts haben wir dich zu audible.de weitergeleitet.</h1></body></html>";
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) });
+                }
+                // Default: return a US product page with og:title
+                var usHtml = "<html><head><meta property=\"og:title\" content=\"US Product Title\" /></head><body></body></html>";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(usHtml) });
+            });
+
+            var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.audible.de") };
+            var svc = new AudibleSearchService(httpClient, new NullLogger<AudibleSearchService>());
+
+            // Call internal TryFetchProductTitle directly (InternalsVisibleTo applied)
+            var title = await svc.TryFetchProductTitle("https://www.audible.de/pd/test-product", "B0TESTASIN");
+
+            // Assert that the service retried and returned the US og:title
+            Assert.Equal("US Product Title", title);
+        }
+
+        [Fact]
+        public async Task Amazon_GetHtmlAsync_RetriesToCom_WhenNonUsHostRequested()
+        {
+            // Arrange: handler returns locale redirect for amazon.de and valid content for amazon.com
+            var handler = new DelegatingHandlerStub(req =>
+            {
+                var host = req.RequestUri?.Host ?? string.Empty;
+                if (host.Contains("amazon.de", StringComparison.OrdinalIgnoreCase) || host.Contains("amazon.co.uk", StringComparison.OrdinalIgnoreCase))
+                {
+                    var html = "<html><body><p>We have redirected you to amazon.de due to your location</p></body></html>";
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) });
+                }
+                // Default: return a US product/search page
+                var usHtml = "<html><head><title>US Amazon Page</title></head><body>Product Content</body></html>";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(usHtml) });
+            });
+
+            var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.amazon.de") };
+            var svc = new AmazonAsinService(httpClient, new NullLogger<AmazonAsinService>());
+
+            // Call internal GetHtmlAsync directly (InternalsVisibleTo applied)
+            var html = await svc.GetHtmlAsync("https://www.amazon.de/s?k=test", CancellationToken.None);
+
+            Assert.NotNull(html);
+            Assert.Contains("US Amazon Page", html);
+        }
+    }
+
+    // Simple delegating handler stub to simulate network responses
+    internal class DelegatingHandlerStub : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _responder;
+
+        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder)
+        {
+            _responder = responder ?? throw new ArgumentNullException(nameof(responder));
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return _responder(request);
+        }
+    }
+}

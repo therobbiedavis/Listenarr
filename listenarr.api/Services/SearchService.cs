@@ -318,8 +318,8 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Starting intelligent search for: {Query}", query);
 
                 // Step 1: Parallel search Amazon & Audible
-                _logger.LogInformation("Searching Amazon and Audible for: {Query}", query);
-                await BroadcastSearchProgressAsync("Searching Amazon and Audible for query...", null);
+                _logger.LogInformation("Searching for: {Query}", query);
+                await BroadcastSearchProgressAsync($"Searching for {query}", null);
                 var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
                 var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
                 await Task.WhenAll(amazonTask, audibleTask);
