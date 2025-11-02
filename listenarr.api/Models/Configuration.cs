@@ -103,9 +103,22 @@ namespace Listenarr.Api.Models
         // Whether to show completed downloads from external clients in the Activity view
         public bool ShowCompletedExternalDownloads { get; set; } = false;
 
+        /// <summary>
+        /// Webhook URL for sending notifications.
+        /// </summary>
+        public string WebhookUrl { get; set; } = string.Empty;
+
+        /// <summary>
+        /// List of enabled notification triggers.
+        /// </summary>
+        public List<string> EnabledNotificationTriggers { get; set; } = new() { "book-added", "book-downloading", "book-available", "book-completed" };
+
         // Optional admin credentials submitted from the UI when saving settings.
         // These are NOT mapped to the ApplicationSettings table; they are used to create/update
         // a User record in the Users table via the ConfigurationService.
+        /// <summary>
+        /// Admin username submitted from the UI (not persisted to the settings table).
+        /// </summary>
         [NotMapped]
         public string? AdminUsername { get; set; }
 

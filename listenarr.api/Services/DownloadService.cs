@@ -39,6 +39,7 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IRemotePathMappingService _pathMappingService;
         private readonly ISearchService _searchService;
+        private readonly NotificationService? _notificationService;
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
@@ -49,7 +50,8 @@ namespace Listenarr.Api.Services
             IServiceScopeFactory serviceScopeFactory,
             IRemotePathMappingService pathMappingService,
             ISearchService searchService,
-            IHubContext<DownloadHub> hubContext)
+            IHubContext<DownloadHub> hubContext,
+            NotificationService? notificationService = null)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
@@ -60,6 +62,7 @@ namespace Listenarr.Api.Services
             _pathMappingService = pathMappingService;
             _searchService = searchService;
             _hubContext = hubContext;
+            _notificationService = notificationService;
         }
 
         public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
@@ -513,6 +516,34 @@ namespace Listenarr.Api.Services
                     await _dbContext.SaveChangesAsync();
                     _logger.LogInformation("Updated download {DownloadId} with qBittorrent hash: {Hash}", downloadId, clientSpecificId);
                 }
+            }
+
+            // Send notification for book-downloading event
+            using (var scope = _serviceScopeFactory.CreateScope())
+            {
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = await configService.GetApplicationSettingsAsync();
+                
+                // Fetch audiobook details for richer notification
+                Audiobook? audiobook = null;
+                if (audiobookId.HasValue)
+                {
+                    audiobook = await _dbContext.Audiobooks.FindAsync(audiobookId.Value);
+                }
+                
+                await _notificationService.SendNotificationAsync("book-downloading", new
+                {
+                    downloadId = downloadId,
+                    title = searchResult.Title ?? audiobook?.Title ?? "Unknown Title",
+                    authors = audiobook?.Authors ?? new List<string> { searchResult.Artist ?? "Unknown Artist" },
+                    asin = audiobook?.Asin,
+                    imageUrl = audiobook?.ImageUrl,
+                    description = audiobook?.Description,
+                    size = searchResult.Size,
+                    source = searchResult.Source ?? "Unknown Source",
+                    downloadClient = downloadClient.Name ?? "Unknown Client",
+                    audiobookId = audiobookId
+                }, settings.WebhookUrl, settings.EnabledNotificationTriggers);
             }
 
             return downloadId;
@@ -3532,6 +3563,36 @@ namespace Listenarr.Api.Services
                     }
 
                     await dbContext.SaveChangesAsync();
+
+                    // Send notification for book-completed event
+                    if (_notificationService != null)
+                    {
+                        using (var notificationScope = _serviceScopeFactory.CreateScope())
+                        {
+                            var notificationConfigService = notificationScope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                            var notificationSettings = await notificationConfigService.GetApplicationSettingsAsync();
+                            
+                            // Fetch audiobook details for richer notification
+                            Audiobook? audiobook = null;
+                            if (completedDownload.AudiobookId.HasValue)
+                            {
+                                audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
+                            }
+                            
+                            await _notificationService.SendNotificationAsync("book-completed", new
+                            {
+                                downloadId = downloadId,
+                                title = completedDownload.Title ?? audiobook?.Title ?? "Unknown Title",
+                                authors = audiobook?.Authors ?? new List<string> { completedDownload.Artist ?? "Unknown Artist" },
+                                asin = audiobook?.Asin,
+                                imageUrl = audiobook?.ImageUrl,
+                                description = audiobook?.Description,
+                                size = completedDownload.TotalSize,
+                                finalPath = completedDownload.FinalPath,
+                                audiobookId = completedDownload.AudiobookId
+                            }, notificationSettings.WebhookUrl, notificationSettings.EnabledNotificationTriggers);
+                        }
+                    }
 
                     try
                     {

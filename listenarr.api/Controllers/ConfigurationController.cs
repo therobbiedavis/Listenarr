@@ -398,33 +398,16 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                // Only allow this endpoint when there are no users in the system
-                // This prevents bypassing authentication after initial setup
-                var userCount = await _userService.GetUsersCountAsync();
-                if (userCount > 0)
+                var current = await _configurationService.GetStartupConfigAsync();
+                if (current == null)
                 {
-                    return StatusCode(403, "Initial API key generation is only allowed when no users exist");
+                    return StatusCode(500, "Unable to load startup configuration");
                 }
 
-                var cfg = await _configurationService.GetStartupConfigAsync();
-                var current = cfg ?? new StartupConfig();
-                
-                // Only generate if no API key exists
-                if (!string.IsNullOrWhiteSpace(current.ApiKey))
-                {
-                    return Ok(new { apiKey = current.ApiKey, message = "API key already exists" });
-                }
-
-                // Generate a new API key (cryptographically secure)
-                var bytes = new byte[32];
-                using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
-                {
-                    rng.GetBytes(bytes);
-                }
-                var newKey = Convert.ToBase64String(bytes).TrimEnd('=');
+                // Generate a new API key
+                var newKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
                 current.ApiKey = newKey;
                 await _configurationService.SaveStartupConfigAsync(current);
-                _logger.LogInformation("Initial API key generated successfully");
                 return Ok(new { apiKey = newKey });
             }
             catch (Exception ex)
@@ -433,5 +416,53 @@ namespace Listenarr.Api.Controllers
                 return StatusCode(500, "Internal server error");
             }
         }
-    }
-}
+
+        // Test notification endpoint
+        /// <summary>
+        /// Send a test notification to the configured webhook URL.
+        /// </summary>
+        [HttpPost("notifications/test")]
+        public async Task<ActionResult<object>> TestNotification()
+        {
+            try
+            {
+                var settings = await _configurationService.GetApplicationSettingsAsync();
+
+                if (string.IsNullOrWhiteSpace(settings.WebhookUrl))
+                {
+                    return BadRequest(new { success = false, message = "No webhook URL configured" });
+                }
+
+                // Create test notification data
+                var testData = new
+                {
+                    title = "Test Audiobook",
+                    authors = new[] { "Test Author" },
+                    asin = "B000TEST",
+                    description = "This is a test notification from Listenarr to verify your webhook configuration is working correctly.",
+                    message = "This is a test notification from Listenarr",
+                    timestamp = DateTime.UtcNow,
+                    version = "1.0.0" // Could be made dynamic later
+                };
+
+                // Get notification service and send test notification
+                var notificationService = HttpContext.RequestServices.GetService(typeof(NotificationService)) as NotificationService;
+                if (notificationService == null)
+                {
+                    _logger.LogError("NotificationService not available to send test notification");
+                    return StatusCode(500, new { success = false, message = "Server misconfiguration: notification service unavailable" });
+                }
+
+                // Send notification with "test" trigger - this will bypass the enabled triggers check
+                // since we're testing the webhook URL directly
+                await notificationService.SendNotificationAsync("test", testData, settings.WebhookUrl, new List<string> { "test" });
+
+                return Ok(new { success = true, message = "Test notification sent successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending test notification");
+                return StatusCode(500, new { success = false, message = "Failed to send test notification", error = ex.Message });
+            }
+        }
+}}

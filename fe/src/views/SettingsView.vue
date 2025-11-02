@@ -49,6 +49,14 @@
   <PhSliders />
         General Settings
       </button>
+      <button 
+        @click="router.push({ hash: '#notifications' })" 
+        :class="{ active: activeTab === 'notifications' }"
+        class="tab-button"
+      >
+  <PhBell />
+        Notifications
+      </button>
     </div>
 
     <div class="settings-content">
@@ -802,6 +810,86 @@
           </div>
         </div>
       </div>
+
+      <!-- Notifications Tab -->
+      <div v-if="activeTab === 'notifications'" class="tab-content">
+        <div class="section-header">
+          <h3>Notification Settings</h3>
+          <button @click="saveSettings" :disabled="configStore.isLoading || (activeTab !== 'notifications' && !isFormValid)" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
+            <template v-if="configStore.isLoading">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else>
+              <PhFloppyDisk />
+            </template>
+            {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
+          </button>
+        </div>
+
+        <div v-if="settings" class="settings-form">
+          <div class="form-section">
+            <h4><PhBell /> Webhook Configuration</h4>
+            
+            <div class="form-group">
+              <label>Webhook URL</label>
+              <div class="input-group">
+                <input v-model="settings.webhookUrl" type="text" placeholder="https://hooks.slack.com/services/...">
+                <div class="input-group-append">
+                  <button 
+                    @click="testNotification" 
+                    :disabled="!settings.webhookUrl || settings.webhookUrl.trim() === '' || testingNotification"
+                    class="input-group-btn test-button"
+                    :title="!settings.webhookUrl || settings.webhookUrl.trim() === '' ? 'Enter a webhook URL first' : 'Send test notification'"
+                  >
+                    <template v-if="testingNotification">
+                      <PhSpinner class="ph-spin" />
+                    </template>
+                    <template v-else>
+                      <PhPaperPlaneTilt />
+                    </template>
+                    Test
+                  </button>
+                </div>
+              </div>
+              <span class="form-help">URL to send notification events to. Leave empty to disable webhook notifications.</span>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h4><PhListChecks /> Notification Triggers</h4>
+            
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.enabledNotificationTriggers" value="book-added" type="checkbox">
+                <span>
+                  <strong>Book Added</strong>
+                  <small>Send notification when a new audiobook is added to the library</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.enabledNotificationTriggers" value="book-downloading" type="checkbox">
+                <span>
+                  <strong>Book Downloading</strong>
+                  <small>Send notification when an audiobook download starts</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.enabledNotificationTriggers" value="book-available" type="checkbox">
+                <span>
+                  <strong>Book Available</strong>
+                  <small>Send notification when an audiobook download completes and is ready</small>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- API Configuration Modal (placeholder) -->
@@ -989,7 +1077,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
-import { PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink, PhListChecks, PhClock, PhXCircle, PhWarning, PhCloudSlash, PhArrowUp, PhDownloadSimple, PhShieldCheck, PhLock, PhLockOpen, PhFolder, PhLinkSimple, PhBrowser, PhCheck, PhX, PhWarningCircle, PhCheckSquare, PhRuler, PhUsers, PhTextAa, PhSparkle, PhGlobe, PhInfo, PhUserCircle, PhFloppyDisk, PhFiles, PhArrowCounterClockwise, PhEye, PhEyeSlash, PhScissors } from '@phosphor-icons/vue'
+import { PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink, PhListChecks, PhClock, PhXCircle, PhWarning, PhCloudSlash, PhArrowUp, PhDownloadSimple, PhShieldCheck, PhLock, PhLockOpen, PhFolder, PhLinkSimple, PhBrowser, PhCheck, PhX, PhWarningCircle, PhCheckSquare, PhRuler, PhUsers, PhTextAa, PhSparkle, PhGlobe, PhInfo, PhUserCircle, PhFloppyDisk, PhFiles, PhArrowCounterClockwise, PhEye, PhEyeSlash, PhScissors, PhBell } from '@phosphor-icons/vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
 import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
@@ -1000,7 +1088,7 @@ const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
 const toast = useToast()
-const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general'>('indexers')
+const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'notifications'>('indexers')
 const showApiForm = ref(false)
 const showClientForm = ref(false)
 const showIndexerForm = ref(false)
@@ -1079,6 +1167,7 @@ const authEnabled = ref(false)
 const indexers = ref<Indexer[]>([])
 const qualityProfiles = ref<QualityProfile[]>([])
 const remotePathMappings = ref<RemotePathMapping[]>([])
+const testingNotification = ref(false)
 const testingIndexer = ref<number | null>(null)
 const testingClient = ref<string | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
@@ -1236,38 +1325,26 @@ const executeDeleteClient = async (id?: string) => {
 }
 
 // Test a download client configuration (include credentials in payload)
-const testClient = async (client: DownloadClientConfiguration) => {
-  testingClient.value = client.id
-  try {
-    // Ensure antiforgery token is issued for the current auth principal.
-    // This prevents failures when a token was fetched while anonymous and
-    // later reused after authentication ("meant for a different claims-based user").
-    try {
-      await apiService.ensureAntiforgeryForCurrentAuth()
-    } catch (e) {
-      // Non-fatal: we'll still attempt the test request and surface any server error
-      console.debug('ensureAntiforgeryForCurrentAuth failed', e)
-    }
+const testNotification = async () => {
+  if (!settings.value?.webhookUrl || settings.value.webhookUrl.trim() === '') {
+    toast.error('Test failed', 'Please enter a webhook URL first')
+    return
+  }
 
-    // Send full client config to server for testing (credentials included)
-    const result = await apiTestDownloadClient(client)
-    if (result && result.success) {
-      toast.success('Download client', result.message || 'Test succeeded')
-      // Update local list if server returned an updated client object
-      if (result.client) {
-        const idx = configStore.downloadClientConfigurations.findIndex(c => c.id === result.client!.id)
-        if (idx !== -1) configStore.downloadClientConfigurations[idx] = result.client as DownloadClientConfiguration
-      }
+  testingNotification.value = true
+  try {
+    const response = await apiService.testNotification()
+    if (response.success) {
+      toast.success('Test notification', response.message || 'Test notification sent successfully')
     } else {
-      const message = (result && result.message) ? result.message : 'Test failed'
-      toast.error('Download client test failed', message)
+      toast.error('Test failed', response.message || 'Failed to send test notification')
     }
-  } catch (err) {
-    console.error('Failed to test download client:', err)
-    const errorMessage = formatApiError(err)
-    toast.error('Download client test failed', errorMessage)
+  } catch (error) {
+    console.error('Failed to test notification:', error)
+    const errorMessage = formatApiError(error)
+    toast.error('Test failed', errorMessage)
   } finally {
-    testingClient.value = null
+    testingNotification.value = false
   }
 }
 
@@ -1408,6 +1485,35 @@ const testIndexerFunc = async (id: number) => {
     toast.error('Indexer test failed', errorMessage)
   } finally {
     testingIndexer.value = null
+  }
+}
+
+const testClient = async (client: DownloadClientConfiguration) => {
+  testingClient.value = client.id
+  try {
+    const result = await apiTestDownloadClient(client.id)
+    if (result.success) {
+      toast.success('Download client test', `Download client tested successfully: ${result.message}`)
+      // Update the client with test results
+      const index = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
+      if (index !== -1) {
+        configStore.downloadClientConfigurations[index] = result.client
+      }
+    } else {
+      const errorMessage = formatApiError({ response: { data: result.error || result.message } })
+      toast.error('Download client test failed', errorMessage)
+      // Still update to show failed test status
+      const index = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
+      if (index !== -1) {
+        configStore.downloadClientConfigurations[index] = result.client
+      }
+    }
+  } catch (error) {
+    console.error('Failed to test download client:', error)
+    const errorMessage = formatApiError(error)
+    toast.error('Download client test failed', errorMessage)
+  } finally {
+    testingClient.value = null
   }
 }
 
@@ -1601,8 +1707,8 @@ const formatDate = (dateString: string | undefined): string => {
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
-  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general'
-  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general'].includes(hash)) {
+  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'notifications'
+  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'notifications'].includes(hash)) {
     activeTab.value = hash
   } else {
     // Default to indexers and update URL
@@ -1661,6 +1767,8 @@ async function loadTabContents(tab: string) {
           settings.value = configStore.applicationSettings
           // Ensure sensible default
           if (settings.value && !settings.value.completedFileAction) settings.value.completedFileAction = 'Move'
+          // Initialize notification triggers array if not present
+          if (settings.value && !settings.value.enabledNotificationTriggers) settings.value.enabledNotificationTriggers = []
 
           try {
             remotePathMappings.value = await getRemotePathMappings()
@@ -1681,6 +1789,12 @@ async function loadTabContents(tab: string) {
           }
 
           loaded.general = true
+        }
+        break
+      case 'notifications':
+        // Notifications are part of general settings
+        if (!loaded.general) {
+          await loadTabContents('general')
         }
         break
       default:

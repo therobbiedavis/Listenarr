@@ -1171,9 +1171,10 @@ const hideLayout = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  font-size: 18px;
+  /* Increased size for better visibility */
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
   color: #c7cfd6; /* slightly brighter than default */
   border-radius: 8px;
 }
@@ -1184,7 +1185,17 @@ const hideLayout = computed(() => {
 
 .top-nav .nav-user-btn .ph,
 .top-nav .nav-btn .ph {
-  font-size: 18px; /* ensure consistent glyph size */
+  font-size: 22px; /* ensure consistent glyph size */
+}
+
+/* Sidebar navigation icons (Phosphor icons render as SVG) */
+.sidebar .nav-item svg,
+.sidebar .nav-item .ph {
+  width: 28px;
+  height: 28px;
+  font-size: 20px;
+  flex-shrink: 0;
+  color: #c7cfd6;
 }
 
 .inline-spinner {

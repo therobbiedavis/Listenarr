@@ -356,6 +356,12 @@ class ApiService {
     })
   }
 
+  async testNotification(): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>('/configuration/notifications/test', {
+      method: 'POST'
+    })
+  }
+
   // Application Settings
   async getApplicationSettings(): Promise<ApplicationSettings> {
     return this.request<ApplicationSettings>('/configuration/settings')
@@ -555,22 +561,43 @@ class ApiService {
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       return imageUrl
     }
-      // Convert relative URL to absolute and append access_token if an API key is present
-      const absolute = `${BACKEND_BASE_URL}${imageUrl}`
+    // If the stored path is the library cache path, convert to our images API endpoint
+    // Example stored path: /config/cache/images/library/B0DD5FX7QG.jpg
+    try {
+      const libMatch = imageUrl.match(/\/config\/cache\/images\/library\/(.+)$/)
+      if (libMatch && libMatch[1]) {
+        // Extract filename (with extension) and strip extension to use as identifier
+        const filename = libMatch[1]
+        const identifier = filename.replace(/\.[^.]+$/, '')
+        let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
 
-      // Use synchronous cached startup config getter to avoid async/await here
-      try {
+        // Append access_token if API key is configured
         const cfg = getCachedStartupConfig()
         const apiKey = cfg?.apiKey
         if (apiKey) {
-          const sep = absolute.includes('?') ? '&' : '?'
-          return `${absolute}${sep}access_token=${encodeURIComponent(apiKey)}`
+          url += `?access_token=${encodeURIComponent(apiKey)}`
         }
-      } catch {
-        // ignore and return plain absolute URL
+        return url
       }
+    } catch (e) {
+      // fall back to default behavior below on any error
+      try { console.debug('[ApiService] getImageUrl library-detect error', e) } catch {}
+    }
 
-      return absolute
+    // Convert other relative URLs to absolute and append access_token if an API key is present
+    const absolute = `${BACKEND_BASE_URL}${imageUrl}`
+    try {
+      const cfg = getCachedStartupConfig()
+      const apiKey = cfg?.apiKey
+      if (apiKey) {
+        const sep = absolute.includes('?') ? '&' : '?'
+        return `${absolute}${sep}access_token=${encodeURIComponent(apiKey)}`
+      }
+    } catch {
+      // ignore and return plain absolute URL
+    }
+
+    return absolute
   }
 
   // History API

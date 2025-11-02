@@ -369,8 +369,38 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning(ex, "Failed to handle legacy filePath migration for audiobook {AudiobookId}", audiobook.Id);
                         }
 
-                        // update job status and broadcast completion
-                        try { _queue.UpdateJobStatus(job.Id, "Completed"); } catch { }
+                        // Send "book-available" notification if the audiobook is monitored and files were imported
+                        if (audiobook.Monitored && createdFiles > 0)
+                        {
+                            try
+                            {
+                                using var notificationScope = _scopeFactory.CreateScope();
+                                var notificationService = notificationScope.ServiceProvider.GetService<NotificationService>();
+                                var configService = notificationScope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                                var settings = await configService.GetApplicationSettingsAsync();
+                                var availableData = new
+                                {
+                                    id = audiobook.Id,
+                                    title = audiobook.Title ?? "Unknown Title",
+                                    authors = audiobook.Authors,
+                                    asin = audiobook.Asin,
+                                    imageUrl = audiobook.ImageUrl,
+                                    description = audiobook.Description,
+                                    monitored = audiobook.Monitored,
+                                    qualityProfileId = audiobook.QualityProfileId,
+                                    filesImported = createdFiles,
+                                    totalFiles = 0 // Will be updated below
+                                };
+                                if (notificationService != null)
+                                {
+                                    await notificationService.SendNotificationAsync("book-available", availableData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to send book-available notification for audiobook {AudiobookId} in background scan", audiobook.Id);
+                            }
+                        }
 
                         // Detach the previously-tracked audiobook entity so the subsequent query fetches fresh DB state
                         try { db.Entry(audiobook).State = EntityState.Detached; } catch { }
