@@ -519,31 +519,24 @@ namespace Listenarr.Api.Services
             }
 
             // Send notification for book-downloading event
-            using (var scope = _serviceScopeFactory.CreateScope())
+            if (_notificationService != null)
             {
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
-                
-                // Fetch audiobook details for richer notification
-                Audiobook? audiobook = null;
-                if (audiobookId.HasValue)
+                using (var scope = _serviceScopeFactory.CreateScope())
                 {
-                    audiobook = await _dbContext.Audiobooks.FindAsync(audiobookId.Value);
+                    var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                    var settings = await configService.GetApplicationSettingsAsync();
+                    await _notificationService.SendNotificationAsync("book-downloading", new
+                    {
+                        downloadId = downloadId,
+                        title = searchResult.Title ?? "Unknown Title",
+                        artist = searchResult.Artist ?? "Unknown Artist",
+                        album = searchResult.Album ?? "Unknown Album",
+                        size = searchResult.Size,
+                        source = searchResult.Source ?? "Unknown Source",
+                        downloadClient = downloadClient.Name ?? "Unknown Client",
+                        audiobookId = audiobookId
+                    }, settings.WebhookUrl, settings.EnabledNotificationTriggers);
                 }
-                
-                await _notificationService.SendNotificationAsync("book-downloading", new
-                {
-                    downloadId = downloadId,
-                    title = searchResult.Title ?? audiobook?.Title ?? "Unknown Title",
-                    authors = audiobook?.Authors ?? new List<string> { searchResult.Artist ?? "Unknown Artist" },
-                    asin = audiobook?.Asin,
-                    imageUrl = audiobook?.ImageUrl,
-                    description = audiobook?.Description,
-                    size = searchResult.Size,
-                    source = searchResult.Source ?? "Unknown Source",
-                    downloadClient = downloadClient.Name ?? "Unknown Client",
-                    audiobookId = audiobookId
-                }, settings.WebhookUrl, settings.EnabledNotificationTriggers);
             }
 
             return downloadId;
@@ -3571,22 +3564,12 @@ namespace Listenarr.Api.Services
                         {
                             var notificationConfigService = notificationScope.ServiceProvider.GetRequiredService<IConfigurationService>();
                             var notificationSettings = await notificationConfigService.GetApplicationSettingsAsync();
-                            
-                            // Fetch audiobook details for richer notification
-                            Audiobook? audiobook = null;
-                            if (completedDownload.AudiobookId.HasValue)
-                            {
-                                audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                            }
-                            
                             await _notificationService.SendNotificationAsync("book-completed", new
                             {
                                 downloadId = downloadId,
-                                title = completedDownload.Title ?? audiobook?.Title ?? "Unknown Title",
-                                authors = audiobook?.Authors ?? new List<string> { completedDownload.Artist ?? "Unknown Artist" },
-                                asin = audiobook?.Asin,
-                                imageUrl = audiobook?.ImageUrl,
-                                description = audiobook?.Description,
+                                title = completedDownload.Title ?? "Unknown Title",
+                                artist = completedDownload.Artist ?? "Unknown Artist",
+                                album = completedDownload.Album ?? "Unknown Album",
                                 size = completedDownload.TotalSize,
                                 finalPath = completedDownload.FinalPath,
                                 audiobookId = completedDownload.AudiobookId

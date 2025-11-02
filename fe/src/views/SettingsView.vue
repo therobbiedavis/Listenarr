@@ -1491,20 +1491,20 @@ const testIndexerFunc = async (id: number) => {
 const testClient = async (client: DownloadClientConfiguration) => {
   testingClient.value = client.id
   try {
-    const result = await apiTestDownloadClient(client.id)
+    const result = await apiTestDownloadClient(client)
     if (result.success) {
       toast.success('Download client test', `Download client tested successfully: ${result.message}`)
       // Update the client with test results
       const index = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
-      if (index !== -1) {
+      if (index !== -1 && result.client) {
         configStore.downloadClientConfigurations[index] = result.client
       }
     } else {
-      const errorMessage = formatApiError({ response: { data: result.error || result.message } })
+      const errorMessage = formatApiError({ response: { data: result.message } })
       toast.error('Download client test failed', errorMessage)
       // Still update to show failed test status
       const index = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
-      if (index !== -1) {
+      if (index !== -1 && result.client) {
         configStore.downloadClientConfigurations[index] = result.client
       }
     }
