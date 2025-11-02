@@ -3,29 +3,29 @@
     <!-- Top Navigation Bar -->
     <div class="top-nav">
       <button class="nav-btn" @click="goBack">
-        <i class="ph ph-arrow-left"></i>
+        <PhArrowLeft />
         Back
       </button>
       <div class="nav-actions">
         <button class="nav-btn" @click="refresh">
-          <i class="ph ph-arrow-clockwise"></i>
+          <PhArrowClockwise />
           Refresh
         </button>
         <button class="nav-btn" @click="toggleMonitored">
-          <i class="ph ph-bookmark" :class="{ 'ph-fill': audiobook.monitored }"></i>
+          <PhBookmark :weight="audiobook.monitored ? 'fill' : 'regular'" />
           {{ audiobook.monitored ? 'Monitored' : 'Monitor' }}
         </button>
         <!-- Scan button moved to top nav: enqueues a background scan and shows queued feedback -->
         <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
-          <i v-if="scanning" class="ph ph-spinner ph-spin"></i>
-          <i v-else-if="scanQueued" class="ph ph-clock"></i>
-          <i v-else class="ph ph-magnifying-glass"></i>
+          <PhSpinner v-if="scanning" class="ph-spin" />
+          <PhClock v-else-if="scanQueued" />
+          <PhMagnifyingGlass v-else />
           <span v-if="scanning">Scanning...</span>
           <span v-else-if="scanQueued">Scan queued</span>
           <span v-else>Scan Folder</span>
         </button>
         <button class="nav-btn delete-btn" @click="confirmDelete">
-          <i class="ph ph-trash"></i>
+          <PhTrash />
           Delete
         </button>
       </div>
@@ -48,7 +48,7 @@
           
           <div class="meta-info">
             <span class="runtime" v-if="audiobook.runtime">
-              <i class="ph ph-clock"></i>
+              <PhClock />
               {{ formatRuntime(audiobook.runtime) }}
             </span>
             <span class="genre">{{ audiobook.genres?.join(', ') || 'Audiobook' }}</span>
@@ -58,42 +58,42 @@
 
           <div class="key-details">
             <div class="detail-item" v-if="displayBasePath">
-              <i class="ph ph-folder"></i>
+              <PhFolder />
               <span class="file-path">{{ displayBasePath }}</span>
             </div>
             <div class="detail-item" v-if="audiobook.fileSize">
-              <i class="ph ph-database"></i>
+              <PhDatabase />
               <span>{{ formatFileSize(audiobook.fileSize) }}</span>
             </div>
             <div class="detail-item" v-if="audiobook.quality">
-              <i class="ph ph-speaker-high"></i>
+              <PhSpeakerHigh />
               <span>{{ audiobook.quality }}</span>
             </div>
             <div class="detail-item" v-if="audiobook.language">
-              <i class="ph ph-globe"></i>
+              <PhGlobe />
               <span>{{ audiobook.language }}</span>
             </div>
             <div class="detail-item">
-              <i class="ph ph-tag"></i>
+              <PhTag />
               <span>{{ audiobook.abridged ? 'Abridged' : 'Unabridged' }}</span>
             </div>
           </div>
 
           <div class="status-badges">
             <span class="badge monitored" v-if="audiobook.monitored">
-              <i class="ph ph-bookmark-fill"></i>
+              <PhBookmark weight="fill" />
               Monitored
             </span>
             <span class="badge quality-profile" v-if="assignedProfileName">
-              <i class="ph ph-star"></i>
+              <PhStar />
               Quality: {{ assignedProfileName }}
             </span>
             <span class="badge language">
-              <i class="ph ph-chat-circle"></i>
+              <PhChatCircle />
               {{ audiobook.language || 'English' }}
             </span>
             <span class="badge tlc" v-if="audiobook.version">
-              <i class="ph ph-music-notes"></i>
+              <PhMusicNotes />
               {{ audiobook.version }}
             </span>
           </div>
@@ -131,7 +131,7 @@
           :class="{ active: activeTab === 'details' }"
           @click="activeTab = 'details'"
         >
-          <i class="ph ph-info"></i>
+          <PhInfo />
           Details
         </button>
         <button 
@@ -139,7 +139,7 @@
           :class="{ active: activeTab === 'files' }"
           @click="activeTab = 'files'"
         >
-          <i class="ph ph-file"></i>
+          <PhFile />
           Files
         </button>
         <button 
@@ -147,7 +147,7 @@
           :class="{ active: activeTab === 'history' }"
           @click="activeTab = 'history'"
         >
-          <i class="ph ph-clock-counter-clockwise"></i>
+          <PhClockCounterClockwise />
           History
         </button>
       </div>
@@ -238,7 +238,7 @@
             <!-- Scan job status (updated via SignalR) -->
             <div v-if="scanJobId" class="scan-job-status">
               <div class="job-row">
-                <i class="ph ph-clock"></i>
+                <PhClock />
                 <strong>Scan job:</strong>
                 <span class="job-id">{{ scanJobId }}</span>
               </div>
@@ -253,14 +253,14 @@
           <div v-for="f in audiobook.files" :key="f.id" class="file-item" :class="{ 'expanded': isFileAccordionExpanded(f.id) }">
             <div class="file-header" @click="toggleFileAccordion(f.id)">
               <div class="file-info">
-                <i class="ph ph-file-audio"></i>
+                <PhFileAudio />
                 <span class="file-name">{{ getFileName(f.path) }}</span>
                 <small class="file-meta">• {{ f.format ? f.format.toUpperCase() : '' }} {{ f.durationSeconds ? '• ' + formatDuration(f.durationSeconds) : '' }}</small>
               </div>
               <div class="file-actions">
                 <span class="file-size" v-if="f.size">{{ formatFileSize(f.size) }}</span>
                 <span class="file-size" v-else>Unknown size</span>
-                <i class="ph ph-chevron-down accordion-toggle" :class="{ 'rotated': isFileAccordionExpanded(f.id) }"></i>
+                <PhCaretDown class="accordion-toggle" :class="{ 'rotated': isFileAccordionExpanded(f.id) }" />
               </div>
             </div>
             <div v-if="isFileAccordionExpanded(f.id)" class="file-accordion">
@@ -316,7 +316,7 @@
           </div>
         </div>
         <div v-else class="empty-files">
-          <i class="ph ph-file-dashed"></i>
+          <PhFileDashed />
           <p>No files available</p>
           <p class="hint">This audiobook hasn't been downloaded yet</p>
         </div>
@@ -327,20 +327,20 @@
         <div class="history-header">
           <h3>History</h3>
           <button v-if="historyEntries.length > 0" class="refresh-btn" @click="loadHistory" :disabled="historyLoading">
-            <i class="ph ph-arrow-clockwise" :class="{ 'ph-spin': historyLoading }"></i>
+            <PhArrowClockwise :class="{ 'ph-spin': historyLoading }" />
             Refresh
           </button>
         </div>
         
         <!-- Loading State -->
         <div v-if="historyLoading" class="history-loading">
-          <i class="ph ph-spinner ph-spin"></i>
+          <PhSpinner class="ph-spin" />
           <p>Loading history...</p>
         </div>
         
         <!-- Error State -->
         <div v-else-if="historyError" class="history-error">
-          <i class="ph ph-warning-circle"></i>
+          <PhWarningCircle />
           <p>{{ historyError }}</p>
           <button class="retry-btn" @click="loadHistory">Retry</button>
         </div>
@@ -349,12 +349,15 @@
         <div v-else-if="historyEntries.length > 0" class="history-list">
           <div v-for="entry in historyEntries" :key="entry.id" class="history-entry">
             <div class="history-icon" :class="getEventTypeClass(entry.eventType)">
-              <i :class="getEventIcon(entry.eventType)"></i>
+              <component :is="getEventIconComponent(entry.eventType)" />
             </div>
             <div class="history-details">
               <div class="history-event">
-                <span class="event-type">{{ entry.eventType }}</span>
-                <span v-if="entry.source" class="event-source">from {{ entry.source }}</span>
+                <span class="event-type">{{ formatEventTitle(entry.eventType) }}</span>
+                <span v-if="entry.notificationSent" class="discord-pill">
+                  <PhDiscordLogo :size="14" />
+                  Notified
+                </span>
               </div>
               <div v-if="entry.message" class="history-message">{{ entry.message }}</div>
               <div class="history-time">{{ formatHistoryTime(entry.timestamp) }}</div>
@@ -364,7 +367,7 @@
         
         <!-- Empty State -->
         <div v-else class="empty-history">
-          <i class="ph ph-clock-counter-clockwise"></i>
+          <PhClockCounterClockwise />
           <p>No history available</p>
           <p class="hint">Activity for this audiobook will appear here</p>
         </div>
@@ -376,7 +379,7 @@
       <div class="dialog" @click.stop>
         <div class="dialog-header">
           <h3>
-            <i class="ph ph-warning"></i>
+            <PhWarning />
             Confirm Deletion
           </h3>
         </div>
@@ -389,8 +392,8 @@
             Cancel
           </button>
           <button class="dialog-btn confirm-btn" @click="executeDelete" :disabled="deleting">
-            <i v-if="deleting" class="ph ph-spinner ph-spin"></i>
-            <i v-else class="ph ph-trash"></i>
+            <PhSpinner v-if="deleting" class="ph-spin" />
+            <PhTrash v-else />
             {{ deleting ? 'Deleting...' : 'Delete' }}
           </button>
         </div>
@@ -400,24 +403,24 @@
 
   <!-- Loading State -->
   <div v-else-if="loading" class="loading-container">
-    <i class="ph ph-spinner ph-spin"></i>
+    <PhSpinner class="ph-spin" />
     <p>Loading audiobook details...</p>
   </div>
 
   <!-- Error State -->
   <div v-else-if="error" class="error-container">
-    <i class="ph ph-warning-circle"></i>
+    <PhWarningCircle />
     <h2>Error Loading Audiobook</h2>
     <p>{{ error }}</p>
     <button @click="goBack" class="back-btn">
-      <i class="ph ph-arrow-left"></i>
+      <PhArrowLeft />
       Back to Library
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed, type Component } from 'vue'
 import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
@@ -427,6 +430,41 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
+import { 
+  PhArrowLeft, 
+  PhArrowClockwise, 
+  PhBookmark, 
+  PhSpinner, 
+  PhMagnifyingGlass, 
+  PhTrash, 
+  PhClock, 
+  PhFolder,
+  PhDatabase,
+  PhSpeakerHigh,
+  PhGlobe,
+  PhTag,
+  PhBookmarkSimple,
+  PhStar,
+  PhChatCircle,
+  PhMusicNotes,
+  PhInfo,
+  PhFile,
+  PhClockCounterClockwise,
+  PhFileAudio,
+  PhCaretDown,
+  PhFileDashed,
+  PhWarning,
+  PhWarningCircle,
+  PhPlusCircle,
+  PhDownload,
+  PhUpload,
+  PhPencil,
+  PhHandGrabbing,
+  PhFilePlus,
+  PhFileMinus,
+  PhCircle,
+  PhDiscordLogo
+} from '@phosphor-icons/vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -769,21 +807,21 @@ function formatHistoryTime(timestamp: string): string {
   })
 }
 
-function getEventIcon(eventType: string): string {
-  const icons: Record<string, string> = {
-    'Added': 'ph ph-plus-circle',
-    'Downloaded': 'ph ph-download',
-    'Imported': 'ph ph-upload',
-    'Deleted': 'ph ph-trash',
-    'Updated': 'ph ph-pencil',
-    'Monitored': 'ph ph-bookmark',
-    'Unmonitored': 'ph ph-bookmark-simple',
-    'Grabbed': 'ph ph-hand-grabbing',
-    'Failed': 'ph ph-warning-circle',
-    'File Added': 'ph ph-file-plus',
-    'File Removed': 'ph ph-file-minus'
+function getEventIconComponent(eventType: string): Component {
+  const icons: Record<string, Component> = {
+    'Added': PhPlusCircle,
+    'Downloaded': PhDownload,
+    'Imported': PhUpload,
+    'Deleted': PhTrash,
+    'Updated': PhPencil,
+    'Monitored': PhBookmark,
+    'Unmonitored': PhBookmarkSimple,
+    'Grabbed': PhHandGrabbing,
+    'Failed': PhWarningCircle,
+    'File Added': PhFilePlus,
+    'File Removed': PhFileMinus
   }
-  return icons[eventType] || 'ph ph-circle'
+  return icons[eventType] || PhCircle
 }
 
 function getEventTypeClass(eventType: string): string {
@@ -801,6 +839,23 @@ function getEventTypeClass(eventType: string): string {
     'File Removed': 'event-warning'
   }
   return classes[eventType] || 'event-default'
+}
+
+function formatEventTitle(eventType: string): string {
+  const titles: Record<string, string> = {
+    'Added': 'Added to Library',
+    'Downloaded': 'Downloaded',
+    'Imported': 'Imported',
+    'Deleted': 'Deleted from Library',
+    'Updated': 'Updated',
+    'Monitored': 'Monitoring Enabled',
+    'Unmonitored': 'Monitoring Disabled',
+    'Grabbed': 'Download Started',
+    'Failed': 'Failed',
+    'File Added': 'File Added',
+    'File Removed': 'File Removed'
+  }
+  return titles[eventType] || eventType
 }
 
 function getFileName(filePath?: string): string {
@@ -859,15 +914,27 @@ function formatDate(dateString?: string): string {
 .audiobook-detail {
   min-height: 100vh;
   background-color: #1a1a1a;
+  padding-top: 60px; /* Add padding to account for fixed local nav */
 }
 
 .top-nav {
+  position: fixed;
+  top: 60px; /* Account for global header nav */
+  left: 200px; /* Account for sidebar width */
+  right: 0;
+  z-index: 99; /* Below global nav (1000) but above content */
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 12px 20px;
   background-color: #2a2a2a;
   border-bottom: 1px solid #333;
+}
+
+@media (max-width: 768px) {
+  .top-nav {
+    left: 0; /* Full width on mobile */
+  }
 }
 
 .nav-actions {
@@ -1649,6 +1716,19 @@ function formatDate(dateString?: string): string {
   font-weight: 600;
   color: #fff;
   font-size: 14px;
+}
+
+.discord-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #5865F2;
+  background-color: rgba(88, 101, 242, 0.15);
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  font-weight: 500;
 }
 
 .event-source {

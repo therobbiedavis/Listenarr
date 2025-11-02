@@ -256,6 +256,7 @@ export interface History {
   message?: string
   source?: string
   timestamp: string
+  notificationSent?: boolean
   data?: string
 }
 
