@@ -463,12 +463,18 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
 
 <style scoped>
 .audiobooks-view {
-  padding: 0;
+  margin-top: 60px; /* Add margin to account for fixed toolbar */
+  padding-top: 10px; 
   background-color: #1a1a1a;
   min-height: 100vh;
 }
 
 .toolbar {
+  position: fixed;
+  top: 60px; /* Account for global header nav */
+  left: 200px; /* Account for sidebar width */
+  right: 0;
+  z-index: 99; /* Below global nav (1000) but above content */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -476,6 +482,12 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
   background-color: #2a2a2a;
   border-bottom: 1px solid #333;
   margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+  .toolbar {
+    left: 0; /* Full width on mobile */
+  }
 }
 
 .toolbar-left,

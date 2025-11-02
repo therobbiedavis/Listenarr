@@ -121,6 +121,13 @@ builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQu
 // Toast service for broadcasting UI toasts via SignalR
 builder.Services.AddSingleton<IToastService, ToastService>();
 
+// Notification service for webhook notifications
+builder.Services.AddScoped<NotificationService>();
+
+// Allow services to access the current HttpContext so NotificationService can
+// build absolute image URLs when the startup config doesn't supply a base URL.
+builder.Services.AddHttpContextAccessor();
+
 // Always register session service, but it will check config internally
 builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
 
@@ -388,6 +395,17 @@ app.UseForwardedHeaders();
     // DefaultFiles enables serving index.html when requesting '/'
     app.UseDefaultFiles();
     app.UseStaticFiles();
+
+    // Serve cached images from config/cache/images directory
+    var cacheImagesPath = Path.Combine(app.Environment.ContentRootPath, "config", "cache", "images");
+    if (Directory.Exists(cacheImagesPath))
+    {
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(cacheImagesPath),
+            RequestPath = "/config/cache/images"
+        });
+    }
 
 // Ensure routing middleware is enabled so endpoint routing features (CORS, Authorization)
 // can be applied by subsequent middleware. This must run before UseCors()/UseAuthorization().

@@ -154,6 +154,10 @@ export interface ApplicationSettings {
   usProxyPort?: number
   usProxyUsername?: string
   usProxyPassword?: string
+
+  // Notification settings
+  webhookUrl?: string
+  enabledNotificationTriggers?: string[]
 }
 
 export interface StartupConfig {
@@ -252,6 +256,7 @@ export interface History {
   message?: string
   source?: string
   timestamp: string
+  notificationSent?: boolean
   data?: string
 }
 

@@ -43,7 +43,19 @@ namespace Listenarr.Api.Controllers
         private readonly IServiceProvider _serviceProvider;
         private readonly IScanQueueService? _scanQueueService;
         private readonly IFileNamingService _fileNamingService;
+        private readonly NotificationService? _notificationService;
         
+        /// <summary>
+        /// Initializes a new <see cref="LibraryController"/> with required services.
+        /// </summary>
+        /// <param name="repo">Repository for audiobook persistence and queries.</param>
+        /// <param name="imageCacheService">Service for caching and moving cover images.</param>
+        /// <param name="logger">Logger instance for diagnostic messages.</param>
+        /// <param name="dbContext">EF Core database context instance.</param>
+        /// <param name="serviceProvider">Service provider used to create scoped services when required.</param>
+        /// <param name="fileNamingService">Service responsible for applying file naming patterns.</param>
+        /// <param name="scanQueueService">Optional background scan queue service for asynchronous scans.</param>
+        /// <param name="notificationService">Service for sending webhook notifications.</param>
         public LibraryController(
             IAudiobookRepository repo, 
             IImageCacheService imageCacheService, 
@@ -51,7 +63,8 @@ namespace Listenarr.Api.Controllers
             ListenArrDbContext dbContext,
             IServiceProvider serviceProvider,
             IFileNamingService fileNamingService,
-            IScanQueueService? scanQueueService = null)
+            IScanQueueService? scanQueueService = null,
+            NotificationService? notificationService = null)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
@@ -60,6 +73,7 @@ namespace Listenarr.Api.Controllers
             _serviceProvider = serviceProvider;
             _fileNamingService = fileNamingService;
             _scanQueueService = scanQueueService;
+            _notificationService = notificationService;
         }
 
         public class ScanRequest
@@ -119,7 +133,7 @@ namespace Listenarr.Api.Controllers
                     var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(metadata.Asin);
                     if (libraryImagePath != null)
                     {
-                        imageUrl = $"/api/images/{metadata.Asin}";
+                        imageUrl = $"/{libraryImagePath}";
                         _logger.LogInformation("Moved image for ASIN {Asin} to permanent library storage", metadata.Asin);
                     }
                     else
@@ -190,6 +204,28 @@ namespace Listenarr.Api.Controllers
             }
             
             await _repo.AddAsync(audiobook);
+            
+            // Send notification if configured
+            if (_notificationService != null)
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = await configService.GetApplicationSettingsAsync();
+                var data = new
+                {
+                    id = audiobook.Id,
+                    title = audiobook.Title ?? "Unknown Title",
+                    authors = audiobook.Authors,
+                    narrators = audiobook.Narrators,
+                    description = audiobook.Description,
+                    asin = audiobook.Asin,
+                    publisher = audiobook.Publisher,
+                    year = audiobook.PublishYear,
+                    imageUrl = audiobook.ImageUrl
+                };
+                await _notificationService.SendNotificationAsync("book-added", data, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+            }
+
             
             // Create the expected directory structure for the audiobook (but don't set FilePath)
             // FilePath should only be set when actual files are found during scanning
@@ -472,6 +508,136 @@ namespace Listenarr.Api.Controllers
             }
 
             return StatusCode(500, new { message = "Failed to delete audiobook" });
+        }
+
+        [HttpPost("delete-bulk")]
+        public async Task<IActionResult> BulkDeleteAudiobooks([FromBody] BulkDeleteRequest request)
+        {
+            if (request.Ids == null || !request.Ids.Any())
+            {
+                return BadRequest(new { message = "No audiobook IDs provided for bulk deletion" });
+            }
+
+            var deletedCount = 0;
+            var deletedImagesCount = 0;
+            var errors = new List<string>();
+            var deletedIds = new List<int>();
+
+            // Use a transaction to ensure all deletions succeed or all fail
+            using (var transaction = await _dbContext.Database.BeginTransactionAsync())
+            {
+                try
+                {
+                    foreach (var id in request.Ids.Distinct())
+                    {
+                        try
+                        {
+                            var audiobook = await _repo.GetByIdAsync(id);
+                            if (audiobook == null)
+                            {
+                                errors.Add($"Audiobook with ID {id} not found");
+                                continue;
+                            }
+
+                            // Delete associated image from cache if it exists
+                            if (!string.IsNullOrEmpty(audiobook.Asin))
+                            {
+                                try
+                                {
+                                    var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
+                                    if (imagePath != null)
+                                    {
+                                        var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                        if (System.IO.File.Exists(fullPath))
+                                        {
+                                            System.IO.File.Delete(fullPath);
+                                            deletedImagesCount++;
+                                            _logger.LogInformation("Deleted cached image for ASIN {Asin}", audiobook.Asin);
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
+                                    // Continue with deletion even if image cleanup fails
+                                }
+                            }
+
+                            // Log history entry for the deleted audiobook
+                            var historyEntry = new History
+                            {
+                                AudiobookId = audiobook.Id,
+                                AudiobookTitle = audiobook.Title ?? "Unknown Title",
+                                EventType = "Deleted",
+                                Message = $"Audiobook '{audiobook.Title}' deleted via bulk operation",
+                                Source = "BulkDelete",
+                                Timestamp = DateTime.UtcNow
+                            };
+
+                            _dbContext.History.Add(historyEntry);
+
+                            var deleted = await _repo.DeleteByIdAsync(id);
+                            if (deleted)
+                            {
+                                deletedCount++;
+                                deletedIds.Add(id);
+                                _logger.LogInformation("Deleted audiobook '{Title}' (ID: {Id}) via bulk operation", audiobook.Title, id);
+                            }
+                            else
+                            {
+                                errors.Add($"Failed to delete audiobook with ID {id}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error deleting audiobook with ID {Id}", id);
+                            errors.Add($"Error deleting audiobook with ID {id}: {ex.Message}");
+                        }
+                    }
+
+                    // Commit the transaction if we successfully deleted at least one audiobook
+                    if (deletedCount > 0)
+                    {
+                        await transaction.CommitAsync();
+                    }
+                    else
+                    {
+                        await transaction.RollbackAsync();
+                        return BadRequest(new { message = "No audiobooks were successfully deleted", errors });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger.LogError(ex, "Transaction failed during bulk delete operation");
+                    return StatusCode(500, new { message = "Bulk delete operation failed", error = ex.Message });
+                }
+            }
+
+            object result;
+            if (errors.Any())
+            {
+                result = new
+                {
+                    message = $"Partially successful: deleted {deletedCount} audiobook{(deletedCount != 1 ? "s" : "")}, {errors.Count} error{(errors.Count != 1 ? "s" : "")} occurred",
+                    deletedCount,
+                    deletedImagesCount,
+                    ids = deletedIds,
+                    errors
+                };
+            }
+            else
+            {
+                result = new
+                {
+                    message = $"Successfully deleted {deletedCount} audiobook{(deletedCount != 1 ? "s" : "")}",
+                    deletedCount,
+                    deletedImagesCount,
+                    ids = deletedIds
+                };
+            }
+
+            return Ok(result);
         }
 
         /// <summary>
@@ -845,6 +1011,36 @@ namespace Listenarr.Api.Controllers
 
                 // Reload audiobook with files to return
                 var updated = await db.Audiobooks.Include(a => a.Files).FirstOrDefaultAsync(a => a.Id == audiobook.Id);
+
+                // Send "book-available" notification if the audiobook is monitored and files were imported
+                if (_notificationService != null && audiobook.Monitored && created.Count > 0)
+                {
+                    try
+                    {
+                        using var notificationScope = _serviceProvider.CreateScope();
+                        var configService = notificationScope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                        var settings = await configService.GetApplicationSettingsAsync();
+                        var availableData = new
+                        {
+                            id = audiobook.Id,
+                            title = audiobook.Title ?? "Unknown Title",
+                            authors = audiobook.Authors,
+                            asin = audiobook.Asin,
+                            imageUrl = audiobook.ImageUrl,
+                            description = audiobook.Description,
+                            monitored = audiobook.Monitored,
+                            qualityProfileId = audiobook.QualityProfileId,
+                            filesImported = created.Count,
+                            totalFiles = updated?.Files?.Count ?? 0
+                        };
+                        await _notificationService.SendNotificationAsync("book-available", availableData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to send book-available notification for audiobook {AudiobookId}", audiobook.Id);
+                    }
+                }
+
                 return Ok(new { message = "Scan complete", scannedPath = scanRoot, found = foundFiles.Count, created = created.Count, audiobook = updated });
             }
         }

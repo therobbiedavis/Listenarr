@@ -53,7 +53,7 @@
         </div>
         <div class="notification-wrapper" ref="notificationRef">
           <button class="nav-btn" @click="toggleNotifications" aria-haspopup="true" :aria-expanded="notificationsOpen">
-            <PhBell />
+            <PhBell class="notification-inline-icon"/>
             <span class="notification-badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
           </button>
           <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
@@ -1154,14 +1154,31 @@ const hideLayout = computed(() => {
 }
 
 .search-inline-icon {
-  color: #9aa0a6;
-  font-size: 18px;
-  padding: 6px;
+  color: #c7cfd6;
+  font-size: 20px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .search-inline-icon:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+.notification-inline-icon {
+  color: #c7cfd6;
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notification-inline-icon:hover {
   background-color: #3a3a3a;
   color: #fff;
 }
@@ -1171,20 +1188,33 @@ const hideLayout = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  font-size: 18px;
+  /* Increased size for better visibility and proportion */
+  width: 48px;
+  height: 48px;
+  font-size: 32px;
   color: #c7cfd6; /* slightly brighter than default */
   border-radius: 8px;
 }
 
 .top-nav .nav-btn {
-  padding: 4px; /* smaller padding so icon boxes are consistent */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .top-nav .nav-user-btn .ph,
 .top-nav .nav-btn .ph {
-  font-size: 18px; /* ensure consistent glyph size */
+  font-size: 32px; /* ensure consistent glyph size */
+}
+
+/* Sidebar navigation icons (Phosphor icons render as SVG) */
+.sidebar .nav-item svg,
+.sidebar .nav-item .ph {
+  width: 28px;
+  height: 28px;
+  font-size: 20px;
+  flex-shrink: 0;
+  color: #c7cfd6;
 }
 
 .inline-spinner {

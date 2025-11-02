@@ -57,6 +57,11 @@ namespace Listenarr.Api.Models
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
         
         /// <summary>
+        /// Whether a Discord notification was sent for this event
+        /// </summary>
+        public bool NotificationSent { get; set; } = false;
+        
+        /// <summary>
         /// Optional data payload (JSON string for additional context)
         /// </summary>
         public string? Data { get; set; }
