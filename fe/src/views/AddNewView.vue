@@ -322,6 +322,7 @@ import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
 import { useToast } from '@/services/toastService'
 import { safeText } from '@/utils/textUtils'
+import { logger } from '@/utils/logger'
 
 // Extended type for title search results that includes search metadata
 type TitleSearchResult = OpenLibraryBook & { 
@@ -353,58 +354,58 @@ const enabledMetadataSources = computed(() => {
 //     .replace(/&#39;/g, "'")
 // }
 
-console.log('AddNewView component loaded')
-console.log('libraryStore:', libraryStore)
+logger.debug('AddNewView component loaded')
+logger.debug('libraryStore:', libraryStore)
 
 // Library checking functions
 const checkExistingInLibrary = async () => {
-  console.log('Checking existing audiobooks in library...')
+  logger.debug('Checking existing audiobooks in library...')
   
   // Ensure library is loaded
   if (!libraryStore.audiobooks || libraryStore.audiobooks.length === 0) {
-    console.log('Loading library...')
+    logger.debug('Loading library...')
     await libraryStore.fetchLibrary()
   }
   
-  console.log('Library has', libraryStore.audiobooks.length, 'audiobooks')
+  logger.debug('Library has', libraryStore.audiobooks.length, 'audiobooks')
   markExistingResults()
 }
 
 const markExistingResults = () => {
-  console.log('Marking existing results...')
+  logger.debug('Marking existing results...')
   const libraryAsins = new Set(
     libraryStore.audiobooks
       .map(book => book.asin)
       .filter((asin): asin is string => !!asin)
   )
   
-  console.log('Library ASINs:', Array.from(libraryAsins))
+  logger.debug('Library ASINs:', Array.from(libraryAsins))
   
   // Check ASIN search result
   if (audibleResult.value?.asin) {
-    console.log('Checking ASIN result:', audibleResult.value.asin)
+    logger.debug('Checking ASIN result:', audibleResult.value.asin)
     if (libraryAsins.has(audibleResult.value.asin)) {
-      console.log('ASIN result is in library - marking as added')
+      logger.debug('ASIN result is in library - marking as added')
       addedAsins.value.add(audibleResult.value.asin)
     }
   }
   
   // Check title search results
   if (titleResults.value.length > 0) {
-    console.log('Checking', titleResults.value.length, 'title results')
+    logger.debug('Checking', titleResults.value.length, 'title results')
     titleResults.value.forEach((book, index) => {
       const asin = getAsin(book)
       if (asin) {
-        console.log(`Title result ${index}: ASIN=${asin}, inLibrary=${libraryAsins.has(asin)}`)
+        logger.debug(`Title result ${index}: ASIN=${asin}, inLibrary=${libraryAsins.has(asin)}`)
         if (libraryAsins.has(asin)) {
-          console.log(`Marking title result ${index} as added`)
+          logger.debug(`Marking title result ${index} as added`)
           addedAsins.value.add(asin)
         }
       }
     })
   }
   
-  console.log('Added ASINs:', Array.from(addedAsins.value))
+  logger.debug('Added ASINs:', Array.from(addedAsins.value))
 }
 
 // Unified Search
@@ -516,7 +517,7 @@ const handleSearchInput = () => {
 
 const performSearch = async () => {
   const query = searchQuery.value.trim()
-  console.log('performSearch called with query:', query)
+  logger.debug('performSearch called with query:', query)
   
   if (!query) {
     searchError.value = 'Please enter a search term'
@@ -524,7 +525,7 @@ const performSearch = async () => {
   }
 
   const detectedType = detectSearchType(query)
-  console.log('Detected search type:', detectedType)
+  logger.debug('Detected search type:', detectedType)
   searchType.value = detectedType
   searchStatus.value = ''
 
@@ -538,7 +539,7 @@ const performSearch = async () => {
 }
 
 const searchByAsin = async (asin: string) => {
-  console.log('searchByAsin called with:', asin)
+  logger.debug('searchByAsin called with:', asin)
   
   if (!/^[A-Z0-9]{10}$/.test(asin)) {
     searchError.value = 'Invalid ASIN format. Must be 10 alphanumeric characters (e.g., B08G9PRS1K)'
@@ -568,7 +569,7 @@ const searchByAsin = async (asin: string) => {
     const result = response.metadata
     const sourceName = response.source
     
-    console.log('Metadata response:', { sourceName, hasMetadata: !!result })
+    logger.debug('Metadata response:', { sourceName, hasMetadata: !!result })
     
     searchStatus.value = `Metadata received from ${sourceName}, processing...`
     
@@ -602,7 +603,7 @@ const searchByAsin = async (asin: string) => {
         source: sourceName
       }
       
-      console.log('audibleResult set with source:', audibleResult.value.source)
+      logger.debug('audibleResult set with source:', audibleResult.value.source)
     }
     
   // Check library status after getting result
@@ -611,7 +612,7 @@ const searchByAsin = async (asin: string) => {
   // Finalize status
   searchStatus.value = audibleResult.value ? `Metadata ready from ${sourceName}` : 'No metadata available'
   } catch (error) {
-    console.error('ASIN search failed:', error)
+    logger.error('ASIN search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
   } finally {
     isSearching.value = false
@@ -641,8 +642,8 @@ const searchByTitle = async (query: string) => {
   try {
     // Use intelligent search API that searches Audible/Amazon, gets ASINs, and enriches with metadata
     const results = await apiService.searchByTitle(query)
-    console.log('Intelligent search returned:', results)
-    console.log('Number of results:', results?.length)
+    logger.debug('Intelligent search returned:', results)
+    logger.debug('Number of results:', results?.length)
     
     searchStatus.value = 'Processing search results...'
     
@@ -686,7 +687,7 @@ const searchByTitle = async (query: string) => {
     await checkExistingInLibrary()
     searchStatus.value = `Search complete — found ${titleResults.value.length} items`
   } catch (error) {
-    console.error('Title search failed:', error)
+    logger.error('Title search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
   } finally {
     isSearching.value = false
@@ -722,7 +723,7 @@ const loadMoreTitleResults = async () => {
   // Since backend search returns all Amazon/Audible results at once,
   // we don't need pagination like OpenLibrary. This function is now a no-op.
   // Results are already loaded in searchByTitle()
-  console.log('Load more not needed - all Amazon/Audible results already loaded')
+  logger.debug('Load more not needed - all Amazon/Audible results already loaded')
 }
 
 // const clearTitleError = () => {
@@ -774,22 +775,22 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
 
 // Common methods for both search types
 const selectTitleResult = async (book: TitleSearchResult) => {
-  console.log('selectTitleResult called with book:', book)
+  logger.debug('selectTitleResult called with book:', book)
   const asin = resolvedAsins.value[book.key] || book.searchResult?.asin
   
   if (!asin) {
-    console.error('No ASIN available for selected book')
+    logger.error('No ASIN available for selected book')
     toast.warning('Cannot add', 'Cannot add to library: No ASIN available')
     return
   }
 
-  console.log('Adding audiobook with ASIN:', asin)
+  logger.debug('Adding audiobook with ASIN:', asin)
   
   try {
     // If we have enriched search result, use it directly
     if (book.searchResult && book.searchResult.isEnriched) {
       const result = book.searchResult
-      console.log('Using enriched metadata from intelligent search:', result)
+      logger.debug('Using enriched metadata from intelligent search:', result)
       
       // Extract publish year from date string if available
       let publishYear: string | undefined
@@ -822,11 +823,11 @@ const selectTitleResult = async (book: TitleSearchResult) => {
       await addToLibrary(metadata)
     } else {
       // Fallback: fetch metadata if not already enriched
-      console.log('Fetching metadata for ASIN:', asin)
+      logger.debug('Fetching metadata for ASIN:', asin)
       toast.info('Fetching metadata', `Getting book details from configured sources...`)
       const response = await apiService.getMetadata(asin, 'us', true)
       const audimetaData = response.metadata
-      console.log(`Metadata fetched from ${response.source}:`, audimetaData)
+      logger.debug(`Metadata fetched from ${response.source}:`, audimetaData)
       toast.success('Metadata retrieved', `Book details fetched from ${response.source}`)
       
       // Store the metadata source in the book object so it shows in the UI
@@ -864,7 +865,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
       await addToLibrary(metadata)
     }
   } catch (error) {
-    console.error('Failed to add audiobook:', error)
+    logger.error('Failed to add audiobook:', error)
     toast.error('Add failed', 'Failed to add audiobook. Please try again.')
   }
 }
@@ -876,7 +877,7 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
       // If we have enriched search result, use it directly
       if (book.searchResult && book.searchResult.isEnriched) {
         const result = book.searchResult
-        console.log('Using enriched metadata from intelligent search:', result)
+        logger.debug('Using enriched metadata from intelligent search:', result)
         
         // Extract publish year from date string if available
         let publishYear: string | undefined
@@ -940,11 +941,11 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
       }
       showDetailsModal.value = true
   } catch (error) {
-  console.error('Failed to fetch detailed metadata:', error)
+  logger.error('Failed to fetch detailed metadata:', error)
   toast.error('Fetch failed', 'Failed to fetch audiobook details. Please try again.')
     }
   } else {
-    console.error('No ASIN available for selected book')
+    logger.error('No ASIN available for selected book')
   }
 }
 
@@ -983,7 +984,7 @@ const closeAddLibraryModal = () => {
 const handleLibraryAdded = (audiobook: Audiobook) => {
   // Mark as added in the UI
   if (audiobook.asin) {
-    console.log('Marking ASIN as added:', audiobook.asin)
+    logger.debug('Marking ASIN as added:', audiobook.asin)
     addedAsins.value.add(audiobook.asin)
   }
   
@@ -1070,7 +1071,7 @@ const searchByISBNChain = async (isbn: string) => {
       isbnLookupMessage.value = 'No audiobooks found for this ISBN. The book may not be available as an audiobook.'
     }
   } catch (error) {
-    console.error('ISBN search failed', error)
+    logger.error('ISBN search failed', error)
     isbnLookupWarning.value = true
     isbnLookupMessage.value = 'ISBN search failed'
   } finally {

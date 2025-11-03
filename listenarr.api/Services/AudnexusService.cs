@@ -193,9 +193,19 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Successfully fetched author ASIN {Asin} from Audnexus", asin);
                 return result;
             }
-            catch (Exception ex)
+            catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "Error fetching author from Audnexus for ASIN {Asin}", asin);
+                _logger.LogError(ex, "HTTP error fetching author from Audnexus for ASIN {Asin}", asin);
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex, "Request timed out or was canceled fetching author from Audnexus for ASIN {Asin}", asin);
+                return null;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "JSON deserialization error fetching author from Audnexus for ASIN {Asin}", asin);
                 return null;
             }
         }
@@ -237,9 +247,19 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Successfully fetched chapters for ASIN {Asin} from Audnexus", asin);
                 return result;
             }
-            catch (Exception ex)
+            catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "Error fetching chapters from Audnexus for ASIN {Asin}", asin);
+                _logger.LogError(ex, "HTTP error fetching chapters from Audnexus for ASIN {Asin}", asin);
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex, "Request timed out fetching chapters from Audnexus for ASIN {Asin}", asin);
+                return null;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "JSON deserialization error fetching chapters from Audnexus for ASIN {Asin}", asin);
                 return null;
             }
         }

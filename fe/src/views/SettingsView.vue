@@ -1167,7 +1167,23 @@ import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
-import { PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink, PhListChecks, PhClock, PhXCircle, PhWarning, PhCloudSlash, PhArrowUp, PhDownloadSimple, PhShieldCheck, PhLock, PhLockOpen, PhFolder, PhFolderOpen, PhLinkSimple, PhBrowser, PhCheck, PhX, PhWarningCircle, PhCheckSquare, PhRuler, PhUsers, PhTextAa, PhSparkle, PhGlobe, PhInfo, PhUserCircle, PhFloppyDisk, PhFiles, PhArrowCounterClockwise, PhEye, PhEyeSlash, PhScissors, PhBell, PhPaperPlaneTilt } from '@phosphor-icons/vue'
+import {
+  // Settings & Navigation
+  PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus,
+  PhArrowUp, PhDownloadSimple, PhCloudSlash, PhGlobe, PhInfo,
+  // Form Controls & Actions
+  PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink,
+  PhListChecks, PhClock, PhXCircle, PhCheck, PhX, PhCheckSquare, PhRuler, PhSparkle,
+  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt,
+  // Security & Authentication
+  PhShieldCheck, PhLock, PhLockOpen, PhWarning, PhWarningCircle,
+  // Files & Folders
+  PhFolder, PhLinkSimple, PhBrowser, PhFloppyDisk, PhFiles,
+  // Users
+  PhUsers, PhUserCircle,
+  // Misc
+  PhTextAa, PhEye, PhEyeSlash
+} from '@phosphor-icons/vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
 import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'

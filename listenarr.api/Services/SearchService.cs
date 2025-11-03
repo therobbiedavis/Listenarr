@@ -413,8 +413,6 @@ namespace Listenarr.Api.Services
                             string? metadataSourceName = null;
                             
                             // Use the pre-fetched metadata sources (avoid DbContext concurrency issues)
-                            _logger.LogInformation("Using {Count} enabled metadata sources for ASIN {Asin}", metadataSources.Count, asin);
-                            
                             if (metadataSources.Count > 0)
                             {
                                 _logger.LogInformation("Attempting to fetch metadata for ASIN {Asin} from {Count} configured source(s): {Sources}", 
@@ -981,14 +979,9 @@ namespace Listenarr.Api.Services
             string? productUrl = null;
             if (!string.IsNullOrEmpty(asin))
             {
-                if (metadata.Source == "Amazon")
-                {
-                    productUrl = $"https://www.amazon.com/dp/{asin}";
-                }
-                else // Default to Audible for both "Audible" and any other source
-                {
-                    productUrl = $"https://www.audible.com/pd/{asin}";
-                }
+                productUrl = metadata.Source == "Amazon"
+                    ? $"https://www.amazon.com/dp/{asin}"
+                    : $"https://www.audible.com/pd/{asin}";
             }
             
             return new SearchResult
@@ -2389,9 +2382,14 @@ namespace Listenarr.Api.Services
                 
                 return metadataSources;
             }
-            catch (Exception ex)
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
             {
-                _logger.LogError(ex, "Error retrieving enabled metadata sources from database");
+                _logger.LogError(ex, "Database update error retrieving enabled metadata sources");
+                return new List<ApiConfiguration>();
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogError(ex, "Invalid operation error retrieving enabled metadata sources");
                 return new List<ApiConfiguration>();
             }
         }
