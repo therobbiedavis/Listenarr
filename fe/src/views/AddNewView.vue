@@ -734,7 +734,7 @@ const loadMoreTitleResults = async () => {
 const getCoverUrl = (book: TitleSearchResult): string => {
   // Check for audimeta result image URL first
   if (book.imageUrl) {
-    return book.imageUrl
+    return apiService.getImageUrl(book.imageUrl)
   }
   // Fall back to search result image URL
   const imageUrl = book.searchResult?.imageUrl || ''
