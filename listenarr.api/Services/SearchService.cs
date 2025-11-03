@@ -926,7 +926,7 @@ namespace Listenarr.Api.Services
                 target.PublishYear = scraped.PublishYear;
         }
 
-        private async Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null)
+        private Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null)
         {
             // Use metadata if available, otherwise fallback to raw search result, finally to generic fallback
             var title = metadata.Title;
@@ -981,7 +981,7 @@ namespace Listenarr.Api.Services
                     : $"https://www.audible.com/pd/{asin}";
             }
             
-            return new SearchResult
+            return Task.FromResult(new SearchResult
             {
                 Id = Guid.NewGuid().ToString(),
                 Title = title,
@@ -1006,7 +1006,7 @@ namespace Listenarr.Api.Services
                 ImageUrl = imageUrl,
                 Asin = asin,
                 ProductUrl = productUrl
-            };
+            });
         }
 
         private SearchResult ConvertAmazonSearchToResult(AmazonSearchResult amazonResult)
