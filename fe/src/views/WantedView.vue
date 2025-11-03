@@ -402,7 +402,7 @@ const markAsSkipped = async (item: Audiobook) => {
 
 <style scoped>
 .wanted-view {
-  padding: 2rem;
+  padding: 2em;
 }
 
 .page-header {
@@ -419,51 +419,77 @@ const markAsSkipped = async (item: Audiobook) => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  font-weight: 600;
 }
 
-.page-header h1 i {
-  color: #e74c3c;
+.page-header h1 svg {
+  color: #fa5252;
+  width: 32px;
+  height: 32px;
 }
 
 .wanted-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
+  padding: 0.65rem 1.25rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .btn-primary {
-  background-color: #007acc;
+  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: white;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #005fa3;
+  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #adb5bd;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .btn-icon {
   background: none;
   border: none;
-  color: #ccc;
+  color: #adb5bd;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
-  transition: all 0.2s;
+  border-radius: 6px;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -471,7 +497,7 @@ const markAsSkipped = async (item: Audiobook) => {
 }
 
 .btn-icon:hover:not(:disabled) {
-  background-color: #3a3a3a;
+  background-color: rgba(255, 255, 255, 0.08);
   color: white;
 }
 
@@ -480,13 +506,18 @@ const markAsSkipped = async (item: Audiobook) => {
   cursor: not-allowed;
 }
 
+.btn-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
 /* Robot icon for automatic search */
 .btn-icon .ph-robot {
-  color: #4caf50;
+  color: #51cf66;
 }
 
 .btn-icon:hover:not(:disabled) .ph-robot {
-  color: #66bb6a;
+  color: #69db7c;
 }
 
 .wanted-filters {
@@ -496,51 +527,106 @@ const markAsSkipped = async (item: Audiobook) => {
 .filter-tabs {
   display: flex;
   gap: 0.5rem;
-  border-bottom: 1px solid #3a3a3a;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
   background: none;
   border: none;
-  color: #ccc;
+  color: #adb5bd;
   cursor: pointer;
-  padding: 1rem 1.5rem;
-  border-radius: 4px 4px 0 0;
-  transition: all 0.2s;
+  padding: 0.875rem 1.5rem;
+  border-radius: 6px 6px 0 0;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  position: relative;
+  font-size: 0.9rem;
+}
+
+.tab::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.2s ease;
 }
 
 .tab:hover {
-  background-color: #2a2a2a;
+  background-color: rgba(255, 255, 255, 0.05);
   color: white;
 }
 
 .tab.active {
-  background-color: #007acc;
-  color: white;
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  font-weight: 600;
+}
+
+.tab.active::after {
+  background: #4dabf7;
 }
 
 .tab-badge {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.15);
   border-radius: 10px;
-  padding: 0.2rem 0.5rem;
+  padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
-  font-weight: bold;
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+}
+
+.tab.active .tab-badge {
+  background-color: rgba(77, 171, 247, 0.25);
+  color: #74c0fc;
 }
 
 .loading-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #ccc;
+  color: #adb5bd;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.loading-state i {
+.loading-state svg {
   font-size: 3rem;
-  color: #007acc;
+  color: #4dabf7;
   margin-bottom: 1rem;
+  width: 48px;
+  height: 48px;
+}
+
+.loading-state p {
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.ph-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .wanted-list {
@@ -552,25 +638,35 @@ const markAsSkipped = async (item: Audiobook) => {
 .wanted-item {
   display: flex;
   align-items: center;
-  padding: 1rem;
+  padding: 1.25rem;
   background-color: #2a2a2a;
   border-radius: 8px;
-  border-left: 4px solid #e74c3c;
-  transition: background-color 0.2s;
+  border-left: 4px solid #fa5252;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .wanted-item:hover {
-  background-color: #333;
+  background-color: #2f2f2f;
+  border-color: rgba(250, 82, 82, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-left-color: #ff6b6b;
 }
 
 .wanted-poster {
   width: 80px;
   height: 80px;
-  margin-right: 1rem;
-  background-color: #555;
-  border-radius: 4px;
+  margin-right: 1.25rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.wanted-item:hover .wanted-poster {
+  transform: scale(1.02);
 }
 
 .wanted-poster img {
@@ -585,44 +681,66 @@ const markAsSkipped = async (item: Audiobook) => {
 }
 
 .wanted-info h3 {
-  margin: 0 0 0.25rem 0;
+  margin: 0 0 0.35rem 0;
   color: white;
   font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .wanted-info h4 {
   margin: 0 0 0.5rem 0;
-  color: #007acc;
+  color: #4dabf7;
   font-size: 0.9rem;
   font-weight: 500;
 }
 
 .wanted-meta {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 0.25rem;
-  color: #999;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  color: #868e96;
   font-size: 0.85rem;
   flex-wrap: wrap;
 }
 
+.wanted-meta span {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+}
+
 .wanted-quality {
-  color: #f39c12;
+  color: #ffd43b;
   font-size: 0.85rem;
   font-weight: 500;
+  background-color: rgba(255, 212, 59, 0.1);
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.profile-name {
+  color: #fcc419;
+  font-weight: 600;
 }
 
 .search-status {
   margin-top: 0.5rem;
-  color: #007acc;
+  color: #4dabf7;
   font-size: 0.85rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  background-color: rgba(77, 171, 247, 0.1);
+  padding: 0.35rem 0.7rem;
+  border-radius: 4px;
+  display: inline-flex;
 }
 
-.search-status i {
-  font-size: 1rem;
+.search-status svg {
+  width: 16px;
+  height: 16px;
 }
 
 .wanted-status {
@@ -631,31 +749,36 @@ const markAsSkipped = async (item: Audiobook) => {
 }
 
 .status-badge {
-  padding: 0.4rem 0.8rem;
-  border-radius: 12px;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: bold;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .status-badge.missing {
-  background-color: #e74c3c;
-  color: white;
+  background-color: rgba(250, 82, 82, 0.15);
+  color: #fa5252;
+  border: 1px solid rgba(250, 82, 82, 0.3);
 }
 
 .status-badge.searching {
-  background-color: #007acc;
-  color: white;
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border: 1px solid rgba(77, 171, 247, 0.3);
 }
 
 .status-badge.failed {
-  background-color: #95a5a6;
-  color: white;
+  background-color: rgba(134, 142, 150, 0.15);
+  color: #868e96;
+  border: 1px solid rgba(134, 142, 150, 0.3);
 }
 
 .status-badge.skipped {
-  background-color: #555;
-  color: white;
+  background-color: rgba(134, 142, 150, 0.15);
+  color: #868e96;
+  border: 1px solid rgba(134, 142, 150, 0.3);
 }
 
 .wanted-actions-cell {
@@ -667,18 +790,36 @@ const markAsSkipped = async (item: Audiobook) => {
 .empty-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #ccc;
+  color: #adb5bd;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .empty-icon {
   font-size: 4rem;
-  margin-bottom: 1rem;
-  color: #2ecc71;
+  margin-bottom: 1.5rem;
+  color: #51cf66;
+}
+
+.empty-icon svg {
+  width: 80px;
+  height: 80px;
 }
 
 .empty-state h2 {
   color: white;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  font-size: 1.5rem;
+}
+
+.empty-state p {
+  color: #868e96;
+  font-size: 1rem;
+  line-height: 1.5;
+  max-width: 400px;
+  margin: 0 auto;
 }
 
 @media (max-width: 768px) {
@@ -689,11 +830,17 @@ const markAsSkipped = async (item: Audiobook) => {
   
   .wanted-poster {
     margin-bottom: 1rem;
+    margin-right: 0;
   }
   
   .wanted-status,
   .wanted-actions-cell {
     margin: 1rem 0 0 0;
+    align-self: stretch;
+  }
+  
+  .wanted-actions-cell {
+    justify-content: flex-end;
   }
 }
 </style>

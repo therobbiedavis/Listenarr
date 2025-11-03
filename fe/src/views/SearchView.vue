@@ -90,6 +90,9 @@
               <span class="result-size">{{ formatFileSize(result.size) }}</span>
               <span class="result-quality">{{ result.quality }}</span>
               <span class="result-source">{{ result.source }}</span>
+              <span v-if="result.metadataSource" class="result-metadata-source" :title="`Metadata enriched by ${result.metadataSource}`">
+                🔍 {{ result.metadataSource }}
+              </span>
             </div>
             <div class="result-stats">
               <span class="seeders">↑ {{ result.seeders }}</span>
@@ -496,6 +499,13 @@ const getScoreClass = (score: number): string => {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   color: #666;
+}
+
+.result-metadata-source {
+  background-color: #e8f5e9 !important;
+  color: #2e7d32 !important;
+  font-weight: 500;
+  border: 1px solid #a5d6a7;
 }
 
 .quality-score {

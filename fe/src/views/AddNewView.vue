@@ -8,7 +8,15 @@
     <div class="search-section">
       <div class="search-method">
         <label class="search-method-label">Search for Audiobooks</label>
-        <p class="search-help">Enter an ASIN (e.g., B08G9PRS1K) or search by title and author</p>
+        <p class="search-help">
+          Enter an ASIN (e.g., B08G9PRS1K) or search by title and author. 
+          <template v-if="enabledMetadataSources.length > 0">
+            Metadata powered by: {{ enabledMetadataSources.map(s => s.name).join(', ') }}
+          </template>
+          <template v-else>
+            <router-link to="/settings#apis" class="settings-link">Configure metadata sources</router-link>
+          </template>
+        </p>
       </div>
       
       <div class="unified-search-bar">
@@ -65,44 +73,56 @@
       <!-- ASIN Results -->
       <div v-if="searchType === 'asin' && audibleResult">
         <h2>Audiobook Found</h2>
-        <div class="result-card">
-          <div class="result-poster">
-            <img v-if="audibleResult.imageUrl" :src="apiService.getImageUrl(audibleResult.imageUrl)" :alt="audibleResult.title" />
-            <div v-else class="placeholder-cover">
-              <PhImage />
+        <div class="title-results">
+          <div class="title-result-card">
+            <div class="result-poster">
+              <img v-if="audibleResult.imageUrl" :src="apiService.getImageUrl(audibleResult.imageUrl)" :alt="audibleResult.title" />
+              <div v-else class="placeholder-cover">
+                <PhImage />
+              </div>
             </div>
-          </div>
-          <div class="result-info">
-            <h3>
-              {{ safeText(audibleResult.title) }}
-              <span v-if="audibleResult.language" class="language-badge">{{ audibleResult.language }}</span>
-            </h3>
-            <p class="result-author">
-              by {{ (audibleResult.authors || []).map(author => safeText(author)).join(', ') || 'Unknown Author' }}
-            </p>
-            <p v-if="audibleResult.narrators?.length" class="result-narrator">
-              Narrated by {{ audibleResult.narrators.map(narrator => safeText(narrator)).join(', ') }}
-            </p>
+            <div class="result-info">
+              <h3>
+                {{ safeText(audibleResult.title) }}
+              </h3>
+              <p class="result-author">
+                by {{ (audibleResult.authors || []).map(author => safeText(author)).join(', ') || 'Unknown Author' }}
+              </p>
+              
+              <p v-if="audibleResult.narrators?.length" class="result-narrator">
+                Narrated by {{ audibleResult.narrators.map(narrator => safeText(narrator)).join(', ') }}
+              </p>
+              
               <div class="result-stats">
-              <span v-if="audibleResult.runtime" class="stat-item">
-                <PhClock />
-                {{ formatRuntime(audibleResult.runtime) }}
-              </span>
-              <span v-if="audibleResult.language" class="stat-item">
-                <PhGlobe />
-                {{ audibleResult.language }}
-              </span>
-            </div>
-            <div class="result-description" v-html="audibleResult.description"></div>
+                <span v-if="audibleResult.runtime" class="stat-item">
+                  <PhClock />
+                  {{ formatRuntime(audibleResult.runtime) }}
+                </span>
+                <span v-if="audibleResult.language" class="stat-item">
+                  <PhGlobe />
+                  {{ capitalizeLanguage(audibleResult.language) }}
+                </span>
+                <span v-if="audibleResult.series" class="stat-item">
+                  <PhBook />
+                  {{ safeText(audibleResult.series) }}<span v-if="audibleResult.seriesNumber"> #{{ audibleResult.seriesNumber }}</span>
+                </span>
+              </div>
+              
+              <p v-if="audibleResult.publishYear" class="result-year">Published: {{ audibleResult.publishYear }}</p>
+              <p v-if="audibleResult.publisher" class="result-publisher">
+                Publisher: {{ safeText(audibleResult.publisher) }}
+              </p>
+              
               <div class="result-meta">
-              <span v-if="audibleResult.publishYear">{{ audibleResult.publishYear }}</span>
-              <span v-if="audibleResult.language">{{ audibleResult.language }}</span>
-              <span v-if="audibleResult.publisher">Publisher: {{ safeText(audibleResult.publisher) }}</span>
-              <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
-              <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
-              <span v-if="audibleResult.series">Series: {{ safeText(audibleResult.series) }}</span>
-              <span v-if="audibleResult.explicit">Explicit</span>
-              <span v-if="audibleResult.abridged">Abridged</span>
+                <span v-if="audibleResult.source" class="metadata-source-badge" :data-source="audibleResult.source">
+                  <PhCloud />
+                  {{ audibleResult.source }}
+                </span>
+                <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
+                <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
+                <span v-if="audibleResult.explicit">Explicit</span>
+                <span v-if="audibleResult.abridged">Abridged</span>
+              </div>
             </div>
             <div class="result-actions">
               <button 
@@ -146,19 +166,22 @@
             <div class="result-info">
               <h3>
                 {{ safeText(book.title) }}
-                <span v-if="book.searchResult?.language" class="language-badge">{{ book.searchResult?.language }}</span>
               </h3>
               <p class="result-author">by {{ formatAuthors(book) }}</p>
               
-              <!-- Audiobook metadata from search results -->
+              <!-- Audiobook metadata from enriched results -->
               <p v-if="book.searchResult?.narrator" class="result-narrator">
-                Narrated by {{ safeText(book.searchResult.narrator) }}
+                Narrated by {{ book.searchResult.narrator }}
               </p>
               
               <div class="result-stats">
                 <span v-if="book.searchResult?.runtime" class="stat-item">
                   <PhClock />
                   {{ formatRuntime(book.searchResult.runtime) }}
+                </span>
+                <span v-if="book.searchResult?.language" class="stat-item">
+                  <PhGlobe />
+                  {{ capitalizeLanguage(book.searchResult.language) }}
                 </span>
                 <span v-if="book.searchResult?.series" class="stat-item">
                   <PhBook />
@@ -170,11 +193,28 @@
               <p v-if="book.publisher?.length" class="result-publisher">
                 Publisher: {{ safeText(book.publisher[0]) }}
               </p>
+              <p v-if="getAsin(book)" class="result-asin">ASIN: {{ getAsin(book) }}</p>
               
               <div class="result-meta">
-                <span v-if="getAsin(book)">ASIN: {{ getAsin(book) }}</span>
-                <span v-if="book.searchResult?.source">Source: {{ book.searchResult.source }}</span>
-                <span v-if="book.first_publish_year">Published: {{ book.first_publish_year }}</span>
+                <a v-if="book.metadataSource && getMetadataSourceUrl(book)" 
+                   :href="getMetadataSourceUrl(book)!" 
+                   target="_blank" 
+                   rel="noopener noreferrer"
+                   class="metadata-source-link"
+                   :data-source="book.metadataSource">
+                  Metadata: {{ book.metadataSource }}
+                </a>
+                <span v-else-if="book.metadataSource" class="metadata-source-badge" :data-source="book.metadataSource">
+                  Metadata: {{ book.metadataSource }}
+                </span>
+                <a v-if="book.searchResult?.productUrl && book.searchResult?.source" 
+                   :href="book.searchResult.productUrl" 
+                   target="_blank" 
+                   rel="noopener noreferrer"
+                   class="source-link">
+                  Source: {{ book.searchResult.source }}
+                </a>
+                <span v-else-if="book.searchResult?.source">Source: {{ book.searchResult.source }}</span>
               </div>
             </div>
             <div class="result-actions">
@@ -269,7 +309,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise } from '@phosphor-icons/vue'
+import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
@@ -284,12 +324,23 @@ import { useToast } from '@/services/toastService'
 import { safeText } from '@/utils/textUtils'
 
 // Extended type for title search results that includes search metadata
-type TitleSearchResult = OpenLibraryBook & { searchResult?: SearchResult }
+type TitleSearchResult = OpenLibraryBook & { 
+  searchResult?: SearchResult // Store the enriched SearchResult from intelligent search
+  imageUrl?: string // For results that have direct image URLs
+  metadataSource?: string // Store which metadata source was used
+}
 
 const router = useRouter()
 const configStore = useConfigurationStore()
 const libraryStore = useLibraryStore()
 const toast = useToast()
+
+// Get enabled metadata sources
+const enabledMetadataSources = computed(() => {
+  return configStore.apiConfigurations.filter(api => 
+    api.isEnabled && api.type === 'metadata'
+  ).sort((a, b) => a.priority - b.priority) // Sort by priority (lower = higher priority)
+})
 
 // Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
 // const decodeHtml = (input?: string | null): string => {
@@ -465,12 +516,15 @@ const handleSearchInput = () => {
 
 const performSearch = async () => {
   const query = searchQuery.value.trim()
+  console.log('performSearch called with query:', query)
+  
   if (!query) {
     searchError.value = 'Please enter a search term'
     return
   }
 
   const detectedType = detectSearchType(query)
+  console.log('Detected search type:', detectedType)
   searchType.value = detectedType
   searchStatus.value = ''
 
@@ -484,6 +538,8 @@ const performSearch = async () => {
 }
 
 const searchByAsin = async (asin: string) => {
+  console.log('searchByAsin called with:', asin)
+  
   if (!/^[A-Z0-9]{10}$/.test(asin)) {
     searchError.value = 'Invalid ASIN format. Must be 10 alphanumeric characters (e.g., B08G9PRS1K)'
     return
@@ -495,20 +551,65 @@ const searchByAsin = async (asin: string) => {
   isbnResult.value = null
   errorMessage.value = ''
   asinQuery.value = asin
-  searchStatus.value = `Searching Audible for ASIN: ${asin}...`
+  
+  // Check if metadata sources are configured
+  if (enabledMetadataSources.value.length === 0) {
+    searchStatus.value = 'No metadata sources configured'
+    errorMessage.value = 'Please configure at least one metadata source in Settings to fetch audiobook information.'
+    isSearching.value = false
+    return
+  }
+  
+  searchStatus.value = `Searching for ASIN ${asin}...`
+  
   try {
-    // Inform user that request was sent
-    searchStatus.value = `Requesting metadata for ASIN ${asin}...`
-    const result = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
-    // Server returned metadata
-    searchStatus.value = `Metadata received for ASIN ${asin}, processing...`
-    audibleResult.value = result
+    // Use the new metadata endpoint that respects configured sources
+    const response = await apiService.getMetadata(asin, 'us', true)
+    const result = response.metadata
+    const sourceName = response.source
+    
+    console.log('Metadata response:', { sourceName, hasMetadata: !!result })
+    
+    searchStatus.value = `Metadata received from ${sourceName}, processing...`
+    
+    // Convert audimeta response to our audiobook format
+    if (result) {
+      // Extract year from publishDate if available
+      let publishYear: string | undefined
+      if (result.publishDate || result.releaseDate) {
+        const dateStr = result.publishDate || result.releaseDate
+        const yearMatch = dateStr?.match(/\d{4}/)
+        publishYear = yearMatch ? yearMatch[0] : undefined
+      }
+      
+      audibleResult.value = {
+        asin: result.asin || asin,
+        title: result.title || 'Unknown Title',
+        subtitle: result.subtitle,
+        authors: result.authors?.map(a => a.name).filter(n => n) as string[] || [],
+        narrators: result.narrators?.map(n => n.name).filter(n => n) as string[] || [],
+        publisher: result.publisher,
+        publishYear: publishYear,
+        description: result.description,
+        imageUrl: result.imageUrl,
+        runtime: result.lengthMinutes ? result.lengthMinutes * 60 : undefined,
+        language: result.language,
+        genres: result.genres?.map(g => g.name).filter(n => n) as string[] || [],
+        series: result.series?.[0]?.name,
+        seriesNumber: result.series?.[0]?.position,
+        abridged: result.bookFormat?.toLowerCase().includes('abridged') || false,
+        isbn: result.isbn,
+        source: sourceName
+      }
+      
+      console.log('audibleResult set with source:', audibleResult.value.source)
+    }
     
   // Check library status after getting result
   searchStatus.value = 'Checking library for existing copies...'
   await checkExistingInLibrary()
   // Finalize status
-  searchStatus.value = audibleResult.value ? 'ASIN metadata ready' : 'No metadata available'
+  searchStatus.value = audibleResult.value ? `Metadata ready from ${sourceName}` : 'No metadata available'
   } catch (error) {
     console.error('ASIN search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
@@ -536,29 +637,38 @@ const searchByTitle = async (query: string) => {
   titleQuery.value = parsed.title
   authorQuery.value = parsed.author || ''
   
-  searchStatus.value = ''
+  searchStatus.value = 'Searching for audiobooks and fetching metadata...'
   try {
-  // Use backend intelligent search API (Amazon + Audible enrichment only)
-  const searchResults = await apiService.intelligentSearch(query)
+    // Use intelligent search API that searches Audible/Amazon, gets ASINs, and enriches with metadata
+    const results = await apiService.searchByTitle(query)
+    console.log('Intelligent search returned:', results)
+    console.log('Number of results:', results?.length)
     
     searchStatus.value = 'Processing search results...'
     
-    // Convert SearchResult objects to displayable format and extract unique ASINs
+    // Convert enriched SearchResult to display format
     titleResults.value = []
     const processedAsins = new Set<string>()
     
-    for (const result of searchResults) {
-      if (result.asin && !processedAsins.has(result.asin)) {
-        processedAsins.add(result.asin)
-        resolvedAsins.value[`search-${result.asin}`] = result.asin
+    for (const result of results) {
+      const asin = result.asin
+      
+      if (asin && !processedAsins.has(asin) && result.isEnriched) {
+        processedAsins.add(asin)
+        resolvedAsins.value[`search-${asin}`] = asin
         
-        // Create a simplified book object for display
+        // Create a book object with metadata from the enriched SearchResult
         const displayBook: TitleSearchResult = {
-          key: `search-${result.asin}`,
-          title: result.title,
+          key: `search-${asin}`,
+          title: result.title || 'Unknown Title',
           author_name: result.artist ? [result.artist] : [],
           isbn: [],
-          searchResult: result // Store the full search result for metadata
+          first_publish_year: result.publishedDate ? 
+            parseInt(result.publishedDate.match(/\d{4}/)?.[0] || '0', 10) || undefined : undefined,
+          publisher: result.publisher ? [result.publisher] : undefined,
+          metadataSource: result.metadataSource, // Which metadata source enriched it (Audimeta, Audnexus, etc.)
+          imageUrl: result.imageUrl,
+          searchResult: result // Store the full enriched SearchResult
         }
         titleResults.value.push(displayBook)
       }
@@ -571,10 +681,10 @@ const searchByTitle = async (query: string) => {
       errorMessage.value = 'No audiobooks found. Try refining your search terms.'
     }
     
-  // Check library status after getting results
-  searchStatus.value = 'Checking library for existing matches...'
-  await checkExistingInLibrary()
-  searchStatus.value = `Search complete — found ${titleResults.value.length} items`
+    // Check library status after getting results
+    searchStatus.value = 'Checking library for existing matches...'
+    await checkExistingInLibrary()
+    searchStatus.value = `Search complete — found ${titleResults.value.length} items`
   } catch (error) {
     console.error('Title search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
@@ -621,6 +731,11 @@ const loadMoreTitleResults = async () => {
 
 // Helper methods for Open Library results
 const getCoverUrl = (book: TitleSearchResult): string => {
+  // Check for audimeta result image URL first
+  if (book.imageUrl) {
+    return book.imageUrl
+  }
+  // Fall back to search result image URL
   const imageUrl = book.searchResult?.imageUrl || ''
   return apiService.getImageUrl(imageUrl)
 }
@@ -631,6 +746,28 @@ const formatAuthors = (book: TitleSearchResult): string => {
 
 const getAsin = (book: TitleSearchResult): string | null => {
   return book.searchResult?.asin || resolvedAsins.value[book.key] || null
+}
+
+const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
+  const asin = getAsin(book)
+  if (!asin) return null
+  
+  const source = book.metadataSource
+  if (!source) return null
+  
+  // Map metadata source to URL
+  if (source.toLowerCase().includes('audimeta')) {
+    return `https://audimeta.de/book/${asin}`
+  } else if (source.toLowerCase().includes('audnex')) {
+    // Audnexus API format
+    return `https://api.audnex.us/books/${asin}`
+  } else if (source === 'Amazon') {
+    return `https://www.amazon.com/dp/${asin}`
+  } else if (source === 'Audible') {
+    return `https://www.audible.com/pd/${asin}`
+  }
+  
+  return null
 }
 
 // Removed manual ASIN helper methods (createAsinSearchHint, openAmazonSearch, useBookForAsinSearch)
@@ -649,13 +786,83 @@ const selectTitleResult = async (book: TitleSearchResult) => {
   console.log('Adding audiobook with ASIN:', asin)
   
   try {
-    // Fetch full metadata
-    console.log('Fetching metadata from /api/audible/metadata/' + asin)
-    const metadata = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
-    console.log('Metadata fetched:', metadata)
-    
-    // Add to library directly
-    await addToLibrary(metadata)
+    // If we have enriched search result, use it directly
+    if (book.searchResult && book.searchResult.isEnriched) {
+      const result = book.searchResult
+      console.log('Using enriched metadata from intelligent search:', result)
+      
+      // Extract publish year from date string if available
+      let publishYear: string | undefined
+      if (result.publishedDate) {
+        const yearMatch = result.publishedDate.match(/\d{4}/)
+        publishYear = yearMatch ? yearMatch[0] : undefined
+      }
+      
+      const metadata: AudibleBookMetadata = {
+        asin: result.asin || asin,
+        title: result.title || 'Unknown Title',
+        subtitle: undefined,
+        authors: result.artist ? [result.artist] : [],
+        narrators: result.narrator ? [result.narrator] : [],
+        publisher: result.publisher,
+        publishYear: publishYear,
+        description: result.description,
+        imageUrl: result.imageUrl,
+        runtime: result.runtime,
+        language: result.language,
+        genres: [],
+        series: result.series,
+        seriesNumber: result.seriesNumber,
+        abridged: false,
+        isbn: undefined,
+        source: book.metadataSource || result.source
+      }
+      
+      // Add to library directly
+      await addToLibrary(metadata)
+    } else {
+      // Fallback: fetch metadata if not already enriched
+      console.log('Fetching metadata for ASIN:', asin)
+      toast.info('Fetching metadata', `Getting book details from configured sources...`)
+      const response = await apiService.getMetadata(asin, 'us', true)
+      const audimetaData = response.metadata
+      console.log(`Metadata fetched from ${response.source}:`, audimetaData)
+      toast.success('Metadata retrieved', `Book details fetched from ${response.source}`)
+      
+      // Store the metadata source in the book object so it shows in the UI
+      book.metadataSource = response.source
+      
+      // Convert audimeta response to AudibleBookMetadata format
+      let publishYear: string | undefined
+      if (audimetaData.publishDate || audimetaData.releaseDate) {
+        const dateStr = audimetaData.publishDate || audimetaData.releaseDate
+        const yearMatch = dateStr?.match(/\d{4}/)
+        publishYear = yearMatch ? yearMatch[0] : undefined
+      }
+      
+      const metadata: AudibleBookMetadata = {
+        asin: audimetaData.asin || asin,
+        title: audimetaData.title || 'Unknown Title',
+        subtitle: audimetaData.subtitle,
+        authors: audimetaData.authors?.map((a: any) => a.name).filter((n: any) => n) as string[] || [],
+        narrators: audimetaData.narrators?.map((n: any) => n.name).filter((n: any) => n) as string[] || [],
+        publisher: audimetaData.publisher,
+        publishYear: publishYear,
+        description: audimetaData.description,
+        imageUrl: audimetaData.imageUrl,
+        runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes * 60 : undefined,
+        language: audimetaData.language,
+        genres: audimetaData.genres?.map((g: any) => g.name).filter((n: any) => n) as string[] || [],
+        series: audimetaData.series?.[0]?.name,
+        seriesNumber: audimetaData.series?.[0]?.position,
+        abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
+        isbn: audimetaData.isbn,
+        source: response.source
+      }
+      
+      // Add to library directly
+      await addToLibrary(metadata)
+    }
   } catch (error) {
     console.error('Failed to add audiobook:', error)
     toast.error('Add failed', 'Failed to add audiobook. Please try again.')
@@ -666,8 +873,71 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
   const asin = resolvedAsins.value[book.key] || book.searchResult?.asin
   if (asin) {
     try {
-      const result = await apiService.getAudibleMetadata<AudibleBookMetadata>(asin)
-      selectedBook.value = result
+      // If we have enriched search result, use it directly
+      if (book.searchResult && book.searchResult.isEnriched) {
+        const result = book.searchResult
+        console.log('Using enriched metadata from intelligent search:', result)
+        
+        // Extract publish year from date string if available
+        let publishYear: string | undefined
+        if (result.publishedDate) {
+          const yearMatch = result.publishedDate.match(/\d{4}/)
+          publishYear = yearMatch ? yearMatch[0] : undefined
+        }
+        
+        selectedBook.value = {
+          asin: result.asin || asin,
+          title: result.title || 'Unknown Title',
+          subtitle: undefined,
+          authors: result.artist ? [result.artist] : [],
+          narrators: result.narrator ? [result.narrator] : [],
+          publisher: result.publisher,
+          publishYear: publishYear,
+          description: result.description,
+          imageUrl: result.imageUrl,
+          runtime: result.runtime,
+          language: result.language,
+          genres: [],
+          series: result.series,
+          seriesNumber: result.seriesNumber,
+          abridged: false,
+          isbn: undefined,
+          source: book.metadataSource || result.source
+        }
+      } else {
+        // Fallback: fetch metadata if not already enriched
+        const response = await apiService.getMetadata(asin, 'us', true)
+        const audimetaData = response.metadata
+        book.metadataSource = response.source
+        
+        // Convert to AudibleBookMetadata format
+        let publishYear: string | undefined
+        if (audimetaData.publishDate || audimetaData.releaseDate) {
+          const dateStr = audimetaData.publishDate || audimetaData.releaseDate
+          const yearMatch = dateStr?.match(/\d{4}/)
+          publishYear = yearMatch ? yearMatch[0] : undefined
+        }
+        
+        selectedBook.value = {
+          asin: audimetaData.asin || asin,
+          title: audimetaData.title || 'Unknown Title',
+          subtitle: audimetaData.subtitle,
+          authors: audimetaData.authors?.map((a: any) => a.name).filter((n: string) => n) as string[] || [],
+          narrators: audimetaData.narrators?.map((n: any) => n.name).filter((n: string) => n) as string[] || [],
+          publisher: audimetaData.publisher,
+          publishYear: publishYear,
+          description: audimetaData.description,
+          imageUrl: audimetaData.imageUrl,
+          runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes * 60 : undefined,
+          language: audimetaData.language,
+          genres: audimetaData.genres?.map((g: any) => g.name).filter((n: string) => n) as string[] || [],
+          series: audimetaData.series?.[0]?.name,
+          seriesNumber: audimetaData.series?.[0]?.position,
+          abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
+          isbn: audimetaData.isbn,
+          source: response.source
+        }
+      }
       showDetailsModal.value = true
   } catch (error) {
   console.error('Failed to fetch detailed metadata:', error)
@@ -747,6 +1017,11 @@ const formatRuntime = (minutes: number): string => {
   return `${hours}h ${mins}m`
 }
 
+const capitalizeLanguage = (language: string | undefined): string => {
+  if (!language) return ''
+  return language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
+}
+
 // Search by ISBN: fetch basic metadata, then search by title instead of ISBN-to-ASIN conversion
 const searchByISBNChain = async (isbn: string) => {
   if (!isbnService.validateISBN(isbn)) {
@@ -804,9 +1079,10 @@ const searchByISBNChain = async (isbn: string) => {
   }
 }
 
-// Load application settings on mount
+// Load application settings and API configurations on mount
 onMounted(async () => {
   await configStore.loadApplicationSettings()
+  await configStore.loadApiConfigurations()
   // Subscribe to server-side search progress updates
   const unsub = signalRService.onSearchProgress((payload) => {
     if (payload && payload.message) {
@@ -832,6 +1108,16 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.settings-link {
+  color: #2196f3;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.settings-link:hover {
+  text-decoration: underline;
 }
 
 /* Search Tabs */
@@ -868,57 +1154,95 @@ onMounted(async () => {
 
 /* Search Section */
 .search-section {
-  margin-bottom: 2rem;
+  margin-bottom: 2.5rem;
+  background-color: #2a2a2a;
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .search-method {
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .search-method-label {
   display: block;
   color: white;
   font-weight: 600;
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .search-help {
-  color: #ccc;
+  color: #adb5bd;
   font-size: 0.9rem;
   margin: 0;
+  line-height: 1.5;
+}
+
+.search-help .settings-link {
+  color: #4dabf7;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.search-help .settings-link:hover {
+  color: #74c0fc;
+  text-decoration: underline;
 }
 
 /* Unified Search */
 .unified-search-bar {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
 .unified-search-bar .search-input {
   flex: 1;
-  padding: 1rem;
-  border: 1px solid #555;
+  padding: 0.875rem 1.125rem;
+  border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  background-color: #2a2a2a;
+  background-color: rgba(0, 0, 0, 0.2);
   color: white;
   font-size: 1rem;
   font-family: inherit;
   text-transform: none;
+  transition: all 0.2s ease;
+}
+
+.unified-search-bar .search-input:focus {
+  outline: none;
+  border-color: #4dabf7;
+  background-color: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
+}
+
+.unified-search-bar .search-input::placeholder {
+  color: #6c757d;
 }
 
 .search-hint {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #888;
-  font-size: 0.9rem;
-  margin-bottom: 1rem;
+  color: #6c757d;
+  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  margin-bottom: 0;
 }
 
-.search-hint .ph {
-  color: #007acc;
+.search-hint svg {
+  color: #4dabf7;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 /* ASIN Search */
@@ -929,25 +1253,33 @@ onMounted(async () => {
 
 .search-input {
   flex: 1;
-  padding: 1rem;
-  border: 1px solid #555;
+  padding: 0.875rem 1.125rem;
+  border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  background-color: #2a2a2a;
+  background-color: rgba(0, 0, 0, 0.2);
   color: white;
   font-size: 1rem;
   text-transform: uppercase;
   font-family: 'Courier New', monospace;
+  transition: all 0.2s ease;
 }
 
 .search-input.error {
-  border-color: #e74c3c;
-  box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.2);
+  border-color: #fa5252;
+  background-color: rgba(250, 82, 82, 0.05);
+  box-shadow: 0 0 0 3px rgba(250, 82, 82, 0.1);
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #007acc;
-  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+  border-color: #4dabf7;
+  background-color: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
+}
+
+.search-input::placeholder {
+  color: #6c757d;
+  text-transform: none;
 }
 
 /* Title Search Form */
@@ -991,8 +1323,8 @@ onMounted(async () => {
 
 /* Buttons */
 .search-btn {
-  padding: 1rem 2rem;
-  background-color: #007acc;
+  padding: 0.875rem 1.75rem;
+  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -1000,14 +1332,33 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-weight: 500;
-  min-width: 120px;
+  font-weight: 600;
+  min-width: 140px;
   justify-content: center;
-  align-self: flex-start;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
 .search-btn:hover:not(:disabled) {
-  background-color: #005fa3;
+  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
+  transform: translateY(-1px);
+}
+
+.search-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.search-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.search-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .search-btn:disabled {
@@ -1016,9 +1367,9 @@ onMounted(async () => {
 }
 
 .btn {
-  padding: 0.5rem 1rem;
+  padding: 0.65rem 1.25rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;
@@ -1026,49 +1377,79 @@ onMounted(async () => {
   gap: 0.5rem;
   min-width: 100px;
   justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .btn-primary {
-  background-color: #007acc;
+  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: white;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #005fa3;
+  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn-success {
-  background-color: #27ae60;
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
   color: white;
+  box-shadow: 0 2px 8px rgba(46, 204, 113, 0.3);
 }
 
 .btn-success:disabled {
-  opacity: 1;
+  opacity: 0.7;
   cursor: not-allowed;
 }
 
 .btn-secondary {
-  background-color: #555;
-  color: white;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #adb5bd;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background-color: #666;
+  background-color: rgba(255, 255, 255, 0.12);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
 }
 
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Error Messages */
 /* Error Messages */
 .error-message {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  color: #e74c3c;
+  gap: 0.625rem;
+  color: #fff;
+  background-color: rgba(250, 82, 82, 0.15);
+  border: 1px solid rgba(250, 82, 82, 0.3);
+  border-radius: 8px;
+  padding: 0.875rem 1.125rem;
   font-size: 0.9rem;
-  margin-top: 0.5rem;
+  margin-top: 1rem;
+}
+
+.error-message svg {
+  color: #fa5252;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 /* Loading Results */
@@ -1078,35 +1459,49 @@ onMounted(async () => {
   align-items: center;
   padding: 4rem 2rem;
   min-height: 300px;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .loading-spinner {
   text-align: center;
-  color: #ccc;
+  color: #adb5bd;
+}
+
+.loading-spinner svg {
+  font-size: 3rem;
+  color: #4dabf7;
+  margin-bottom: 1rem;
+  width: 48px;
+  height: 48px;
 }
 
 .loading-spinner i {
   font-size: 3rem;
-  color: #007acc;
+  color: #4dabf7;
   margin-bottom: 1rem;
 }
 
 .loading-spinner p {
   font-size: 1.1rem;
   margin: 0;
+  font-weight: 500;
 }
 
 .search-status {
-  font-size: 0.9rem;
-  color: #888;
-  margin: 0.5rem 0 0 0;
+  font-size: 0.875rem;
+  color: #6c757d;
+  margin: 0.75rem 0 0 0;
   font-style: italic;
 }
 
 /* Results */
 .search-results h2 {
   color: white;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+  font-weight: 600;
 }
 
 /* ASIN Result Card */
@@ -1115,20 +1510,34 @@ onMounted(async () => {
   background-color: #2a2a2a;
   border-radius: 8px;
   overflow: hidden;
-  padding: 1rem;
-  gap: 1rem;
+  padding: 1.25rem;
+  gap: 1.25rem;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.result-card:hover {
+  background-color: #2f2f2f;
+  border-color: rgba(33, 150, 243, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .result-poster {
-  width: 120px;
-  height: 120px;
+  width: 140px;
+  height: 140px;
   flex-shrink: 0;
   background-color: #555;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.result-card:hover .result-poster {
+  transform: scale(1.02);
 }
 
 .result-poster img {
@@ -1139,58 +1548,88 @@ onMounted(async () => {
 
 .placeholder-cover {
   color: #888;
-  font-size: 2rem;
+  font-size: 2.5rem;
 }
 
 .result-info {
   flex: 1;
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .result-info h3 {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   color: white;
-  font-size: 1.3rem;
+  font-size: 1.4rem;
+  line-height: 1.3;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .result-author {
-  color: #007acc;
-  margin: 0 0 0.25rem 0;
+  color: #4dabf7;
+  margin: 0;
   font-weight: 500;
+  font-size: 0.95rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .result-narrator {
-  color: #ccc;
-  margin: 0 0 1rem 0;
+  color: #adb5bd;
+  margin: 0;
   font-style: italic;
+  font-size: 0.9rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .result-stats {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
   flex-wrap: wrap;
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  color: #999;
-  font-size: 0.9rem;
-  background-color: #333;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  gap: 0.35rem;
+  color: #adb5bd;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: background-color 0.2s ease;
+}
+
+.stat-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.stat-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .stat-item i {
-  color: #007acc;
+  color: #4dabf7;
 }
 
 .result-description {
   color: #ccc;
-  margin-bottom: 1rem;
+  margin: 0.5rem 0;
   line-height: 1.5;
   flex-grow: 1;
   overflow: hidden;
@@ -1203,25 +1642,82 @@ onMounted(async () => {
 .result-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0 0;
   color: #999;
   font-size: 0.875rem;
 }
 
-.result-meta span {
-  background-color: #333;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+.result-meta span,
+.result-meta a.source-link {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  text-decoration: none;
+  color: #adb5bd;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.result-meta span:hover,
+.result-meta a.source-link:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.metadata-source-badge,
+.metadata-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: rgba(33, 150, 243, 0.15) !important;
+  color: #4dabf7 !important;
+  font-weight: 500;
+  padding: 0.35rem 0.7rem !important;
+  border-radius: 6px !important;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.metadata-source-link:hover {
+  background-color: rgba(33, 150, 243, 0.25) !important;
+  color: #74c0fc !important;
+  transform: translateY(-1px);
+}
+
+.metadata-source-badge svg,
+.metadata-source-link svg {
+  width: 14px;
+  height: 14px;
+}
+
+.result-meta a.source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #adb5bd;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.result-meta a.source-link:hover {
+  background-color: rgba(33, 150, 243, 0.15);
+  color: #4dabf7;
+  transform: translateY(-1px);
 }
 
 .result-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
 }
 
 .result-actions .btn {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Title Search Results */
@@ -1240,20 +1736,6 @@ onMounted(async () => {
   align-items: flex-start;
 }
 
-/* Language badge */
-.language-badge {
-  display: inline-block;
-  background-color: rgba(255,255,255,0.06);
-  color: #e6edf3;
-  padding: 0.15rem 0.5rem;
-  margin-left: 0.5rem;
-  font-size: 0.75rem;
-  border-radius: 999px;
-  text-transform: none;
-  vertical-align: middle;
-  border: 1px solid rgba(255,255,255,0.04);
-}
-
 .title-result-card .result-info {
   flex: 1;
 }
@@ -1265,10 +1747,11 @@ onMounted(async () => {
   min-width: 150px;
 }
 
-.result-year, .result-publisher {
-  color: #999;
-  margin: 0.25rem 0;
-  font-size: 0.9rem;
+.result-year, .result-publisher, .result-asin {
+  color: #868e96;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 /* ASIN helper styles removed */

@@ -29,7 +29,11 @@ namespace Listenarr.Api.Services
         private static readonly Regex AsinRegex = new(@"/pd/[^/]+/([A-Z0-9]{10})", RegexOptions.Compiled);
         private static readonly Regex AsinFromUrlRegex = new(@"B0[A-Z0-9]{8}", RegexOptions.Compiled);
     // New: detect navigation/header noise and generic site labels like 'Audible'
-    private static readonly string[] HeaderNoisePhrases = new[] { "English - USD", "Language", "Currency", "Sign in", "Account & Lists", "Audible", "Audible.com" };
+    private static readonly string[] HeaderNoisePhrases = new[] { 
+        "English - USD", "Language", "Currency", "Sign in", "Account & Lists", "Audible", "Audible.com",
+        "No results", "Suggested Searches", "No results found", "Try again", "Browse categories",
+        "Customer Service", "Help", "Search", "Menu"
+    };
 
     // Detect common locale/geo redirect messages (examples include German audible.de redirect text)
     private static readonly string[] RedirectNoisePhrases = new[]
@@ -177,13 +181,22 @@ namespace Listenarr.Api.Services
             if (string.IsNullOrWhiteSpace(title)) return true;
             var t = title.Trim();
             if (t.Length < 3) return true;
+            
             // If the title is exactly one of the header phrases or is very short/one-word generic like 'Audible', treat as noise
             if (HeaderNoisePhrases.Any(p => string.Equals(t, p, StringComparison.OrdinalIgnoreCase))) return true;
-            if (HeaderNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0 && t.Length < 40)) return true;
+            
+            // If the title contains any header noise phrase, treat as noise (regardless of length)
+            if (HeaderNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
+            
             // If the title contains any known locale/geo redirect phrasing, treat as noise
             if (RedirectNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
-            // repeated blocks like header duplicated
+            
+            // Repeated blocks like header duplicated
             if (t.Count(c => c == '\n') > 3 && t.Length > 120) return true;
+            
+            // Check for titles that are just whitespace and newlines
+            if (t.All(c => char.IsWhiteSpace(c) || c == '\n' || c == '\r')) return true;
+            
             return false;
         }
 

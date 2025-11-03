@@ -23,7 +23,7 @@
         class="tab-button"
       >
   <PhCloud />
-        API Sources
+        Metadata Sources
       </button>
       <button 
         @click="router.push({ hash: '#clients' })" 
@@ -169,19 +169,19 @@
         </div>
       </div>
 
-      <!-- API Sources Tab -->
+      <!-- Metadata Sources Tab -->
       <div v-if="activeTab === 'apis'" class="tab-content">
         <div class="section-header">
-          <h3>API Sources</h3>
+          <h3>Metadata Sources</h3>
           <button @click="showApiForm = true" class="add-button">
             <PhPlus />
-            Add API Source
+            Add Metadata Source
           </button>
         </div>
 
         <div v-if="configStore.apiConfigurations.length === 0" class="empty-state">
           <PhCloudSlash />
-          <p>No API sources configured. Add one to start searching for media.</p>
+          <p>No metadata sources configured. Add one to enrich audiobook information.</p>
         </div>
 
         <div v-else class="config-list">
@@ -189,6 +189,7 @@
             v-for="api in configStore.apiConfigurations" 
             :key="api.id"
             class="config-card"
+            :class="{ disabled: !api.isEnabled }"
           >
             <div class="config-info">
               <h4>{{ api.name }}</h4>
@@ -206,6 +207,18 @@
               </div>
             </div>
               <div class="config-actions">
+              <button 
+                @click="toggleApiConfig(api)" 
+                class="icon-button"
+                :title="api.isEnabled ? 'Disable' : 'Enable'"
+              >
+                <template v-if="api.isEnabled">
+                  <PhToggleRight />
+                </template>
+                <template v-else>
+                  <PhToggleLeft />
+                </template>
+              </button>
               <button @click="editApiConfig(api)" class="edit-button" title="Edit">
                 <PhPencil />
               </button>
@@ -892,24 +905,101 @@
       </div>
     </div>
 
-    <!-- API Configuration Modal (placeholder) -->
-    <div v-if="showApiForm" class="modal-overlay" @click="showApiForm = false">
+    <!-- Metadata Source Configuration Modal -->
+    <div v-if="showApiForm" class="modal-overlay" @click="closeApiForm">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
-          <h3>{{ editingApi ? 'Edit' : 'Add' }} API Source</h3>
-          <button @click="showApiForm = false" class="modal-close">
+          <h3>{{ editingApi ? 'Edit' : 'Add' }} Metadata Source</h3>
+          <button @click="closeApiForm" class="modal-close">
             <PhX />
           </button>
         </div>
         <div class="modal-body">
-          <p>API configuration form would go here...</p>
+          <form @submit.prevent="saveApiConfig" class="config-form">
+            <div class="form-group">
+              <label for="api-name">Name *</label>
+              <input 
+                id="api-name"
+                v-model="apiForm.name" 
+                type="text" 
+                placeholder="e.g., Audimeta" 
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="api-url">Base URL *</label>
+              <input 
+                id="api-url"
+                v-model="apiForm.baseUrl" 
+                type="url" 
+                placeholder="https://api.example.com" 
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="api-type">Type *</label>
+              <select id="api-type" v-model="apiForm.type" required>
+                <option value="metadata">Metadata</option>
+                <option value="search">Search</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="api-key">API Key</label>
+              <input 
+                id="api-key"
+                v-model="apiForm.apiKey" 
+                type="password" 
+                placeholder="Optional API key"
+              />
+              <small>Leave empty if not required</small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="api-priority">Priority</label>
+                <input 
+                  id="api-priority"
+                  v-model.number="apiForm.priority" 
+                  type="number" 
+                  min="1" 
+                  max="100"
+                />
+                <small>Lower numbers = higher priority</small>
+              </div>
+
+              <div class="form-group">
+                <label for="api-rate-limit">Rate Limit (per minute)</label>
+                <input 
+                  id="api-rate-limit"
+                  v-model="apiForm.rateLimitPerMinute" 
+                  type="number" 
+                  min="0"
+                  placeholder="0 = unlimited"
+                />
+              </div>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input 
+                  v-model="apiForm.isEnabled" 
+                  type="checkbox"
+                />
+                <span>Enable this metadata source</span>
+              </label>
+            </div>
+          </form>
         </div>
         <div class="modal-actions">
-          <button @click="showApiForm = false" class="cancel-button">
+          <button @click="closeApiForm" class="cancel-button" type="button">
             <PhX />
             Cancel
           </button>
-          <button @click="saveApiConfig" class="save-button">
+          <button @click="saveApiConfig" class="save-button" type="button">
             <PhCheck />
             Save
           </button>
@@ -1097,6 +1187,16 @@ const editingApi = ref<ApiConfiguration | null>(null)
 const editingClient = ref<DownloadClientConfiguration | null>(null)
 const editingIndexer = ref<Indexer | null>(null)
 const editingQualityProfile = ref<QualityProfile | null>(null)
+const apiForm = reactive({
+  id: '',
+  name: '',
+  baseUrl: '',
+  apiKey: '',
+  type: 'metadata',
+  isEnabled: true,
+  priority: 1,
+  rateLimitPerMinute: ''
+})
 const settings = ref<ApplicationSettings | null>(null)
 const startupConfig = ref<import('@/types').StartupConfig | null>(null)
 const loadingApiKey = ref(false)
@@ -1281,7 +1381,29 @@ const formatApiError = (error: unknown): string => {
 
 const editApiConfig = (api: ApiConfiguration) => {
   editingApi.value = api
+  apiForm.id = api.id
+  apiForm.name = api.name
+  apiForm.baseUrl = api.baseUrl
+  apiForm.apiKey = api.apiKey || ''
+  apiForm.type = api.type
+  apiForm.isEnabled = api.isEnabled
+  apiForm.priority = api.priority
+  apiForm.rateLimitPerMinute = api.rateLimitPerMinute || ''
   showApiForm.value = true
+}
+
+const closeApiForm = () => {
+  showApiForm.value = false
+  editingApi.value = null
+  // Reset form
+  apiForm.id = ''
+  apiForm.name = ''
+  apiForm.baseUrl = ''
+  apiForm.apiKey = ''
+  apiForm.type = 'metadata'
+  apiForm.isEnabled = true
+  apiForm.priority = 1
+  apiForm.rateLimitPerMinute = ''
 }
 
 const editClientConfig = (client: DownloadClientConfiguration) => {
@@ -1299,6 +1421,19 @@ const deleteApiConfig = async (id: string) => {
       const errorMessage = formatApiError(error)
       toast.error('API delete failed', errorMessage)
     }
+  }
+}
+
+const toggleApiConfig = async (api: ApiConfiguration) => {
+  try {
+    // Toggle the enabled state
+    const updatedApi = { ...api, isEnabled: !api.isEnabled }
+    await configStore.saveApiConfiguration(updatedApi)
+    toast.success('Metadata source', `${api.name} ${updatedApi.isEnabled ? 'enabled' : 'disabled'} successfully`)
+  } catch (error) {
+    console.error('Failed to toggle API configuration:', error)
+    const errorMessage = formatApiError(error)
+    toast.error('Toggle failed', errorMessage)
   }
 }
 
@@ -1358,11 +1493,39 @@ const getClientTypeClass = (type: string): string => {
   return typeMap[type.toLowerCase()] || 'torrent'
 }
 
-const saveApiConfig = () => {
-  // Placeholder for API config save
-  toast.info('API', 'API configuration form would be implemented here')
-  showApiForm.value = false
-  editingApi.value = null
+const saveApiConfig = async () => {
+  try {
+    // Validate required fields
+    if (!apiForm.name || !apiForm.baseUrl) {
+      toast.error('Validation error', 'Name and Base URL are required')
+      return
+    }
+
+    const apiData: ApiConfiguration = {
+      id: apiForm.id || crypto.randomUUID(),
+      name: apiForm.name,
+      baseUrl: apiForm.baseUrl,
+      apiKey: apiForm.apiKey,
+      type: apiForm.type as 'torrent' | 'nzb' | 'metadata' | 'search' | 'other',
+      isEnabled: apiForm.isEnabled,
+      priority: apiForm.priority,
+      headers: {},
+      parameters: {},
+      rateLimitPerMinute: apiForm.rateLimitPerMinute || undefined,
+      createdAt: editingApi.value?.createdAt || new Date().toISOString(),
+      lastUsed: editingApi.value?.lastUsed
+    }
+
+    // Use the single save method which handles both create and update
+    await configStore.saveApiConfiguration(apiData)
+    
+    toast.success('Metadata source', `Metadata source ${editingApi.value ? 'updated' : 'added'} successfully`)
+    closeApiForm()
+  } catch (error) {
+    console.error('Failed to save metadata source:', error)
+    const errorMessage = formatApiError(error)
+    toast.error('Save failed', errorMessage)
+  }
 }
 
 const saveSettings = async () => {
@@ -2145,6 +2308,13 @@ onMounted(async () => {
   margin-bottom: 0;
 }
 
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
 .form-group label {
   font-weight: 600;
   color: #fff;
@@ -2153,6 +2323,8 @@ onMounted(async () => {
 
 .form-group input[type="text"],
 .form-group input[type="number"],
+.form-group input[type="url"],
+.form-group input[type="password"],
 .form-group select {
   padding: 0.75rem;
   background-color: #2a2a2a;
@@ -2165,10 +2337,35 @@ onMounted(async () => {
 
 .form-group input[type="text"]:focus,
 .form-group input[type="number"]:focus,
+.form-group input[type="url"]:focus,
+.form-group input[type="password"]:focus,
 .form-group select:focus {
   outline: none;
   border-color: #007acc;
   box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+}
+
+.form-group small {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.checkbox-group {
+  margin-bottom: 1rem;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
 }
 
 .form-help {
