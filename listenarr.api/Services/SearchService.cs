@@ -955,23 +955,20 @@ namespace Listenarr.Api.Services
                 imageUrl = fallbackImageUrl;
             }
             
-            // Download and cache the image to temp storage
+            // Download and cache the image to temp storage for future use
+            // Keep the original external URL for search results to avoid 404s
             if (!string.IsNullOrEmpty(imageUrl) && !string.IsNullOrEmpty(asin))
             {
                 try
                 {
-                    var cachedPath = await _imageCacheService.DownloadAndCacheImageAsync(imageUrl, asin);
-                    if (cachedPath != null)
-                    {
-                        // Return API endpoint URL instead of file path
-                        imageUrl = $"/api/images/{asin}";
-                        _logger.LogInformation("Cached image for ASIN {Asin} to temp storage, API URL: {ImageUrl}", asin, imageUrl);
-                    }
+                    // Cache the image in background, but don't wait for it or change the URL
+                    // This ensures search results always show images immediately from their source
+                    _ = _imageCacheService.DownloadAndCacheImageAsync(imageUrl, asin);
+                    _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to cache image for ASIN {Asin}, will use remote URL", asin);
-                    // Keep the original remote URL if caching fails
+                    _logger.LogWarning(ex, "Failed to initiate image caching for ASIN {Asin}", asin);
                 }
             }
             
