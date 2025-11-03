@@ -337,86 +337,13 @@ using (var scope = app.Services.CreateScope())
     try
     {
         logger.LogInformation("Applying database migrations...");
-        // Apply any pending migrations
+        // Apply any pending migrations (including AddDefaultMetadataSources which adds Audimeta and Audnexus)
         context.Database.Migrate();
         logger.LogInformation("Database migrations applied successfully");
         
         // Apply SQLite PRAGMA settings after database is created
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
-        
-        // Seed default metadata API sources if they don't exist
-        // This runs AFTER migrations to ensure the ApiConfigurations table exists
-        try
-        {
-            logger.LogInformation("Checking for default metadata API sources...");
-            
-            // Check current state
-            var existingApis = context.ApiConfigurations
-                .Where(a => a.Type == "metadata")
-                .Select(a => a.Name)
-                .ToList();
-            
-            logger.LogInformation($"Found {existingApis.Count} existing metadata sources: {string.Join(", ", existingApis)}");
-            
-            var needsChanges = false;
-            
-            if (!existingApis.Contains("Audimeta"))
-            {
-                logger.LogInformation("Creating default Audimeta API source...");
-                var audimetaApi = new ApiConfiguration
-                {
-                    Name = "Audimeta",
-                    BaseUrl = "https://audimeta.de",
-                    Type = "metadata",
-                    IsEnabled = true,
-                    Priority = 1,
-                    CreatedAt = DateTime.UtcNow
-                };
-                context.ApiConfigurations.Add(audimetaApi);
-                needsChanges = true;
-                logger.LogInformation("Default Audimeta API source added to context");
-            }
-            else
-            {
-                logger.LogInformation("Audimeta API source already exists, skipping");
-            }
-            
-            if (!existingApis.Contains("Audnexus"))
-            {
-                logger.LogInformation("Creating default Audnexus API source...");
-                var audnexusApi = new ApiConfiguration
-                {
-                    Name = "Audnexus",
-                    BaseUrl = "https://api.audnex.us",
-                    Type = "metadata",
-                    IsEnabled = true,
-                    Priority = 2,
-                    CreatedAt = DateTime.UtcNow
-                };
-                context.ApiConfigurations.Add(audnexusApi);
-                needsChanges = true;
-                logger.LogInformation("Default Audnexus API source added to context");
-            }
-            else
-            {
-                logger.LogInformation("Audnexus API source already exists, skipping");
-            }
-            
-            if (needsChanges)
-            {
-                var changes = context.SaveChanges();
-                logger.LogInformation($"Default metadata API sources seeded successfully ({changes} records inserted)");
-            }
-            else
-            {
-                logger.LogInformation("All default metadata API sources already exist, no seeding needed");
-            }
-        }
-        catch (Exception seedEx)
-        {
-            logger.LogError(seedEx, "Failed to seed default metadata API sources - this may cause metadata functionality to fail");
-        }
     }
     catch (Exception ex)
     {
