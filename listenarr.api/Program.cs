@@ -88,6 +88,13 @@ builder.Services.AddHttpClient<AudimetaService>()
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
 
+// Add HTTP client for Audnexus service
+builder.Services.AddHttpClient<AudnexusService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
+
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 

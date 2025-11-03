@@ -39,6 +39,7 @@ namespace Listenarr.Api.Services
         private readonly IImageCacheService _imageCacheService;
         private readonly ListenArrDbContext _dbContext;
         private readonly AudimetaService _audimetaService;
+        private readonly AudnexusService _audnexusService;
 
         public SearchService(
             HttpClient httpClient, 
@@ -51,7 +52,8 @@ namespace Listenarr.Api.Services
             IImageCacheService imageCacheService,
             ListenArrDbContext dbContext,
             IHubContext<DownloadHub> hubContext,
-            AudimetaService audimetaService)
+            AudimetaService audimetaService,
+            AudnexusService audnexusService)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -64,6 +66,7 @@ namespace Listenarr.Api.Services
             _dbContext = dbContext;
             _hubContext = hubContext;
             _audimetaService = audimetaService;
+            _audnexusService = audnexusService;
         }
 
         private async Task BroadcastSearchProgressAsync(string message, string? asin = null)
@@ -381,7 +384,12 @@ namespace Listenarr.Api.Services
                     return fallback.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
                 }
 
-                // Step 3: Enrich each ASIN with detailed metadata concurrently (limit concurrency)
+                // Step 3: Get enabled metadata sources ONCE before concurrent enrichment to avoid DbContext threading issues
+                _logger.LogInformation("Fetching enabled metadata sources before concurrent enrichment...");
+                var metadataSources = await GetEnabledMetadataSourcesAsync();
+                _logger.LogInformation("Will use {Count} metadata source(s) for all ASINs", metadataSources.Count);
+
+                // Step 4: Enrich each ASIN with detailed metadata concurrently (limit concurrency)
                 var semaphore = new SemaphoreSlim(3); // throttle external fetches
                 var enrichmentTasks = new List<Task>();
                 var enriched = new ConcurrentBag<SearchResult>();
@@ -404,34 +412,62 @@ namespace Listenarr.Api.Services
                             AudibleBookMetadata? metadata = null;
                             string? metadataSourceName = null;
                             
-                            // Get enabled metadata sources ordered by priority
-                            var metadataSources = await GetEnabledMetadataSourcesAsync();
-                            _logger.LogInformation("Found {Count} enabled metadata sources for ASIN {Asin}", metadataSources.Count, asin);
+                            // Use the pre-fetched metadata sources (avoid DbContext concurrency issues)
+                            _logger.LogInformation("Using {Count} enabled metadata sources for ASIN {Asin}", metadataSources.Count, asin);
+                            
+                            if (metadataSources.Count > 0)
+                            {
+                                _logger.LogInformation("Attempting to fetch metadata for ASIN {Asin} from {Count} configured source(s): {Sources}", 
+                                    asin, metadataSources.Count, string.Join(", ", metadataSources.Select(s => s.Name)));
+                            }
                             
                             // Try each metadata source in priority order until one succeeds
                             foreach (var source in metadataSources)
                             {
                                 try
                                 {
-                                    _logger.LogDebug("Attempting to fetch metadata from {SourceName} for ASIN {Asin}", source.Name, asin);
+                                    _logger.LogInformation("Attempting to fetch metadata from {SourceName} ({BaseUrl}) for ASIN {Asin}", source.Name, source.BaseUrl, asin);
                                     await BroadcastSearchProgressAsync($"Fetching metadata from {source.Name} for ASIN: {asin}", asin);
                                     
                                     if (source.BaseUrl.Contains("audimeta.de", StringComparison.OrdinalIgnoreCase))
                                     {
+                                        _logger.LogDebug("Calling Audimeta service for ASIN {Asin}", asin);
                                         var audimetaData = await _audimetaService.GetBookMetadataAsync(asin, "us", true);
+                                        
                                         if (audimetaData != null)
                                         {
+                                            _logger.LogInformation("✓ Audimeta returned data for ASIN {Asin}. Title: {Title}", asin, audimetaData.Title ?? "null");
                                             metadata = ConvertAudimetaToMetadata(audimetaData, asin, originalSource ?? "Audible");
                                             metadataSourceName = source.Name; // Store which metadata source succeeded
                                             _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName}", asin, source.Name);
                                             break; // Success! Stop trying other sources
                                         }
+                                        else
+                                        {
+                                            _logger.LogWarning("✗ Audimeta returned null for ASIN {Asin}", asin);
+                                        }
                                     }
                                     else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase))
                                     {
-                                        // TODO: Add Audnexus support when implemented
-                                        _logger.LogDebug("Audnexus support not yet implemented, skipping");
-                                        continue;
+                                        _logger.LogDebug("Calling Audnexus service for ASIN {Asin}", asin);
+                                        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, "us", true, false);
+                                        
+                                        if (audnexusData != null)
+                                        {
+                                            _logger.LogInformation("✓ Audnexus returned data for ASIN {Asin}. Title: {Title}", asin, audnexusData.Title ?? "null");
+                                            metadata = ConvertAudnexusToMetadata(audnexusData, asin, originalSource ?? "Audible");
+                                            metadataSourceName = source.Name; // Store which metadata source succeeded
+                                            _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName}", asin, source.Name);
+                                            break; // Success! Stop trying other sources
+                                        }
+                                        else
+                                        {
+                                            _logger.LogWarning("✗ Audnexus returned null for ASIN {Asin}", asin);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("Unknown metadata source type: {BaseUrl}, skipping", source.BaseUrl);
                                     }
                                 }
                                 catch (Exception sourceEx)
@@ -446,23 +482,35 @@ namespace Listenarr.Api.Services
                             {
                                 if (metadataSources.Count == 0)
                                 {
-                                    _logger.LogInformation("No metadata sources configured for ASIN {Asin}, falling back to scraping", asin);
+                                    _logger.LogInformation("⚠ No metadata sources configured for ASIN {Asin}, falling back to scraping", asin);
+                                    await BroadcastSearchProgressAsync($"No metadata sources configured, scraping for ASIN: {asin}", asin);
                                 }
                                 else
                                 {
-                                    _logger.LogWarning("All {Count} metadata sources failed for ASIN {Asin}, falling back to scraping", metadataSources.Count, asin);
+                                    _logger.LogWarning("⚠ All {Count} metadata sources failed for ASIN {Asin} (tried: {Sources}), falling back to scraping", 
+                                        metadataSources.Count, asin, string.Join(", ", metadataSources.Select(s => s.Name)));
+                                    await BroadcastSearchProgressAsync($"Metadata sources failed, scraping for ASIN: {asin}", asin);
                                 }
                                 
+                                _logger.LogInformation("Attempting to scrape metadata for ASIN {Asin}", asin);
                                 metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                                
                                 if (metadata != null)
                                 {
+                                    _logger.LogInformation("✓ Successfully scraped metadata for ASIN {Asin}. Title: {Title}, Source: {Source}", 
+                                        asin, metadata.Title ?? "null", metadata.Source ?? "null");
+                                    
                                     // Keep the original source for the product link (Amazon/Audible where ASIN was found)
                                     var scrapedFrom = metadata.Source; // This is set by the scraper based on which site worked
                                     metadata.Source = originalSource ?? "Audible";
                                     
                                     // Set metadata source to the site that was scraped (without "(Scraped)" suffix)
                                     metadataSourceName = scrapedFrom;
-                                    _logger.LogInformation("Successfully scraped metadata for ASIN {Asin} from {ScrapedFrom}", asin, scrapedFrom);
+                                    _logger.LogInformation("Scraped metadata from {ScrapedFrom}, setting MetadataSource badge to: {MetadataSource}", scrapedFrom, metadataSourceName);
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("✗ Failed to scrape metadata for ASIN {Asin}", asin);
                                 }
                             }
                             
@@ -485,9 +533,19 @@ namespace Listenarr.Api.Services
                                 if (!string.IsNullOrEmpty(metadataSourceName))
                                 {
                                     enrichedResult.MetadataSource = metadataSourceName;
+                                    _logger.LogInformation("✓ Enriched result for ASIN {Asin} - Title: {Title}, MetadataSource: {MetadataSource}", 
+                                        asin, enrichedResult.Title ?? "null", metadataSourceName);
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("⚠ Metadata obtained for ASIN {Asin} but metadataSourceName is null/empty", asin);
                                 }
                                 
                                 enriched.Add(enrichedResult);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("✗ No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
                             }
                         }
                         catch (Exception ex)
@@ -571,7 +629,26 @@ namespace Listenarr.Api.Services
                     r.Title.Length >= 3
                 ).ToList();
 
-                _logger.LogInformation("Intelligent search complete. Returning {Count} filtered results for query: {Query}", results.Count, query);
+                // Sort results: Prioritize proper metadata sources over scraped sources
+                // Proper metadata sources (Audimeta, Audnexus, etc.) should be at the top
+                // Scraped sources (Amazon, Audible) should be at the bottom
+                results = results.OrderByDescending(r =>
+                {
+                    // Check if this result has a proper metadata source (not scraped)
+                    if (string.IsNullOrEmpty(r.MetadataSource))
+                        return 0; // No metadata source = lowest priority
+                    
+                    var metadataSource = r.MetadataSource.ToLowerInvariant();
+                    
+                    // Scraped sources get lower priority
+                    if (metadataSource == "amazon" || metadataSource == "audible")
+                        return 1; // Scraped = medium priority
+                    
+                    // Proper metadata sources get highest priority
+                    return 2; // Audimeta, Audnexus, etc. = highest priority
+                }).ToList();
+
+                _logger.LogInformation("Intelligent search complete. Returning {Count} filtered and sorted results for query: {Query}", results.Count, query);
                 return results;
             }
             catch (Exception ex)
@@ -745,6 +822,65 @@ namespace Listenarr.Api.Services
             }
 
             _logger.LogInformation("Converted audimeta data for {Asin}: Title={Title}, Runtime={Runtime}min, Year={Year}, Series={Series}, ImageUrl={ImageUrl}", 
+                asin, metadata.Title, metadata.Runtime, metadata.PublishYear, metadata.Series, metadata.ImageUrl);
+
+            return metadata;
+        }
+
+        private AudibleBookMetadata ConvertAudnexusToMetadata(AudnexusBookResponse audnexusData, string asin, string source = "Audible")
+        {
+            var metadata = new AudibleBookMetadata
+            {
+                Asin = audnexusData.Asin ?? asin,
+                Source = source, // Use the original search source (Amazon or Audible)
+                Title = audnexusData.Title,
+                Subtitle = audnexusData.Subtitle,
+                Authors = audnexusData.Authors?.Select(a => a.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
+                Narrators = audnexusData.Narrators?.Select(n => n.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
+                Publisher = audnexusData.PublisherName,
+                Description = audnexusData.Description ?? audnexusData.Summary,
+                Genres = audnexusData.Genres?.Select(g => g.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
+                Language = audnexusData.Language,
+                Isbn = audnexusData.Isbn,
+                ImageUrl = audnexusData.Image,
+                Abridged = audnexusData.FormatType?.Contains("abridged", StringComparison.OrdinalIgnoreCase) ?? false,
+                Explicit = audnexusData.IsAdult ?? false
+            };
+
+            // Handle series (primary series first, then secondary) - Audnexus returns single objects, not arrays
+            if (audnexusData.SeriesPrimary != null)
+            {
+                metadata.Series = audnexusData.SeriesPrimary.Name;
+                metadata.SeriesNumber = audnexusData.SeriesPrimary.Position;
+            }
+            else if (audnexusData.SeriesSecondary != null)
+            {
+                metadata.Series = audnexusData.SeriesSecondary.Name;
+                metadata.SeriesNumber = audnexusData.SeriesSecondary.Position;
+            }
+
+            // Convert runtime from minutes
+            if (audnexusData.RuntimeLengthMin.HasValue && audnexusData.RuntimeLengthMin > 0)
+            {
+                metadata.Runtime = audnexusData.RuntimeLengthMin.Value;
+            }
+
+            // Extract year from releaseDate (format: "2021-05-04T00:00:00.000Z")
+            if (!string.IsNullOrEmpty(audnexusData.ReleaseDate))
+            {
+                var yearMatch = Regex.Match(audnexusData.ReleaseDate, @"\d{4}");
+                if (yearMatch.Success)
+                {
+                    metadata.PublishYear = yearMatch.Value;
+                }
+            }
+            // Fallback to copyright year if no release date
+            else if (audnexusData.Copyright.HasValue)
+            {
+                metadata.PublishYear = audnexusData.Copyright.Value.ToString();
+            }
+
+            _logger.LogInformation("Converted Audnexus data for {Asin}: Title={Title}, Runtime={Runtime}min, Year={Year}, Series={Series}, ImageUrl={ImageUrl}", 
                 asin, metadata.Title, metadata.Runtime, metadata.PublishYear, metadata.Series, metadata.ImageUrl);
 
             return metadata;
@@ -2233,17 +2369,29 @@ namespace Listenarr.Api.Services
         {
             try
             {
+                _logger.LogDebug("Querying database for enabled metadata sources...");
+                
                 var metadataSources = await _dbContext.ApiConfigurations
                     .Where(api => api.IsEnabled && api.Type == "metadata")
                     .OrderBy(api => api.Priority)
                     .ToListAsync();
                 
-                _logger.LogInformation("Retrieved {Count} enabled metadata sources", metadataSources.Count);
+                if (metadataSources.Count > 0)
+                {
+                    _logger.LogInformation("Retrieved {Count} enabled metadata sources: {Sources}", 
+                        metadataSources.Count, 
+                        string.Join(", ", metadataSources.Select(s => $"{s.Name} (Priority: {s.Priority}, BaseUrl: {s.BaseUrl})")));
+                }
+                else
+                {
+                    _logger.LogWarning("No enabled metadata sources found in database");
+                }
+                
                 return metadataSources;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving enabled metadata sources");
+                _logger.LogError(ex, "Error retrieving enabled metadata sources from database");
                 return new List<ApiConfiguration>();
             }
         }
