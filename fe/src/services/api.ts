@@ -19,6 +19,8 @@ import type {
   QualityProfile,
   SearchSortBy,
   SearchSortDirection,
+  AudimetaSearchResponse,
+  AudimetaBookResponse,
   AudibleBookMetadata
   , ManualImportPreviewResponse, ManualImportRequest, ManualImportResult
 } from '@/types'
@@ -240,6 +242,24 @@ class ApiService {
 
   async testApiConnection(apiId: string): Promise<boolean> {
     return this.request<boolean>(`/search/test/${apiId}`, { method: 'POST' })
+  }
+
+  // Audimeta API
+  async searchAudimeta(query: string, region: string = 'us'): Promise<AudimetaSearchResponse> {
+    const params = new URLSearchParams({ query, region })
+    return this.request<AudimetaSearchResponse>(`/search/audimeta?${params}`)
+  }
+
+    async getAudimetaMetadata(asin: string, region: string = 'us', cache: boolean = true): Promise<AudimetaBookResponse> {
+    return this.request(`/search/audimeta/${asin}?region=${region}&cache=${cache}`)
+  }
+
+  async getMetadata(asin: string, region: string = 'us', cache: boolean = true): Promise<{ metadata: AudimetaBookResponse, source: string, sourceUrl: string }> {
+    return this.request(`/search/metadata/${asin}?region=${region}&cache=${cache}`)
+  }
+
+  async searchByTitle(query: string): Promise<SearchResult[]> {
+    return this.request(`/search/intelligent?query=${encodeURIComponent(query)}`)
   }
 
   // Downloads API
@@ -989,5 +1009,11 @@ export const scoreSearchResults = (profileId: number, searchResults: SearchResul
 
 // Download client helpers
 export const testDownloadClient = (config: DownloadClientConfiguration) => apiService.testDownloadClient(config)
+
+// Audimeta helpers
+export const searchAudimeta = (query: string, region?: string) => apiService.searchAudimeta(query, region)
+export const getAudimetaMetadata = (asin: string, region?: string, cache?: boolean) => apiService.getAudimetaMetadata(asin, region, cache)
+export const getMetadata = (asin: string, region?: string, cache?: boolean) => apiService.getMetadata(asin, region, cache)
+
 
 

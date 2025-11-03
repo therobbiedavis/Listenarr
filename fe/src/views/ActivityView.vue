@@ -389,53 +389,73 @@ onUnmounted(() => {
   margin: 0;
   color: white;
   font-size: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.page-header h1 svg {
+  width: 32px;
+  height: 32px;
 }
 
 .activity-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .btn {
-  padding: 0.5rem 1rem;
+  padding: 0.65rem 1.25rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  transition: background-color 0.2s;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
 }
 
 .btn-secondary {
-  background-color: #555;
-  color: white;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #adb5bd;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.btn-secondary:hover {
-  background-color: #666;
+.btn-secondary:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn-icon {
   background: none;
   border: none;
-  color: #ccc;
+  color: #adb5bd;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   font-size: 1.25rem;
 }
 
 .btn-icon:hover {
-  background-color: #3a3a3a;
+  background-color: rgba(255, 255, 255, 0.08);
   color: white;
 }
 
 .btn-icon.btn-danger:hover {
-  background-color: rgba(231, 76, 60, 0.2);
-  color: #e74c3c;
+  background-color: rgba(250, 82, 82, 0.15);
+  color: #fa5252;
 }
 
 .activity-filters {
@@ -445,38 +465,70 @@ onUnmounted(() => {
 .filter-tabs {
   display: flex;
   gap: 0.5rem;
-  border-bottom: 1px solid #3a3a3a;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
   background: none;
   border: none;
-  color: #ccc;
+  color: #adb5bd;
   cursor: pointer;
-  padding: 1rem 1.5rem;
-  border-radius: 4px 4px 0 0;
+  padding: 0.875rem 1.5rem;
+  border-radius: 6px 6px 0 0;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  font-weight: 500;
+  white-space: nowrap;
+  position: relative;
+}
+
+.tab::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.2s;
 }
 
 .tab:hover {
-  background-color: #2a2a2a;
+  background-color: rgba(255, 255, 255, 0.05);
   color: white;
 }
 
 .tab.active {
-  background-color: #007acc;
-  color: white;
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  font-weight: 600;
+}
+
+.tab.active::after {
+  background: #4dabf7;
 }
 
 .tab-badge {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.15);
   border-radius: 10px;
-  padding: 0.2rem 0.5rem;
+  padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
-  font-weight: bold;
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+}
+
+.tab.active .tab-badge {
+  background-color: rgba(77, 171, 247, 0.25);
+  color: #74c0fc;
 }
 
 .queue-list {
@@ -488,30 +540,39 @@ onUnmounted(() => {
 .queue-item {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 1rem;
+  gap: 1.25rem;
+  padding: 1.25rem;
   background-color: #2a2a2a;
   border-radius: 8px;
-  border-left: 4px solid #007acc;
+  border-left: 4px solid #4dabf7;
   transition: all 0.2s;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .queue-item:hover {
-  background-color: #333;
-  border-left-color: #0098ff;
+  background-color: #2f2f2f;
+  border-color: rgba(77, 171, 247, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-left-color: #74c0fc;
 }
 
 .queue-icon {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #007acc;
+  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   border-radius: 8px;
   color: white;
   font-size: 1.5rem;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
+}
+
+.queue-icon svg {
+  width: 24px;
+  height: 24px;
 }
 
 .queue-info {
@@ -528,7 +589,7 @@ onUnmounted(() => {
 
 .queue-title {
   color: white;
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 600;
   margin: 0;
   white-space: nowrap;
@@ -541,22 +602,25 @@ onUnmounted(() => {
   align-items: center;
   gap: 1rem;
   margin-bottom: 0.75rem;
-  font-size: 0.85rem;
-  color: #999;
+  font-size: 0.875rem;
+  color: #868e96;
 }
 
 .queue-meta span {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
 }
 
 .queue-client {
-  color: #007acc;
+  color: #4dabf7;
 }
 
 .queue-quality {
-  color: #27ae60;
+  color: #51cf66;
   font-weight: 500;
 }
 
@@ -567,68 +631,89 @@ onUnmounted(() => {
 .queue-stats-top {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.25rem;
   margin-bottom: 0.5rem;
-  font-size: 0.85rem;
-  color: #ccc;
+  font-size: 0.875rem;
+  color: #adb5bd;
+  flex-wrap: wrap;
 }
 
 .progress-text {
   font-weight: 600;
   color: white;
+  font-size: 0.95rem;
 }
 
 .download-speed {
-  color: #27ae60;
+  color: #51cf66;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  background-color: rgba(81, 207, 102, 0.1);
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+}
+
+.download-speed svg {
+  width: 14px;
+  height: 14px;
 }
 
 .eta {
-  color: #f39c12;
+  color: #ffd43b;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  background-color: rgba(255, 212, 59, 0.1);
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+}
+
+.eta svg {
+  width: 14px;
+  height: 14px;
 }
 
 .size-info {
-  color: #999;
+  color: #868e96;
 }
 
 .progress-bar {
   width: 100%;
-  height: 8px;
-  background-color: #1a1a1a;
-  border-radius: 4px;
+  height: 10px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
   overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .progress-fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: width 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .progress-fill.downloading {
-  background: linear-gradient(90deg, #007acc, #0098ff);
+  background: linear-gradient(90deg, #1e88e5, #42a5f5);
   animation: progress-shimmer 2s infinite;
+  background-size: 200% 100%;
 }
 
 .progress-fill.paused {
-  background-color: #f39c12;
+  background: linear-gradient(90deg, #ffd43b, #fcc419);
 }
 
 .progress-fill.completed {
-  background-color: #27ae60;
+  background: linear-gradient(90deg, #51cf66, #40c057);
 }
 
 .progress-fill.failed {
-  background-color: #e74c3c;
+  background: linear-gradient(90deg, #fa5252, #ff6b6b);
 }
 
 .progress-fill.queued {
-  background-color: #555;
+  background-color: #868e96;
 }
 
 @keyframes progress-shimmer {
@@ -645,41 +730,42 @@ onUnmounted(() => {
 }
 
 .status-badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: bold;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .status-badge.completed {
-  background-color: rgba(39, 174, 96, 0.2);
-  color: #27ae60;
-  border: 1px solid #27ae60;
+  background-color: rgba(81, 207, 102, 0.15);
+  color: #51cf66;
+  border: 1px solid rgba(81, 207, 102, 0.3);
 }
 
 .status-badge.downloading {
-  background-color: rgba(0, 122, 204, 0.2);
-  color: #007acc;
-  border: 1px solid #007acc;
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border: 1px solid rgba(77, 171, 247, 0.3);
 }
 
 .status-badge.failed {
-  background-color: rgba(231, 76, 60, 0.2);
-  color: #e74c3c;
-  border: 1px solid #e74c3c;
+  background-color: rgba(250, 82, 82, 0.15);
+  color: #fa5252;
+  border: 1px solid rgba(250, 82, 82, 0.3);
 }
 
 .status-badge.paused {
-  background-color: rgba(243, 156, 18, 0.2);
-  color: #f39c12;
-  border: 1px solid #f39c12;
+  background-color: rgba(255, 212, 59, 0.15);
+  color: #ffd43b;
+  border: 1px solid rgba(255, 212, 59, 0.3);
 }
 
 .status-badge.queued {
-  background-color: rgba(85, 85, 85, 0.2);
-  color: #999;
-  border: 1px solid #555;
+  background-color: rgba(134, 142, 150, 0.15);
+  color: #868e96;
+  border: 1px solid rgba(134, 142, 150, 0.3);
 }
 
 .queue-actions {
@@ -690,30 +776,64 @@ onUnmounted(() => {
 .empty-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #ccc;
+  color: #adb5bd;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .empty-icon {
   font-size: 4rem;
-  margin-bottom: 1rem;
-  color: #555;
+  margin-bottom: 1.5rem;
+  color: #495057;
+}
+
+.empty-icon svg {
+  width: 80px;
+  height: 80px;
 }
 
 .empty-state h2 {
   color: white;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  font-size: 1.5rem;
+}
+
+.empty-state p {
+  color: #868e96;
+  font-size: 1rem;
+  line-height: 1.5;
+  max-width: 400px;
+  margin: 0 auto;
 }
 
 .loading-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #ccc;
+  color: #adb5bd;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.loading-state svg {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  color: #4dabf7;
+  width: 48px;
+  height: 48px;
 }
 
 .loading-state i {
   font-size: 3rem;
   margin-bottom: 1rem;
-  color: #007acc;
+  color: #4dabf7;
+}
+
+.loading-state p {
+  font-size: 1.1rem;
+  font-weight: 500;
 }
 
 .ph-spin {
@@ -736,12 +856,13 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.75);
+  background-color: rgba(0, 0, 0, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   animation: fadeIn 0.2s ease;
+  backdrop-filter: blur(4px);
 }
 
 @keyframes fadeIn {
@@ -760,6 +881,7 @@ onUnmounted(() => {
   max-width: 500px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   animation: slideUp 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 @keyframes slideUp {
@@ -778,38 +900,50 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 1.5rem;
-  border-bottom: 1px solid #3a3a3a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .modal-header h3 {
   margin: 0;
   color: white;
   font-size: 1.25rem;
+  font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
+}
+
+.modal-header h3 svg {
+  color: #ffd43b;
+  width: 24px;
+  height: 24px;
 }
 
 .modal-header h3 i {
-  color: #f39c12;
+  color: #ffd43b;
   font-size: 1.5rem;
 }
 
 .modal-close {
   background: none;
   border: none;
-  color: #999;
+  color: #868e96;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   font-size: 1.5rem;
   line-height: 1;
 }
 
 .modal-close:hover {
-  background-color: #3a3a3a;
+  background-color: rgba(255, 255, 255, 0.08);
   color: white;
+}
+
+.modal-close svg {
+  width: 20px;
+  height: 20px;
 }
 
 .modal-body {
@@ -817,14 +951,15 @@ onUnmounted(() => {
 }
 
 .modal-body > p:first-child {
-  color: #ccc;
+  color: #adb5bd;
   margin: 0 0 1rem 0;
   font-size: 1rem;
+  line-height: 1.5;
 }
 
 .remove-item-info {
-  background-color: #1a1a1a;
-  border-left: 4px solid #f39c12;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-left: 4px solid #ffd43b;
   padding: 1rem;
   border-radius: 8px;
   margin-bottom: 1rem;
@@ -835,32 +970,47 @@ onUnmounted(() => {
   display: block;
   margin-bottom: 0.5rem;
   font-size: 1rem;
+  font-weight: 600;
 }
 
 .item-details {
   display: flex;
   gap: 1rem;
   font-size: 0.875rem;
-  color: #999;
+  color: #868e96;
+  flex-wrap: wrap;
 }
 
 .item-details span {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
+}
+
+.item-details svg {
+  width: 14px;
+  height: 14px;
 }
 
 .warning-text {
-  color: #f39c12;
+  color: #ffd43b;
   font-size: 0.875rem;
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  background-color: rgba(243, 156, 18, 0.1);
-  padding: 0.75rem;
-  border-radius: 6px;
+  gap: 0.625rem;
+  background-color: rgba(255, 212, 59, 0.1);
+  padding: 0.875rem;
+  border-radius: 8px;
   margin: 0;
-  border: 1px solid rgba(243, 156, 18, 0.3);
+  border: 1px solid rgba(255, 212, 59, 0.25);
+  line-height: 1.5;
+}
+
+.warning-text svg {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  width: 18px;
+  height: 18px;
 }
 
 .warning-text i {
@@ -873,14 +1023,14 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 0.75rem;
   padding: 1.5rem;
-  border-top: 1px solid #3a3a3a;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .btn-danger {
-  background-color: #e74c3c;
+  background: linear-gradient(135deg, #fa5252 0%, #e03131 100%);
   color: white;
   border: none;
-  padding: 0.625rem 1.25rem;
+  padding: 0.65rem 1.25rem;
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
@@ -888,16 +1038,28 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   transition: all 0.2s;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 8px rgba(250, 82, 82, 0.3);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background-color: #c0392b;
+  background: linear-gradient(135deg, #ff6b6b 0%, #fa5252 100%);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+  box-shadow: 0 4px 12px rgba(250, 82, 82, 0.4);
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn-danger:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+}
+
+.btn-danger svg {
+  width: 16px;
+  height: 16px;
 }
 </style>

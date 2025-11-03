@@ -10,6 +10,7 @@ namespace Listenarr.Api.Services
         Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null);
         Task<bool> TestApiConnectionAsync(string apiId);
         Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
+        Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync();
     }
 
     public interface IDownloadService

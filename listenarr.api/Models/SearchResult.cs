@@ -47,9 +47,12 @@ namespace Listenarr.Api.Models
         public string? Asin { get; set; }
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
+        public string? ProductUrl { get; set; } // Direct link to Amazon/Audible product page
         // Indicates this result had a successful full metadata enrichment pass (Audible product scrape)
         public bool IsEnriched { get; set; }
         public int Score { get; set; }
+        // Tracks which metadata API was used to enrich this result (e.g., "Audimeta", "Audnexus", "Audible (Scraped)")
+        public string? MetadataSource { get; set; }
     }
 
     public class SearchAndDownloadResult

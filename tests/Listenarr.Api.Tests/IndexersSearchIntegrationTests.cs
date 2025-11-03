@@ -82,5 +82,10 @@ namespace Listenarr.Api.Tests
             };
             return Task.FromResult(list);
         }
+
+        public Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync()
+        {
+            return Task.FromResult(new List<ApiConfiguration>());
+        }
     }
 }

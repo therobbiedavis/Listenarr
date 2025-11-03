@@ -81,6 +81,20 @@ builder.Services.AddHttpClient<IAudibleMetadataService, AudibleMetadataService>(
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
 
+// Add HTTP client for Audimeta service
+builder.Services.AddHttpClient<AudimetaService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
+
+// Add HTTP client for Audnexus service
+builder.Services.AddHttpClient<AudnexusService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
+
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 
@@ -330,6 +344,49 @@ using (var scope = app.Services.CreateScope())
         // Apply SQLite PRAGMA settings after database is created
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
+        
+        // Seed default metadata API sources if they don't exist
+        try
+        {
+            if (!context.ApiConfigurations.Any(a => a.Name == "Audimeta"))
+            {
+                logger.LogInformation("Creating default Audimeta API source...");
+                var audimetaApi = new ApiConfiguration
+                {
+                    Name = "Audimeta",
+                    BaseUrl = "https://audimeta.de",
+                    Type = "metadata",
+                    IsEnabled = true,
+                    Priority = 1,
+                    CreatedAt = DateTime.UtcNow
+                };
+                context.ApiConfigurations.Add(audimetaApi);
+                logger.LogInformation("Default Audimeta API source created");
+            }
+            
+            if (!context.ApiConfigurations.Any(a => a.Name == "Audnexus"))
+            {
+                logger.LogInformation("Creating default Audnexus API source...");
+                var audnexusApi = new ApiConfiguration
+                {
+                    Name = "Audnexus",
+                    BaseUrl = "https://api.audnex.us",
+                    Type = "metadata",
+                    IsEnabled = true,
+                    Priority = 2,
+                    CreatedAt = DateTime.UtcNow
+                };
+                context.ApiConfigurations.Add(audnexusApi);
+                logger.LogInformation("Default Audnexus API source created");
+            }
+            
+            context.SaveChanges();
+            logger.LogInformation("Default metadata API sources seeded successfully");
+        }
+        catch (Exception seedEx)
+        {
+            logger.LogWarning(seedEx, "Failed to seed default metadata API sources, but will continue startup");
+        }
     }
     catch (Exception ex)
     {

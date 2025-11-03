@@ -24,7 +24,8 @@ namespace Listenarr.Api.Tests
             mockService.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>())).ReturnsAsync(sample);
 
             var logger = Mock.Of<ILogger<SearchController>>();
-            var controller = new SearchController(mockService.Object, logger);
+            var mockAudimetaService = Mock.Of<AudimetaService>();
+            var controller = new SearchController(mockService.Object, logger, mockAudimetaService);
 
             // Act
             var actionResult = await controller.IntelligentSearch("query");
@@ -57,7 +58,8 @@ namespace Listenarr.Api.Tests
             mockService.Setup(s => s.SearchIndexersAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>())).ReturnsAsync(sample);
 
             var logger = Mock.Of<ILogger<SearchController>>();
-            var controller = new SearchController(mockService.Object, logger);
+            var mockAudimetaService = Mock.Of<AudimetaService>();
+            var controller = new SearchController(mockService.Object, logger, mockAudimetaService);
 
             // Act
             var actionResult = await controller.IndexersSearch("query");

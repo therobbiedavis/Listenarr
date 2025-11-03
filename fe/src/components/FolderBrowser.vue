@@ -11,12 +11,12 @@
       />
       <!-- Folder icon button opens inline browser beneath the input -->
       <button @click="toggleBrowser" class="browse-button" type="button" aria-label="Browse folders">
-        <i class="ph ph-folder-open"></i>
+        <PhFolderOpen />
       </button>
     </div>
 
     <div v-if="validationMessage" class="validation-message" :class="{ error: !isValid, success: isValid }">
-      <i :class="isValid ? 'ph ph-check-circle' : 'ph ph-warning-circle'"></i>
+      <component :is="isValid ? PhCheckCircle : PhWarningCircle" />
       {{ validationMessage }}
     </div>
 
@@ -30,22 +30,22 @@
             class="back-button"
             title="Go up to parent folder"
           >
-            <i class="ph ph-arrow-left"></i>
+            <PhArrowLeft />
           </button>
-          <i class="ph ph-folder"></i>
+          <PhFolder />
           <span>{{ currentPath || 'Computer' }}</span>
           <button class="select-inline" @click="selectCurrentPath" title="Select this folder">
-            <i class="ph ph-check-circle"></i>
+            <PhCheckCircle />
           </button>
         </div>
 
         <div v-if="isLoading" class="loading-state">
-          <i class="ph ph-spinner ph-spin"></i>
+          <PhSpinner class="ph-spin" />
           <span>Loading directories...</span>
         </div>
 
         <div v-else-if="error" class="error-state">
-          <i class="ph ph-warning-circle"></i>
+          <PhWarningCircle />
           <span>{{ error }}</span>
         </div>
 
@@ -55,7 +55,7 @@
             @click="navigateToParent"
             class="directory-item parent-item"
           >
-            <i class="ph ph-arrow-up"></i>
+            <PhArrowUp />
             <span>Go up to parent folder</span>
           </div>
 
@@ -65,12 +65,12 @@
             @click="navigateToDirectory(item)"
             class="directory-item"
           >
-            <i class="ph ph-folder"></i>
+            <PhFolder />
             <span>{{ item.name }}</span>
           </div>
 
           <div v-if="items.length === 0 && !parentPath" class="empty-state">
-            <i class="ph ph-folder-open"></i>
+            <PhFolderOpen />
             <span>No accessible directories found</span>
           </div>
         </div>
@@ -82,6 +82,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { apiService } from '@/services/api'
+import { PhFolderOpen, PhCheckCircle, PhWarningCircle, PhArrowLeft, PhFolder, PhSpinner, PhArrowUp } from '@phosphor-icons/vue'
 
 interface Props {
   modelValue: string

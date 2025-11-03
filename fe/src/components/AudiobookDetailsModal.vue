@@ -68,6 +68,13 @@
             <div class="detail-section">
               <h4>Identifiers</h4>
               <div class="detail-grid">
+                <div v-if="book.source" class="detail-item metadata-source-item">
+                  <span class="label">Metadata Source:</span>
+                  <span class="value metadata-source-badge">
+                    <i class="ph ph-cloud"></i>
+                    {{ book.source }}
+                  </span>
+                </div>
                 <div v-if="book.asin" class="detail-item">
                   <span class="label">ASIN:</span>
                   <span class="value">{{ book.asin }}</span>
@@ -531,9 +538,26 @@ const formatRuntime = (minutes: number): string => {
 }
 
 .profile-help {
-  color: #999;
-  font-size: 0.85rem;
+  color: #888;
+  font-size: 0.875rem;
   line-height: 1.4;
+}
+
+/* Metadata Source Badge in Modal */
+.metadata-source-item .metadata-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+  color: white;
+  font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
+}
+
+.metadata-source-item .metadata-source-badge i {
+  font-size: 14px;
 }
 
 .detail-section h4 i {

@@ -25,8 +25,10 @@ export interface SearchResult {
   asin?: string
   series?: string
   seriesNumber?: string
+  productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   score?: number
+  metadataSource?: string // Which metadata API enriched this result (e.g., "Audimeta", "Audnexus")
 }
 
 export interface Download {
@@ -83,7 +85,7 @@ export interface ApiConfiguration {
   name: string
   baseUrl: string
   apiKey: string
-  type: 'torrent' | 'nzb'
+  type: 'torrent' | 'nzb' | 'metadata' | 'search' | 'other'
   isEnabled: boolean
   priority: number
   headers: Record<string, string>
@@ -449,3 +451,60 @@ export interface ManualImportResult {
   error?: string
 }
 
+// Audimeta API Types
+export interface AudimetaBookResponse {
+  asin?: string
+  title?: string
+  subtitle?: string
+  authors?: AudimetaAuthor[]
+  narrators?: AudimetaNarrator[]
+  publisher?: string
+  publishDate?: string
+  description?: string
+  imageUrl?: string
+  lengthMinutes?: number
+  language?: string
+  genres?: AudimetaGenre[]
+  series?: AudimetaSeries[]
+  explicit?: boolean
+  releaseDate?: string
+  isbn?: string
+  region?: string
+  bookFormat?: string
+}
+
+export interface AudimetaAuthor {
+  asin?: string
+  name?: string
+  region?: string
+}
+
+export interface AudimetaNarrator {
+  name?: string
+}
+
+export interface AudimetaGenre {
+  asin?: string
+  name?: string
+  type?: string
+}
+
+export interface AudimetaSeries {
+  asin?: string
+  name?: string
+  position?: string
+}
+
+export interface AudimetaSearchResponse {
+  results?: AudimetaSearchResult[]
+  totalResults?: number
+}
+
+export interface AudimetaSearchResult {
+  asin?: string
+  title?: string
+  authors?: AudimetaAuthor[]
+  imageUrl?: string
+  lengthMinutes?: number
+  language?: string
+}
