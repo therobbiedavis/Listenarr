@@ -591,11 +591,17 @@ class ApiService {
         const identifier = filename.replace(/\.[^.]+$/, '')
         let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
 
-        // Append access_token if API key is configured
-        const cfg = getCachedStartupConfig()
-        const apiKey = cfg?.apiKey
-        if (apiKey) {
-          url += `?access_token=${encodeURIComponent(apiKey)}`
+        // Append session token if available (for authenticated users)
+        const sessionToken = sessionTokenManager.getToken()
+        if (sessionToken) {
+          url += `?access_token=${encodeURIComponent(sessionToken)}`
+        } else {
+          // Fallback to API key if no session token (for non-authenticated access)
+          const cfg = getCachedStartupConfig()
+          const apiKey = cfg?.apiKey
+          if (apiKey) {
+            url += `?access_token=${encodeURIComponent(apiKey)}`
+          }
         }
         return url
       }
@@ -604,9 +610,17 @@ class ApiService {
       try { console.debug('[ApiService] getImageUrl library-detect error', e) } catch {}
     }
 
-    // Convert other relative URLs to absolute and append access_token if an API key is present
+    // Convert other relative URLs to absolute and append access_token
     const absolute = `${BACKEND_BASE_URL}${imageUrl}`
     try {
+      // Try session token first (for authenticated users)
+      const sessionToken = sessionTokenManager.getToken()
+      if (sessionToken) {
+        const sep = absolute.includes('?') ? '&' : '?'
+        return `${absolute}${sep}access_token=${encodeURIComponent(sessionToken)}`
+      }
+
+      // Fallback to API key if no session token
       const cfg = getCachedStartupConfig()
       const apiKey = cfg?.apiKey
       if (apiKey) {

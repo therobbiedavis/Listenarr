@@ -12,7 +12,7 @@
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="book.imageUrl" :alt="book.title" />
+            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" />
             <div v-else class="placeholder-cover">
               <i class="ph ph-image"></i>
               <span>No Cover</span>
@@ -151,7 +151,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type { AudibleBookMetadata, QualityProfile } from '@/types'
-import { getQualityProfiles } from '@/services/api'
+import { getQualityProfiles, apiService } from '@/services/api'
 
 interface Props {
   visible: boolean
