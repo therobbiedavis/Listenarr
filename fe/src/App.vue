@@ -35,7 +35,7 @@
             <ul v-if="suggestions.length > 0" class="search-list">
               <li v-for="s in suggestions" :key="s.id" class="search-result" @click="selectSuggestion(s)">
                 <div style="display:flex;align-items:center;gap:10px;">
-                  <img v-if="s.imageUrl" :src="s.imageUrl" alt="cover" class="result-thumb" />
+                  <img v-if="s.imageUrl" :src="apiService.getImageUrl(s.imageUrl)" alt="cover" class="result-thumb" />
                   <div>
                     <div class="result-title">{{ s.title }}</div>
                     <div class="result-sub">{{ s.author }}</div>
