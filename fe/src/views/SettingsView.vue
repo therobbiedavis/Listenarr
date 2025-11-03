@@ -219,10 +219,10 @@
                   <PhToggleLeft />
                 </template>
               </button>
-              <button @click="editApiConfig(api)" class="edit-button" title="Edit">
+              <button @click="editApiConfig(api)" class="icon-button" title="Edit">
                 <PhPencil />
               </button>
-              <button @click="deleteApiConfig(api.id)" class="delete-button" title="Delete">
+              <button @click="deleteApiConfig(api.id)" class="icon-button danger" title="Delete">
                 <PhTrash />
               </button>
             </div>
@@ -2269,7 +2269,7 @@ onMounted(async () => {
 
 .edit-button,
 .delete-button {
-  padding: 0.75rem;
+  padding: 0.5rem;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -2277,6 +2277,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 36px;
+  height: 36px;
+  font-size: 1.1rem;
 }
 
 .edit-button {
@@ -2289,7 +2292,7 @@ onMounted(async () => {
   background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: #fff;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
 
 .delete-button {
@@ -2302,7 +2305,7 @@ onMounted(async () => {
   background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
   color: #fff;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
 }
 
 .settings-form {
@@ -2691,11 +2694,15 @@ onMounted(async () => {
   transition: all 0.2s ease;
   border: none;
   border-left: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 0;
   font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
 .test-button:hover:not(:disabled) {
   background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
 
 .test-button:disabled {
@@ -2873,35 +2880,42 @@ onMounted(async () => {
 .icon-button {
   padding: 0.5rem;
   background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
   cursor: pointer;
-  color: #868e96;
+  color: #adb5bd;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
-  font-size: 1rem;
+  font-size: 1.1rem;
+  width: 36px;
+  height: 36px;
 }
 
 .icon-button:hover:not(:disabled) {
   background: rgba(77, 171, 247, 0.15);
-  border-color: rgba(77, 171, 247, 0.3);
+  border-color: #4dabf7;
   color: #4dabf7;
   transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.3);
 }
 
 .icon-button.danger {
   color: #ff6b6b;
 }
 
-.icon-button.danger:hover {
-  background: rgba(231, 76, 60, 0.15);
-  border-color: rgba(231, 76, 60, 0.3);
+.icon-button.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.15);
+  border-color: #ff6b6b;
   color: #ff6b6b;
+  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
 }
 
 .icon-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .indexer-details {

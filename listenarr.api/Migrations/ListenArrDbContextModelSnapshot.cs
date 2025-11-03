@@ -63,7 +63,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApiConfigurations");
+                    b.ToTable("ApiConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.ApplicationSettings", b =>
@@ -138,7 +138,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApplicationSettings");
+                    b.ToTable("ApplicationSettings", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.Audiobook", b =>
@@ -229,7 +229,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasIndex("QualityProfileId");
 
-                    b.ToTable("Audiobooks");
+                    b.ToTable("Audiobooks", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.AudiobookFile", b =>
@@ -279,7 +279,7 @@ namespace Listenarr.Api.Migrations
                     b.HasIndex("AudiobookId", "Path")
                         .IsUnique();
 
-                    b.ToTable("AudiobookFiles");
+                    b.ToTable("AudiobookFiles", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.Download", b =>
@@ -369,7 +369,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Downloads");
+                    b.ToTable("Downloads", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.DownloadClientConfiguration", b =>
@@ -419,7 +419,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DownloadClientConfigurations");
+                    b.ToTable("DownloadClientConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.DownloadProcessingJob", b =>
@@ -480,7 +480,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DownloadProcessingJobs");
+                    b.ToTable("DownloadProcessingJobs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.History", b =>
@@ -516,7 +516,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("History");
+                    b.ToTable("History", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.Indexer", b =>
@@ -600,7 +600,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Indexers");
+                    b.ToTable("Indexers", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.QualityProfile", b =>
@@ -670,7 +670,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("QualityProfiles");
+                    b.ToTable("QualityProfiles", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.RemotePathMapping", b =>
@@ -702,7 +702,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RemotePathMappings");
+                    b.ToTable("RemotePathMappings", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.User", b =>
@@ -730,7 +730,7 @@ namespace Listenarr.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Api.Models.Audiobook", b =>
