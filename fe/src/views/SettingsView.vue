@@ -1050,229 +1050,136 @@
 
   <!-- Webhook Configuration Modal -->
   <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm" @keydown.esc="closeWebhookForm">
-    <div class="modal-content webhook-modal" @click.stop>
+    <div class="modal-content" @click.stop>
       <div class="modal-header">
-        <div class="modal-title">
-          <div class="modal-icon">
-            <PhBell />
-          </div>
-          <div>
-            <h3>{{ editingWebhook ? 'Edit' : 'Create' }} Webhook</h3>
-            <p class="modal-subtitle">{{ editingWebhook ? 'Update your webhook configuration' : 'Set up a new notification webhook' }}</p>
-          </div>
-        </div>
-        <button @click="closeWebhookForm" class="modal-close" aria-label="Close modal">
+        <h2>{{ editingWebhook ? 'Edit' : 'Add' }} Webhook</h2>
+        <button @click="closeWebhookForm" class="close-btn" aria-label="Close modal">
           <PhX />
         </button>
       </div>
       <div class="modal-body">
-        <form @submit.prevent="saveWebhook" class="config-form webhook-form">
+        <form @submit.prevent="saveWebhook">
           
           <!-- Basic Configuration Section -->
           <div class="form-section">
-            <div class="section-header-inline">
-              <h4><PhSliders /> Basic Configuration</h4>
-              <span class="step-indicator">Step 1 of 3</span>
-            </div>
+            <h3>Basic</h3>
             
-            <div class="form-row">
-              <div class="form-group flex-2" :class="{ 'has-error': webhookFormErrors.name }">
-                <label for="webhook-name" class="required-label">
-                  Webhook Name
-                </label>
-                <input 
-                  id="webhook-name"
-                  v-model="webhookForm.name" 
-                  type="text" 
-                  placeholder="e.g., Production Slack Channel" 
-                  required
-                  class="form-input"
-                  autocomplete="off"
-                  @blur="validateWebhookField('name')"
-                />
-                <small v-if="!webhookFormErrors.name" class="form-hint">A descriptive name to identify this webhook</small>
-                <small v-else class="form-error">{{ webhookFormErrors.name }}</small>
-              </div>
-
-              <div class="form-group flex-1" :class="{ 'has-error': webhookFormErrors.type }">
-                <label for="webhook-type" class="required-label">
-                  Service
-                </label>
-                <div class="select-wrapper">
-                  <select 
-                    id="webhook-type"
-                    v-model="webhookForm.type" 
-                    required
-                    class="form-select"
-                    @change="onServiceTypeChange"
-                  >
-                    <option value="" disabled>Choose a service...</option>
-                    <option value="Slack">Slack</option>
-                    <option value="Discord">Discord</option>
-                    <option value="Telegram">Telegram</option>
-                    <option value="Pushover">Pushover</option>
-                    <option value="Pushbullet">Pushbullet</option>
-                    <option value="NTFY">NTFY</option>
-                    <option value="Zapier">Zapier</option>
-                  </select>
-                </div>
-                <small v-if="!webhookFormErrors.type" class="form-hint">Notification service type</small>
-                <small v-else class="form-error">{{ webhookFormErrors.type }}</small>
-              </div>
+            <div class="form-group">
+              <label for="webhook-name">Name *</label>
+              <input 
+                id="webhook-name"
+                v-model="webhookForm.name" 
+                type="text" 
+                placeholder="e.g., Production Slack Channel" 
+                required
+              />
+              <small v-if="getServiceHelp()">{{ getServiceHelp() }}</small>
             </div>
 
-            <div class="form-group" :class="{ 'has-error': webhookFormErrors.url }">
-              <label for="webhook-url" class="required-label">
-                <PhLink />
-                Webhook URL
-              </label>
-              <div class="input-with-icon">
-                <input 
-                  id="webhook-url"
-                  v-model="webhookForm.url" 
-                  type="url" 
-                  placeholder="https://hooks.example.com/services/your-webhook-url" 
-                  required
-                  class="form-input url-input"
-                  autocomplete="off"
-                  @blur="validateWebhookField('url')"
-                  @input="validateUrlFormat"
-                />
-                <div v-if="isValidatingUrl" class="input-spinner">
-                  <PhSpinner class="ph-spin" />
-                </div>
-              </div>
-              <small v-if="!webhookFormErrors.url && getServiceHelp()" class="form-hint service-help">
-                <PhInfo />
-                {{ getServiceHelp() }}
-              </small>
-              <small v-else-if="webhookFormErrors.url" class="form-error">
-                <PhWarning />
-                {{ webhookFormErrors.url }}
-              </small>
-              <small v-else class="form-hint">
-                <PhInfo />
-                The endpoint URL provided by your notification service
-              </small>
+            <div class="form-group">
+              <label for="webhook-type">Type *</label>
+              <select 
+                id="webhook-type"
+                v-model="webhookForm.type" 
+                required
+                @change="onServiceTypeChange"
+              >
+                <option value="" disabled>Select type...</option>
+                <option value="Slack">Slack</option>
+                <option value="Discord">Discord</option>
+                <option value="Telegram">Telegram</option>
+                <option value="Pushover">Pushover</option>
+                <option value="Pushbullet">Pushbullet</option>
+                <option value="NTFY">NTFY</option>
+                <option value="Zapier">Zapier / Generic</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="webhook-url">Webhook URL *</label>
+              <input 
+                id="webhook-url"
+                v-model="webhookForm.url" 
+                type="url" 
+                placeholder="https://hooks.example.com/services/your-webhook-url" 
+                required
+              />
             </div>
           </div>
 
           <!-- Triggers Section -->
           <div class="form-section triggers-section">
-            <div class="section-header-inline">
-              <h4><PhBell /> Notification Triggers</h4>
-              <span class="step-indicator">Step 2 of 3</span>
-            </div>
-            <div class="section-title">
-              <p class="section-description">Select the events that will trigger this webhook</p>
-              <span class="trigger-count" :class="{ empty: webhookForm.triggers.length === 0, error: webhookFormErrors.triggers }">
-                {{ webhookForm.triggers.length }} {{ webhookForm.triggers.length === 1 ? 'trigger' : 'triggers' }} selected
-              </span>
-            </div>
+            <h3>Notification Triggers</h3>
             
-            <div class="trigger-cards">
-              <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-added') }">
-                <input v-model="webhookForm.triggers" value="book-added" type="checkbox" class="trigger-checkbox">
-                <div class="trigger-content">
-                  <div class="trigger-icon book-added">
-                    <PhPlus />
-                  </div>
-                  <div class="trigger-info">
-                    <strong>Book Added to Library</strong>
-                    <small>Notifies when a new audiobook is added to your library</small>
-                  </div>
-                </div>
-              </label>
-
-              <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-downloading') }">
-                <input v-model="webhookForm.triggers" value="book-downloading" type="checkbox" class="trigger-checkbox">
-                <div class="trigger-content">
-                  <div class="trigger-icon book-downloading">
-                    <PhDownloadSimple />
-                  </div>
-                  <div class="trigger-info">
-                    <strong>Download Started</strong>
-                    <small>Notifies when an audiobook download begins</small>
-                  </div>
-                </div>
-              </label>
-
-              <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-available') }">
-                <input v-model="webhookForm.triggers" value="book-available" type="checkbox" class="trigger-checkbox">
-                <div class="trigger-content">
-                  <div class="trigger-icon book-available">
-                    <PhCheckCircle />
-                  </div>
-                  <div class="trigger-info">
-                    <strong>Download Complete</strong>
-                    <small>Notifies when an audiobook finishes downloading and is ready</small>
-                  </div>
-                </div>
+            <div class="checkbox-group">
+              <label for="trigger-book-added">
+                <input id="trigger-book-added" v-model="webhookForm.triggers" value="book-added" type="checkbox">
+                <span>
+                  <strong>Book Added to Library</strong>
+                  <small>Notifies when a new audiobook is added to your library</small>
+                </span>
               </label>
             </div>
 
-            <div v-if="webhookFormErrors.triggers" class="validation-hint warning">
-              <PhWarning />
-              <span>{{ webhookFormErrors.triggers }}</span>
+            <div class="checkbox-group">
+              <label for="trigger-book-downloading">
+                <input id="trigger-book-downloading" v-model="webhookForm.triggers" value="book-downloading" type="checkbox">
+                <span>
+                  <strong>Download Started</strong>
+                  <small>Notifies when an audiobook download begins</small>
+                </span>
+              </label>
             </div>
-            <div v-else-if="webhookForm.triggers.length === 0" class="validation-hint warning">
-              <PhWarning />
-              <span>Please select at least one trigger event to continue</span>
-            </div>
-            <div v-else class="validation-hint success">
-              <PhCheckCircle />
-              <span>{{ webhookForm.triggers.length }} event{{ webhookForm.triggers.length > 1 ? 's' : '' }} will trigger this webhook</span>
+
+            <div class="checkbox-group">
+              <label for="trigger-book-available">
+                <input id="trigger-book-available" v-model="webhookForm.triggers" value="book-available" type="checkbox">
+                <span>
+                  <strong>Download Complete</strong>
+                  <small>Notifies when an audiobook finishes downloading and is ready</small>
+                </span>
+              </label>
             </div>
           </div>
 
           <!-- Status Section -->
           <div class="form-section status-section">
-            <div class="section-header-inline">
-              <h4><PhToggleRight /> Activation</h4>
-              <span class="step-indicator">Step 3 of 3</span>
+            <h3>Activation</h3>
+            <div class="checkbox-group">
+              <label for="webhook-enabled">
+                <input id="webhook-enabled" v-model="webhookForm.isEnabled" type="checkbox" />
+                <span>
+                  <strong>Enable</strong>
+                  <small>Enable this webhook to start receiving notifications</small>
+                </span>
+              </label>
             </div>
-            <label class="toggle-label">
-              <input 
-                v-model="webhookForm.isEnabled" 
-                type="checkbox"
-                class="toggle-checkbox"
-                id="webhook-enabled"
-              />
-              <div class="toggle-switch"></div>
-              <div class="toggle-text">
-                <strong>{{ webhookForm.isEnabled ? 'Webhook is Active' : 'Webhook is Inactive' }}</strong>
-                <small>{{ webhookForm.isEnabled ? 'Notifications will be sent to this webhook when triggers occur' : 'Enable to start receiving notifications. You can always enable it later.' }}</small>
-              </div>
-            </label>
           </div>
 
         </form>
       </div>
-      <div class="modal-actions">
-        <button @click="closeWebhookForm" class="cancel-button" type="button">
-          <PhX />
+      <div class="modal-footer">
+        <button @click="closeWebhookForm" class="btn btn-secondary" type="button">
           Cancel
         </button>
         <button 
           v-if="webhookForm.url && webhookForm.type && webhookForm.triggers.length > 0 && !editingWebhook"
           @click="testWebhookConfig" 
-          class="test-button" 
+          class="btn btn-info" 
           type="button"
           :disabled="testingWebhookConfig"
         >
           <PhSpinner v-if="testingWebhookConfig" class="ph-spin" />
-          <PhPaperPlaneTilt v-else />
-          {{ testingWebhookConfig ? 'Testing...' : 'Test Webhook' }}
+          {{ testingWebhookConfig ? 'Testing...' : 'Test' }}
         </button>
         <button 
           @click="saveWebhook" 
-          class="save-button" 
+          class="btn btn-primary" 
           type="button" 
           :disabled="!isWebhookFormValid || savingWebhook"
         >
           <PhSpinner v-if="savingWebhook" class="ph-spin" />
-          <PhCheck v-else />
-          {{ savingWebhook ? 'Saving...' : (editingWebhook ? 'Update Webhook' : 'Create Webhook') }}
+          {{ savingWebhook ? 'Saving...' : (editingWebhook ? 'Update' : 'Save') }}
         </button>
       </div>
     </div>
@@ -1593,7 +1500,6 @@ const webhookFormErrors = reactive({
   type: '',
   triggers: ''
 })
-const isValidatingUrl = ref(false)
 const testingWebhookConfig = ref(false)
 const savingWebhook = ref(false)
 
@@ -2519,14 +2425,8 @@ const isValidUrl = (url: string): boolean => {
   }
 }
 
-const validateUrlFormat = () => {
-  if (webhookForm.url.trim().length > 0) {
-    validateWebhookField('url')
-  }
-}
-
 const onServiceTypeChange = () => {
-  validateWebhookField('type')
+  // Type changed, could trigger validation here if needed
 }
 
 const getServiceHelp = (): string => {
@@ -3198,7 +3098,6 @@ onMounted(async () => {
   color: #868e96;
   font-size: 0.85rem;
   font-weight: 600;
-  text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
@@ -3496,10 +3395,19 @@ onMounted(async () => {
 }
 
 .form-section {
-  background-color: #2a2a2a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.form-section:last-child {
+  margin-bottom: 0;
+}
+
+.form-section h3 {
+  color: #fff;
+  font-size: 1.1rem;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #444;
 }
 
 .form-section h4 {
@@ -3519,9 +3427,6 @@ onMounted(async () => {
 }
 
 .form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
   margin-bottom: 1.5rem;
 }
 
@@ -3537,56 +3442,71 @@ onMounted(async () => {
 }
 
 .form-group label {
-  font-weight: 600;
+  display: block;
+  margin-bottom: 0.5rem;
   color: #fff;
+  font-weight: 600;
   font-size: 0.95rem;
 }
 
-.form-group input[type="text"],
-.form-group input[type="number"],
-.form-group input[type="url"],
-.form-group input[type="password"],
+.form-group input,
 .form-group select {
-  padding: 0.75rem;
-  background-color: rgba(0, 0, 0, 0.2);
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  font-size: 1rem;
-  color: #fff;
-  transition: all 0.2s ease;
   width: 100%;
+  padding: 0.75rem;
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.95rem;
+  transition: all 0.2s;
 }
 
-.form-group select option {
-  background-color: #2a2a2a;
-  color: #ffffff;
-  padding: 0.5rem;
-  border: none;
+.form-group input::placeholder {
+  color: #999;
+  opacity: 1;
+}
+
+.form-group input:-webkit-autofill,
+.form-group input:-webkit-autofill:hover,
+.form-group input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #1a1a1a inset !important;
+  -webkit-text-fill-color: #fff !important;
+  border: 1px solid #444 !important;
+}
+
+.form-group input:disabled,
+.form-group select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #0d0d0d;
 }
 
 .form-group select option:hover,
 .form-group select option:focus,
 .form-group select option:checked {
-  background-color: #4dabf7;
+  background-color: #005a9e;
   color: #ffffff;
   border: none;
 }
 
-.form-group input[type="text"]:focus,
-.form-group input[type="number"]:focus,
-.form-group input[type="url"]:focus,
-.form-group input[type="password"]:focus,
+.form-group input:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #4dabf7;
-  background-color: rgba(0, 0, 0, 0.3);
-  box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.15);
+  border-color: #007acc;
+  box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+}
+
+.form-group input:focus-visible,
+.form-group select:focus-visible {
+  outline: 2px solid #007acc;
+  outline-offset: 2px;
 }
 
 .form-group small {
-  color: #868e96;
+  display: block;
+  margin-top: 0.5rem;
+  color: #b3b3b3;
   font-size: 0.85rem;
-  line-height: 1.5;
 }
 
 .checkbox-group {
@@ -3595,17 +3515,48 @@ onMounted(async () => {
 
 .checkbox-group label {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  background-color: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
   cursor: pointer;
-  font-weight: normal;
+  transition: all 0.2s;
+}
+
+.checkbox-group label:hover {
+  border-color: #007acc;
+  background-color: #222;
 }
 
 .checkbox-group input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+  margin-top: 0.25rem;
+  width: auto;
   cursor: pointer;
-  accent-color: #4dabf7;
+}
+
+.checkbox-group input[type="checkbox"]:focus-visible {
+  outline: 2px solid #007acc;
+  outline-offset: 2px;
+}
+
+.checkbox-group label span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.checkbox-group label strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.checkbox-group label small {
+  color: #b3b3b3;
+  font-size: 0.85rem;
+  font-weight: normal;
 }
 
 .form-help {
@@ -3923,13 +3874,14 @@ onMounted(async () => {
 
 .modal-content {
   background: #2a2a2a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #444;
   border-radius: 8px;
-  max-width: 600px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  max-width: 700px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
 .modal-header {
@@ -3937,7 +3889,13 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem 2rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #444;
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.5rem;
 }
 
 .modal-header h3 {
@@ -3947,28 +3905,53 @@ onMounted(async () => {
   font-weight: 600;
 }
 
-.modal-close {
+.close-btn {
   background: none;
   border: none;
-  color: #868e96;
+  color: #b3b3b3;
   cursor: pointer;
   padding: 0.5rem;
   font-size: 1.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s ease;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background-color: #333;
+  color: #fff;
+}
+
+.close-btn:focus-visible {
+  outline: 2px solid #007acc;
+  outline-offset: 2px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  padding: 0.5rem;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
 }
 
 .modal-close:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: #333;
   color: #fff;
 }
 
 .modal-body {
   padding: 2rem;
-  color: #adb5bd;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .modal-actions {
@@ -3976,25 +3959,26 @@ onMounted(async () => {
   gap: 1rem;
   justify-content: flex-end;
   padding: 1.5rem 2rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid #444;
 }
 
 .cancel-button {
   padding: 0.75rem 1.5rem;
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: #555;
   color: white;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-weight: 500;
+  font-size: 0.95rem;
 }
 
 .cancel-button:hover {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: #666;
   transform: translateY(-1px);
 }
 
@@ -4661,652 +4645,69 @@ onMounted(async () => {
 }
 
 /* Webhook Modal Specific Styles */
-.modal-content.webhook-modal {
-  max-width: 750px;
-  max-height: 90vh;
+
+
+
+
+.modal-footer {
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.webhook-modal .modal-header {
-  flex-shrink: 0;
-  padding: 2rem;
-}
-
-.webhook-modal .modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 2rem 2rem 2rem;
-}
-
-/* Custom scrollbar for modal body */
-.webhook-modal .modal-body::-webkit-scrollbar {
-  width: 10px;
-}
-
-.webhook-modal .modal-body::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 5px;
-}
-
-.webhook-modal .modal-body::-webkit-scrollbar-thumb {
-  background: rgba(77, 171, 247, 0.4);
-  border-radius: 5px;
-}
-
-.webhook-modal .modal-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(77, 171, 247, 0.6);
-}
-
-.webhook-modal .modal-actions {
-  flex-shrink: 0;
+  gap: 1rem;
+  justify-content: flex-end;
   padding: 1.5rem 2rem;
+  border-top: 1px solid #444;
 }
 
-.webhook-modal .modal-title {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  flex: 1;
-}
-
-.webhook-modal .modal-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #4dabf7 0%, #339af0 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(77, 171, 247, 0.3);
-}
-
-.webhook-modal .modal-icon svg {
-  width: 28px;
-  height: 28px;
-  color: #fff;
-}
-
-.webhook-modal .modal-title h3 {
-  margin: 0 0 0.25rem 0;
-  font-size: 1.5rem;
-}
-
-.webhook-modal .modal-subtitle {
-  margin: 0;
-  font-size: 0.95rem;
-  color: #868e96;
-  font-weight: normal;
-}
-
-.webhook-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.webhook-form .form-section {
-  background: linear-gradient(135deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.3) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 1.5rem;
-  transition: all 0.2s ease;
-}
-
-.webhook-form .form-section:hover {
-  border-color: rgba(77, 171, 247, 0.2);
-}
-
-.webhook-form .section-header-inline {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.25rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.webhook-form .section-header-inline h4 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.05rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.webhook-form .section-header-inline h4 svg {
-  color: #4dabf7;
-  width: 20px;
-  height: 20px;
-}
-
-.step-indicator {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.35rem 0.75rem;
-  background-color: rgba(77, 171, 247, 0.15);
-  color: #4dabf7;
-  border: 1px solid rgba(77, 171, 247, 0.3);
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.webhook-form .form-row {
-  display: flex;
-  gap: 1rem;
-}
-
-.webhook-form .form-row .form-group {
-  margin-bottom: 0;
-}
-
-.webhook-form .form-row .flex-1 {
-  flex: 1;
-}
-
-.webhook-form .form-row .flex-2 {
-  flex: 2;
-}
-
-.webhook-form .form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1.25rem;
-}
-
-.webhook-form .form-group:last-child {
-  margin-bottom: 0;
-}
-
-.webhook-form label {
-  color: #e0e0e0;
-  font-weight: 600;
-  font-size: 0.95rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.webhook-form label.required-label::after {
-  content: '*';
-  color: #ff6b6b;
-  margin-left: 0.25rem;
-}
-
-.webhook-form label svg {
-  width: 16px;
-  height: 16px;
-  color: #4dabf7;
-}
-
-.form-input,
-.form-select {
-  padding: 0.85rem 1rem;
-  background-color: rgba(0, 0, 0, 0.3);
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  font-size: 0.95rem;
-  color: #fff;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.form-input:focus,
-.form-select:focus {
-  outline: none;
-  border-color: #4dabf7;
-  background-color: rgba(0, 0, 0, 0.4);
-  box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.15);
-}
-
-.form-group.has-error .form-input,
-.form-group.has-error .form-select {
-  border-color: #ff6b6b;
-}
-
-.form-group.has-error .form-input:focus,
-.form-group.has-error .form-select:focus {
-  border-color: #ff6b6b;
-  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.15);
-}
-
-.form-error {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: #ff6b6b;
-  font-size: 0.85rem;
-  line-height: 1.5;
-  font-weight: 500;
-}
-
-.form-error svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.form-input::placeholder {
-  color: #6c757d;
-}
-
-.select-wrapper {
-  position: relative;
-}
-
-.form-select {
-  appearance: none;
-  cursor: pointer;
-  padding-right: 2.5rem;
-}
-
-.form-select option {
-  background-color: #2a2a2a;
-  color: #ffffff;
-  padding: 0.75rem;
-}
-
-.input-with-icon {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.input-icon {
-  position: absolute;
-  left: 1rem;
-  color: #4dabf7;
-  width: 18px;
-  height: 18px;
-  pointer-events: none;
-}
-
-.input-spinner {
-  position: absolute;
-  right: 1rem;
-  color: #4dabf7;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.input-with-icon .form-input {
-  padding-left: 2.75rem;
-  padding-right: 2.75rem;
-}
-
-.form-input.url-input {
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 0.9rem;
-}
-
-.form-hint.service-help {
-  background-color: rgba(77, 171, 247, 0.08);
-  padding: 0.65rem 0.85rem;
-  border-radius: 6px;
-  border-left: 3px solid #4dabf7;
-  font-weight: 500;
-}
-
-.form-hint {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: #868e96;
-  font-size: 0.85rem;
-  line-height: 1.5;
-}
-
-.form-hint svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  color: #4dabf7;
-}
-
-/* Triggers Section */
-.triggers-section {
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.08) 0%, rgba(0, 0, 0, 0.3) 100%);
-  border-color: rgba(77, 171, 247, 0.2);
-}
-
-.triggers-section .section-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 1rem;
-  gap: 1rem;
-}
-
-.section-description {
-  color: #adb5bd;
-  font-size: 0.9rem;
-  margin: 0;
-  flex: 1;
-  line-height: 1.5;
-}
-
-.trigger-count {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.4rem 0.85rem;
-  background-color: rgba(77, 171, 247, 0.2);
-  color: #4dabf7;
-  border: 1px solid rgba(77, 171, 247, 0.3);
-  border-radius: 14px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.trigger-count.empty {
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border-color: rgba(231, 76, 60, 0.3);
-}
-
-.trigger-count.error {
-  background-color: rgba(231, 76, 60, 0.2);
-  color: #ff6b6b;
-  border-color: rgba(231, 76, 60, 0.4);
-  animation: pulse-error 2s ease-in-out infinite;
-}
-
-@keyframes pulse-error {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
-.trigger-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
-
-.trigger-card {
-  position: relative;
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 2px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  padding: 1.25rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.trigger-card:hover {
-  border-color: rgba(77, 171, 247, 0.4);
-  background-color: rgba(77, 171, 247, 0.08);
-  transform: translateX(4px);
-}
-
-.trigger-card.active {
-  border-color: #4dabf7;
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.15) 0%, rgba(77, 171, 247, 0.08) 100%);
-}
-
-.trigger-checkbox {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-  margin: 0;
-  padding: 0;
-}
-
-.trigger-content {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.trigger-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.trigger-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.trigger-icon.book-added {
-  background: linear-gradient(135deg, rgba(76, 175, 80, 0.25) 0%, rgba(76, 175, 80, 0.15) 100%);
-  color: #51cf66;
-  border: 1px solid rgba(76, 175, 80, 0.3);
-}
-
-.trigger-icon.book-downloading {
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.25) 0%, rgba(77, 171, 247, 0.15) 100%);
-  color: #4dabf7;
-  border: 1px solid rgba(77, 171, 247, 0.3);
-}
-
-.trigger-icon.book-available {
-  background: linear-gradient(135deg, rgba(156, 39, 176, 0.25) 0%, rgba(156, 39, 176, 0.15) 100%);
-  color: #b197fc;
-  border: 1px solid rgba(156, 39, 176, 0.3);
-}
-
-.trigger-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.trigger-info strong {
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.trigger-info small {
-  color: #868e96;
-  font-size: 0.85rem;
-  margin: 0;
-  line-height: 1.4;
-}
-
-.trigger-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background-color: transparent;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  color: transparent;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.trigger-card.active .trigger-check {
-  background-color: #4dabf7;
-  border-color: #4dabf7;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.4);
-}
-
-.trigger-check svg {
-  width: 16px;
-  height: 16px;
-}
-
-.validation-hint {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.85rem 1.1rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  margin-top: 1rem;
-  font-weight: 500;
-}
-
-.validation-hint.warning {
-  background-color: rgba(255, 193, 7, 0.12);
-  border: 1px solid rgba(255, 193, 7, 0.3);
-  color: #ffc107;
-}
-
-.validation-hint.success {
-  background-color: rgba(76, 175, 80, 0.12);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  color: #51cf66;
-}
-
-.validation-hint svg {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-/* Status Section with Toggle Switch */
-.status-section {
-  background: linear-gradient(135deg, rgba(76, 175, 80, 0.08) 0%, rgba(0, 0, 0, 0.3) 100%);
-  border-color: rgba(76, 175, 80, 0.2);
-}
-
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  cursor: pointer;
-  margin: 0;
-  padding: 0.5rem;
-  border-radius: 8px;
-  transition: background-color 0.2s ease;
-}
-
-.toggle-label:hover {
-  background-color: rgba(255, 255, 255, 0.03);
-}
-
-.toggle-checkbox {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.toggle-switch {
-  position: relative;
-  width: 56px;
-  height: 32px;
-  background-color: rgba(255, 255, 255, 0.1);
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 16px;
-  transition: all 0.3s ease;
-  flex-shrink: 0;
-}
-
-.toggle-switch::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 22px;
-  height: 22px;
-  background-color: #868e96;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.toggle-checkbox:checked + .toggle-switch {
-  background-color: rgba(76, 175, 80, 0.3);
-  border-color: #51cf66;
-}
-
-.toggle-checkbox:checked + .toggle-switch::after {
-  left: 27px;
-  background-color: #51cf66;
-  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
-}
-
-.toggle-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  flex: 1;
-}
-
-.toggle-text strong {
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.toggle-text small {
-  color: #868e96;
-  font-size: 0.85rem;
-  margin: 0;
-  line-height: 1.5;
-}
-
-/* Save Button States */
-.webhook-modal .save-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background: linear-gradient(135deg, #495057 0%, #343a40 100%);
-}
-
-.webhook-modal .save-button:disabled:hover {
-  transform: none;
-  box-shadow: none;
-}
-
-.webhook-modal .test-button {
+.btn {
   padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
-  color: #000;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+  font-weight: 500;
+  font-size: 0.95rem;
 }
 
-.webhook-modal .test-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
-}
-
-.webhook-modal .test-button:disabled {
+.btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.webhook-modal .test-button:disabled:hover {
-  transform: none;
-  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+.btn:focus-visible {
+  outline: 2px solid #007acc;
+  outline-offset: 2px;
+}
+
+.btn-secondary {
+  background-color: #555;
+  color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #666;
+  transform: translateY(-1px);
+}
+
+.btn-info {
+  background-color: #2196f3;
+  color: white;
+}
+
+.btn-info:hover:not(:disabled) {
+  background-color: #1976d2;
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background-color: #007acc;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #005a9e;
+  transform: translateY(-1px);
 }
 
 /* Webhook Modal Responsive Styles */
