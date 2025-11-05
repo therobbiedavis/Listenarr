@@ -161,15 +161,12 @@ const BUFFER_ROWS = 3
 const visibleRange = ref({ start: 0, end: 20 })
 
 const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
-  console.log('Getting quality profile for audiobook:', audiobook.title, 'qualityProfileId:', audiobook.qualityProfileId)
   if (!audiobook || !audiobook.qualityProfileId) {
-    console.log('No qualityProfileId for audiobook:', audiobook.title)
     return null
   }
   const profile = configurationStore.qualityProfiles.find(
     (profile) => profile.id === audiobook.qualityProfileId
   )
-  console.log('Found profile:', profile ? profile.name : 'null')
   return profile || null
 }
 
@@ -191,18 +188,6 @@ onMounted(async () => {
   nextTick(() => {
     updateVisibleRange()
   })
-  
-  // Debug logging
-  console.log('Total audiobooks in library:', libraryStore.audiobooks.length)
-  console.log('Monitored audiobooks:', libraryStore.audiobooks.filter(a => a.monitored).length)
-  console.log('Audiobooks without files:', libraryStore.audiobooks.filter(a => !a.filePath || a.filePath.trim() === '').length)
-  console.log('Wanted audiobooks:', wantedAudiobooks.value.length)
-  console.log('Quality profiles loaded:', configurationStore.qualityProfiles.length)
-  
-  // Log first few audiobooks for inspection
-  if (libraryStore.audiobooks.length > 0) {
-    console.log('Sample audiobook:', libraryStore.audiobooks[0])
-  }
 })
 
 // Filter audiobooks that are monitored and missing files
@@ -446,7 +431,7 @@ const markAsSkipped = async (item: Audiobook) => {
 
 <style scoped>
 .wanted-view {
-  padding: 2em;
+  padding: 1em;
 }
 
 .page-header {
@@ -458,9 +443,10 @@ const markAsSkipped = async (item: Audiobook) => {
 
 /* Virtual scrolling container */
 .wanted-list-container {
-  height: calc(100vh - 320px);
+  height: calc(100vh - 254px);
   overflow-y: auto;
   position: relative;
+  padding: 0 .5em 0 0;
 }
 
 .wanted-list-spacer {
@@ -720,8 +706,8 @@ const markAsSkipped = async (item: Audiobook) => {
 }
 
 .wanted-poster {
-  width: 80px;
-  height: 80px;
+  width: 120px;
+  height: 120px;
   margin-right: 1.25rem;
   background-color: rgba(255, 255, 255, 0.05);
   border-radius: 6px;

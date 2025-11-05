@@ -334,6 +334,7 @@ namespace Listenarr.Api.Controllers
                 basePath = a.BasePath,
                 monitored = a.Monitored,
                 quality = a.Quality,
+                qualityProfileId = a.QualityProfileId,
                 files = a.Files?.Select(f => new {
                     id = f.Id,
                     path = f.Path,
@@ -436,31 +437,64 @@ namespace Listenarr.Api.Controllers
                 return NotFound(new { message = "Audiobook not found" });
             }
 
-            // Update properties
-            existingAudiobook.Title = updatedAudiobook.Title;
-            existingAudiobook.Subtitle = updatedAudiobook.Subtitle;
-            existingAudiobook.Authors = updatedAudiobook.Authors;
-            existingAudiobook.ImageUrl = updatedAudiobook.ImageUrl;
-            existingAudiobook.PublishYear = updatedAudiobook.PublishYear;
-            existingAudiobook.Series = updatedAudiobook.Series;
-            existingAudiobook.SeriesNumber = updatedAudiobook.SeriesNumber;
-            existingAudiobook.Description = updatedAudiobook.Description;
-            existingAudiobook.Genres = updatedAudiobook.Genres;
-            existingAudiobook.Tags = updatedAudiobook.Tags;
-            existingAudiobook.Narrators = updatedAudiobook.Narrators;
-            existingAudiobook.Isbn = updatedAudiobook.Isbn;
-            existingAudiobook.Asin = updatedAudiobook.Asin;
-            existingAudiobook.Publisher = updatedAudiobook.Publisher;
-            existingAudiobook.Language = updatedAudiobook.Language;
-            existingAudiobook.Runtime = updatedAudiobook.Runtime;
-            existingAudiobook.Version = updatedAudiobook.Version;
+            // Only update non-null properties to support partial updates
+            if (updatedAudiobook.Title != null) existingAudiobook.Title = updatedAudiobook.Title;
+            if (updatedAudiobook.Subtitle != null) existingAudiobook.Subtitle = updatedAudiobook.Subtitle;
+            if (updatedAudiobook.Authors != null) existingAudiobook.Authors = updatedAudiobook.Authors;
+            if (updatedAudiobook.ImageUrl != null) existingAudiobook.ImageUrl = updatedAudiobook.ImageUrl;
+            if (updatedAudiobook.PublishYear != null) existingAudiobook.PublishYear = updatedAudiobook.PublishYear;
+            if (updatedAudiobook.Series != null) existingAudiobook.Series = updatedAudiobook.Series;
+            if (updatedAudiobook.SeriesNumber != null) existingAudiobook.SeriesNumber = updatedAudiobook.SeriesNumber;
+            if (updatedAudiobook.Description != null) existingAudiobook.Description = updatedAudiobook.Description;
+            if (updatedAudiobook.Genres != null) existingAudiobook.Genres = updatedAudiobook.Genres;
+            if (updatedAudiobook.Tags != null) existingAudiobook.Tags = updatedAudiobook.Tags;
+            if (updatedAudiobook.Narrators != null) existingAudiobook.Narrators = updatedAudiobook.Narrators;
+            if (updatedAudiobook.Isbn != null) existingAudiobook.Isbn = updatedAudiobook.Isbn;
+            if (updatedAudiobook.Asin != null) existingAudiobook.Asin = updatedAudiobook.Asin;
+            if (updatedAudiobook.Publisher != null) existingAudiobook.Publisher = updatedAudiobook.Publisher;
+            if (updatedAudiobook.Language != null) existingAudiobook.Language = updatedAudiobook.Language;
+            if (updatedAudiobook.Runtime != null) existingAudiobook.Runtime = updatedAudiobook.Runtime;
+            if (updatedAudiobook.Version != null) existingAudiobook.Version = updatedAudiobook.Version;
+            
+            // Always update these fields as they have default values
             existingAudiobook.Explicit = updatedAudiobook.Explicit;
             existingAudiobook.Abridged = updatedAudiobook.Abridged;
             existingAudiobook.Monitored = updatedAudiobook.Monitored;
-            existingAudiobook.FilePath = updatedAudiobook.FilePath;
-            existingAudiobook.FileSize = updatedAudiobook.FileSize;
-            existingAudiobook.Quality = updatedAudiobook.Quality;
-            existingAudiobook.QualityProfileId = updatedAudiobook.QualityProfileId;
+            
+            if (updatedAudiobook.FilePath != null) existingAudiobook.FilePath = updatedAudiobook.FilePath;
+            if (updatedAudiobook.FileSize.HasValue) existingAudiobook.FileSize = updatedAudiobook.FileSize;
+            if (updatedAudiobook.Quality != null) existingAudiobook.Quality = updatedAudiobook.Quality;
+            
+            // Handle QualityProfileId - if -1 is sent, use default profile
+            if (updatedAudiobook.QualityProfileId.HasValue)
+            {
+                if (updatedAudiobook.QualityProfileId.Value == -1)
+                {
+                    // -1 means "use default profile"
+                    using (var scope = _serviceProvider.CreateScope())
+                    {
+                        var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
+                        var defaultProfile = await qualityProfileService.GetDefaultAsync();
+                        if (defaultProfile != null)
+                        {
+                            existingAudiobook.QualityProfileId = defaultProfile.Id;
+                            _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to audiobook '{Title}'", 
+                                defaultProfile.Name, defaultProfile.Id, existingAudiobook.Title);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No default quality profile found. Audiobook '{Title}' quality profile set to null.", existingAudiobook.Title);
+                            existingAudiobook.QualityProfileId = null;
+                        }
+                    }
+                }
+                else
+                {
+                    existingAudiobook.QualityProfileId = updatedAudiobook.QualityProfileId.Value;
+                    _logger.LogInformation("Updated quality profile for audiobook '{Title}' to ID {ProfileId}", 
+                        existingAudiobook.Title, updatedAudiobook.QualityProfileId.Value);
+                }
+            }
 
             await _repo.UpdateAsync(existingAudiobook);
 

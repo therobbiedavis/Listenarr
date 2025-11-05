@@ -111,12 +111,11 @@
                 :key="profile.id"
                 :value="profile.id"
               >
-                {{ profile.name }}
-                <span v-if="profile.isDefault">(Default)</span>
+                {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
               </option>
             </select>
             <small class="form-help">
-              Choose which quality profile to use for automatic downloads of this audiobook
+              Choose which quality profile to use for automatic downloads. Leave as "Use Default Profile" to automatically use the default profile.
             </small>
           </div>
         </div>

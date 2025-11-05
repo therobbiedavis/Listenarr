@@ -433,8 +433,21 @@ namespace Listenarr.Api.Services
                     return logs;
                 }
 
-                // Read the last N lines from the log file
-                var lines = File.ReadLines(logFilePath).Reverse().Take(limit).Reverse().ToList();
+                // Read the last N lines from the log file with shared read access
+                var lines = new List<string>();
+                using (var fileStream = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(fileStream))
+                {
+                    var allLines = new List<string>();
+                    string? line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        allLines.Add(line);
+                    }
+                    
+                    // Take the last N lines
+                    lines = allLines.TakeLast(limit).ToList();
+                }
                 
                 foreach (var line in lines)
                 {
@@ -483,43 +496,68 @@ namespace Listenarr.Api.Services
                 Directory.CreateDirectory(logsDir);
             }
 
-            // Use today's date for the log file name
-            var logFileName = $"listenarr-{DateTime.UtcNow:yyyy-MM-dd}.log";
-            return Path.Combine(logsDir, logFileName);
+            // Use today's date for the log file name (Serilog format with RollingInterval.Day)
+            // Serilog will create files like: listenarr-20251105.log
+            var logFileName = $"listenarr-{DateTime.UtcNow:yyyyMMdd}.log";
+            var todayLogPath = Path.Combine(logsDir, logFileName);
+            
+            // If today's log doesn't exist yet, find the most recent log file
+            if (!File.Exists(todayLogPath))
+            {
+                var logFiles = Directory.GetFiles(logsDir, "listenarr-*.log")
+                    .OrderByDescending(f => new FileInfo(f).LastWriteTimeUtc)
+                    .ToList();
+                
+                return logFiles.FirstOrDefault() ?? todayLogPath;
+            }
+            
+            return todayLogPath;
         }
 
         private LogEntry? ParseLogLine(string line)
         {
             try
             {
-                // Expected format: [2024-10-07 14:30:45] [INFO] Message here
-                // Or ASP.NET Core format: info: Microsoft.Hosting.Lifetime[14] Message here
+                // Expected Serilog format: 2025-11-05 11:43:58.516 -05:00 [INF] Message here
                 
                 if (string.IsNullOrWhiteSpace(line))
                     return null;
 
-                // Try to parse ASP.NET Core default logging format
-                var parts = line.Split(':', 2);
-                if (parts.Length >= 2)
+                // Try to parse Serilog format with regex
+                // Format: YYYY-MM-DD HH:MM:SS.FFF ZZZ [LEVEL] Message
+                var match = System.Text.RegularExpressions.Regex.Match(
+                    line, 
+                    @"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+[+-]\d{2}:\d{2})\s+\[(\w{3})\]\s+(.+)$"
+                );
+                
+                if (match.Success)
                 {
-                    var level = parts[0].Trim().ToLowerInvariant();
-                    var message = parts[1].Trim();
+                    var timestampStr = match.Groups[1].Value;
+                    var level = match.Groups[2].Value.ToUpperInvariant();
+                    var message = match.Groups[3].Value;
                     
-                    // Map ASP.NET log levels
+                    // Parse timestamp
+                    DateTime timestamp;
+                    if (!DateTime.TryParse(timestampStr, out timestamp))
+                    {
+                        timestamp = DateTime.UtcNow;
+                    }
+                    
+                    // Map Serilog log levels
                     var mappedLevel = level switch
                     {
-                        "trce" => "Debug",
-                        "dbug" => "Debug",
-                        "info" => "Info",
-                        "warn" => "Warning",
-                        "fail" => "Error",
-                        "crit" => "Error",
+                        "VRB" => "Debug",  // Verbose
+                        "DBG" => "Debug",  // Debug
+                        "INF" => "Info",   // Information
+                        "WRN" => "Warning", // Warning
+                        "ERR" => "Error",  // Error
+                        "FTL" => "Error",  // Fatal
                         _ => "Info"
                     };
 
                     return new LogEntry
                     {
-                        Timestamp = DateTime.UtcNow, // We don't have timestamp in default format
+                        Timestamp = timestamp,
                         Level = mappedLevel,
                         Message = message,
                         Source = "Application"

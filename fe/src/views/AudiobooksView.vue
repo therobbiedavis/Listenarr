@@ -204,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PhGridFour, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhWarning } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -407,7 +407,10 @@ onMounted(async () => {
     
     // Add resize observer to recalculate on window resize
     const resizeObserver = new ResizeObserver(() => {
-      const newContainerWidth = scrollContainer.value!.clientWidth - 40
+      // Guard against null - element may be unmounted during navigation
+      if (!scrollContainer.value) return
+      
+      const newContainerWidth = scrollContainer.value.clientWidth - 40
       const newItemsPerRow = Math.floor((newContainerWidth + gap) / (minItemWidth + gap)) || 1
       if (newItemsPerRow !== ITEMS_PER_ROW.value) {
         ITEMS_PER_ROW.value = newItemsPerRow
@@ -415,6 +418,11 @@ onMounted(async () => {
       }
     })
     resizeObserver.observe(scrollContainer.value)
+    
+    // Clean up observer when component unmounts
+    onUnmounted(() => {
+      resizeObserver.disconnect()
+    })
   }
 })
 
@@ -495,7 +503,10 @@ async function handleBulkEditSaved() {
 }
 
 function openEditModal(audiobook: Audiobook) {
-  editAudiobook.value = audiobook
+  // Always get the latest audiobook from the store to ensure we have the most recent data
+  // This is important after edits that update the audiobook (like quality profile changes)
+  const freshAudiobook = libraryStore.audiobooks.find(book => book.id === audiobook.id)
+  editAudiobook.value = freshAudiobook || audiobook
   showEditModal.value = true
 }
 
@@ -507,6 +518,14 @@ function closeEditModal() {
 async function handleEditSaved() {
   // Refresh library to show updated data
   await libraryStore.fetchLibrary()
+  
+  // Update the editAudiobook reference with the fresh data
+  if (editAudiobook.value) {
+    const updated = libraryStore.audiobooks.find(book => book.id === editAudiobook.value!.id)
+    if (updated) {
+      editAudiobook.value = updated
+    }
+  }
 }
 
 function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: MouseEvent) {

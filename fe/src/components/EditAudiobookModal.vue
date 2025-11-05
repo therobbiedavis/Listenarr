@@ -62,6 +62,7 @@
               v-model="formData.qualityProfileId"
               class="form-select"
             >
+              <option :value="null">Use Default Profile</option>
               <option
                 v-for="profile in qualityProfiles"
                 :key="profile.id"
@@ -71,7 +72,7 @@
               </option>
             </select>
             <p class="help-text">
-              Controls which quality standards to use for downloads and upgrades
+              Controls which quality standards to use for downloads and upgrades. Leave as "Use Default Profile" to automatically use the default profile.
             </p>
           </div>
 
@@ -109,7 +110,7 @@ interface Props {
 
 interface FormData {
   monitored: boolean
-  qualityProfileId: number
+  qualityProfileId: number | null
 }
 
 const props = defineProps<Props>()
@@ -124,14 +125,14 @@ const saving = ref(false)
 
 const formData = ref<FormData>({
   monitored: true,
-  qualityProfileId: 0
+  qualityProfileId: null
 })
 
 const hasChanges = computed(() => {
   if (!props.audiobook) return false
 
   return formData.value.monitored !== Boolean(props.audiobook.monitored) ||
-    formData.value.qualityProfileId !== (props.audiobook.qualityProfileId || 0)
+    formData.value.qualityProfileId !== (props.audiobook.qualityProfileId ?? null)
 })
 
 watch(() => props.isOpen, async (isOpen) => {
@@ -162,7 +163,7 @@ function initializeForm() {
 
   formData.value = {
     monitored: Boolean(props.audiobook.monitored),
-    qualityProfileId: props.audiobook.qualityProfileId || 0
+    qualityProfileId: props.audiobook.qualityProfileId ?? null
   }
 }
 
@@ -173,8 +174,15 @@ async function handleSave() {
   try {
     // Build update payload with current form values
     const updates: Partial<Audiobook> = {
-      monitored: formData.value.monitored,
-      qualityProfileId: formData.value.qualityProfileId
+      monitored: formData.value.monitored
+    }
+    
+    // If qualityProfileId is null, send -1 to signal "use default"
+    // Otherwise send the actual ID
+    if (formData.value.qualityProfileId === null) {
+      (updates as {qualityProfileId?: number}).qualityProfileId = -1 // -1 means "use default profile"
+    } else {
+      updates.qualityProfileId = formData.value.qualityProfileId
     }
 
     // Call single update API

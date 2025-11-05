@@ -1469,13 +1469,19 @@ namespace Listenarr.Api.Services
                             pendingJobs.Count, allJobDownloads.Count, ddlCompletedToShow.Count);
                     }
                     
-                    // Add active DDL downloads
-                    ddlToShow.AddRange(ddlDownloads.Where(d => d.Status != DownloadStatus.Completed));
+                    // Add active DDL downloads (exclude Completed and Moved)
+                    ddlToShow.AddRange(ddlDownloads.Where(d => 
+                        d.Status != DownloadStatus.Completed && 
+                        d.Status != DownloadStatus.Moved));
                 }
                 
                 // For external clients, we'll filter based on what's actually in their queues
-                // So we include all downloads from external clients for matching purposes
-                var externalDownloads = allDownloads.Where(d => d.DownloadClientId != "DDL").ToList();
+                // Exclude downloads that are already completed/moved to avoid duplicate queue entries
+                var externalDownloads = allDownloads
+                    .Where(d => d.DownloadClientId != "DDL" && 
+                                d.Status != DownloadStatus.Completed && 
+                                d.Status != DownloadStatus.Moved)
+                    .ToList();
                 
                 listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
                 

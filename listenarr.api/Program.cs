@@ -34,15 +34,14 @@ using Polly.Extensions.Http;
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
 // Configure Serilog for file logging with rotation
-var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "logs.txt");
+var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
 Log.Logger = new Serilog.LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.Console()
     .WriteTo.File(
         logFilePath,
-        fileSizeLimitBytes: 10 * 1024 * 1024, // 10MB per file
-        rollOnFileSizeLimit: true,
-        retainedFileCountLimit: 5,
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 30, // Keep 30 days of logs
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 

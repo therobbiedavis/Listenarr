@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
+import { logger } from '@/utils/logger'
 import type { StartupConfig } from '@/types'
 
 // Module-level cache/promise for startup config to avoid repeated requests during rapid navigation
@@ -49,6 +50,14 @@ router.beforeEach(async (to, from, next) => {
   if (import.meta.env.CYPRESS) return next()
   const auth = useAuthStore()
 
+  // Debug: Log every navigation attempt
+  logger.log('router', 'Navigation:', {
+    from: from.fullPath,
+    to: to.fullPath,
+    authenticated: auth.user.authenticated,
+    loaded: auth.loaded
+  })
+
   // Load current user only once per app lifetime (avoid repeated calls on every navigation)
   if (!auth.loaded) {
     try {
@@ -90,8 +99,53 @@ router.beforeEach(async (to, from, next) => {
     // Authentication globally disabled: don't enforce requiresAuth.
     // Still prevent navigating to the login page when auth is disabled.
     if (to.name === 'login') {
-      if (import.meta.env.DEV) { try { console.debug('[router] auth disabled, redirecting from login to home') } catch {} }
+      // Check if there's a redirect parameter - if so, honor it instead of going to home
+      // Also check auth.redirectTo store as fallback (set during initial navigation attempts)
+      const redirectPath = (to.query.redirect as string | undefined) || auth.redirectTo
+      
+      if (redirectPath) {
+        // Parse and navigate to the intended destination
+        try {
+          const url = new URL(redirectPath, window.location.origin)
+          const dest = {
+            path: url.pathname,
+            query: Object.fromEntries(url.searchParams),
+            hash: url.hash // Preserve the hash/anchor (e.g., #indexers)
+          }
+          auth.redirectTo = null
+          if (import.meta.env.DEV) { 
+            try { 
+              console.debug('[router] auth disabled, but redirect found in store/query, going to:', dest) 
+            } catch {} 
+          }
+          return next(dest)
+        } catch {
+          // Fallback to string path
+          auth.redirectTo = null
+          if (import.meta.env.DEV) { 
+            try { 
+              console.debug('[router] auth disabled, but redirect found in store/query (fallback), going to:', redirectPath) 
+            } catch {} 
+          }
+          return next(redirectPath)
+        }
+      }
+      
+      // No redirect - go to home
+      if (import.meta.env.DEV) { try { console.debug('[router] auth disabled, no redirect found, going to home') } catch {} }
       return next({ name: 'home' })
+    }
+    
+    // Auth disabled: allow all other routes through without checking authentication
+    // But still preserve the intended destination if user tried to access login somehow
+    if (!auth.loaded && to.meta.requiresAuth) {
+      // First time loading a protected route - save it before auth finishes loading
+      auth.redirectTo = to.fullPath
+      if (import.meta.env.DEV) { 
+        try { 
+          console.debug('[router] auth disabled, saving redirect for initial load:', to.fullPath) 
+        } catch {} 
+      }
     }
   } else {
     // Authentication enabled: enforce protection on routes marked as requiresAuth
@@ -106,9 +160,42 @@ router.beforeEach(async (to, from, next) => {
 
   // If already authenticated and going to login, redirect to saved destination
   if (to.name === 'login' && auth.user.authenticated) {
-    const dest = auth.redirectTo ?? { name: 'home' }
+    // Check for redirect in query params first (survives page reloads), then fall back to store
+    const redirectPath = (to.query.redirect as string | undefined) || auth.redirectTo
+    
+    if (redirectPath) {
+      // Parse the redirect path to extract path, query, and hash components
+      // This ensures we properly handle anchors like /settings#indexers
+      try {
+        const url = new URL(redirectPath, window.location.origin)
+        const dest = {
+          path: url.pathname,
+          query: Object.fromEntries(url.searchParams),
+          hash: url.hash // Preserve the hash/anchor (e.g., #indexers)
+        }
+        auth.redirectTo = null
+        if (import.meta.env.DEV) { 
+          try { 
+            console.debug('[router] authenticated user on login page, redirecting to:', dest) 
+          } catch {} 
+        }
+        return next(dest)
+      } catch {
+        // Fallback: if URL parsing fails, use the path string directly
+        // Vue Router should still handle it correctly
+        auth.redirectTo = null
+        if (import.meta.env.DEV) { 
+          try { 
+            console.debug('[router] authenticated user on login page, redirecting to (fallback):', redirectPath) 
+          } catch {} 
+        }
+        return next(redirectPath)
+      }
+    }
+    
+    // No redirect path - go to home
     auth.redirectTo = null
-    return next(dest)
+    return next({ name: 'home' })
   }
 
   return next()

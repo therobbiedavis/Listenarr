@@ -54,7 +54,13 @@ export const useAuthStore = defineStore('auth', () => {
               try {
                 const current = window.location.pathname + window.location.search + window.location.hash
                 if (!current.startsWith('/login')) {
-                  mod.default.push({ name: 'login' }).catch(() => { window.location.href = '/login' })
+                  // Preserve the current location as redirect parameter so user can return after login
+                  mod.default.push({ 
+                    name: 'login', 
+                    query: { redirect: current } 
+                  }).catch(() => { 
+                    window.location.href = `/login?redirect=${encodeURIComponent(current)}` 
+                  })
                 }
               } catch {
                 window.location.href = '/login'
