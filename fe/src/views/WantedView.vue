@@ -63,11 +63,14 @@
           </div>
           <div class="wanted-quality">
             <template v-if="getQualityProfileForAudiobook(item)">
-              Wanted Quality Profile:
+              Wanted Quality:
               <span class="profile-name">{{ getQualityProfileForAudiobook(item)?.name ?? 'Unknown' }}</span>
             </template>
+            <template v-else-if="item.quality">
+              Wanted Quality: {{ item.quality }}
+            </template>
             <template v-else>
-              Wanted Quality: {{ item.quality || 'Any' }}
+              Wanted Quality: Any
             </template>
           </div>
           <div v-if="searchResults[item.id]" class="search-status">

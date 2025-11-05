@@ -195,7 +195,7 @@
               <h4>{{ api.name }}</h4>
               <p class="config-url">{{ api.baseUrl }}</p>
               <div class="config-meta">
-                <span class="config-type">{{ api.type.toUpperCase() }}</span>
+                <span v-if="api.type !== 'metadata'" class="config-type">{{ api.type.toUpperCase() }}</span>
                 <span class="config-status" :class="{ enabled: api.isEnabled }">
                   <component :is="api.isEnabled ? PhCheckCircle : PhXCircle" :class="api.isEnabled ? 'success' : 'error'" />
                   {{ api.isEnabled ? 'Enabled' : 'Disabled' }}
@@ -817,78 +817,76 @@
       <!-- Notifications Tab -->
       <div v-if="activeTab === 'notifications'" class="tab-content">
         <div class="section-header">
-          <h3>Notification Settings</h3>
-          <button @click="saveSettings" :disabled="configStore.isLoading || (activeTab !== 'notifications' && !isFormValid)" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
-            <template v-if="configStore.isLoading">
-              <PhSpinner class="ph-spin" />
-            </template>
-            <template v-else>
-              <PhFloppyDisk />
-            </template>
-            {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
+          <h3>Notification Webhooks</h3>
+          <button @click="showWebhookForm = true" class="add-button">
+            <PhPlus />
+            Add Webhook
           </button>
         </div>
 
-        <div v-if="settings" class="settings-form">
-          <div class="form-section">
-            <h4><PhBell /> Webhook Configuration</h4>
-            
-            <div class="form-group">
-              <label>Webhook URL</label>
-              <div class="input-group">
-                <input v-model="settings.webhookUrl" type="text" placeholder="https://hooks.slack.com/services/..." class="input-group-input">
-                <div class="input-group-append">
-                  <button 
-                    @click="testNotification" 
-                    :disabled="!settings.webhookUrl || settings.webhookUrl.trim() === '' || testingNotification"
-                    class="input-group-btn test-button"
-                    :title="!settings.webhookUrl || settings.webhookUrl.trim() === '' ? 'Enter a webhook URL first' : 'Send test notification'"
-                  >
-                    <template v-if="testingNotification">
-                      <PhSpinner class="ph-spin" />
-                    </template>
-                    <template v-else>
-                      <PhPaperPlaneTilt />
-                    </template>
-                    Test
-                  </button>
-                </div>
+        <div v-if="webhooks.length === 0" class="empty-state">
+          <PhBellSlash />
+          <p>No notification webhooks configured. Add one to receive notifications.</p>
+        </div>
+
+        <div v-else class="config-list">
+          <div 
+            v-for="webhook in webhooks" 
+            :key="webhook.id"
+            class="config-card"
+            :class="{ disabled: !webhook.isEnabled }"
+          >
+            <div class="config-info">
+              <h4>{{ webhook.name }}</h4>
+              <p class="config-url">{{ webhook.url }}</p>
+              <div class="config-meta">
+                <span class="config-type">{{ webhook.type }}</span>
+                <span class="config-status" :class="{ enabled: webhook.isEnabled }">
+                  <component :is="webhook.isEnabled ? PhCheckCircle : PhXCircle" :class="webhook.isEnabled ? 'success' : 'error'" />
+                  {{ webhook.isEnabled ? 'Enabled' : 'Disabled' }}
+                </span>
+                <span class="config-triggers">
+                  <PhBell />
+                  {{ webhook.triggers.length }} trigger(s)
+                </span>
               </div>
-              <span class="form-help">URL to send notification events to. Leave empty to disable webhook notifications.</span>
             </div>
-          </div>
-
-          <div class="form-section">
-            <h4><PhListChecks /> Notification Triggers</h4>
-            
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enabledNotificationTriggers" value="book-added" type="checkbox">
-                <span>
-                  <strong>Book Added</strong>
-                  <small>Send notification when a new audiobook is added to the library</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enabledNotificationTriggers" value="book-downloading" type="checkbox">
-                <span>
-                  <strong>Book Downloading</strong>
-                  <small>Send notification when an audiobook download starts</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enabledNotificationTriggers" value="book-available" type="checkbox">
-                <span>
-                  <strong>Book Available</strong>
-                  <small>Send notification when an audiobook download completes and is ready</small>
-                </span>
-              </label>
+            <div class="config-actions">
+              <button 
+                @click="toggleWebhook(webhook)" 
+                class="icon-button"
+                :title="webhook.isEnabled ? 'Disable' : 'Enable'"
+              >
+                <template v-if="webhook.isEnabled">
+                  <PhToggleRight class="toggle-icon active" />
+                </template>
+                <template v-else>
+                  <PhToggleLeft class="toggle-icon" />
+                </template>
+              </button>
+              <button 
+                @click="testWebhook(webhook)" 
+                class="icon-button test-button"
+                :disabled="testingWebhook === webhook.id"
+                title="Test Webhook"
+              >
+                <PhSpinner v-if="testingWebhook === webhook.id" class="ph-spin" />
+                <PhPaperPlaneTilt v-else />
+              </button>
+              <button 
+                @click="editWebhook(webhook)" 
+                class="icon-button"
+                title="Edit"
+              >
+                <PhPencil />
+              </button>
+              <button 
+                @click="deleteWebhook(webhook.id)" 
+                class="icon-button delete"
+                title="Delete"
+              >
+                <PhTrash />
+              </button>
             </div>
           </div>
         </div>
@@ -926,15 +924,6 @@
                 placeholder="https://api.example.com" 
                 required
               />
-            </div>
-
-            <div class="form-group">
-              <label for="api-type">Type *</label>
-              <select id="api-type" v-model="apiForm.type" required>
-                <option value="metadata">Metadata</option>
-                <option value="search">Search</option>
-                <option value="other">Other</option>
-              </select>
             </div>
 
             <div class="form-group">
@@ -994,6 +983,179 @@
             Save
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webhook Configuration Modal -->
+  <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm">
+    <div class="modal-content webhook-modal" @click.stop>
+      <div class="modal-header">
+        <div class="modal-title">
+          <PhBell />
+          <h3>{{ editingWebhook ? 'Edit' : 'Add' }} Webhook</h3>
+        </div>
+        <button @click="closeWebhookForm" class="modal-close">
+          <PhX />
+        </button>
+      </div>
+      <div class="modal-body">
+        <form @submit.prevent="saveWebhook" class="config-form webhook-form">
+          
+          <!-- Basic Configuration Section -->
+          <div class="form-section">
+            <h4><PhGear /> Basic Configuration</h4>
+            
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="webhook-name">
+                  <PhTextAa />
+                  Name *
+                </label>
+                <input 
+                  id="webhook-name"
+                  v-model="webhookForm.name" 
+                  type="text" 
+                  placeholder="e.g., Production Slack Channel" 
+                  required
+                />
+                <small>A friendly name to identify this webhook</small>
+              </div>
+
+              <div class="form-group flex-1">
+                <label for="webhook-type">
+                  <PhSparkle />
+                  Service Type *
+                </label>
+                <select 
+                  id="webhook-type"
+                  v-model="webhookForm.type" 
+                  required
+                  class="type-select"
+                >
+                  <option value="">Select service...</option>
+                  <option value="Pushbullet">Pushbullet</option>
+                  <option value="Telegram">Telegram</option>
+                  <option value="Slack">Slack</option>
+                  <option value="Discord">Discord</option>
+                  <option value="Pushover">Pushover</option>
+                  <option value="NTFY">NTFY</option>
+                  <option value="Zapier">Zapier</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="webhook-url">
+                <PhLink />
+                Webhook URL *
+              </label>
+              <input 
+                id="webhook-url"
+                v-model="webhookForm.url" 
+                type="url" 
+                placeholder="https://hooks.example.com/services/your-webhook-url" 
+                required
+                class="url-input"
+              />
+              <small>
+                <PhInfo />
+                The endpoint URL provided by {{ webhookForm.type || 'your service' }}
+              </small>
+            </div>
+          </div>
+
+          <!-- Triggers Section -->
+          <div class="form-section triggers-section">
+            <div class="section-title">
+              <h4><PhListChecks /> Notification Triggers</h4>
+              <span class="trigger-count">{{ webhookForm.triggers.length }} selected</span>
+            </div>
+            <p class="section-description">Choose which events will send notifications to this webhook</p>
+            
+            <div class="trigger-cards">
+              <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-added') }">
+                <input v-model="webhookForm.triggers" value="book-added" type="checkbox" class="trigger-checkbox">
+                <div class="trigger-content">
+                  <div class="trigger-icon book-added">
+                    <PhPlus />
+                  </div>
+                  <div class="trigger-info">
+                    <strong>Book Added</strong>
+                    <small>Triggered when a new audiobook is added to your library</small>
+                  </div>
+                  <div class="trigger-check">
+                    <PhCheckCircle />
+                  </div>
+                </div>
+              </label>
+
+              <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-downloading') }">
+                <input v-model="webhookForm.triggers" value="book-downloading" type="checkbox" class="trigger-checkbox">
+                <div class="trigger-content">
+                  <div class="trigger-icon book-downloading">
+                    <PhDownloadSimple />
+                  </div>
+                  <div class="trigger-info">
+                    <strong>Book Downloading</strong>
+                    <small>Triggered when an audiobook download begins</small>
+                  </div>
+                  <div class="trigger-check">
+                    <PhCheckCircle />
+                  </div>
+                </div>
+              </label>
+
+              <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-available') }">
+                <input v-model="webhookForm.triggers" value="book-available" type="checkbox" class="trigger-checkbox">
+                <div class="trigger-content">
+                  <div class="trigger-icon book-available">
+                    <PhCheckSquare />
+                  </div>
+                  <div class="trigger-info">
+                    <strong>Book Available</strong>
+                    <small>Triggered when an audiobook download completes successfully</small>
+                  </div>
+                  <div class="trigger-check">
+                    <PhCheckCircle />
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div v-if="webhookForm.triggers.length === 0" class="validation-hint warning">
+              <PhWarning />
+              Please select at least one trigger
+            </div>
+          </div>
+
+          <!-- Status Section -->
+          <div class="form-section status-section">
+            <label class="toggle-label">
+              <input 
+                v-model="webhookForm.isEnabled" 
+                type="checkbox"
+                class="toggle-checkbox"
+              />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <strong>{{ webhookForm.isEnabled ? 'Webhook Enabled' : 'Webhook Disabled' }}</strong>
+                <small>{{ webhookForm.isEnabled ? 'This webhook will receive notifications' : 'This webhook is inactive and will not receive notifications' }}</small>
+              </div>
+            </label>
+          </div>
+
+        </form>
+      </div>
+      <div class="modal-actions">
+        <button @click="closeWebhookForm" class="cancel-button" type="button">
+          <PhX />
+          Cancel
+        </button>
+        <button @click="saveWebhook" class="save-button" type="button" :disabled="webhookForm.triggers.length === 0">
+          <PhCheck />
+          {{ editingWebhook ? 'Update' : 'Create' }} Webhook
+        </button>
       </div>
     </div>
   </div>
@@ -1164,7 +1326,7 @@ import {
   // Form Controls & Actions
   PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink,
   PhListChecks, PhClock, PhXCircle, PhCheck, PhX, PhCheckSquare, PhRuler, PhSparkle,
-  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt,
+  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt, PhBellSlash,
   // Security & Authentication
   PhShieldCheck, PhLock, PhLockOpen, PhWarning, PhWarningCircle,
   // Files & Folders
@@ -1278,6 +1440,35 @@ const testingIndexer = ref<number | null>(null)
 const testingClient = ref<string | null>(null)
 const indexerToDelete = ref<Indexer | null>(null)
 const profileToDelete = ref<QualityProfile | null>(null)
+
+// Webhook management
+const showWebhookForm = ref(false)
+const editingWebhook = ref<{
+  id: string
+  name: string
+  url: string
+  type: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier'
+  triggers: string[]
+  isEnabled: boolean
+} | null>(null)
+const testingWebhook = ref<string | null>(null)
+const webhooks = ref<Array<{
+  id: string
+  name: string
+  url: string
+  type: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier'
+  triggers: string[]
+  isEnabled: boolean
+}>>([])
+const webhookForm = reactive({
+  id: '',
+  name: '',
+  url: '',
+  type: '' as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier' | '',
+  triggers: [] as string[],
+  isEnabled: true
+})
+
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
   const showProxySecurityModal = ref(false)
@@ -1391,7 +1582,7 @@ const editApiConfig = (api: ApiConfiguration) => {
   apiForm.name = api.name
   apiForm.baseUrl = api.baseUrl
   apiForm.apiKey = api.apiKey || ''
-  apiForm.type = api.type
+  apiForm.type = 'metadata' // Always metadata since this is the metadata sources modal
   apiForm.isEnabled = api.isEnabled
   apiForm.priority = api.priority
   apiForm.rateLimitPerMinute = api.rateLimitPerMinute || ''
@@ -1466,6 +1657,7 @@ const executeDeleteClient = async (id?: string) => {
 }
 
 // Test a download client configuration (include credentials in payload)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const testNotification = async () => {
   if (!settings.value?.webhookUrl || settings.value.webhookUrl.trim() === '') {
     toast.error('Test failed', 'Please enter a webhook URL first')
@@ -1486,6 +1678,148 @@ const testNotification = async () => {
     toast.error('Test failed', errorMessage)
   } finally {
     testingNotification.value = false
+  }
+}
+
+// Webhook management functions
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const openWebhookForm = () => {
+  editingWebhook.value = null
+  webhookForm.id = ''
+  webhookForm.name = ''
+  webhookForm.url = ''
+  webhookForm.type = ''
+  webhookForm.triggers = []
+  webhookForm.isEnabled = true
+  showWebhookForm.value = true
+}
+
+const closeWebhookForm = () => {
+  showWebhookForm.value = false
+  editingWebhook.value = null
+  webhookForm.id = ''
+  webhookForm.name = ''
+  webhookForm.url = ''
+  webhookForm.type = ''
+  webhookForm.triggers = []
+  webhookForm.isEnabled = true
+}
+
+const editWebhook = (webhook: typeof webhooks.value[0]) => {
+  editingWebhook.value = webhook
+  webhookForm.id = webhook.id
+  webhookForm.name = webhook.name
+  webhookForm.url = webhook.url
+  webhookForm.type = webhook.type
+  webhookForm.triggers = [...webhook.triggers]
+  webhookForm.isEnabled = webhook.isEnabled
+  showWebhookForm.value = true
+}
+
+const saveWebhook = () => {
+  // Validate required fields
+  if (!webhookForm.name || !webhookForm.url || !webhookForm.type) {
+    toast.error('Validation error', 'Name, Type, and Webhook URL are required')
+    return
+  }
+
+  if (webhookForm.triggers.length === 0) {
+    toast.error('Validation error', 'Please select at least one notification trigger')
+    return
+  }
+
+  const webhook = {
+    id: webhookForm.id || crypto.randomUUID(),
+    name: webhookForm.name,
+    url: webhookForm.url,
+    type: webhookForm.type as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier',
+    triggers: [...webhookForm.triggers],
+    isEnabled: webhookForm.isEnabled
+  }
+
+  if (editingWebhook.value) {
+    // Update existing webhook
+    const index = webhooks.value.findIndex(w => w.id === webhook.id)
+    if (index !== -1) {
+      webhooks.value[index] = webhook
+    }
+    toast.success('Webhook', 'Webhook updated successfully')
+  } else {
+    // Add new webhook
+    webhooks.value.push(webhook)
+    toast.success('Webhook', 'Webhook added successfully')
+  }
+
+  closeWebhookForm()
+}
+
+const deleteWebhook = (id: string) => {
+  const webhook = webhooks.value.find(w => w.id === id)
+  if (webhook && confirm(`Are you sure you want to delete the webhook "${webhook.name}"?`)) {
+    webhooks.value = webhooks.value.filter(w => w.id !== id)
+    toast.success('Webhook', 'Webhook deleted successfully')
+  }
+}
+
+const toggleWebhook = (webhook: typeof webhooks.value[0]) => {
+  const index = webhooks.value.findIndex(w => w.id === webhook.id)
+  if (index !== -1) {
+    const targetWebhook = webhooks.value[index]
+    if (targetWebhook) {
+      targetWebhook.isEnabled = !targetWebhook.isEnabled
+      toast.success('Webhook', `${webhook.name} ${targetWebhook.isEnabled ? 'enabled' : 'disabled'}`)
+    }
+  }
+}
+
+const testWebhook = async (webhook: typeof webhooks.value[0]) => {
+  testingWebhook.value = webhook.id
+  try {
+    // TODO: Implement webhook test API call
+    // For now, just simulate success
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    toast.success('Test notification', `Test notification sent to ${webhook.name}`)
+  } catch (error) {
+    console.error('Failed to test webhook:', error)
+    const errorMessage = formatApiError(error)
+    toast.error('Test failed', errorMessage)
+  } finally {
+    testingWebhook.value = null
+  }
+}
+
+// Migrate old single webhook format to new multiple webhooks format
+const migrateOldWebhookData = () => {
+  if (!settings.value) return
+  
+  // Check if old format exists and new format is empty
+  if (settings.value.webhookUrl && settings.value.webhookUrl.trim() !== '' && webhooks.value.length === 0) {
+    const oldUrl = settings.value.webhookUrl.trim()
+    const oldTriggers = settings.value.enabledNotificationTriggers || []
+    
+    // Create a webhook from the old data
+    // Try to detect type from URL, default to 'Zapier' for generic webhooks
+    let detectedType: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier' = 'Zapier'
+    const urlLower = oldUrl.toLowerCase()
+    
+    if (urlLower.includes('pushbullet')) detectedType = 'Pushbullet'
+    else if (urlLower.includes('telegram')) detectedType = 'Telegram'
+    else if (urlLower.includes('slack')) detectedType = 'Slack'
+    else if (urlLower.includes('discord')) detectedType = 'Discord'
+    else if (urlLower.includes('pushover')) detectedType = 'Pushover'
+    else if (urlLower.includes('ntfy')) detectedType = 'NTFY'
+    
+    webhooks.value = [{
+      id: crypto.randomUUID(),
+      name: `Migrated Webhook (${detectedType})`,
+      url: oldUrl,
+      type: detectedType,
+      triggers: oldTriggers.length > 0 ? oldTriggers : ['book-added', 'book-downloading', 'book-available'],
+      isEnabled: true
+    }]
+    
+    console.log('Migrated old webhook configuration to new format:', webhooks.value[0])
+    toast.info('Webhook Migration', 'Your existing webhook has been migrated to the new format')
   }
 }
 
@@ -1965,6 +2299,8 @@ async function loadTabContents(tab: string) {
         if (!loaded.general) {
           await loadTabContents('general')
         }
+        // Migrate old webhook format to new format
+        migrateOldWebhookData()
         break
       default:
         // default to indexers
@@ -2363,6 +2699,19 @@ onMounted(async () => {
   font-size: 1rem;
   color: #fff;
   transition: all 0.2s ease;
+}
+
+.form-group select option {
+  background-color: #2a2a2a;
+  color: #ffffff;
+  padding: 0.5rem;
+}
+
+.form-group select option:hover,
+.form-group select option:focus,
+.form-group select option:checked {
+  background-color: #4dabf7;
+  color: #ffffff;
 }
 
 .form-group input[type="text"]:focus,
@@ -3412,6 +3761,428 @@ onMounted(async () => {
     margin-left: 0;
     width: 100%;
     justify-content: flex-start;
+  }
+}
+
+/* Webhook Modal Specific Styles */
+.modal-content.webhook-modal {
+  max-width: 700px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.webhook-modal .modal-header {
+  flex-shrink: 0;
+}
+
+.webhook-modal .modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+}
+
+/* Custom scrollbar for modal body */
+.webhook-modal .modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.webhook-modal .modal-body::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.webhook-modal .modal-body::-webkit-scrollbar-thumb {
+  background: rgba(77, 171, 247, 0.3);
+  border-radius: 4px;
+}
+
+.webhook-modal .modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(77, 171, 247, 0.5);
+}
+
+.webhook-modal .modal-actions {
+  flex-shrink: 0;
+}
+
+.webhook-modal .modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.webhook-modal .modal-title svg {
+  width: 24px;
+  height: 24px;
+  color: #4dabf7;
+}
+
+.webhook-modal .modal-title h3 {
+  margin: 0;
+}
+
+.webhook-form {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.webhook-form .form-section {
+  background-color: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.webhook-form .form-section h4 {
+  margin: 0 0 1rem 0;
+  color: #4dabf7;
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.webhook-form .form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.webhook-form .form-row .form-group {
+  margin-bottom: 0;
+}
+
+.webhook-form .form-row .flex-1 {
+  flex: 1;
+}
+
+.webhook-form .form-row .flex-2 {
+  flex: 2;
+}
+
+.webhook-form label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #e0e0e0;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.webhook-form label svg {
+  width: 16px;
+  height: 16px;
+  color: #868e96;
+}
+
+.webhook-form .type-select {
+  font-size: 0.95rem;
+}
+
+.webhook-form .url-input {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.9rem;
+}
+
+.webhook-form small {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #868e96;
+  font-size: 0.85rem;
+  margin-top: 0.35rem;
+}
+
+.webhook-form small svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* Triggers Section */
+.triggers-section {
+  background: linear-gradient(135deg, rgba(77, 171, 247, 0.05) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border-color: rgba(77, 171, 247, 0.2);
+}
+
+.triggers-section .section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.triggers-section .section-title h4 {
+  margin: 0;
+}
+
+.trigger-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  background-color: rgba(77, 171, 247, 0.2);
+  color: #4dabf7;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.section-description {
+  color: #868e96;
+  font-size: 0.9rem;
+  margin: 0 0 1rem 0;
+}
+
+.trigger-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.trigger-card {
+  position: relative;
+  background-color: #2a2a2a;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.trigger-card:hover {
+  border-color: rgba(77, 171, 247, 0.4);
+  background-color: rgba(77, 171, 247, 0.05);
+}
+
+.trigger-card.active {
+  border-color: #4dabf7;
+  background-color: rgba(77, 171, 247, 0.1);
+}
+
+.trigger-checkbox {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.trigger-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.trigger-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.trigger-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.trigger-icon.book-added {
+  background-color: rgba(76, 175, 80, 0.2);
+  color: #51cf66;
+}
+
+.trigger-icon.book-downloading {
+  background-color: rgba(77, 171, 247, 0.2);
+  color: #4dabf7;
+}
+
+.trigger-icon.book-available {
+  background-color: rgba(156, 39, 176, 0.2);
+  color: #b197fc;
+}
+
+.trigger-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.trigger-info strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.trigger-info small {
+  color: #868e96;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.trigger-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  color: transparent;
+  transition: all 0.2s ease;
+}
+
+.trigger-card.active .trigger-check {
+  background-color: #4dabf7;
+  border-color: #4dabf7;
+  color: #fff;
+}
+
+.trigger-check svg {
+  width: 16px;
+  height: 16px;
+}
+
+.validation-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.validation-hint.warning {
+  background-color: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  color: #ffc107;
+}
+
+.validation-hint svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* Status Section with Toggle Switch */
+.status-section {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.05) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border-color: rgba(76, 175, 80, 0.2);
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  cursor: pointer;
+  margin: 0;
+}
+
+.toggle-checkbox {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 52px;
+  height: 28px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background-color: #868e96;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.toggle-checkbox:checked + .toggle-switch {
+  background-color: rgba(76, 175, 80, 0.3);
+  border-color: #51cf66;
+}
+
+.toggle-checkbox:checked + .toggle-switch::after {
+  left: 26px;
+  background-color: #51cf66;
+}
+
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.toggle-text strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.toggle-text small {
+  color: #868e96;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* Save Button Disabled State */
+.webhook-modal .save-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #495057;
+}
+
+.webhook-modal .save-button:disabled:hover {
+  background-color: #495057;
+  transform: none;
+}
+
+/* Webhook Modal Responsive Styles */
+@media (max-width: 768px) {
+  .webhook-modal {
+    width: 95%;
+    max-height: 95vh;
+  }
+
+  .webhook-modal .modal-header,
+  .webhook-modal .modal-body,
+  .webhook-modal .modal-actions {
+    padding: 1.25rem 1.5rem;
+  }
+
+  .webhook-modal .modal-title h3 {
+    font-size: 1.2rem;
+  }
+
+  .webhook-form .form-row {
+    flex-direction: column;
+  }
+
+  .trigger-content {
+    gap: 0.75rem;
+  }
+
+  .trigger-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .trigger-icon svg {
+    width: 18px;
+    height: 18px;
   }
 }
 </style>
