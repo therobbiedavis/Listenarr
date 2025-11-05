@@ -160,6 +160,15 @@ export interface ApplicationSettings {
   // Notification settings
   webhookUrl?: string
   enabledNotificationTriggers?: string[]
+  // New webhook format (multiple webhooks)
+  webhooks?: Array<{
+    id: string
+    name: string
+    url: string
+    type: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier'
+    triggers: string[]
+    isEnabled: boolean
+  }>
 }
 
 export interface StartupConfig {

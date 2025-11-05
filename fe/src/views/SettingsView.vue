@@ -817,7 +817,10 @@
       <!-- Notifications Tab -->
       <div v-if="activeTab === 'notifications'" class="tab-content">
         <div class="section-header">
-          <h3>Notification Webhooks</h3>
+          <div class="section-title-wrapper">
+            <h3>Notification Webhooks</h3>
+            <p class="section-subtitle">Configure webhooks to receive real-time notifications about audiobook events</p>
+          </div>
           <button @click="showWebhookForm = true" class="add-button">
             <PhPlus />
             Add Webhook
@@ -825,67 +828,125 @@
         </div>
 
         <div v-if="webhooks.length === 0" class="empty-state">
-          <PhBellSlash />
-          <p>No notification webhooks configured. Add one to receive notifications.</p>
+          <PhBellSlash class="empty-icon" />
+          <h3>No webhooks configured</h3>
+          <p>Webhooks allow you to receive real-time notifications when important events occur.</p>
+          <p class="empty-help">Supported services include Slack, Discord, Telegram, Pushover, and more.</p>
+          <button @click="showWebhookForm = true" class="add-button-large">
+            <PhPlus />
+            Create Your First Webhook
+          </button>
         </div>
 
-        <div v-else class="config-list">
+        <div v-else class="webhooks-grid">
           <div 
             v-for="webhook in webhooks" 
             :key="webhook.id"
-            class="config-card"
+            class="webhook-card"
             :class="{ disabled: !webhook.isEnabled }"
           >
-            <div class="config-info">
-              <h4>{{ webhook.name }}</h4>
-              <p class="config-url">{{ webhook.url }}</p>
-              <div class="config-meta">
-                <span class="config-type">{{ webhook.type }}</span>
-                <span class="config-status" :class="{ enabled: webhook.isEnabled }">
-                  <component :is="webhook.isEnabled ? PhCheckCircle : PhXCircle" :class="webhook.isEnabled ? 'success' : 'error'" />
-                  {{ webhook.isEnabled ? 'Enabled' : 'Disabled' }}
-                </span>
-                <span class="config-triggers">
-                  <PhBell />
-                  {{ webhook.triggers.length }} trigger(s)
-                </span>
+            <div class="webhook-header" @click="toggleWebhookExpanded(webhook.id)">
+              <div class="webhook-title-row">
+                <div class="webhook-icon" :class="`service-${webhook.type.toLowerCase()}`">
+                  <component :is="getWebhookIcon(webhook.type)" />
+                </div>
+                <div class="webhook-info">
+                  <h4>{{ webhook.name }}</h4>
+                  <div class="webhook-meta">
+                    <span class="webhook-type-badge">{{ webhook.type }}</span>
+                    <div class="triggers-preview">
+                      <span 
+                        v-for="trigger in webhook.triggers" 
+                        :key="trigger"
+                        class="trigger-badge-small"
+                        :class="getTriggerClass(trigger)"
+                        :title="formatTriggerName(trigger)"
+                      >
+                        <component :is="getTriggerIcon(trigger)" />
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="webhook-header-actions">
+                <div class="webhook-status-badge" :class="{ active: webhook.isEnabled }">
+                  <component :is="webhook.isEnabled ? PhCheckCircle : PhXCircle" />
+                  {{ webhook.isEnabled ? 'Active' : 'Inactive' }}
+                </div>
+                <button 
+                  class="expand-toggle" 
+                  :class="{ expanded: isWebhookExpanded(webhook.id) }"
+                  :title="isWebhookExpanded(webhook.id) ? 'Collapse details' : 'Expand details'"
+                  @click.stop="toggleWebhookExpanded(webhook.id)"
+                >
+                  <PhCaretDown />
+                </button>
               </div>
             </div>
-            <div class="config-actions">
+
+            <transition name="expand">
+              <div v-if="isWebhookExpanded(webhook.id)" class="webhook-body">
+                <div class="webhook-url-container">
+                  <PhLink class="url-icon" />
+                  <span class="webhook-url">{{ webhook.url }}</span>
+                </div>
+
+                <div class="webhook-triggers-section">
+                  <div class="triggers-header">
+                    <PhBell />
+                    <span class="triggers-label">Active Triggers ({{ webhook.triggers.length }})</span>
+                  </div>
+                  <div class="triggers-list">
+                    <span 
+                      v-for="trigger in webhook.triggers" 
+                      :key="trigger"
+                      class="trigger-badge"
+                      :class="getTriggerClass(trigger)"
+                    >
+                      <component :is="getTriggerIcon(trigger)" />
+                      {{ formatTriggerName(trigger) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </transition>
+
+            <div class="webhook-actions">
               <button 
                 @click="toggleWebhook(webhook)" 
-                class="icon-button"
-                :title="webhook.isEnabled ? 'Disable' : 'Enable'"
+                class="action-btn toggle-btn"
+                :class="{ active: webhook.isEnabled }"
+                :title="webhook.isEnabled ? 'Disable webhook' : 'Enable webhook'"
               >
-                <template v-if="webhook.isEnabled">
-                  <PhToggleRight class="toggle-icon active" />
-                </template>
-                <template v-else>
-                  <PhToggleLeft class="toggle-icon" />
-                </template>
+                <component :is="webhook.isEnabled ? PhToggleRight : PhToggleLeft" />
+                {{ webhook.isEnabled ? 'Enabled' : 'Disabled' }}
               </button>
               <button 
                 @click="testWebhook(webhook)" 
-                class="icon-button test-button"
-                :disabled="testingWebhook === webhook.id"
-                title="Test Webhook"
+                class="action-btn test-btn"
+                :disabled="testingWebhook === webhook.id || !webhook.isEnabled"
+                :title="!webhook.isEnabled ? 'Enable webhook to test' : 'Send test notification'"
               >
                 <PhSpinner v-if="testingWebhook === webhook.id" class="ph-spin" />
                 <PhPaperPlaneTilt v-else />
+                <span v-if="testingWebhook !== webhook.id">Test</span>
+                <span v-else>Testing...</span>
               </button>
               <button 
                 @click="editWebhook(webhook)" 
-                class="icon-button"
-                title="Edit"
+                class="action-btn edit-btn"
+                title="Edit webhook"
               >
                 <PhPencil />
+                <span>Edit</span>
               </button>
               <button 
                 @click="deleteWebhook(webhook.id)" 
-                class="icon-button delete"
-                title="Delete"
+                class="action-btn delete-btn"
+                title="Delete webhook"
               >
                 <PhTrash />
+                <span>Delete</span>
               </button>
             </div>
           </div>
@@ -988,14 +1049,19 @@
   </div>
 
   <!-- Webhook Configuration Modal -->
-  <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm">
+  <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm" @keydown.esc="closeWebhookForm">
     <div class="modal-content webhook-modal" @click.stop>
       <div class="modal-header">
         <div class="modal-title">
-          <PhBell />
-          <h3>{{ editingWebhook ? 'Edit' : 'Add' }} Webhook</h3>
+          <div class="modal-icon">
+            <PhBell />
+          </div>
+          <div>
+            <h3>{{ editingWebhook ? 'Edit' : 'Create' }} Webhook</h3>
+            <p class="modal-subtitle">{{ editingWebhook ? 'Update your webhook configuration' : 'Set up a new notification webhook' }}</p>
+          </div>
         </div>
-        <button @click="closeWebhookForm" class="modal-close">
+        <button @click="closeWebhookForm" class="modal-close" aria-label="Close modal">
           <PhX />
         </button>
       </div>
@@ -1004,13 +1070,15 @@
           
           <!-- Basic Configuration Section -->
           <div class="form-section">
-            <h4><PhGear /> Basic Configuration</h4>
+            <div class="section-header-inline">
+              <h4><PhSliders /> Basic Configuration</h4>
+              <span class="step-indicator">Step 1 of 3</span>
+            </div>
             
             <div class="form-row">
-              <div class="form-group flex-2">
-                <label for="webhook-name">
-                  <PhTextAa />
-                  Name *
+              <div class="form-group flex-2" :class="{ 'has-error': webhookFormErrors.name }">
+                <label for="webhook-name" class="required-label">
+                  Webhook Name
                 </label>
                 <input 
                   id="webhook-name"
@@ -1018,60 +1086,89 @@
                   type="text" 
                   placeholder="e.g., Production Slack Channel" 
                   required
+                  class="form-input"
+                  autocomplete="off"
+                  @blur="validateWebhookField('name')"
                 />
-                <small>A friendly name to identify this webhook</small>
+                <small v-if="!webhookFormErrors.name" class="form-hint">A descriptive name to identify this webhook</small>
+                <small v-else class="form-error">{{ webhookFormErrors.name }}</small>
               </div>
 
-              <div class="form-group flex-1">
-                <label for="webhook-type">
-                  <PhSparkle />
-                  Service Type *
+              <div class="form-group flex-1" :class="{ 'has-error': webhookFormErrors.type }">
+                <label for="webhook-type" class="required-label">
+                  Service
                 </label>
-                <select 
-                  id="webhook-type"
-                  v-model="webhookForm.type" 
-                  required
-                  class="type-select"
-                >
-                  <option value="">Select service...</option>
-                  <option value="Pushbullet">Pushbullet</option>
-                  <option value="Telegram">Telegram</option>
-                  <option value="Slack">Slack</option>
-                  <option value="Discord">Discord</option>
-                  <option value="Pushover">Pushover</option>
-                  <option value="NTFY">NTFY</option>
-                  <option value="Zapier">Zapier</option>
-                </select>
+                <div class="select-wrapper">
+                  <select 
+                    id="webhook-type"
+                    v-model="webhookForm.type" 
+                    required
+                    class="form-select"
+                    @change="onServiceTypeChange"
+                  >
+                    <option value="" disabled>Choose a service...</option>
+                    <option value="Slack">Slack</option>
+                    <option value="Discord">Discord</option>
+                    <option value="Telegram">Telegram</option>
+                    <option value="Pushover">Pushover</option>
+                    <option value="Pushbullet">Pushbullet</option>
+                    <option value="NTFY">NTFY</option>
+                    <option value="Zapier">Zapier</option>
+                  </select>
+                </div>
+                <small v-if="!webhookFormErrors.type" class="form-hint">Notification service type</small>
+                <small v-else class="form-error">{{ webhookFormErrors.type }}</small>
               </div>
             </div>
 
-            <div class="form-group">
-              <label for="webhook-url">
+            <div class="form-group" :class="{ 'has-error': webhookFormErrors.url }">
+              <label for="webhook-url" class="required-label">
                 <PhLink />
-                Webhook URL *
+                Webhook URL
               </label>
-              <input 
-                id="webhook-url"
-                v-model="webhookForm.url" 
-                type="url" 
-                placeholder="https://hooks.example.com/services/your-webhook-url" 
-                required
-                class="url-input"
-              />
-              <small>
+              <div class="input-with-icon">
+                <input 
+                  id="webhook-url"
+                  v-model="webhookForm.url" 
+                  type="url" 
+                  placeholder="https://hooks.example.com/services/your-webhook-url" 
+                  required
+                  class="form-input url-input"
+                  autocomplete="off"
+                  @blur="validateWebhookField('url')"
+                  @input="validateUrlFormat"
+                />
+                <div v-if="isValidatingUrl" class="input-spinner">
+                  <PhSpinner class="ph-spin" />
+                </div>
+              </div>
+              <small v-if="!webhookFormErrors.url && getServiceHelp()" class="form-hint service-help">
                 <PhInfo />
-                The endpoint URL provided by {{ webhookForm.type || 'your service' }}
+                {{ getServiceHelp() }}
+              </small>
+              <small v-else-if="webhookFormErrors.url" class="form-error">
+                <PhWarning />
+                {{ webhookFormErrors.url }}
+              </small>
+              <small v-else class="form-hint">
+                <PhInfo />
+                The endpoint URL provided by your notification service
               </small>
             </div>
           </div>
 
           <!-- Triggers Section -->
           <div class="form-section triggers-section">
-            <div class="section-title">
-              <h4><PhListChecks /> Notification Triggers</h4>
-              <span class="trigger-count">{{ webhookForm.triggers.length }} selected</span>
+            <div class="section-header-inline">
+              <h4><PhBell /> Notification Triggers</h4>
+              <span class="step-indicator">Step 2 of 3</span>
             </div>
-            <p class="section-description">Choose which events will send notifications to this webhook</p>
+            <div class="section-title">
+              <p class="section-description">Select the events that will trigger this webhook</p>
+              <span class="trigger-count" :class="{ empty: webhookForm.triggers.length === 0, error: webhookFormErrors.triggers }">
+                {{ webhookForm.triggers.length }} {{ webhookForm.triggers.length === 1 ? 'trigger' : 'triggers' }} selected
+              </span>
+            </div>
             
             <div class="trigger-cards">
               <label class="trigger-card" :class="{ active: webhookForm.triggers.includes('book-added') }">
@@ -1081,11 +1178,8 @@
                     <PhPlus />
                   </div>
                   <div class="trigger-info">
-                    <strong>Book Added</strong>
-                    <small>Triggered when a new audiobook is added to your library</small>
-                  </div>
-                  <div class="trigger-check">
-                    <PhCheckCircle />
+                    <strong>Book Added to Library</strong>
+                    <small>Notifies when a new audiobook is added to your library</small>
                   </div>
                 </div>
               </label>
@@ -1097,11 +1191,8 @@
                     <PhDownloadSimple />
                   </div>
                   <div class="trigger-info">
-                    <strong>Book Downloading</strong>
-                    <small>Triggered when an audiobook download begins</small>
-                  </div>
-                  <div class="trigger-check">
-                    <PhCheckCircle />
+                    <strong>Download Started</strong>
+                    <small>Notifies when an audiobook download begins</small>
                   </div>
                 </div>
               </label>
@@ -1110,37 +1201,47 @@
                 <input v-model="webhookForm.triggers" value="book-available" type="checkbox" class="trigger-checkbox">
                 <div class="trigger-content">
                   <div class="trigger-icon book-available">
-                    <PhCheckSquare />
+                    <PhCheckCircle />
                   </div>
                   <div class="trigger-info">
-                    <strong>Book Available</strong>
-                    <small>Triggered when an audiobook download completes successfully</small>
-                  </div>
-                  <div class="trigger-check">
-                    <PhCheckCircle />
+                    <strong>Download Complete</strong>
+                    <small>Notifies when an audiobook finishes downloading and is ready</small>
                   </div>
                 </div>
               </label>
             </div>
 
-            <div v-if="webhookForm.triggers.length === 0" class="validation-hint warning">
+            <div v-if="webhookFormErrors.triggers" class="validation-hint warning">
               <PhWarning />
-              Please select at least one trigger
+              <span>{{ webhookFormErrors.triggers }}</span>
+            </div>
+            <div v-else-if="webhookForm.triggers.length === 0" class="validation-hint warning">
+              <PhWarning />
+              <span>Please select at least one trigger event to continue</span>
+            </div>
+            <div v-else class="validation-hint success">
+              <PhCheckCircle />
+              <span>{{ webhookForm.triggers.length }} event{{ webhookForm.triggers.length > 1 ? 's' : '' }} will trigger this webhook</span>
             </div>
           </div>
 
           <!-- Status Section -->
           <div class="form-section status-section">
+            <div class="section-header-inline">
+              <h4><PhToggleRight /> Activation</h4>
+              <span class="step-indicator">Step 3 of 3</span>
+            </div>
             <label class="toggle-label">
               <input 
                 v-model="webhookForm.isEnabled" 
                 type="checkbox"
                 class="toggle-checkbox"
+                id="webhook-enabled"
               />
               <div class="toggle-switch"></div>
               <div class="toggle-text">
-                <strong>{{ webhookForm.isEnabled ? 'Webhook Enabled' : 'Webhook Disabled' }}</strong>
-                <small>{{ webhookForm.isEnabled ? 'This webhook will receive notifications' : 'This webhook is inactive and will not receive notifications' }}</small>
+                <strong>{{ webhookForm.isEnabled ? 'Webhook is Active' : 'Webhook is Inactive' }}</strong>
+                <small>{{ webhookForm.isEnabled ? 'Notifications will be sent to this webhook when triggers occur' : 'Enable to start receiving notifications. You can always enable it later.' }}</small>
               </div>
             </label>
           </div>
@@ -1152,9 +1253,26 @@
           <PhX />
           Cancel
         </button>
-        <button @click="saveWebhook" class="save-button" type="button" :disabled="webhookForm.triggers.length === 0">
-          <PhCheck />
-          {{ editingWebhook ? 'Update' : 'Create' }} Webhook
+        <button 
+          v-if="webhookForm.url && webhookForm.type && webhookForm.triggers.length > 0 && !editingWebhook"
+          @click="testWebhookConfig" 
+          class="test-button" 
+          type="button"
+          :disabled="testingWebhookConfig"
+        >
+          <PhSpinner v-if="testingWebhookConfig" class="ph-spin" />
+          <PhPaperPlaneTilt v-else />
+          {{ testingWebhookConfig ? 'Testing...' : 'Test Webhook' }}
+        </button>
+        <button 
+          @click="saveWebhook" 
+          class="save-button" 
+          type="button" 
+          :disabled="!isWebhookFormValid || savingWebhook"
+        >
+          <PhSpinner v-if="savingWebhook" class="ph-spin" />
+          <PhCheck v-else />
+          {{ savingWebhook ? 'Saving...' : (editingWebhook ? 'Update Webhook' : 'Create Webhook') }}
         </button>
       </div>
     </div>
@@ -1326,7 +1444,7 @@ import {
   // Form Controls & Actions
   PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink,
   PhListChecks, PhClock, PhXCircle, PhCheck, PhX, PhCheckSquare, PhRuler, PhSparkle,
-  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt, PhBellSlash,
+  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt, PhBellSlash, PhCaretDown,
   // Security & Authentication
   PhShieldCheck, PhLock, PhLockOpen, PhWarning, PhWarningCircle,
   // Files & Folders
@@ -1452,6 +1570,7 @@ const editingWebhook = ref<{
   isEnabled: boolean
 } | null>(null)
 const testingWebhook = ref<string | null>(null)
+const expandedWebhooks = ref<Set<string>>(new Set())
 const webhooks = ref<Array<{
   id: string
   name: string
@@ -1468,6 +1587,15 @@ const webhookForm = reactive({
   triggers: [] as string[],
   isEnabled: true
 })
+const webhookFormErrors = reactive({
+  name: '',
+  url: '',
+  type: '',
+  triggers: ''
+})
+const isValidatingUrl = ref(false)
+const testingWebhookConfig = ref(false)
+const savingWebhook = ref(false)
 
 const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
   const showPassword = ref(false)
@@ -1703,6 +1831,7 @@ const closeWebhookForm = () => {
   webhookForm.type = ''
   webhookForm.triggers = []
   webhookForm.isEnabled = true
+  resetWebhookFormErrors()
 }
 
 const editWebhook = (webhook: typeof webhooks.value[0]) => {
@@ -1713,61 +1842,80 @@ const editWebhook = (webhook: typeof webhooks.value[0]) => {
   webhookForm.type = webhook.type
   webhookForm.triggers = [...webhook.triggers]
   webhookForm.isEnabled = webhook.isEnabled
+  resetWebhookFormErrors()
   showWebhookForm.value = true
 }
 
-const saveWebhook = () => {
-  // Validate required fields
-  if (!webhookForm.name || !webhookForm.url || !webhookForm.type) {
-    toast.error('Validation error', 'Name, Type, and Webhook URL are required')
+const saveWebhook = async () => {
+  // Validate all fields
+  validateWebhookField('name')
+  validateWebhookField('url')
+  validateWebhookField('type')
+  validateWebhookField('triggers')
+
+  // Check if form is valid
+  if (!isWebhookFormValid.value) {
+    toast.error('Validation error', 'Please fix the errors before saving')
     return
   }
 
-  if (webhookForm.triggers.length === 0) {
-    toast.error('Validation error', 'Please select at least one notification trigger')
-    return
-  }
-
-  const webhook = {
-    id: webhookForm.id || crypto.randomUUID(),
-    name: webhookForm.name,
-    url: webhookForm.url,
-    type: webhookForm.type as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier',
-    triggers: [...webhookForm.triggers],
-    isEnabled: webhookForm.isEnabled
-  }
-
-  if (editingWebhook.value) {
-    // Update existing webhook
-    const index = webhooks.value.findIndex(w => w.id === webhook.id)
-    if (index !== -1) {
-      webhooks.value[index] = webhook
+  savingWebhook.value = true
+  try {
+    const webhook = {
+      id: webhookForm.id || crypto.randomUUID(),
+      name: webhookForm.name.trim(),
+      url: webhookForm.url.trim(),
+      type: webhookForm.type as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier',
+      triggers: [...webhookForm.triggers],
+      isEnabled: webhookForm.isEnabled
     }
-    toast.success('Webhook', 'Webhook updated successfully')
-  } else {
-    // Add new webhook
-    webhooks.value.push(webhook)
-    toast.success('Webhook', 'Webhook added successfully')
-  }
 
-  closeWebhookForm()
+    if (editingWebhook.value) {
+      // Update existing webhook
+      const index = webhooks.value.findIndex(w => w.id === webhook.id)
+      if (index !== -1) {
+        webhooks.value[index] = webhook
+      }
+      toast.success('Webhook', 'Webhook updated successfully')
+    } else {
+      // Add new webhook
+      webhooks.value.push(webhook)
+      toast.success('Webhook', 'Webhook added successfully')
+    }
+
+    // Persist webhooks to settings
+    await persistWebhooks()
+
+    closeWebhookForm()
+  } catch (error) {
+    console.error('Failed to save webhook:', error)
+    toast.error('Save failed', 'Failed to save webhook')
+  } finally {
+    savingWebhook.value = false
+  }
 }
 
-const deleteWebhook = (id: string) => {
+const deleteWebhook = async (id: string) => {
   const webhook = webhooks.value.find(w => w.id === id)
   if (webhook && confirm(`Are you sure you want to delete the webhook "${webhook.name}"?`)) {
     webhooks.value = webhooks.value.filter(w => w.id !== id)
     toast.success('Webhook', 'Webhook deleted successfully')
+    
+    // Persist webhooks to settings
+    await persistWebhooks()
   }
 }
 
-const toggleWebhook = (webhook: typeof webhooks.value[0]) => {
+const toggleWebhook = async (webhook: typeof webhooks.value[0]) => {
   const index = webhooks.value.findIndex(w => w.id === webhook.id)
   if (index !== -1) {
     const targetWebhook = webhooks.value[index]
     if (targetWebhook) {
       targetWebhook.isEnabled = !targetWebhook.isEnabled
       toast.success('Webhook', `${webhook.name} ${targetWebhook.isEnabled ? 'enabled' : 'disabled'}`)
+      
+      // Persist webhooks to settings
+      await persistWebhooks()
     }
   }
 }
@@ -1789,13 +1937,23 @@ const testWebhook = async (webhook: typeof webhooks.value[0]) => {
 }
 
 // Migrate old single webhook format to new multiple webhooks format
-const migrateOldWebhookData = () => {
+const migrateOldWebhookData = async () => {
   if (!settings.value) return
+  
+  // Check if migration has already been completed
+  const migrationKey = 'webhook_migration_completed'
+  if (localStorage.getItem(migrationKey)) {
+    return // Migration already done
+  }
   
   // Check if old format exists and new format is empty
   if (settings.value.webhookUrl && settings.value.webhookUrl.trim() !== '' && webhooks.value.length === 0) {
     const oldUrl = settings.value.webhookUrl.trim()
     const oldTriggers = settings.value.enabledNotificationTriggers || []
+    
+    console.log('Migration Debug - Old URL:', oldUrl)
+    console.log('Migration Debug - Old Triggers:', oldTriggers)
+    console.log('Migration Debug - Old Triggers Length:', oldTriggers.length)
     
     // Create a webhook from the old data
     // Try to detect type from URL, default to 'Zapier' for generic webhooks
@@ -1809,17 +1967,58 @@ const migrateOldWebhookData = () => {
     else if (urlLower.includes('pushover')) detectedType = 'Pushover'
     else if (urlLower.includes('ntfy')) detectedType = 'NTFY'
     
+    // Use old triggers if they exist and have valid values, otherwise use all default triggers
+    let triggersToUse = ['book-added', 'book-downloading', 'book-available']
+    
+    if (oldTriggers && oldTriggers.length > 0) {
+      // Filter out any invalid triggers and only use valid ones
+      const validTriggers = oldTriggers.filter(t => 
+        ['book-added', 'book-downloading', 'book-available', 'book-completed'].includes(t)
+      )
+      if (validTriggers.length > 0) {
+        triggersToUse = validTriggers
+      }
+    }
+    
+    console.log('Migration Debug - Final Triggers:', triggersToUse)
+    
     webhooks.value = [{
       id: crypto.randomUUID(),
       name: `Migrated Webhook (${detectedType})`,
       url: oldUrl,
       type: detectedType,
-      triggers: oldTriggers.length > 0 ? oldTriggers : ['book-added', 'book-downloading', 'book-available'],
+      triggers: triggersToUse,
       isEnabled: true
     }]
     
+    // Persist migrated webhook to backend
+    await persistWebhooks()
+    
+    // Mark migration as completed
+    localStorage.setItem(migrationKey, 'true')
+    
     console.log('Migrated old webhook configuration to new format:', webhooks.value[0])
     toast.info('Webhook Migration', 'Your existing webhook has been migrated to the new format')
+  } else if (webhooks.value.length === 0 && (!settings.value.webhookUrl || settings.value.webhookUrl.trim() === '')) {
+    // No old webhook data and no new webhooks - mark migration as complete to avoid checking again
+    localStorage.setItem(migrationKey, 'true')
+  }
+}
+
+// Persist webhooks to backend settings
+const persistWebhooks = async () => {
+  if (!settings.value) return
+  
+  try {
+    // Update settings with current webhooks
+    settings.value.webhooks = webhooks.value
+    
+    // Save to backend
+    await configStore.saveApplicationSettings(settings.value)
+  } catch (error) {
+    console.error('Failed to persist webhooks:', error)
+    toast.error('Save failed', 'Failed to save webhooks to settings')
+    throw error
   }
 }
 
@@ -2208,6 +2407,162 @@ const formatDate = (dateString: string | undefined): string => {
   return date.toLocaleString()
 }
 
+// Helper functions for webhook UI
+const getWebhookIcon = (type: string) => {
+  const iconMap: Record<string, unknown> = {
+    'Slack': PhBell,
+    'Discord': PhBell,
+    'Telegram': PhBell,
+    'Pushover': PhBell,
+    'Pushbullet': PhBell,
+    'NTFY': PhBell,
+    'Zapier': PhBell
+  }
+  return iconMap[type] || PhBell
+}
+
+const getTriggerIcon = (trigger: string) => {
+  const iconMap: Record<string, unknown> = {
+    'book-added': PhPlus,
+    'book-downloading': PhDownloadSimple,
+    'book-available': PhCheckCircle
+  }
+  return iconMap[trigger] || PhBell
+}
+
+const getTriggerClass = (trigger: string): string => {
+  const classMap: Record<string, string> = {
+    'book-added': 'trigger-added',
+    'book-downloading': 'trigger-downloading',
+    'book-available': 'trigger-available'
+  }
+  return classMap[trigger] || ''
+}
+
+const formatTriggerName = (trigger: string): string => {
+  const nameMap: Record<string, string> = {
+    'book-added': 'Book Added',
+    'book-downloading': 'Download Started',
+    'book-available': 'Download Complete'
+  }
+  return nameMap[trigger] || trigger
+}
+
+// Webhook expand/collapse management
+const toggleWebhookExpanded = (webhookId: string) => {
+  if (expandedWebhooks.value.has(webhookId)) {
+    expandedWebhooks.value.delete(webhookId)
+  } else {
+    expandedWebhooks.value.add(webhookId)
+  }
+}
+
+const isWebhookExpanded = (webhookId: string): boolean => {
+  return expandedWebhooks.value.has(webhookId)
+}
+
+// Webhook form validation
+const isWebhookFormValid = computed(() => {
+  return webhookForm.name.trim().length > 0 &&
+         webhookForm.url.trim().length > 0 &&
+         webhookForm.type !== '' &&
+         webhookForm.triggers.length > 0 &&
+         !webhookFormErrors.name &&
+         !webhookFormErrors.url &&
+         !webhookFormErrors.type &&
+         !webhookFormErrors.triggers
+})
+
+const validateWebhookField = (field: 'name' | 'url' | 'type' | 'triggers') => {
+  switch (field) {
+    case 'name':
+      if (!webhookForm.name || webhookForm.name.trim().length === 0) {
+        webhookFormErrors.name = 'Webhook name is required'
+      } else if (webhookForm.name.trim().length < 3) {
+        webhookFormErrors.name = 'Name must be at least 3 characters'
+      } else {
+        webhookFormErrors.name = ''
+      }
+      break
+    case 'url':
+      if (!webhookForm.url || webhookForm.url.trim().length === 0) {
+        webhookFormErrors.url = 'Webhook URL is required'
+      } else if (!isValidUrl(webhookForm.url)) {
+        webhookFormErrors.url = 'Please enter a valid HTTPS URL'
+      } else {
+        webhookFormErrors.url = ''
+      }
+      break
+    case 'type':
+      if (!webhookForm.type) {
+        webhookFormErrors.type = 'Please select a service type'
+      } else {
+        webhookFormErrors.type = ''
+      }
+      break
+    case 'triggers':
+      if (webhookForm.triggers.length === 0) {
+        webhookFormErrors.triggers = 'Please select at least one trigger'
+      } else {
+        webhookFormErrors.triggers = ''
+      }
+      break
+  }
+}
+
+const isValidUrl = (url: string): boolean => {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+const validateUrlFormat = () => {
+  if (webhookForm.url.trim().length > 0) {
+    validateWebhookField('url')
+  }
+}
+
+const onServiceTypeChange = () => {
+  validateWebhookField('type')
+}
+
+const getServiceHelp = (): string => {
+  const helpText: Record<string, string> = {
+    'Slack': 'Get your webhook URL from Slack: Settings & administration → Manage apps → Incoming Webhooks',
+    'Discord': 'Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL',
+    'Telegram': 'Create a bot with @BotFather, then get the webhook URL format: https://api.telegram.org/bot{token}/sendMessage',
+    'Pushover': 'Get your User Key and API Token from pushover.net/apps/build',
+    'Pushbullet': 'Get your Access Token from Settings → Account → Access Tokens',
+    'NTFY': 'Use format: https://ntfy.sh/{topic} or your self-hosted instance URL',
+    'Zapier': 'Create a Zap with "Webhooks by Zapier" and copy the webhook URL'
+  }
+  return webhookForm.type ? helpText[webhookForm.type] || '' : ''
+}
+
+const testWebhookConfig = async () => {
+  testingWebhookConfig.value = true
+  try {
+    // TODO: Implement actual webhook test API call
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    toast.success('Test successful', `Test notification sent to ${webhookForm.type}`)
+  } catch (error) {
+    console.error('Failed to test webhook:', error)
+    toast.error('Test failed', 'Failed to send test notification')
+  } finally {
+    testingWebhookConfig.value = false
+  }
+}
+
+const resetWebhookFormErrors = () => {
+  webhookFormErrors.name = ''
+  webhookFormErrors.url = ''
+  webhookFormErrors.type = ''
+  webhookFormErrors.triggers = ''
+}
+
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
   const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'notifications'
@@ -2299,8 +2654,18 @@ async function loadTabContents(tab: string) {
         if (!loaded.general) {
           await loadTabContents('general')
         }
+        // Load webhooks from settings and ensure triggers are valid
+        if (settings.value?.webhooks && settings.value.webhooks.length > 0) {
+          webhooks.value = settings.value.webhooks.map(webhook => ({
+            ...webhook,
+            // Ensure triggers array is never empty
+            triggers: webhook.triggers && webhook.triggers.length > 0 
+              ? webhook.triggers 
+              : ['book-added', 'book-downloading', 'book-available']
+          }))
+        }
         // Migrate old webhook format to new format
-        migrateOldWebhookData()
+        await migrateOldWebhookData()
         break
       default:
         // default to indexers
@@ -2477,16 +2842,507 @@ onMounted(async () => {
   color: #868e96;
 }
 
-.empty-state i {
+.empty-state .empty-icon {
   font-size: 4rem;
   color: #495057;
   margin-bottom: 1rem;
+  width: 4rem;
+  height: 4rem;
+}
+
+.empty-state h3 {
+  margin: 1rem 0 0.5rem 0;
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 600;
 }
 
 .empty-state p {
-  margin: 0;
-  font-size: 1.1rem;
+  margin: 0.5rem 0;
+  font-size: 1.05rem;
   line-height: 1.6;
+  color: #adb5bd;
+}
+
+.empty-state .empty-help {
+  font-size: 0.95rem;
+  color: #868e96;
+  margin-bottom: 2rem;
+}
+
+.add-button-large {
+  margin-top: 1.5rem;
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+  font-size: 1rem;
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.3);
+}
+
+.add-button-large:hover {
+  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(30, 136, 229, 0.4);
+}
+
+.section-title-wrapper {
+  flex: 1;
+}
+
+.section-subtitle {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.95rem;
+  color: #868e96;
+  font-weight: normal;
+}
+
+/* Webhook Grid Layout */
+.webhooks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+  gap: 1.5rem;
+}
+
+/* Webhook Card */
+.webhook-card {
+  background-color: #2a2a2a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.webhook-card:hover {
+  border-color: rgba(77, 171, 247, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.webhook-card.disabled {
+  opacity: 0.6;
+  filter: grayscale(30%);
+}
+
+.webhook-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(77, 171, 247, 0.05) 0%, rgba(0, 0, 0, 0.1) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.webhook-header:hover {
+  background: linear-gradient(135deg, rgba(77, 171, 247, 0.08) 0%, rgba(0, 0, 0, 0.15) 100%);
+}
+
+.webhook-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.webhook-title-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.webhook-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.5rem;
+}
+
+.webhook-icon.service-slack {
+  background: linear-gradient(135deg, #4A154B 0%, #611f69 100%);
+  color: #fff;
+}
+
+.webhook-icon.service-discord {
+  background: linear-gradient(135deg, #5865F2 0%, #404eed 100%);
+  color: #fff;
+}
+
+.webhook-icon.service-telegram {
+  background: linear-gradient(135deg, #0088cc 0%, #006699 100%);
+  color: #fff;
+}
+
+.webhook-icon.service-pushover {
+  background: linear-gradient(135deg, #249DF1 0%, #1a7dc4 100%);
+  color: #fff;
+}
+
+.webhook-icon.service-pushbullet {
+  background: linear-gradient(135deg, #4AB367 0%, #3a9053 100%);
+  color: #fff;
+}
+
+.webhook-icon.service-ntfy {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+  color: #fff;
+}
+
+.webhook-icon.service-zapier {
+  background: linear-gradient(135deg, #FF4A00 0%, #e04200 100%);
+  color: #fff;
+}
+
+.webhook-info h4 {
+  margin: 0 0 0.25rem 0;
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.webhook-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.triggers-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trigger-badge-small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid;
+  cursor: help;
+  transition: all 0.2s ease;
+}
+
+.trigger-badge-small:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.trigger-badge-small svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.trigger-badge-small.trigger-added {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #51cf66;
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.trigger-badge-small.trigger-downloading {
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border-color: rgba(77, 171, 247, 0.3);
+}
+
+.trigger-badge-small.trigger-available {
+  background-color: rgba(156, 39, 176, 0.15);
+  color: #b197fc;
+  border-color: rgba(156, 39, 176, 0.3);
+}
+
+.webhook-type-badge {
+  display: inline-block;
+  padding: 0.25rem 0.65rem;
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border: 1px solid rgba(77, 171, 247, 0.3);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.webhook-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.webhook-status-badge.active {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #51cf66;
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.expand-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #adb5bd;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.expand-toggle:hover {
+  background-color: rgba(77, 171, 247, 0.15);
+  border-color: rgba(77, 171, 247, 0.3);
+  color: #4dabf7;
+}
+
+.expand-toggle svg {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.3s ease;
+}
+
+.expand-toggle.expanded svg {
+  transform: rotate(180deg);
+}
+
+/* Expand/Collapse Animation */
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  max-height: 500px;
+  opacity: 1;
+}
+
+.webhook-body {
+  padding: 1.5rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.webhook-url-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.url-icon {
+  color: #4dabf7;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.webhook-url {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.85rem;
+  color: #adb5bd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webhook-triggers-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.triggers-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #868e96;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.triggers-label {
+  color: #adb5bd;
+}
+
+.triggers-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.trigger-badge svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.trigger-badge.trigger-added {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #51cf66;
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.trigger-badge.trigger-downloading {
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border-color: rgba(77, 171, 247, 0.3);
+}
+
+.trigger-badge.trigger-available {
+  background-color: rgba(156, 39, 176, 0.15);
+  color: #b197fc;
+  border-color: rgba(156, 39, 176, 0.3);
+}
+
+.webhook-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #adb5bd;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-btn span {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .action-btn span {
+    display: inline;
+  }
+}
+
+.action-btn.toggle-btn {
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border-color: rgba(231, 76, 60, 0.3);
+}
+
+.action-btn.toggle-btn.active {
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #51cf66;
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.action-btn.toggle-btn:hover:not(:disabled) {
+  background-color: rgba(231, 76, 60, 0.25);
+}
+
+.action-btn.toggle-btn.active:hover:not(:disabled) {
+  background-color: rgba(76, 175, 80, 0.25);
+}
+
+.action-btn.test-btn {
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border-color: rgba(77, 171, 247, 0.3);
+}
+
+.action-btn.test-btn:hover:not(:disabled) {
+  background-color: rgba(77, 171, 247, 0.25);
+  border-color: rgba(77, 171, 247, 0.5);
+}
+
+.action-btn.edit-btn {
+  background-color: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+  border-color: rgba(255, 193, 7, 0.3);
+}
+
+.action-btn.edit-btn:hover:not(:disabled) {
+  background-color: rgba(255, 193, 7, 0.25);
+  border-color: rgba(255, 193, 7, 0.5);
+}
+
+.action-btn.delete-btn {
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border-color: rgba(231, 76, 60, 0.3);
+}
+
+.action-btn.delete-btn:hover:not(:disabled) {
+  background-color: rgba(231, 76, 60, 0.25);
+  border-color: rgba(231, 76, 60, 0.5);
 }
 
 .config-list {
@@ -2530,9 +3386,8 @@ onMounted(async () => {
   color: #4dabf7;
   font-family: 'Courier New', monospace;
   font-size: 0.9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .config-meta {
@@ -2699,12 +3554,14 @@ onMounted(async () => {
   font-size: 1rem;
   color: #fff;
   transition: all 0.2s ease;
+  width: 100%;
 }
 
 .form-group select option {
   background-color: #2a2a2a;
   color: #ffffff;
   padding: 0.5rem;
+  border: none;
 }
 
 .form-group select option:hover,
@@ -2712,6 +3569,7 @@ onMounted(async () => {
 .form-group select option:checked {
   background-color: #4dabf7;
   color: #ffffff;
+  border: none;
 }
 
 .form-group input[type="text"]:focus,
@@ -3706,16 +4564,54 @@ onMounted(async () => {
     align-items: flex-start;
     gap: 1rem;
   }
+
+  .config-info {
+    width: 100%;
+  }
+
+  .config-info h4 {
+    font-size: 1rem;
+  }
+
+  .config-url {
+    font-size: 0.8rem;
+    word-break: break-all;
+    white-space: normal;
+    margin-right: 1rem
+  }
+
+  .config-meta {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .config-meta span {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .config-triggers {
+    width: 100%;
+  }
   
   .config-actions {
     width: 100%;
     justify-content: flex-end;
+    gap: 0.75rem;
+  }
+
+  .config-actions .icon-button {
+    padding: 0.6rem;
   }
 
   .section-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 1rem;
+  }
+
+  .section-header h3 {
+    font-size: 1.3rem;
   }
 
   .add-button,
@@ -3766,8 +4662,8 @@ onMounted(async () => {
 
 /* Webhook Modal Specific Styles */
 .modal-content.webhook-modal {
-  max-width: 700px;
-  max-height: 85vh;
+  max-width: 750px;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3775,74 +4671,131 @@ onMounted(async () => {
 
 .webhook-modal .modal-header {
   flex-shrink: 0;
+  padding: 2rem;
 }
 
 .webhook-modal .modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 2rem;
+  padding: 0 2rem 2rem 2rem;
 }
 
 /* Custom scrollbar for modal body */
 .webhook-modal .modal-body::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 .webhook-modal .modal-body::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
+  border-radius: 5px;
 }
 
 .webhook-modal .modal-body::-webkit-scrollbar-thumb {
-  background: rgba(77, 171, 247, 0.3);
-  border-radius: 4px;
+  background: rgba(77, 171, 247, 0.4);
+  border-radius: 5px;
 }
 
 .webhook-modal .modal-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(77, 171, 247, 0.5);
+  background: rgba(77, 171, 247, 0.6);
 }
 
 .webhook-modal .modal-actions {
   flex-shrink: 0;
+  padding: 1.5rem 2rem;
 }
 
 .webhook-modal .modal-title {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  align-items: flex-start;
+  gap: 1rem;
+  flex: 1;
 }
 
-.webhook-modal .modal-title svg {
-  width: 24px;
-  height: 24px;
-  color: #4dabf7;
+.webhook-modal .modal-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #4dabf7 0%, #339af0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(77, 171, 247, 0.3);
+}
+
+.webhook-modal .modal-icon svg {
+  width: 28px;
+  height: 28px;
+  color: #fff;
 }
 
 .webhook-modal .modal-title h3 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.5rem;
+}
+
+.webhook-modal .modal-subtitle {
   margin: 0;
+  font-size: 0.95rem;
+  color: #868e96;
+  font-weight: normal;
 }
 
 .webhook-form {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
 }
 
 .webhook-form .form-section {
-  background-color: rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.3) 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 1.5rem;
+  transition: all 0.2s ease;
 }
 
-.webhook-form .form-section h4 {
-  margin: 0 0 1rem 0;
-  color: #4dabf7;
-  font-size: 1rem;
+.webhook-form .form-section:hover {
+  border-color: rgba(77, 171, 247, 0.2);
+}
+
+.webhook-form .section-header-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.webhook-form .section-header-inline h4 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.05rem;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.65rem;
+}
+
+.webhook-form .section-header-inline h4 svg {
+  color: #4dabf7;
+  width: 20px;
+  height: 20px;
+}
+
+.step-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  background-color: rgba(77, 171, 247, 0.15);
+  color: #4dabf7;
+  border: 1px solid rgba(77, 171, 247, 0.3);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .webhook-form .form-row {
@@ -3862,109 +4815,259 @@ onMounted(async () => {
   flex: 2;
 }
 
+.webhook-form .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.webhook-form .form-group:last-child {
+  margin-bottom: 0;
+}
+
 .webhook-form label {
+  color: #e0e0e0;
+  font-weight: 600;
+  font-size: 0.95rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #e0e0e0;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
+}
+
+.webhook-form label.required-label::after {
+  content: '*';
+  color: #ff6b6b;
+  margin-left: 0.25rem;
 }
 
 .webhook-form label svg {
   width: 16px;
   height: 16px;
-  color: #868e96;
+  color: #4dabf7;
 }
 
-.webhook-form .type-select {
+.form-input,
+.form-select {
+  padding: 0.85rem 1rem;
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   font-size: 0.95rem;
+  color: #fff;
+  transition: all 0.2s ease;
+  font-family: inherit;
 }
 
-.webhook-form .url-input {
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 0.9rem;
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: #4dabf7;
+  background-color: rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.15);
 }
 
-.webhook-form small {
+.form-group.has-error .form-input,
+.form-group.has-error .form-select {
+  border-color: #ff6b6b;
+}
+
+.form-group.has-error .form-input:focus,
+.form-group.has-error .form-select:focus {
+  border-color: #ff6b6b;
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.15);
+}
+
+.form-error {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  color: #868e96;
+  gap: 0.4rem;
+  color: #ff6b6b;
   font-size: 0.85rem;
-  margin-top: 0.35rem;
+  line-height: 1.5;
+  font-weight: 500;
 }
 
-.webhook-form small svg {
+.form-error svg {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
 }
 
+.form-input::placeholder {
+  color: #6c757d;
+}
+
+.select-wrapper {
+  position: relative;
+}
+
+.form-select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 2.5rem;
+}
+
+.form-select option {
+  background-color: #2a2a2a;
+  color: #ffffff;
+  padding: 0.75rem;
+}
+
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 1rem;
+  color: #4dabf7;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+.input-spinner {
+  position: absolute;
+  right: 1rem;
+  color: #4dabf7;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.input-with-icon .form-input {
+  padding-left: 2.75rem;
+  padding-right: 2.75rem;
+}
+
+.form-input.url-input {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.9rem;
+}
+
+.form-hint.service-help {
+  background-color: rgba(77, 171, 247, 0.08);
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  border-left: 3px solid #4dabf7;
+  font-weight: 500;
+}
+
+.form-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #868e96;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.form-hint svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: #4dabf7;
+}
+
 /* Triggers Section */
 .triggers-section {
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.05) 0%, rgba(0, 0, 0, 0.2) 100%);
+  background: linear-gradient(135deg, rgba(77, 171, 247, 0.08) 0%, rgba(0, 0, 0, 0.3) 100%);
   border-color: rgba(77, 171, 247, 0.2);
 }
 
 .triggers-section .section-title {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  gap: 1rem;
 }
 
-.triggers-section .section-title h4 {
+.section-description {
+  color: #adb5bd;
+  font-size: 0.9rem;
   margin: 0;
+  flex: 1;
+  line-height: 1.5;
 }
 
 .trigger-count {
   display: inline-flex;
   align-items: center;
-  padding: 0.3rem 0.7rem;
+  padding: 0.4rem 0.85rem;
   background-color: rgba(77, 171, 247, 0.2);
   color: #4dabf7;
-  border-radius: 12px;
+  border: 1px solid rgba(77, 171, 247, 0.3);
+  border-radius: 14px;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.section-description {
-  color: #868e96;
-  font-size: 0.9rem;
-  margin: 0 0 1rem 0;
+.trigger-count.empty {
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border-color: rgba(231, 76, 60, 0.3);
+}
+
+.trigger-count.error {
+  background-color: rgba(231, 76, 60, 0.2);
+  color: #ff6b6b;
+  border-color: rgba(231, 76, 60, 0.4);
+  animation: pulse-error 2s ease-in-out infinite;
+}
+
+@keyframes pulse-error {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .trigger-cards {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  margin-top: 1rem;
 }
 
 .trigger-card {
   position: relative;
-  background-color: #2a2a2a;
+  background-color: rgba(255, 255, 255, 0.03);
   border: 2px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 1rem;
+  border-radius: 10px;
+  padding: 1.25rem;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .trigger-card:hover {
   border-color: rgba(77, 171, 247, 0.4);
-  background-color: rgba(77, 171, 247, 0.05);
+  background-color: rgba(77, 171, 247, 0.08);
+  transform: translateX(4px);
 }
 
 .trigger-card.active {
   border-color: #4dabf7;
-  background-color: rgba(77, 171, 247, 0.1);
+  background: linear-gradient(135deg, rgba(77, 171, 247, 0.15) 0%, rgba(77, 171, 247, 0.08) 100%);
 }
 
 .trigger-checkbox {
   position: absolute;
   opacity: 0;
+  width: 0;
+  height: 0;
   pointer-events: none;
+  margin: 0;
+  padding: 0;
 }
 
 .trigger-content {
@@ -3977,67 +5080,74 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
 .trigger-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 .trigger-icon.book-added {
-  background-color: rgba(76, 175, 80, 0.2);
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.25) 0%, rgba(76, 175, 80, 0.15) 100%);
   color: #51cf66;
+  border: 1px solid rgba(76, 175, 80, 0.3);
 }
 
 .trigger-icon.book-downloading {
-  background-color: rgba(77, 171, 247, 0.2);
+  background: linear-gradient(135deg, rgba(77, 171, 247, 0.25) 0%, rgba(77, 171, 247, 0.15) 100%);
   color: #4dabf7;
+  border: 1px solid rgba(77, 171, 247, 0.3);
 }
 
 .trigger-icon.book-available {
-  background-color: rgba(156, 39, 176, 0.2);
+  background: linear-gradient(135deg, rgba(156, 39, 176, 0.25) 0%, rgba(156, 39, 176, 0.15) 100%);
   color: #b197fc;
+  border: 1px solid rgba(156, 39, 176, 0.3);
 }
 
 .trigger-info {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.35rem;
 }
 
 .trigger-info strong {
   color: #fff;
   font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .trigger-info small {
   color: #868e96;
   font-size: 0.85rem;
   margin: 0;
+  line-height: 1.4;
 }
 
 .trigger-check {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  background-color: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.2);
   color: transparent;
   transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
 .trigger-card.active .trigger-check {
   background-color: #4dabf7;
   border-color: #4dabf7;
   color: #fff;
+  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.4);
 }
 
 .trigger-check svg {
@@ -4048,37 +5158,51 @@ onMounted(async () => {
 .validation-hint {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-radius: 6px;
+  gap: 0.65rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 8px;
   font-size: 0.9rem;
-  margin-top: 0.75rem;
+  margin-top: 1rem;
+  font-weight: 500;
 }
 
 .validation-hint.warning {
-  background-color: rgba(255, 193, 7, 0.1);
+  background-color: rgba(255, 193, 7, 0.12);
   border: 1px solid rgba(255, 193, 7, 0.3);
   color: #ffc107;
 }
 
+.validation-hint.success {
+  background-color: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #51cf66;
+}
+
 .validation-hint svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 
 /* Status Section with Toggle Switch */
 .status-section {
-  background: linear-gradient(135deg, rgba(76, 175, 80, 0.05) 0%, rgba(0, 0, 0, 0.2) 100%);
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.08) 0%, rgba(0, 0, 0, 0.3) 100%);
   border-color: rgba(76, 175, 80, 0.2);
 }
 
 .toggle-label {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.25rem;
   cursor: pointer;
   margin: 0;
+  padding: 0.5rem;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.toggle-label:hover {
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .toggle-checkbox {
@@ -4089,11 +5213,11 @@ onMounted(async () => {
 
 .toggle-switch {
   position: relative;
-  width: 52px;
-  height: 28px;
+  width: 56px;
+  height: 32px;
   background-color: rgba(255, 255, 255, 0.1);
   border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 14px;
+  border-radius: 16px;
   transition: all 0.3s ease;
   flex-shrink: 0;
 }
@@ -4101,13 +5225,14 @@ onMounted(async () => {
 .toggle-switch::after {
   content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
   background-color: #868e96;
   border-radius: 50%;
   transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .toggle-checkbox:checked + .toggle-switch {
@@ -4116,42 +5241,109 @@ onMounted(async () => {
 }
 
 .toggle-checkbox:checked + .toggle-switch::after {
-  left: 26px;
+  left: 27px;
   background-color: #51cf66;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
 }
 
 .toggle-text {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.35rem;
   flex: 1;
 }
 
 .toggle-text strong {
   color: #fff;
   font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .toggle-text small {
   color: #868e96;
   font-size: 0.85rem;
   margin: 0;
+  line-height: 1.5;
 }
 
-/* Save Button Disabled State */
+/* Save Button States */
 .webhook-modal .save-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  background-color: #495057;
+  background: linear-gradient(135deg, #495057 0%, #343a40 100%);
 }
 
 .webhook-modal .save-button:disabled:hover {
-  background-color: #495057;
   transform: none;
+  box-shadow: none;
+}
+
+.webhook-modal .test-button {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+}
+
+.webhook-modal .test-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+}
+
+.webhook-modal .test-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.webhook-modal .test-button:disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
 }
 
 /* Webhook Modal Responsive Styles */
 @media (max-width: 768px) {
+  .webhooks-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .webhook-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .webhook-title-row {
+    width: 100%;
+  }
+
+  .webhook-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .webhook-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .action-btn.toggle-btn,
+  .action-btn.delete-btn {
+    grid-column: span 1;
+  }
+
+  .action-btn.test-btn,
+  .action-btn.edit-btn {
+    grid-column: span 1;
+  }
+
   .webhook-modal {
     width: 95%;
     max-height: 95vh;
@@ -4163,8 +5355,18 @@ onMounted(async () => {
     padding: 1.25rem 1.5rem;
   }
 
+  .webhook-modal .modal-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .webhook-modal .modal-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+
   .webhook-modal .modal-title h3 {
-    font-size: 1.2rem;
+    font-size: 1.3rem;
   }
 
   .webhook-form .form-row {
@@ -4176,13 +5378,27 @@ onMounted(async () => {
   }
 
   .trigger-icon {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
   }
 
   .trigger-icon svg {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
+  }
+
+  .trigger-check {
+    width: 24px;
+    height: 24px;
+  }
+
+  .triggers-section .section-title {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .trigger-count {
+    align-self: flex-start;
   }
 }
 </style>

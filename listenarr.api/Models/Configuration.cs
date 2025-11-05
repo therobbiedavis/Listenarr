@@ -66,6 +66,16 @@ namespace Listenarr.Api.Models
         }
     }
 
+    public class WebhookConfiguration
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public string Name { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+        public string Type { get; set; } = "Zapier"; // Pushbullet, Telegram, Slack, Discord, Pushover, NTFY, Zapier
+        public List<string> Triggers { get; set; } = new();
+        public bool IsEnabled { get; set; } = true;
+    }
+
     public class ApplicationSettings
     {
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
@@ -104,14 +114,19 @@ namespace Listenarr.Api.Models
         public bool ShowCompletedExternalDownloads { get; set; } = false;
 
         /// <summary>
-        /// Webhook URL for sending notifications.
+        /// Webhook URL for sending notifications (legacy single webhook).
         /// </summary>
         public string WebhookUrl { get; set; } = string.Empty;
 
         /// <summary>
-        /// List of enabled notification triggers.
+        /// List of enabled notification triggers (legacy).
         /// </summary>
         public List<string> EnabledNotificationTriggers { get; set; } = new() { "book-added", "book-downloading", "book-available", "book-completed" };
+
+        /// <summary>
+        /// Multiple webhooks configuration (new format).
+        /// </summary>
+        public List<WebhookConfiguration>? Webhooks { get; set; }
 
         // Optional admin credentials submitted from the UI when saving settings.
         // These are NOT mapped to the ApplicationSettings table; they are used to create/update

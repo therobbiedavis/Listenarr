@@ -131,6 +131,38 @@ namespace Listenarr.Api.Models
                     c => c.ToList()
                 ));
 
+            // ApplicationSettings - EnabledNotificationTriggers as pipe-delimited
+            modelBuilder.Entity<ApplicationSettings>()
+                .Property(e => e.EnabledNotificationTriggers)
+                .HasConversion(
+                    v => string.Join("|", v ?? new List<string>()),
+                    v => v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
+                );
+            modelBuilder.Entity<ApplicationSettings>()
+                .Property(e => e.EnabledNotificationTriggers)
+                .Metadata.SetValueComparer(new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 ?? new List<string>()).SequenceEqual(c2 ?? new List<string>()),
+                    c => (c ?? new List<string>()).Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()
+                ));
+
+            // ApplicationSettings - Webhooks as JSON
+            modelBuilder.Entity<ApplicationSettings>()
+                .Property(e => e.Webhooks)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => string.IsNullOrWhiteSpace(v)
+                        ? null
+                        : System.Text.Json.JsonSerializer.Deserialize<List<WebhookConfiguration>>(v, (System.Text.Json.JsonSerializerOptions?)null)
+                );
+            modelBuilder.Entity<ApplicationSettings>()
+                .Property(e => e.Webhooks)
+                .Metadata.SetValueComparer(new ValueComparer<List<WebhookConfiguration>?>(
+                    (c1, c2) => System.Text.Json.JsonSerializer.Serialize(c1, (System.Text.Json.JsonSerializerOptions?)null) == System.Text.Json.JsonSerializer.Serialize(c2, (System.Text.Json.JsonSerializerOptions?)null),
+                    c => c == null ? 0 : System.Text.Json.JsonSerializer.Serialize(c, (System.Text.Json.JsonSerializerOptions?)null).GetHashCode(),
+                    c => c == null ? null : System.Text.Json.JsonSerializer.Deserialize<List<WebhookConfiguration>>(System.Text.Json.JsonSerializer.Serialize(c, (System.Text.Json.JsonSerializerOptions?)null), (System.Text.Json.JsonSerializerOptions?)null)
+                ));
+
             // ApiConfiguration - ignore computed properties
             modelBuilder.Entity<ApiConfiguration>()
                 .Ignore(e => e.Headers)
