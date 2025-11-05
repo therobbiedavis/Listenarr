@@ -52,7 +52,7 @@
                 </div>
                 <div v-if="book.language" class="detail-item">
                   <span class="label">Language:</span>
-                  <span class="value">{{ book.language }}</span>
+                  <span class="value">{{ capitalizeFirst(book.language) }}</span>
                 </div>
                 <div v-if="book.runtime" class="detail-item">
                   <span class="label">Listening Length:</span>
@@ -215,6 +215,11 @@ const formatRuntime = (minutes: number): string => {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
   return `${hours}h ${mins}m`
+}
+
+const capitalizeFirst = (str: string): string => {
+  if (!str) return ''
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
 }
 </script>
 

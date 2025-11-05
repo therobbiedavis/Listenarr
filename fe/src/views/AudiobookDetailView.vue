@@ -37,6 +37,10 @@
           <PhBell />
           Test Downloading
         </button>
+        <button class="nav-btn" @click="openEditModal">
+          <PhPencil />
+          Edit
+        </button>
         <button class="nav-btn delete-btn" @click="confirmDelete">
           <PhTrash />
           Delete
@@ -84,7 +88,7 @@
             </div>
             <div class="detail-item" v-if="audiobook.language">
               <PhGlobe />
-              <span>{{ audiobook.language }}</span>
+              <span>{{ capitalizeFirst(audiobook.language) }}</span>
             </div>
             <div class="detail-item">
               <PhTag />
@@ -103,7 +107,7 @@
             </span>
             <span class="badge language">
               <PhChatCircle />
-              {{ audiobook.language || 'English' }}
+              {{ capitalizeFirst(audiobook.language) || 'English' }}
             </span>
             <span class="badge tlc" v-if="audiobook.version">
               <PhMusicNotes />
@@ -195,7 +199,7 @@
             </div>
             <div class="detail-row" v-if="audiobook.language">
               <span class="label">Language:</span>
-              <span class="value">{{ audiobook.language }}</span>
+              <span class="value">{{ capitalizeFirst(audiobook.language) }}</span>
             </div>
           </div>
 
@@ -234,8 +238,8 @@
 
           <div class="detail-card" v-if="audiobook.tags && audiobook.tags.length">
             <h3>Tags</h3>
-            <div class="genre-tags">
-              <span v-for="tag in audiobook.tags" :key="tag" class="genre-tag">
+            <div class="tags-list">
+              <span v-for="tag in audiobook.tags" :key="tag" class="tag-badge">
                 {{ tag }}
               </span>
             </div>
@@ -430,6 +434,14 @@
       Back to Library
     </button>
   </div>
+
+  <!-- Edit Audiobook Modal -->
+  <EditAudiobookModal
+    :is-open="showEditModal"
+    :audiobook="audiobook"
+    @close="closeEditModal"
+    @saved="handleEditSaved"
+  />
 </template>
 
 <script setup lang="ts">
@@ -443,6 +455,7 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
+import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import { 
   PhArrowLeft, 
   PhArrowClockwise, 
@@ -496,6 +509,7 @@ const scanning = ref(false)
 const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
 const sendingNotification = ref(false)
+const showEditModal = ref(false)
 
 // History state
 const historyEntries = ref<History[]>([])
@@ -511,6 +525,12 @@ const assignedProfileName = computed(() => {
   const p = qualityProfiles.value.find(q => q.id === id)
   return p ? p.name : null
 })
+
+// Utility function to capitalize first letter
+const capitalizeFirst = (str: string | undefined): string => {
+  if (!str) return ''
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+}
 
 // Show a base path even when no files exist yet by falling back to configured outputPath
 const displayBasePath = computed(() => {
@@ -777,6 +797,19 @@ async function executeDelete() {
     deleting.value = false
     showDeleteDialog.value = false
   }
+}
+
+function openEditModal() {
+  showEditModal.value = true
+}
+
+function closeEditModal() {
+  showEditModal.value = false
+}
+
+async function handleEditSaved() {
+  // Refresh the audiobook data after edit
+  await loadAudiobook()
 }
 
 async function testNotification(trigger: 'book-added' | 'book-available' | 'book-downloading') {
@@ -1447,6 +1480,31 @@ function formatDate(dateString?: string): string {
   border-radius: 4px;
   color: #fff;
   font-size: 12px;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.tag-badge:hover {
+  background-color: #333;
+  border-color: #007acc;
+  color: white;
 }
 
 .files-content, .history-content {

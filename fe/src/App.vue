@@ -829,7 +829,7 @@ const hideLayout = computed(() => {
   margin: 0;
   font-size: 1.5rem;
   font-weight: bold;
-  color: #2196F3;
+  color: #FFF;
 }
 
 .version {
