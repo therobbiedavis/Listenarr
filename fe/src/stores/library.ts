@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, shallowRef, triggerRef } from 'vue'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook } from '@/types'
 
 export const useLibraryStore = defineStore('library', () => {
-  const audiobooks = ref<Audiobook[]>([])
+  const audiobooks = shallowRef<Audiobook[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
   const selectedIds = ref<Set<number>>(new Set())
@@ -38,6 +38,7 @@ export const useLibraryStore = defineStore('library', () => {
       })
 
       audiobooks.value = merged
+      triggerRef(audiobooks)
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch library'
       console.error('Failed to fetch library:', err)
@@ -51,6 +52,7 @@ export const useLibraryStore = defineStore('library', () => {
       await apiService.removeFromLibrary(id)
       // Remove from local state
       audiobooks.value = audiobooks.value.filter(book => book.id !== id)
+      triggerRef(audiobooks)
       // Remove from selection if selected
       selectedIds.value.delete(id)
       return true
@@ -68,6 +70,7 @@ export const useLibraryStore = defineStore('library', () => {
       const result = await apiService.bulkRemoveFromLibrary(ids)
       // Remove from local state
       audiobooks.value = audiobooks.value.filter(book => !ids.includes(book.id))
+      triggerRef(audiobooks)
       // Clear selection
       clearSelection()
       return { success: true, deletedCount: result.deletedCount }
@@ -117,6 +120,7 @@ export const useLibraryStore = defineStore('library', () => {
     // Replace the item in the array immutably to ensure watchers pick up the change
     audiobooks.value = audiobooks.value.slice()
     audiobooks.value[bookIndex] = updated
+    triggerRef(audiobooks)
   }
 
   // Register a SignalR subscription once when the store is created so we can keep local state in sync
@@ -145,6 +149,7 @@ export const useLibraryStore = defineStore('library', () => {
             merged.basePath = prev.basePath
           }
           audiobooks.value[index] = merged
+          triggerRef(audiobooks)
         }
       } catch (e) {
         // Defensive: don't allow signal handler errors to break the app

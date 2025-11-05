@@ -26,6 +26,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.DataProtection;
 using Serilog;
+using Polly;
+using Polly.Extensions.Http;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
@@ -98,13 +100,82 @@ builder.Services.AddHttpClient<AudnexusService>()
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 
+// Add named HttpClient for download operations (qBittorrent, Transmission, etc.)
+// Prevents socket exhaustion by reusing connections
+builder.Services.AddHttpClient("DownloadClient")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false // Cookies handled per-request for multi-tenant scenarios
+    })
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 5,
+            durationOfBreak: TimeSpan.FromSeconds(30),
+            onBreak: (outcome, duration) =>
+            {
+                Console.WriteLine($"[CIRCUIT BREAKER] Download client circuit opened due to {outcome.Exception?.Message ?? "policy trigger"}. Breaking for {duration.TotalSeconds}s");
+            },
+            onReset: () =>
+            {
+                Console.WriteLine("[CIRCUIT BREAKER] Download client circuit reset - service recovered");
+            }
+        ))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(
+            retryCount: 3,
+            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+            onRetry: (outcome, timespan, retryAttempt, context) =>
+            {
+                Console.WriteLine($"[RETRY] Download client retry attempt {retryAttempt} after {timespan.TotalSeconds}s delay");
+            }
+        ));
+
+// Add named HttpClient for direct downloads (DDL)
+builder.Services.AddHttpClient("DirectDownload")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    })
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .Or<TaskCanceledException>()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 3,
+            durationOfBreak: TimeSpan.FromMinutes(1),
+            onBreak: (outcome, duration) =>
+            {
+                Console.WriteLine($"[CIRCUIT BREAKER] Direct download circuit opened. Breaking for {duration.TotalMinutes}m");
+            },
+            onReset: () =>
+            {
+                Console.WriteLine("[CIRCUIT BREAKER] Direct download circuit reset");
+            }
+        ))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .Or<TaskCanceledException>()
+        .WaitAndRetryAsync(
+            retryCount: 2,
+            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))
+        ));
+
 // Register our custom services
 // Compute an absolute path for the SQLite file based on the content root so
 // the published exe will create/use the intended config/database path even
 // when the working directory differs.
 var sqliteDbPath = Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db");
+
+// Use DbContextFactory for better scoped context management
+builder.Services.AddDbContextFactory<ListenArrDbContext>(options =>
+    options.UseSqlite($"Data Source={sqliteDbPath}"));
+
+// Keep AddDbContext for services that still inject DbContext directly (AudiobookRepository, etc.)
 builder.Services.AddDbContext<ListenArrDbContext>(options =>
     options.UseSqlite($"Data Source={sqliteDbPath}"));
+
 builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
 builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
 // Startup config: read config.json (optional) and expose via IStartupConfigService
@@ -178,13 +249,47 @@ builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
-    });
+    })
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 4,
+            durationOfBreak: TimeSpan.FromMinutes(2),
+            onBreak: (outcome, duration) =>
+            {
+                Console.WriteLine($"[CIRCUIT BREAKER] Amazon search circuit opened. Breaking for {duration.TotalMinutes}m");
+            },
+            onReset: () =>
+            {
+                Console.WriteLine("[CIRCUIT BREAKER] Amazon search circuit reset");
+            }
+        ))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(1)));
 
 builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
-    });
+    })
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 4,
+            durationOfBreak: TimeSpan.FromMinutes(2),
+            onBreak: (outcome, duration) =>
+            {
+                Console.WriteLine($"[CIRCUIT BREAKER] Audible search circuit opened. Breaking for {duration.TotalMinutes}m");
+            },
+            onReset: () =>
+            {
+                Console.WriteLine("[CIRCUIT BREAKER] Audible search circuit reset");
+            }
+        ))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(1)));
 
 // External request options (Prefer US domain / optional US proxy)
 builder.Services.Configure<Listenarr.Api.Services.ExternalRequestOptions>(builder.Configuration.GetSection("ExternalRequests"));
@@ -217,7 +322,10 @@ builder.Services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() =>
             }
         }
     }
-    catch { }
+    catch (Exception ex) 
+    { 
+        Console.WriteLine($"[WARNING] Failed to configure proxy settings: {ex.Message}");
+    }
 
     return handler;
 });
@@ -261,7 +369,10 @@ builder.Services.AddSwaggerGen(options =>
             options.IncludeXmlComments(xmlPath);
         }
     }
-    catch { }
+    catch (Exception ex) 
+    { 
+        Console.WriteLine($"[WARNING] Failed to include XML comments in Swagger: {ex.Message}");
+    }
 });
 
 // Authentication: Session-based (default)

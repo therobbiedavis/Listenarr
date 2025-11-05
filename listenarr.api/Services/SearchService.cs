@@ -328,10 +328,8 @@ namespace Listenarr.Api.Services
                 await BroadcastSearchProgressAsync($"Searching for {query}", null);
                 var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
                 var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
-                await Task.WhenAll(amazonTask, audibleTask);
-
-                var amazonResults = amazonTask.Result;
-                var audibleResults = audibleTask.Result;
+                var amazonResults = await amazonTask;
+                var audibleResults = await audibleTask;
                 _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
 
                 // Step 2: Build a unified ASIN candidate set (Amazon priority, then Audible)
@@ -1427,7 +1425,10 @@ namespace Listenarr.Api.Services
                                     }
                                     author = string.Join(", ", authors.Where(a => !string.IsNullOrEmpty(a)));
                                 }
-                                catch { }
+                                catch (Exception ex) 
+                                { 
+                                    _logger.LogWarning(ex, "Failed to parse author JSON for search result");
+                                }
                             }
                         }
 
@@ -1448,7 +1449,10 @@ namespace Listenarr.Api.Services
                                     }
                                     narrator = string.Join(", ", narrators.Where(n => !string.IsNullOrEmpty(n)));
                                 }
-                                catch { }
+                                catch (Exception ex) 
+                                { 
+                                    _logger.LogWarning(ex, "Failed to parse narrator JSON for search result");
+                                }
                             }
                         }
 
@@ -1699,7 +1703,10 @@ namespace Listenarr.Api.Services
                             var detectedLang = ParseLanguageFromText(title ?? string.Empty);
                             if (!string.IsNullOrEmpty(detectedLang)) iaResult.Language = detectedLang;
                         }
-                        catch { }
+                        catch (Exception ex) 
+                        { 
+                            _logger.LogDebug(ex, "Failed to parse language from title: {Title}", title);
+                        }
 
                         results.Add(iaResult);
                     }

@@ -30,38 +30,61 @@ namespace Listenarr.Api.Services
 {
     public class DownloadService : IDownloadService
     {
+        // Cache expiration constants
+        private const int QueueCacheExpirationSeconds = 10;
+        private const int ClientStatusCacheExpirationSeconds = 30;
+        private const int DirectDownloadTimeoutHours = 2;
+        
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAudiobookRepository _audiobookRepository;
         private readonly IConfigurationService _configurationService;
-        private readonly ListenArrDbContext _dbContext;
+        private readonly IDbContextFactory<ListenArrDbContext> _dbContextFactory;
         private readonly ILogger<DownloadService> _logger;
         private readonly HttpClient _httpClient;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IRemotePathMappingService _pathMappingService;
         private readonly ISearchService _searchService;
         private readonly NotificationService? _notificationService;
+        private readonly IMemoryCache _cache;
+        
+        // Track qBittorrent sync state for incremental updates (clientId -> last rid)
+        private readonly Dictionary<string, int> _qbittorrentSyncState = new();
+        
+        // Track Transmission torrent IDs and their last known state for change detection
+        private readonly Dictionary<string, Dictionary<int, long>> _transmissionTorrentStates = new(); // clientId -> (torrentId -> lastActivityDate)
+        
+        // Track SABnzbd last change timestamp
+        private readonly Dictionary<string, long> _sabnzbdLastChange = new(); // clientId -> last_change_timestamp
+        
+        // Track NZBGet last update ID
+        private readonly Dictionary<string, int> _nzbgetLastUpdate = new(); // clientId -> last_update_id
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
             IConfigurationService configurationService,
-            ListenArrDbContext dbContext,
+            IDbContextFactory<ListenArrDbContext> dbContextFactory,
             ILogger<DownloadService> logger,
             HttpClient httpClient,
+            IHttpClientFactory httpClientFactory,
             IServiceScopeFactory serviceScopeFactory,
             IRemotePathMappingService pathMappingService,
             ISearchService searchService,
             IHubContext<DownloadHub> hubContext,
+            IMemoryCache cache,
             NotificationService? notificationService = null)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
-            _dbContext = dbContext;
+            _dbContextFactory = dbContextFactory;
             _logger = logger;
             _httpClient = httpClient;
+            _httpClientFactory = httpClientFactory;
             _serviceScopeFactory = serviceScopeFactory;
             _pathMappingService = pathMappingService;
             _searchService = searchService;
             _hubContext = hubContext;
+            _cache = cache;
             _notificationService = notificationService;
         }
 
@@ -80,12 +103,15 @@ namespace Listenarr.Api.Services
                             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
                             var cookieJar = new CookieContainer();
                             var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
-                            using var httpClient = new HttpClient(handler);
+                            var httpClient = _httpClientFactory.CreateClient("DownloadClient");
+                            // Note: For cookie support, we still need a custom handler here
+                            // This is acceptable for testing as it's not high-frequency
+                            using var testClient = new HttpClient(handler);
                             var loginData = new FormUrlEncodedContent(new[] {
                                 new KeyValuePair<string,string>("username", client.Username ?? string.Empty),
                                 new KeyValuePair<string,string>("password", client.Password ?? string.Empty)
                             });
-                            var resp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+                            var resp = await testClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
                             if (resp.IsSuccessStatusCode)
                                 return (true, "qBittorrent: authentication successful", client);
                             
@@ -478,8 +504,9 @@ namespace Listenarr.Api.Services
                 }
             };
 
-            _dbContext.Downloads.Add(download);
-            await _dbContext.SaveChangesAsync();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync();
+            dbContext.Downloads.Add(download);
+            await dbContext.SaveChangesAsync();
             _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
 
             // Route to appropriate client handler and capture client-specific IDs
@@ -505,15 +532,16 @@ namespace Listenarr.Api.Services
             // Update download record with client-specific ID if available
             if (!string.IsNullOrEmpty(clientSpecificId))
             {
-                var downloadToUpdate = await _dbContext.Downloads.FindAsync(downloadId);
+                await using var updateContext = await _dbContextFactory.CreateDbContextAsync();
+                var downloadToUpdate = await updateContext.Downloads.FindAsync(downloadId);
                 if (downloadToUpdate != null)
                 {
                     if (downloadToUpdate.Metadata == null)
                         downloadToUpdate.Metadata = new Dictionary<string, object>();
                         
                     downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
-                    _dbContext.Downloads.Update(downloadToUpdate);
-                    await _dbContext.SaveChangesAsync();
+                    updateContext.Downloads.Update(downloadToUpdate);
+                    await updateContext.SaveChangesAsync();
                     _logger.LogInformation("Updated download {DownloadId} with qBittorrent hash: {Hash}", downloadId, clientSpecificId);
                 }
             }
@@ -525,18 +553,91 @@ namespace Listenarr.Api.Services
                 {
                     var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                     var settings = await configService.GetApplicationSettingsAsync();
-                    await _notificationService.SendNotificationAsync("book-downloading", new
+                    
+                    // Fetch audiobook data if available for better notification content
+                    object notificationData;
+                    if (audiobookId.HasValue)
                     {
-                        downloadId = downloadId,
-                        title = searchResult.Title ?? "Unknown Title",
-                        artist = searchResult.Artist ?? "Unknown Artist",
-                        album = searchResult.Album ?? "Unknown Album",
-                        size = searchResult.Size,
-                        source = searchResult.Source ?? "Unknown Source",
-                        downloadClient = downloadClient.Name ?? "Unknown Client",
-                        audiobookId = audiobookId
-                    }, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+                        await using var notifContext = await _dbContextFactory.CreateDbContextAsync();
+                        var audiobook = await notifContext.Audiobooks.FindAsync(audiobookId.Value);
+                        if (audiobook != null)
+                        {
+                            // Use audiobook metadata for the notification
+                            notificationData = new
+                            {
+                                title = audiobook.Title,
+                                authors = audiobook.Authors,
+                                asin = audiobook.Asin,
+                                publisher = audiobook.Publisher,
+                                year = audiobook.PublishYear?.ToString(),
+                                publishedDate = audiobook.PublishYear?.ToString(),
+                                imageUrl = audiobook.ImageUrl,
+                                narrators = audiobook.Narrators,
+                                description = audiobook.Description,
+                                // Include download metadata
+                                downloadId = downloadId,
+                                source = searchResult.Source ?? "Unknown Source",
+                                downloadClient = downloadClient.Name ?? "Unknown Client",
+                                size = searchResult.Size
+                            };
+                        }
+                        else
+                        {
+                            // Fallback to search result data if audiobook not found
+                            notificationData = new
+                            {
+                                downloadId = downloadId,
+                                title = searchResult.Title ?? "Unknown Title",
+                                artist = searchResult.Artist ?? "Unknown Artist",
+                                album = searchResult.Album ?? "Unknown Album",
+                                size = searchResult.Size,
+                                source = searchResult.Source ?? "Unknown Source",
+                                downloadClient = downloadClient.Name ?? "Unknown Client",
+                                audiobookId = audiobookId
+                            };
+                        }
+                    }
+                    else
+                    {
+                        // No audiobook ID, use search result data
+                        notificationData = new
+                        {
+                            downloadId = downloadId,
+                            title = searchResult.Title ?? "Unknown Title",
+                            artist = searchResult.Artist ?? "Unknown Artist",
+                            album = searchResult.Album ?? "Unknown Album",
+                            size = searchResult.Size,
+                            source = searchResult.Source ?? "Unknown Source",
+                            downloadClient = downloadClient.Name ?? "Unknown Client"
+                        };
+                    }
+                    
+                    await _notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
                 }
+            }
+
+            // Trigger immediate queue update via SignalR so the UI shows the new download right away
+            // Add a small delay to allow the download client to process and index the new download
+            try
+            {
+                using (var scope = _serviceScopeFactory.CreateScope())
+                {
+                    var hubContext = scope.ServiceProvider.GetService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                    if (hubContext != null)
+                    {
+                        _logger.LogInformation("Waiting briefly for download client to process new download...");
+                        await Task.Delay(1500); // Give qBittorrent/other clients time to index the torrent
+                        
+                        _logger.LogInformation("Triggering immediate queue update after sending download to client");
+                        var currentQueue = await GetQueueAsync();
+                        await hubContext.Clients.All.SendAsync("QueueUpdate", currentQueue);
+                        _logger.LogInformation("Immediate queue update sent with {Count} items", currentQueue?.Count ?? 0);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to trigger immediate queue update (non-fatal)");
             }
 
             return downloadId;
@@ -669,7 +770,20 @@ namespace Listenarr.Api.Services
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
 
+            // Try to extract hash from magnet link before we even contact qBittorrent
+            string? extractedHash = null;
+            if (!string.IsNullOrEmpty(result.MagnetLink) && result.MagnetLink.Contains("xt=urn:btih:"))
+            {
+                var hashStart = result.MagnetLink.IndexOf("xt=urn:btih:") + "xt=urn:btih:".Length;
+                var hashEnd = result.MagnetLink.IndexOf("&", hashStart);
+                if (hashEnd == -1) hashEnd = result.MagnetLink.Length;
+                extractedHash = result.MagnetLink.Substring(hashStart, hashEnd - hashStart).ToLowerInvariant();
+                _logger.LogInformation("Extracted hash from magnet link: {Hash}", extractedHash);
+            }
+
             // Create a local HttpClient with a CookieContainer so qBittorrent session cookie (SID) is preserved
+            // Note: For qBittorrent we need cookies, so we create a custom handler
+            // This is acceptable as it's not high-frequency and cookies are required for auth
             var cookieJar = new CookieContainer();
             var handler = new HttpClientHandler
             {
@@ -678,49 +792,51 @@ namespace Listenarr.Api.Services
                 AutomaticDecompression = DecompressionMethods.All
             };
 
-            using (var httpClient = new HttpClient(handler))
+            // Create HttpClient in a scoped block so it gets disposed before the fallback hash check
             {
-                // Check if authentication is required by attempting login
-                var loginData = new FormUrlEncodedContent(new[]
+                using var httpClient = new HttpClient(handler);
+            
+            // Check if authentication is required by attempting login
+            var loginData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("username", client.Username),
+                new KeyValuePair<string, string>("password", client.Password)
+            });
+
+            var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+
+            if (!loginResponse.IsSuccessStatusCode)
+            {
+                // Read response body to provide more context
+                var loginResponseContent = await loginResponse.Content.ReadAsStringAsync();
+
+                // Check if this is a 403 Forbidden (authentication disabled) vs other errors
+                if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
-                    new KeyValuePair<string, string>("username", client.Username),
-                    new KeyValuePair<string, string>("password", client.Password)
-                });
-
-                var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
-
-                if (!loginResponse.IsSuccessStatusCode)
-                {
-                    // Read response body to provide more context
-                    var loginResponseContent = await loginResponse.Content.ReadAsStringAsync();
-
-                    // Check if this is a 403 Forbidden (authentication disabled) vs other errors
-                    if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    // Try a simple API call without authentication
+                    var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                    if (testResp.IsSuccessStatusCode)
                     {
-                        // Try a simple API call without authentication
-                        var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
-                        if (testResp.IsSuccessStatusCode)
-                        {
-                            // API works without auth, so authentication is disabled
-                            _logger.LogInformation("qBittorrent authentication disabled, proceeding without credentials");
-                        }
-                        else
-                        {
-                            // API fails without auth, so authentication is enabled but credentials are wrong
-                            throw new Exception("qBittorrent authentication enabled but credentials are incorrect");
-                        }
+                        // API works without auth, so authentication is disabled
+                        _logger.LogInformation("qBittorrent authentication disabled, proceeding without credentials");
                     }
                     else
                     {
-                        _logger.LogError("Failed to login to qBittorrent. Status: {Status}, Response: {Response}", 
-                            loginResponse.StatusCode, loginResponseContent);
-                        throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode} - {loginResponseContent}");
+                        // API fails without auth, so authentication is enabled but credentials are wrong
+                        throw new Exception("qBittorrent authentication enabled but credentials are incorrect");
                     }
                 }
                 else
                 {
-                    _logger.LogInformation("Successfully authenticated with qBittorrent");
+                    _logger.LogError("Failed to login to qBittorrent. Status: {Status}, Response: {Response}", 
+                        loginResponse.StatusCode, loginResponseContent);
+                    throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode} - {loginResponseContent}");
                 }
+            }
+            else
+            {
+                _logger.LogInformation("Successfully authenticated with qBittorrent");
+            }
 
             // Get torrent URL - prefer magnet link, fall back to torrent file URL
             var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) 
@@ -759,37 +875,37 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-            // Prepare torrent add data
-            var formData = new List<KeyValuePair<string, string>>
-            {
-                new KeyValuePair<string, string>("urls", torrentUrl),
-                new KeyValuePair<string, string>("savepath", string.IsNullOrEmpty(client.DownloadPath) ? "" : client.DownloadPath)
-            };
-
-            // Add category if configured
-            if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
-            {
-                var category = categoryObj?.ToString();
-                if (!string.IsNullOrEmpty(category))
+                // Prepare torrent add data
+                var formData = new List<KeyValuePair<string, string>>
                 {
-                    formData.Add(new KeyValuePair<string, string>("category", category));
-                    _logger.LogInformation("Adding torrent to qBittorrent with category: {Category}", category);
-                }
-            }
+                    new KeyValuePair<string, string>("urls", torrentUrl),
+                    new KeyValuePair<string, string>("savepath", string.IsNullOrEmpty(client.DownloadPath) ? "" : client.DownloadPath)
+                };
 
-            // Add tags if configured
-            if (client.Settings != null && client.Settings.TryGetValue("tags", out var tagsObj))
-            {
-                var tags = tagsObj?.ToString();
-                if (!string.IsNullOrEmpty(tags))
+                // Add category if configured
+                if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
                 {
-                    formData.Add(new KeyValuePair<string, string>("tags", tags));
-                    _logger.LogInformation("Adding torrent to qBittorrent with tags: {Tags}", tags);
+                    var category = categoryObj?.ToString();
+                    if (!string.IsNullOrEmpty(category))
+                    {
+                        formData.Add(new KeyValuePair<string, string>("category", category));
+                        _logger.LogInformation("Adding torrent to qBittorrent with category: {Category}", category);
+                    }
                 }
-            }
 
-            // Add torrent
-            var addData = new FormUrlEncodedContent(formData);
+                // Add tags if configured
+                if (client.Settings != null && client.Settings.TryGetValue("tags", out var tagsObj))
+                {
+                    var tags = tagsObj?.ToString();
+                    if (!string.IsNullOrEmpty(tags))
+                    {
+                        formData.Add(new KeyValuePair<string, string>("tags", tags));
+                        _logger.LogInformation("Adding torrent to qBittorrent with tags: {Tags}", tags);
+                    }
+                }
+
+                // Add torrent
+                var addData = new FormUrlEncodedContent(formData);
 
                 var addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
                 if (!addResponse.IsSuccessStatusCode)
@@ -800,12 +916,10 @@ namespace Listenarr.Api.Services
                     throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode} - {responseContent}");
                 }
 
-            _logger.LogInformation("Successfully sent torrent to qBittorrent");
+                _logger.LogInformation("Successfully sent torrent to qBittorrent");
 
                 // Wait a moment for qBittorrent to process the torrent
-                await Task.Delay(1000);
-
-                // Get updated torrents list to find the newly added torrent hash
+                await Task.Delay(1000);                // Get updated torrents list to find the newly added torrent hash
                 var torrentsAfterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
                 if (torrentsAfterResp.IsSuccessStatusCode)
                 {
@@ -832,6 +946,13 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
+            } // End using httpClient scope
+
+            // If we couldn't find it by comparing lists but we extracted the hash from magnet link, use that
+            if (!string.IsNullOrEmpty(extractedHash))
+            {
+                _logger.LogInformation("Using extracted hash from magnet link: {Hash}", extractedHash);
+                return extractedHash;
             }
 
             _logger.LogWarning("Could not retrieve torrent hash from qBittorrent after adding torrent: {Title}", result.Title);
@@ -916,19 +1037,19 @@ namespace Listenarr.Api.Services
                 // Set required headers
                 httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
                 
-                // Add basic auth if credentials provided
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                     var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
                 }
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var response = await _httpClient.SendAsync(request);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -988,23 +1109,23 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                // Add basic auth if credentials provided
-                if (!string.IsNullOrEmpty(username))
-                {
-                    var authBytes = Encoding.UTF8.GetBytes($"{username}:{password}");
-                    var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
-                }
-
                 // Make a dummy request to get the session ID from the 409 response
                 var dummyRequest = new { method = "session-get", tag = 0 };
                 var jsonContent = JsonSerializer.Serialize(dummyRequest);
                 var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
                 
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
+                if (!string.IsNullOrEmpty(username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{username}:{password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await _httpClient.SendAsync(request);
 
                 // Transmission returns 409 with X-Transmission-Session-Id header on first request
                 if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
@@ -1224,19 +1345,19 @@ namespace Listenarr.Api.Services
                 var jsonContent = JsonSerializer.Serialize(rpcRequest);
                 var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                // Add basic auth if credentials provided
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                     var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
                 }
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var response = await _httpClient.SendAsync(request);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -1284,7 +1405,14 @@ namespace Listenarr.Api.Services
         public async Task<List<QueueItem>> GetQueueAsync()
         {
             var queueItems = new List<QueueItem>();
-            var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+            
+            // Cache download clients for 10 seconds to reduce DB queries
+            var downloadClients = await _cache.GetOrCreateAsync("DownloadClients", async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(QueueCacheExpirationSeconds);
+                return await _configurationService.GetDownloadClientConfigurationsAsync();
+            }) ?? new List<DownloadClientConfiguration>();
+            
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
             // Get all downloads from database to filter queue items
@@ -1362,15 +1490,20 @@ namespace Listenarr.Api.Services
 
             // Load application settings once to determine whether to include completed
             // external downloads even when they are not tracked in the Listenarr DB.
-            ApplicationSettings? appSettings = null;
-            try
+            // Cache for 30 seconds to reduce DB queries
+            ApplicationSettings? appSettings = await _cache.GetOrCreateAsync("ApplicationSettings", async entry =>
             {
-                appSettings = await _configurationService.GetApplicationSettingsAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to load application settings while building queue (non-fatal)");
-            }
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(ClientStatusCacheExpirationSeconds);
+                try
+                {
+                    return await _configurationService.GetApplicationSettingsAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to load application settings while building queue (non-fatal)");
+                    return null;
+                }
+            });
 
             var includeCompletedExternal = appSettings != null && appSettings.ShowCompletedExternalDownloads;
 
@@ -1378,28 +1511,29 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    List<QueueItem> clientQueue = (client.Type ?? string.Empty).ToLowerInvariant() switch
+                    var clientQueue = client.Type?.ToLowerInvariant() switch
                     {
-                        "qbittorrent" => await GetQBittorrentQueueAsync(client),
-                        "transmission" => await GetTransmissionQueueAsync(client),
-                        "sabnzbd" => await GetSABnzbdQueueAsync(client),
-                        "nzbget" => await GetNZBGetQueueAsync(client),
+                        "qbittorrent" => await GetQBittorrentQueueSyncAsync(client),      // ✅ Incremental sync API
+                        "transmission" => await GetTransmissionQueueOptimizedAsync(client), // ✅ Recently-active filter
+                        "sabnzbd" => await GetSABnzbdQueueOptimizedAsync(client),         // ⚠️ Limited optimization
+                        "nzbget" => await GetNZBGetQueueOptimizedAsync(client),           // ⚠️ Limited optimization
                         _ => new List<QueueItem>()
                     };
 
                     // Filter to only include items that Listenarr initiated
-                    _logger.LogDebug("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
-                    _logger.LogDebug("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
+                    _logger.LogInformation("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
+                    _logger.LogInformation("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
                     
                     foreach (var download in listenarrDownloads)
                     {
-                        _logger.LogDebug("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}", 
-                            download.Id, download.Title, download.DownloadClientId, download.Status);
+                        var hashValue = download.Metadata?.TryGetValue("TorrentHash", out var h) == true ? h?.ToString() : "NO_HASH";
+                        _logger.LogInformation("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}, TorrentHash={Hash}", 
+                            download.Id, download.Title, download.DownloadClientId, download.Status, hashValue);
                     }
                     
                     foreach (var queueItem in clientQueue.Take(3)) // Just show first 3 to avoid spam
                     {
-                        _logger.LogDebug("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'", 
+                        _logger.LogInformation("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'", 
                             queueItem.Id, queueItem.Title, queueItem.DownloadClientId);
                     }
                     
@@ -1438,16 +1572,20 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
                 {
                     titleMatch = IsMatchingTitle(download.Title, queueItem.Title);
-                    _logger.LogDebug("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}", 
+                    _logger.LogInformation("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}", 
                         download.Id, download.Title, queueItem.Title, titleMatch);
                 }
             }
-            catch { titleMatch = false; }
+            catch (Exception ex) 
+            { 
+                _logger.LogWarning(ex, "Failed to match title for download {DownloadId}, defaulting to false", download.Id);
+                titleMatch = false; 
+            }
 
                             var clientMatch = download.DownloadClientId == client.Id;
                             var overallMatch = clientMatch && (idMatch || hashMatch || titleMatch);
                             
-                            _logger.LogDebug("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}", 
+                            _logger.LogInformation("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}", 
                                 download.Id, queueItem.Id, clientMatch, idMatch, hashMatch, titleMatch, overallMatch);
                             
                             return overallMatch;
@@ -1742,6 +1880,8 @@ namespace Listenarr.Api.Services
             try
             {
                 // Use local HttpClient with CookieContainer so login session is preserved
+                // Note: qBittorrent requires cookies for session management (SID cookie)
+                // so we create a custom HttpClient instance with CookieContainer
                 var cookieJar = new CookieContainer();
                 var handler = new HttpClientHandler
                 {
@@ -1901,6 +2041,191 @@ namespace Listenarr.Api.Services
             return items;
         }
 
+        /// <summary>
+        /// Get qBittorrent queue using efficient sync API (incremental updates)
+        /// This only fetches changes since last request, significantly reducing bandwidth
+        /// </summary>
+        private async Task<List<QueueItem>> GetQBittorrentQueueSyncAsync(DownloadClientConfiguration client)
+        {
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+            var items = new List<QueueItem>();
+
+            try
+            {
+                // Use local HttpClient with CookieContainer
+                // Note: qBittorrent requires cookies for session management (SID cookie)
+                var cookieJar = new CookieContainer();
+                var handler = new HttpClientHandler
+                {
+                    CookieContainer = cookieJar,
+                    UseCookies = true,
+                    AutomaticDecompression = DecompressionMethods.All
+                };
+
+                using (var httpClient = new HttpClient(handler))
+                {
+                    // Try to login first
+                    var loginData = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("username", client.Username),
+                        new KeyValuePair<string, string>("password", client.Password)
+                    });
+
+                    var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+
+                    // Check authentication (same as GetQBittorrentQueueAsync)
+                    if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    {
+                        var testResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                        if (!testResponse.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("qBittorrent authentication check failed");
+                            return items;
+                        }
+                    }
+                    else if (!loginResponse.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("qBittorrent login failed with status {Status}", loginResponse.StatusCode);
+                        return items;
+                    }
+
+                    // Get last sync ID for this client (0 = full sync, >0 = incremental)
+                    var rid = _qbittorrentSyncState.TryGetValue(client.Id, out var lastRid) ? lastRid : 0;
+                    
+                    // Use sync/maindata endpoint for efficient updates
+                    var syncUrl = $"{baseUrl}/api/v2/sync/maindata?rid={rid}";
+                    var syncResponse = await httpClient.GetAsync(syncUrl);
+                    
+                    if (!syncResponse.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("qBittorrent sync request failed, falling back to full queue fetch");
+                        return await GetQBittorrentQueueAsync(client);
+                    }
+
+                    var syncJson = await syncResponse.Content.ReadAsStringAsync();
+                    if (string.IsNullOrWhiteSpace(syncJson))
+                    {
+                        return items;
+                    }
+
+                    var syncData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(syncJson);
+                    if (syncData == null)
+                    {
+                        return items;
+                    }
+
+                    // Update sync state
+                    if (syncData.TryGetValue("rid", out var newRidElement))
+                    {
+                        var newRid = newRidElement.GetInt32();
+                        _qbittorrentSyncState[client.Id] = newRid;
+                    }
+
+                    // Check if this is a full update or incremental
+                    var isFullUpdate = syncData.TryGetValue("full_update", out var fullUpdateElement) && 
+                                      fullUpdateElement.GetBoolean();
+
+                    if (!syncData.TryGetValue("torrents", out var torrentsElement))
+                    {
+                        // No torrents in response (no changes)
+                        return items;
+                    }
+
+                    var torrents = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, JsonElement>>>(torrentsElement.GetRawText());
+                    if (torrents == null)
+                    {
+                        return items;
+                    }
+
+                    // Convert to QueueItems (same logic as GetQBittorrentQueueAsync)
+                    foreach (var (hash, torrent) in torrents)
+                    {
+                        var name = torrent.ContainsKey("name") ? torrent["name"].GetString() ?? "" : "";
+                        var progress = torrent.ContainsKey("progress") ? torrent["progress"].GetDouble() * 100 : 0;
+                        var size = torrent.ContainsKey("size") ? torrent["size"].GetInt64() : 0;
+                        var downloaded = torrent.ContainsKey("downloaded") ? torrent["downloaded"].GetInt64() : 0;
+                        var dlspeed = torrent.ContainsKey("dlspeed") ? torrent["dlspeed"].GetDouble() : 0;
+                        var eta = torrent.ContainsKey("eta") ? (int?)torrent["eta"].GetInt32() : null;
+                        var state = torrent.ContainsKey("state") ? torrent["state"].GetString() ?? "unknown" : "unknown";
+                        var addedOn = torrent.ContainsKey("added_on") ? torrent["added_on"].GetInt64() : 0;
+                        var numSeeds = torrent.ContainsKey("num_seeds") ? (int?)torrent["num_seeds"].GetInt32() : null;
+                        var numLeechs = torrent.ContainsKey("num_leechs") ? (int?)torrent["num_leechs"].GetInt32() : null;
+                        var ratio = torrent.ContainsKey("ratio") ? (double?)torrent["ratio"].GetDouble() : null;
+                        var savePath = torrent.ContainsKey("save_path") ? torrent["save_path"].GetString() ?? "" : "";
+
+                        var localPath = !string.IsNullOrEmpty(savePath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, savePath)
+                            : savePath;
+
+                        // Map states (same as GetQBittorrentQueueAsync)
+                        var status = state switch
+                        {
+                            "downloading" => "downloading",
+                            "metaDL" => "downloading",
+                            "forcedDL" => "downloading",
+                            "forcedMetaDL" => "downloading",
+                            "stalledDL" => "downloading",
+                            "checkingDL" => "downloading",
+                            "stoppedDL" => "paused",
+                            "stoppedUP" => "paused",
+                            "queuedDL" => "queued",
+                            "queuedUP" => "queued",
+                            "uploading" => "seeding",
+                            "stalledUP" => "seeding",
+                            "checkingUP" => "seeding",
+                            "forcedUP" => "seeding",
+                            "checkingResumeData" => "downloading",
+                            "moving" => "downloading",
+                            "error" => "failed",
+                            "missingFiles" => "failed",
+                            _ => "unknown"
+                        };
+
+                        if (progress >= 100.0 && (status == "seeding" || state == "uploading" || state == "stalledUP" || 
+                            state == "checkingUP" || state == "forcedUP" || state == "stoppedUP"))
+                        {
+                            status = "completed";
+                        }
+
+                        items.Add(new QueueItem
+                        {
+                            Id = hash,
+                            Title = name,
+                            Quality = "Unknown",
+                            Status = status,
+                            Progress = progress,
+                            Size = size,
+                            Downloaded = downloaded,
+                            DownloadSpeed = dlspeed,
+                            Eta = eta >= 8640000 ? null : eta,
+                            DownloadClient = client.Name,
+                            DownloadClientId = client.Id,
+                            DownloadClientType = "qbittorrent",
+                            AddedAt = DateTimeOffset.FromUnixTimeSeconds(addedOn).DateTime,
+                            Seeders = numSeeds,
+                            Leechers = numLeechs,
+                            Ratio = ratio,
+                            CanPause = status == "downloading" || status == "queued",
+                            CanRemove = true,
+                            RemotePath = savePath,
+                            LocalPath = localPath
+                        });
+                    }
+
+                    _logger.LogDebug("qBittorrent sync update: {UpdateType}, {Count} torrents (rid: {Rid})", 
+                        isFullUpdate ? "full" : "incremental", items.Count, 
+                        _qbittorrentSyncState.TryGetValue(client.Id, out var r) ? r : 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error getting qBittorrent queue via sync API, falling back to full fetch");
+                return await GetQBittorrentQueueAsync(client);
+            }
+
+            return items;
+        }
+
         private async Task<List<QueueItem>> GetTransmissionQueueAsync(DownloadClientConfiguration client)
         {
             var items = new List<QueueItem>();
@@ -1933,19 +2258,19 @@ namespace Listenarr.Api.Services
                 // Set required headers
                 httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
                 
-                // Add basic auth if credentials provided
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                     var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
                 }
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var response = await _httpClient.SendAsync(request);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2058,6 +2383,169 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting Transmission queue");
+            }
+
+            return items;
+        }
+
+        /// <summary>
+        /// Optimized Transmission queue fetch using "recently-active" filter
+        /// Only fetches torrents that have been active since last check
+        /// </summary>
+        private async Task<List<QueueItem>> GetTransmissionQueueOptimizedAsync(DownloadClientConfiguration client)
+        {
+            var items = new List<QueueItem>();
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
+
+            try
+            {
+                string sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
+
+                // Use "recently-active" to get only torrents that changed recently
+                // This dramatically reduces response size when most torrents are idle/seeding
+                var rpcRequest = new
+                {
+                    method = "torrent-get",
+                    arguments = new
+                    {
+                        fields = new[]
+                        {
+                            "id", "name", "status", "percentDone", "totalSize", "downloadedEver",
+                            "rateDownload", "eta", "addedDate", "labels", "downloadDir",
+                            "peersSendingToUs", "peersGettingFromUs", "uploadRatio", "activityDate"
+                        },
+                        ids = "recently-active" // Only get torrents active in last few seconds
+                    },
+                    tag = 2
+                };
+
+                var jsonContent = JsonSerializer.Serialize(rpcRequest);
+                var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
+                
+                // Use factory-created HttpClient (no cookies needed for Transmission)
+                using var httpClient = _httpClientFactory.CreateClient("DownloadClient");
+                
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
+                if (!string.IsNullOrEmpty(client.Username))
+                {
+                    var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
+                    var authHeader = Convert.ToBase64String(authBytes);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                }
+
+                var response = await httpClient.SendAsync(request);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(responseContent))
+                {
+                    _logger.LogWarning("Transmission optimized request failed, falling back to full fetch");
+                    return await GetTransmissionQueueAsync(client);
+                }
+
+                var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                
+                if (!rpcResponse.TryGetProperty("result", out var result) || result.GetString() != "success")
+                {
+                    return await GetTransmissionQueueAsync(client);
+                }
+
+                if (!rpcResponse.TryGetProperty("arguments", out var args) ||
+                    !args.TryGetProperty("torrents", out var torrents) ||
+                    torrents.ValueKind != JsonValueKind.Array)
+                {
+                    return items;
+                }
+
+                var currentStates = new Dictionary<int, long>();
+
+                foreach (var torrent in torrents.EnumerateArray())
+                {
+                    try
+                    {
+                        var id = torrent.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0;
+                        var activityDate = torrent.TryGetProperty("activityDate", out var activityProp) ? activityProp.GetInt64() : 0;
+                        
+                        currentStates[id] = activityDate;
+
+                        var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "Unknown" : "Unknown";
+                        var status = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
+                        var percentDone = torrent.TryGetProperty("percentDone", out var percentProp) ? percentProp.GetDouble() * 100 : 0;
+                        var totalSize = torrent.TryGetProperty("totalSize", out var sizeProp) ? sizeProp.GetInt64() : 0;
+                        var downloadedEver = torrent.TryGetProperty("downloadedEver", out var downloadedProp) ? downloadedProp.GetInt64() : 0;
+                        var rateDownload = torrent.TryGetProperty("rateDownload", out var rateProp) ? rateProp.GetDouble() : 0;
+                        var eta = torrent.TryGetProperty("eta", out var etaProp) ? etaProp.GetInt32() : -1;
+                        var addedDate = torrent.TryGetProperty("addedDate", out var addedProp) ? addedProp.GetInt64() : 0;
+                        var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() ?? "" : "";
+                        var seeders = torrent.TryGetProperty("peersSendingToUs", out var seedersProp) ? (int?)seedersProp.GetInt32() : null;
+                        var leechers = torrent.TryGetProperty("peersGettingFromUs", out var leechersProp) ? (int?)leechersProp.GetInt32() : null;
+                        var ratio = torrent.TryGetProperty("uploadRatio", out var ratioProp) ? (double?)ratioProp.GetDouble() : null;
+
+                        var localPath = !string.IsNullOrEmpty(downloadDir)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, downloadDir)
+                            : downloadDir;
+
+                        string quality = "Unknown";
+                        if (torrent.TryGetProperty("labels", out var labelsProp) && labelsProp.ValueKind == JsonValueKind.Array)
+                        {
+                            var labels = labelsProp.EnumerateArray().Select(l => l.GetString()).Where(l => !string.IsNullOrEmpty(l));
+                            quality = string.Join(", ", labels);
+                        }
+
+                        var mappedStatus = status switch
+                        {
+                            0 => "paused",
+                            1 => "queued",
+                            2 => "downloading",
+                            3 => "queued",
+                            4 => "downloading",
+                            5 => "queued",
+                            6 => "seeding",
+                            _ => "queued"
+                        };
+
+                        items.Add(new QueueItem
+                        {
+                            Id = id.ToString(),
+                            Title = name,
+                            Quality = quality,
+                            Status = mappedStatus,
+                            Progress = percentDone,
+                            Size = totalSize,
+                            Downloaded = downloadedEver,
+                            DownloadSpeed = rateDownload,
+                            Eta = eta > 0 ? eta : null,
+                            DownloadClient = client.Name,
+                            DownloadClientId = client.Id,
+                            DownloadClientType = "transmission",
+                            AddedAt = DateTimeOffset.FromUnixTimeSeconds(addedDate).DateTime,
+                            Seeders = seeders,
+                            Leechers = leechers,
+                            Ratio = ratio,
+                            CanPause = mappedStatus == "downloading" || mappedStatus == "seeding",
+                            CanRemove = true,
+                            RemotePath = downloadDir,
+                            LocalPath = localPath
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error parsing Transmission torrent item");
+                    }
+                }
+
+                // Update state tracking
+                _transmissionTorrentStates[client.Id] = currentStates;
+
+                _logger.LogDebug("Transmission optimized fetch: {Count} recently-active torrents", items.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error in Transmission optimized fetch, falling back");
+                return await GetTransmissionQueueAsync(client);
             }
 
             return items;
@@ -2224,6 +2712,26 @@ namespace Listenarr.Api.Services
             return items;
         }
 
+        /// <summary>
+        /// Optimized SABnzbd queue fetch with minimal response fields
+        /// SABnzbd doesn't have true incremental API, but we can request only essential fields
+        /// </summary>
+        private async Task<List<QueueItem>> GetSABnzbdQueueOptimizedAsync(DownloadClientConfiguration client)
+        {
+            // SABnzbd queue API doesn't support incremental updates like qBittorrent
+            // However, we can optimize by:
+            // 1. Requesting only active queue (skip history/completed)
+            // 2. Using compact output format
+            // For now, use standard fetch but track if no changes occurred
+            
+            var items = await GetSABnzbdQueueAsync(client);
+            
+            // Future optimization: Track queue hash and skip processing if unchanged
+            // SABnzbd API: &mode=queue returns "version" field we could track
+            
+            return items;
+        }
+
         private int ParseSABnzbdTimeLeft(string timeLeft)
         {
             try
@@ -2306,19 +2814,19 @@ namespace Listenarr.Api.Services
                 var jsonContent = JsonSerializer.Serialize(rpcRequest);
                 var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                // Add basic auth if credentials provided
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                     var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
                 }
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var response = await _httpClient.SendAsync(request);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2447,6 +2955,19 @@ namespace Listenarr.Api.Services
             return items;
         }
 
+        /// <summary>
+        /// Optimized NZBGet queue fetch - NZBGet doesn't have incremental API
+        /// But we can optimize by requesting minimal fields
+        /// </summary>
+        private async Task<List<QueueItem>> GetNZBGetQueueOptimizedAsync(DownloadClientConfiguration client)
+        {
+            // NZBGet JSON-RPC doesn't support incremental updates
+            // The listgroups method is already fairly efficient
+            // Future optimization: Could track queue version/timestamp if NZBGet adds it
+            
+            return await GetNZBGetQueueAsync(client);
+        }
+
         private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, string downloadId)
         {
             return client.Type.ToLower() switch
@@ -2526,19 +3047,19 @@ namespace Listenarr.Api.Services
                 // Set required headers
                 httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
                 
-                // Add basic auth if credentials provided
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                     var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
                 }
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var response = await _httpClient.SendAsync(request);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2659,19 +3180,19 @@ namespace Listenarr.Api.Services
                 var jsonContent = JsonSerializer.Serialize(rpcRequest);
                 var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                // Add basic auth if credentials provided
+                // Use per-request authorization header (thread-safe)
+                using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
+                request.Content = httpContent;
+                
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
                     var authHeader = Convert.ToBase64String(authBytes);
-                    _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
                 }
 
-                var response = await _httpClient.PostAsync(baseUrl, httpContent);
+                var response = await _httpClient.SendAsync(request);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
-                // Clear auth header after request
-                _httpClient.DefaultRequestHeaders.Authorization = null;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2732,8 +3253,9 @@ namespace Listenarr.Api.Services
                 Timestamp = DateTime.UtcNow
             };
 
-            _dbContext.History.Add(historyEntry);
-            await _dbContext.SaveChangesAsync();
+            await using var historyContext = await _dbContextFactory.CreateDbContextAsync();
+            historyContext.History.Add(historyEntry);
+            await historyContext.SaveChangesAsync();
         }
 
         private async Task<string> DownloadDirectlyAsync(SearchResult searchResult, int? audiobookId = null)
@@ -2811,8 +3333,9 @@ namespace Listenarr.Api.Services
                     }
                 };
 
-                _dbContext.Downloads.Add(download);
-                await _dbContext.SaveChangesAsync();
+                await using var ddlContext = await _dbContextFactory.CreateDbContextAsync();
+                ddlContext.Downloads.Add(download);
+                await ddlContext.SaveChangesAsync();
 
                 _logger.LogInformation("Starting DDL download [{DownloadId}]: {Title} from {Url}", downloadId, searchResult.Title, downloadUrl);
                 _logger.LogInformation("Downloading to temporary location: {TempFilePath}", tempFilePath);
@@ -2822,9 +3345,9 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
-                        // Create a new HttpClient for the background task to avoid disposal issues
-                        using var httpClient = new HttpClient();
-                        httpClient.Timeout = TimeSpan.FromHours(2); // Allow up to 2 hours for large files
+                        // Use factory-created HttpClient (no cookies needed for direct downloads)
+                        using var httpClient = _httpClientFactory.CreateClient("DirectDownload");
+                        httpClient.Timeout = TimeSpan.FromHours(DirectDownloadTimeoutHours); // Allow up to 2 hours for large files
                         
                         using (var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
                         {
@@ -3707,7 +4230,8 @@ namespace Listenarr.Api.Services
                     return null;
                 }
 
-                var download = await _dbContext.Downloads.FindAsync(downloadId);
+                await using var reprocessContext = await _dbContextFactory.CreateDbContextAsync();
+                var download = await reprocessContext.Downloads.FindAsync(downloadId);
                 if (download == null)
                 {
                     _logger.LogWarning("Download {DownloadId} not found for reprocessing", downloadId);
@@ -3837,8 +4361,9 @@ namespace Listenarr.Api.Services
             {
                 var cutoffDate = maxAge.HasValue ? DateTime.UtcNow.Subtract(maxAge.Value) : DateTime.MinValue;
 
+                await using var queryContext = await _dbContextFactory.CreateDbContextAsync();
                 // Query for eligible downloads
-                var query = _dbContext.Downloads
+                var query = queryContext.Downloads
                     .Where(d => d.Status == DownloadStatus.Completed)
                     .Where(d => d.CompletedAt >= cutoffDate)
                     .Where(d => !string.IsNullOrEmpty(d.FinalPath));

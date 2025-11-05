@@ -617,16 +617,6 @@
           </div>
 
           <div class="form-section">
-            <h4><PhLink /> API Configuration</h4>
-            
-            <div class="form-group">
-              <label>Audnexus API URL</label>
-              <input v-model="settings.audnexusApiUrl" type="text" placeholder="https://api.audnex.us">
-              <span class="form-help">API endpoint for audiobook metadata</span>
-            </div>
-          </div>
-
-          <div class="form-section">
             <h4><PhDownload /> Download Settings</h4>
             
             <div class="form-group">
@@ -687,67 +677,6 @@
           </div>
 
           <div class="form-section">
-            <h4><PhGlobe /> External Requests / US Proxy
-              <button type="button" class="info-inline" @click.prevent="openProxySecurityModal" title="Security recommendations">
-                <PhInfo />
-              </button>
-            </h4>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.preferUsDomain" type="checkbox">
-                <span>
-                  <strong>Prefer US (.com) domain for Audible/Amazon</strong>
-                  <small>When enabled, the server will attempt a retry using the US (.com) domain if a localized or redirect page is detected.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.useUsProxy" type="checkbox">
-                <span>
-                  <strong>Use HTTP proxy for US requests</strong>
-                  <small>When enabled, Audible/Amazon retries to the US domain will be routed through the proxy configured below.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label>US Proxy Host</label>
-              <input v-model="settings.usProxyHost" type="text" placeholder="proxy.example.com" :disabled="!settings.useUsProxy" data-cy="us-proxy-host">
-              <div v-if="settings.useUsProxy && (!settings.usProxyHost || String(settings.usProxyHost).trim() === '')" class="form-error">Proxy host is required when using a proxy.</div>
-            </div>
-
-            <div class="form-group">
-              <label>US Proxy Port</label>
-              <input v-model.number="settings.usProxyPort" type="number" min="1" max="65535" :disabled="!settings.useUsProxy" data-cy="us-proxy-port">
-              <div v-if="settings.useUsProxy && (!settings.usProxyPort || Number(settings.usProxyPort) <= 0)" class="form-error">Proxy port must be between 1 and 65535.</div>
-            </div>
-
-            <div class="form-group">
-              <label>US Proxy Username (optional)</label>
-              <input v-model="settings.usProxyUsername" type="text" placeholder="username" :disabled="!settings.useUsProxy">
-            </div>
-
-              <div class="form-group">
-              <label>US Proxy Password (optional)</label>
-              <div class="password-field">
-                <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
-                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
-                  <template v-if="showPassword">
-                    <PhEyeSlash />
-                  </template>
-                  <template v-else>
-                    <PhEye />
-                  </template>
-                </button>
-              </div>
-              <span class="form-help">Store proxy credentials here for convenience. For production, consider using a secrets manager instead of storing passwords in the application database.</span>
-            </div>
-
-            <hr />
-
             <h4><PhUserCircle /> Authentication</h4>
             
             <div class="form-group">
@@ -818,7 +747,68 @@
                   </button>
                 </div>
               </div>
-              <span class="form-help">An API key can be used to authenticate sensitive API calls from trusted clients. Keep it secret. Keep it safe. Regenerating will replace the existing key.</span>
+              <span class="form-help">API key for authenticating external applications. Generate a new key if needed. Copy it to use with API clients.</span>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h4><PhGlobe /> External Requests / US Proxy
+              <button type="button" class="info-inline" @click.prevent="openProxySecurityModal" title="Security recommendations">
+                <PhInfo />
+              </button>
+            </h4>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.preferUsDomain" type="checkbox">
+                <span>
+                  <strong>Prefer US (.com) domain for Audible/Amazon</strong>
+                  <small>When enabled, the server will attempt a retry using the US (.com) domain if a localized or redirect page is detected.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.useUsProxy" type="checkbox">
+                <span>
+                  <strong>Use HTTP proxy for US requests</strong>
+                  <small>When enabled, Audible/Amazon retries to the US domain will be routed through the proxy configured below.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Host</label>
+              <input v-model="settings.usProxyHost" type="text" placeholder="proxy.example.com" :disabled="!settings.useUsProxy" data-cy="us-proxy-host">
+              <div v-if="settings.useUsProxy && (!settings.usProxyHost || String(settings.usProxyHost).trim() === '')" class="form-error">Proxy host is required when using a proxy.</div>
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Port</label>
+              <input v-model.number="settings.usProxyPort" type="number" min="1" max="65535" :disabled="!settings.useUsProxy" data-cy="us-proxy-port">
+              <div v-if="settings.useUsProxy && (!settings.usProxyPort || Number(settings.usProxyPort) <= 0)" class="form-error">Proxy port must be between 1 and 65535.</div>
+            </div>
+
+            <div class="form-group">
+              <label>US Proxy Username (optional)</label>
+              <input v-model="settings.usProxyUsername" type="text" placeholder="username" :disabled="!settings.useUsProxy">
+            </div>
+
+              <div class="form-group">
+              <label>US Proxy Password (optional)</label>
+              <div class="password-field">
+                <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
+                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <template v-if="showPassword">
+                    <PhEyeSlash />
+                  </template>
+                  <template v-else>
+                    <PhEye />
+                  </template>
+                </button>
+              </div>
+              <span class="form-help">Store proxy credentials here for convenience. For production, consider using a secrets manager instead of storing passwords in the application database.</span>
             </div>
           </div>
         </div>

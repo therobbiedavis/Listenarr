@@ -28,12 +28,15 @@
     </div>
 
     <!-- Queue List -->
-    <div v-if="filteredQueue.length > 0" class="queue-list">
-      <div 
-        v-for="item in filteredQueue" 
-        :key="item.id"
-        class="queue-item"
-      >
+    <div v-if="filteredQueue.length > 0" ref="scrollContainer" class="queue-list-container" @scroll="updateVisibleRange">
+      <div class="queue-list-spacer" :style="{ height: `${totalHeight}px` }">
+        <div class="queue-list" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div 
+            v-for="item in visibleQueueItems" 
+            :key="item.id"
+            v-memo="[item.id, item.status, item.progress, item.eta]"
+            class="queue-item"
+          >
         <div class="queue-icon">
           <PhDownloadSimple />
         </div>
@@ -91,10 +94,12 @@
           </button>
         </div>
       </div>
+        </div>
+      </div>
     </div>
 
     <!-- Empty State -->
-    <div class="empty-state" v-else-if="!loading">
+    <div class="empty-state" v-else-if="filteredQueue.length === 0 && !loading">
       <div class="empty-icon">
         <PhQueue />
       </div>
@@ -155,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { PhActivity, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhDesktop, PhArrowDown, PhClock, PhX, PhQueue, PhWarningCircle, PhInfo, PhChartBar, PhTrash } from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
@@ -173,6 +178,46 @@ const showRemoveModal = ref(false)
 const itemToRemove = ref<QueueItem | null>(null)
 const removing = ref(false)
 let unsubscribeQueue: (() => void) | null = null
+let queueRefreshInterval: ReturnType<typeof setInterval> | null = null
+
+// Virtual scrolling setup
+const scrollContainer = ref<HTMLElement | null>(null)
+const ROW_HEIGHT = 120 // Approximate height of each queue item
+const BUFFER_ROWS = 3 // Extra rows to render above and below viewport
+
+const visibleRange = ref({ start: 0, end: 20 }) // Initially show first 20 items
+
+const visibleQueueItems = computed(() => {
+  return filteredQueue.value.slice(visibleRange.value.start, visibleRange.value.end)
+})
+
+// Update visible range based on scroll position
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+  
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+  
+  // Calculate which items are visible
+  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+  
+  // Add buffer
+  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
+  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, filteredQueue.value.length)
+  
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
+// Calculate total height for proper scrollbar
+const totalHeight = computed(() => {
+  return filteredQueue.value.length * ROW_HEIGHT
+})
+
+// Padding for offset positioning
+const topPadding = computed(() => {
+  return visibleRange.value.start * ROW_HEIGHT
+})
 
 // Convert Download to QueueItem format for unified display
 const convertDownloadToQueueItem = (download: Download): QueueItem => {
@@ -363,12 +408,33 @@ onMounted(async () => {
   
   // Load initial queue state
   await refreshQueue()
+  
+  // Initialize virtual scrolling
+  nextTick(() => {
+    updateVisibleRange()
+  })
+
+  // Fallback polling: slow refresh as backup to SignalR (30 seconds)
+  // Primary updates come from SignalR real-time events
+  queueRefreshInterval = setInterval(async () => {
+    try {
+      await refreshQueue()
+    } catch (err) {
+      console.error('[ActivityView] Failed to refresh queue:', err)
+    }
+  }, 30000) // 30-second fallback polling (SignalR is primary update mechanism)
 })
 
 onUnmounted(() => {
   // Clean up subscription
   if (unsubscribeQueue) {
     unsubscribeQueue()
+  }
+  
+  // Stop frontend polling when view is unmounted
+  if (queueRefreshInterval) {
+    clearInterval(queueRefreshInterval)
+    queueRefreshInterval = null
   }
 })
 </script>
@@ -383,6 +449,28 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+}
+
+/* Virtual scrolling container */
+.queue-list-container {
+  height: calc(100vh - 280px); /* Adjust based on header/footer height */
+  overflow-y: auto;
+  position: relative;
+}
+
+.queue-list-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.queue-list {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .page-header h1 {

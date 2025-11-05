@@ -7,6 +7,19 @@ namespace Listenarr.Api.Controllers;
 [Route("api/diagnostics")]
 public class DiagnosticsController : ControllerBase
 {
+    private readonly NotificationService _notificationService;
+    private readonly IConfigurationService _configurationService;
+    private readonly ILogger<DiagnosticsController> _logger;
+
+    public DiagnosticsController(
+        NotificationService notificationService,
+        IConfigurationService configurationService,
+        ILogger<DiagnosticsController> logger)
+    {
+        _notificationService = notificationService;
+        _configurationService = configurationService;
+        _logger = logger;
+    }
 
     [HttpGet("session")]
     public IActionResult GetSessionStatus()
@@ -23,5 +36,51 @@ public class DiagnosticsController : ControllerBase
             hasApiKey = Request.Headers.ContainsKey("X-Api-Key"),
             hasSessionToken = Request.Headers.ContainsKey("Authorization") || Request.Headers.ContainsKey("X-Session-Token")
         });
+    }
+
+    [HttpPost("test-notification")]
+    public async Task<IActionResult> TestNotification([FromBody] TestNotificationRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.Trigger))
+            {
+                return BadRequest("Trigger type is required");
+            }
+
+            // Get settings to check webhook configuration
+            var settings = await _configurationService.GetApplicationSettingsAsync();
+            if (settings == null || string.IsNullOrWhiteSpace(settings.WebhookUrl))
+            {
+                return BadRequest("Webhook URL is not configured");
+            }
+
+            if (settings.EnabledNotificationTriggers == null || !settings.EnabledNotificationTriggers.Contains(request.Trigger))
+            {
+                _logger.LogWarning("Test notification for trigger '{Trigger}' requested but trigger is not enabled", request.Trigger);
+                return BadRequest($"Notification trigger '{request.Trigger}' is not enabled in settings");
+            }
+
+            // Send the notification
+            await _notificationService.SendNotificationAsync(
+                request.Trigger,
+                request.Data ?? new object(),
+                settings.WebhookUrl,
+                settings.EnabledNotificationTriggers
+            );
+
+            return Ok(new { message = "Test notification sent successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send test notification");
+            return StatusCode(500, $"Failed to send notification: {ex.Message}");
+        }
+    }
+
+    public class TestNotificationRequest
+    {
+        public required string Trigger { get; set; }
+        public object? Data { get; set; }
     }
 }

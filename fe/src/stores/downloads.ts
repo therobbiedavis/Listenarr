@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef, triggerRef } from 'vue'
 import type { Download, SearchResult, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useLibraryStore } from '@/stores/library'
 import { signalRService } from '@/services/signalr'
 
 export const useDownloadsStore = defineStore('downloads', () => {
-  const downloads = ref<Download[]>([])
+  const downloads = shallowRef<Download[]>([])
   const isLoading = ref(false)
   let unsubscribeUpdate: (() => void) | null = null
   let unsubscribeList: (() => void) | null = null
@@ -28,6 +28,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
           downloads.value.unshift(updated)
         }
       })
+      triggerRef(downloads)
 
       // If any updated downloads are completed and linked to an audiobook, refresh that audiobook in the library store
       // Refresh linked audiobooks so UI shows newly-created files. Use Promise.all to avoid unbounded concurrency.
@@ -61,12 +62,14 @@ export const useDownloadsStore = defineStore('downloads', () => {
       downloads.value.sort((a, b) => 
         new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
       )
+      triggerRef(downloads)
     })
     
     // Subscribe to full downloads list
       unsubscribeList = signalRService.onDownloadsList((downloadsList) => {
       console.log('[Downloads Store] Received full list of', downloadsList.length, 'downloads')
       downloads.value = downloadsList
+      triggerRef(downloads)
     })
 
       // Subscribe to AudiobookUpdate messages so we can apply updated audiobook (with Files)
@@ -125,6 +128,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
     try {
       const downloadList = await apiService.getDownloads()
       downloads.value = downloadList
+      triggerRef(downloads)
     } catch (error) {
       console.error('Failed to load downloads:', error)
     } finally {

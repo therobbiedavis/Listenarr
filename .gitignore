@@ -173,6 +173,10 @@ appsettings.Production.json
 **/appsettings.*.json
 !**/appsettings.json
 
+# Data Protection Keys (security-sensitive)
+**/config/dataprotection-keys/
+**/dataprotection-keys/
+
 ##########################
 # OS & System Files      #
 ##########################

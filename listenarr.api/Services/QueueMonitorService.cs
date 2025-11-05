@@ -30,8 +30,14 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly ILogger<QueueMonitorService> _logger;
-        private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(5);
+        
+        // Adaptive polling intervals - conservative since SignalR provides real-time updates
+        private readonly TimeSpan _fastPollingInterval = TimeSpan.FromSeconds(5);   // Active downloads (reduced from 2s)
+        private readonly TimeSpan _normalPollingInterval = TimeSpan.FromSeconds(15); // Idle/seeding (increased from 10s)
+        private readonly TimeSpan _slowPollingInterval = TimeSpan.FromSeconds(60);   // Only completed items (increased from 30s)
+        
         private List<QueueItem> _lastQueueState = new();
+        private TimeSpan _currentInterval;
 
         public QueueMonitorService(
             IServiceScopeFactory serviceScopeFactory,
@@ -41,6 +47,7 @@ namespace Listenarr.Api.Services
             _serviceScopeFactory = serviceScopeFactory;
             _hubContext = hubContext;
             _logger = logger;
+            _currentInterval = _normalPollingInterval;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -78,7 +85,7 @@ namespace Listenarr.Api.Services
                 // Wait before next poll
                 try
                 {
-                    await Task.Delay(_pollingInterval, stoppingToken);
+                    await Task.Delay(_currentInterval, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -99,10 +106,14 @@ namespace Listenarr.Api.Services
                 // Get current queue from all download clients
                 var currentQueue = await downloadService.GetQueueAsync();
 
+                // Determine optimal polling interval based on queue activity
+                _currentInterval = DeterminePollingInterval(currentQueue);
+
                 // Check if queue has changed
                 if (HasQueueChanged(_lastQueueState, currentQueue))
                 {
-                    _logger.LogDebug("Queue changed, broadcasting update ({Count} items)", currentQueue.Count);
+                    _logger.LogDebug("Queue changed, broadcasting update ({Count} items) [polling: {Interval}s]", 
+                        currentQueue.Count, _currentInterval.TotalSeconds);
 
                     // Broadcast queue update via SignalR
                     await _hubContext.Clients.All.SendAsync(
@@ -118,6 +129,30 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogError(ex, "Failed to monitor queue");
             }
+        }
+
+        private TimeSpan DeterminePollingInterval(List<QueueItem> queue)
+        {
+            if (queue == null || queue.Count == 0)
+            {
+                // No items: slow polling
+                return _slowPollingInterval;
+            }
+
+            // Check for active downloads (downloading, queued, or paused with progress < 100)
+            var hasActiveDownloads = queue.Any(q => 
+                q.Status.Equals("downloading", StringComparison.OrdinalIgnoreCase) ||
+                q.Status.Equals("queued", StringComparison.OrdinalIgnoreCase) ||
+                (q.Status.Equals("paused", StringComparison.OrdinalIgnoreCase) && q.Progress < 100));
+
+            if (hasActiveDownloads)
+            {
+                // Active downloads: fast polling for smooth progress updates
+                return _fastPollingInterval;
+            }
+
+            // Only completed/seeding items: normal polling
+            return _normalPollingInterval;
         }
 
         private bool HasQueueChanged(List<QueueItem> oldQueue, List<QueueItem> newQueue)

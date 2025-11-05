@@ -89,59 +89,65 @@
       </template>
     </div>
     
-    <div v-else class="audiobooks-grid">
-      <div 
-        v-for="audiobook in audiobooks" 
-        :key="audiobook.id" 
-        class="audiobook-item"
-        :class="{ 
-          selected: libraryStore.isSelected(audiobook.id),
-          'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
-          'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
-          'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
-        }"
-        @click="navigateToDetail(audiobook.id)"
-      >
-        <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, $event)" @mousedown.prevent>
-          <input
-            type="checkbox"
-            :checked="libraryStore.isSelected(audiobook.id)"
-            readonly
-          />
-        </div>
-        <div class="audiobook-poster-container">
-          <img 
-            :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
-            :alt="audiobook.title" 
-            class="audiobook-poster"
-          />
-          <div class="status-overlay">
-            <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
-            <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
-            <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-              <PhStar />
-              {{ getQualityProfileName(audiobook.qualityProfileId) }}
+    <div v-else ref="scrollContainer" class="audiobooks-scroll-container" @scroll="updateVisibleRange">
+      <div class="audiobooks-scroll-spacer" :style="{ height: `${totalHeight}px` }">
+        <div class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div 
+            v-for="audiobook in visibleAudiobooks" 
+            :key="audiobook.id"
+            v-memo="[audiobook.id, audiobook.monitored, libraryStore.isSelected(audiobook.id), getAudiobookStatus(audiobook)]"
+            class="audiobook-item"
+            :class="{ 
+              selected: libraryStore.isSelected(audiobook.id),
+              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
+            }"
+            @click="navigateToDetail(audiobook.id)"
+          >
+            <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
+              <input
+                type="checkbox"
+                :checked="libraryStore.isSelected(audiobook.id)"
+                readonly
+              />
             </div>
-            <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-              <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
-              {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+            <div class="audiobook-poster-container">
+              <img 
+                :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
+                :alt="audiobook.title" 
+                class="audiobook-poster"
+                loading="lazy"
+              />
+              <div class="status-overlay">
+                <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+                <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
+                <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+                  <PhStar />
+                  {{ getQualityProfileName(audiobook.qualityProfileId) }}
+                </div>
+                <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+                  <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                  {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+                </div>
+              </div>
+              <div class="action-buttons">
+                <button 
+                  class="action-btn edit-btn-small" 
+                  @click.stop="openEditModal(audiobook)"
+                  title="Edit"
+                >
+                  <PhPencil />
+                </button>
+                <button 
+                  class="action-btn delete-btn-small" 
+                  @click.stop="confirmDelete(audiobook)"
+                  title="Delete"
+                >
+                  <PhTrash />
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="action-buttons">
-            <button 
-              class="action-btn edit-btn-small" 
-              @click.stop="openEditModal(audiobook)"
-              title="Edit"
-            >
-              <PhPencil />
-            </button>
-            <button 
-              class="action-btn delete-btn-small" 
-              @click.stop="confirmDelete(audiobook)"
-              title="Delete"
-            >
-              <PhTrash />
-            </button>
           </div>
         </div>
       </div>
@@ -213,13 +219,60 @@ const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 
-  const audiobooks = computed(() => libraryStore.audiobooks || [])
+const audiobooks = computed(() => libraryStore.audiobooks || [])
 const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
 const hasRootFolderConfigured = computed(() => {
   return configStore.applicationSettings?.outputPath && 
          configStore.applicationSettings.outputPath.trim().length > 0
+})
+
+// Virtual scrolling for grid layout
+// We'll render items in chunks as the user scrolls
+const scrollContainer = ref<HTMLElement | null>(null)
+const ITEMS_PER_ROW = ref(4) // Default, will be calculated dynamically
+const ROW_HEIGHT = 320 // Approximate height of a row (item height + gap)
+const BUFFER_ROWS = 2 // Extra rows to render above and below viewport
+
+const visibleRange = ref({ start: 0, end: 20 }) // Initially show first 20 items
+
+const visibleAudiobooks = computed(() => {
+  return audiobooks.value.slice(visibleRange.value.start, visibleRange.value.end)
+})
+
+// Update visible range based on scroll position
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+  
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+  
+  // Calculate which rows are visible
+  const firstVisibleRow = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleRowCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+  
+  // Add buffer rows
+  const startRow = Math.max(0, firstVisibleRow - BUFFER_ROWS)
+  const endRow = firstVisibleRow + visibleRowCount + BUFFER_ROWS
+  
+  // Convert to item indices
+  const startIndex = startRow * ITEMS_PER_ROW.value
+  const endIndex = Math.min(endRow * ITEMS_PER_ROW.value, audiobooks.value.length)
+  
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
+// Calculate total height for proper scrollbar
+const totalHeight = computed(() => {
+  const totalRows = Math.ceil(audiobooks.value.length / ITEMS_PER_ROW.value)
+  return totalRows * ROW_HEIGHT
+})
+
+// Padding for offset positioning
+const topPadding = computed(() => {
+  const firstVisibleRow = Math.floor(visibleRange.value.start / ITEMS_PER_ROW.value)
+  return firstVisibleRow * ROW_HEIGHT
 })
 
 const showDeleteDialog = ref(false)
@@ -341,6 +394,28 @@ onMounted(async () => {
     configStore.loadApplicationSettings(),
     loadQualityProfiles()
   ])
+  
+  // Calculate items per row based on container width
+  if (scrollContainer.value) {
+    const containerWidth = scrollContainer.value.clientWidth - 40 // Subtract padding
+    const minItemWidth = 180
+    const gap = 20
+    ITEMS_PER_ROW.value = Math.floor((containerWidth + gap) / (minItemWidth + gap)) || 1
+    
+    // Initialize visible range
+    updateVisibleRange()
+    
+    // Add resize observer to recalculate on window resize
+    const resizeObserver = new ResizeObserver(() => {
+      const newContainerWidth = scrollContainer.value!.clientWidth - 40
+      const newItemsPerRow = Math.floor((newContainerWidth + gap) / (minItemWidth + gap)) || 1
+      if (newItemsPerRow !== ITEMS_PER_ROW.value) {
+        ITEMS_PER_ROW.value = newItemsPerRow
+        updateVisibleRange()
+      }
+    })
+    resizeObserver.observe(scrollContainer.value)
+  }
 })
 
 async function loadQualityProfiles() {
@@ -434,9 +509,10 @@ async function handleEditSaved() {
   await libraryStore.fetchLibrary()
 }
 
-function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
+function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: MouseEvent) {
   event.preventDefault() // Prevent browser text selection
   
+  // Get the actual index from the full audiobooks array
   const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
   
   if (event.shiftKey && lastClickedIndex.value !== null) {
@@ -464,9 +540,8 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
 <style scoped>
 .audiobooks-view {
   margin-top: 60px; /* Add margin to account for fixed toolbar */
-  padding-top: 10px; 
   background-color: #1a1a1a;
-  min-height: 100vh;
+  min-height: calc(100vh - 120px);
 }
 
 .toolbar {
@@ -546,15 +621,28 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
   font-size: 12px;
 }
 
+.audiobooks-scroll-container {
+  height: calc(100vh - 130px); /* Account for toolbar and header */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 20px;
+}
+
+.audiobooks-scroll-spacer {
+  position: relative;
+  width: 100%;
+}
+
 .audiobooks-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 20px;
-  padding: 0 20px 20px;
+  padding: 10px 0;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  will-change: transform;
 }
 
 .audiobook-item {

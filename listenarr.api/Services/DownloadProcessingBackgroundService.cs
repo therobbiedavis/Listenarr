@@ -158,13 +158,24 @@ namespace Listenarr.Api.Services
                     .Take(200)
                     .ToListAsync(cancellationToken);
 
+                // Batch load all processing jobs for these candidates to avoid N+1 queries
+                var candidateIds = candidates.Select(d => d.Id).ToList();
+                var allJobsForCandidates = await dbContext.DownloadProcessingJobs
+                    .Where(j => candidateIds.Contains(j.DownloadId))
+                    .ToListAsync(cancellationToken);
+                
+                // Group jobs by DownloadId for efficient lookup
+                var jobsByDownloadId = allJobsForCandidates
+                    .GroupBy(j => j.DownloadId)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
                 foreach (var dl in candidates)
                 {
                     try
                     {
                         // Skip if there is already a job for this download pending/processing/retry
-                        var existingJobs = await queueService.GetJobsForDownloadAsync(dl.Id);
-                        if (existingJobs != null && existingJobs.Any(j => j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
+                        var existingJobs = jobsByDownloadId.ContainsKey(dl.Id) ? jobsByDownloadId[dl.Id] : new List<DownloadProcessingJob>();
+                        if (existingJobs.Any(j => j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
                         {
                             continue;
                         }

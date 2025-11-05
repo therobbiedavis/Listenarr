@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef, triggerRef } from 'vue'
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 
 export const useSearchStore = defineStore('search', () => {
-  const searchResults = ref<SearchResult[]>([])
+  const searchResults = shallowRef<SearchResult[]>([])
   const isSearching = ref(false)
   const searchQuery = ref('')
   const selectedCategory = ref<string>('')
@@ -24,9 +24,11 @@ export const useSearchStore = defineStore('search', () => {
       console.log('Search results received:', results)
       console.log('First result:', results[0])
       searchResults.value = results
+      triggerRef(searchResults)
     } catch (error) {
       console.error('Search failed:', error)
       searchResults.value = []
+      triggerRef(searchResults)
     } finally {
       isSearching.value = false
     }
@@ -34,6 +36,7 @@ export const useSearchStore = defineStore('search', () => {
   
   const clearResults = () => {
     searchResults.value = []
+    triggerRef(searchResults)
     searchQuery.value = ''
     selectedCategory.value = ''
     selectedApiIds.value = []

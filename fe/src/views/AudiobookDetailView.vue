@@ -24,6 +24,19 @@
           <span v-else-if="scanQueued">Scan queued</span>
           <span v-else>Scan Folder</span>
         </button>
+        <!-- Debug Notification Buttons -->
+        <button class="nav-btn debug-btn" @click="testNotification('book-added')" :disabled="sendingNotification" title="Test 'Book Added' notification">
+          <PhBell />
+          Test Added
+        </button>
+        <button class="nav-btn debug-btn" @click="testNotification('book-available')" :disabled="sendingNotification" title="Test 'Book Available' notification">
+          <PhBell />
+          Test Available
+        </button>
+        <button class="nav-btn debug-btn" @click="testNotification('book-downloading')" :disabled="sendingNotification" title="Test 'Book Downloading' notification">
+          <PhBell />
+          Test Downloading
+        </button>
         <button class="nav-btn delete-btn" @click="confirmDelete">
           <PhTrash />
           Delete
@@ -463,7 +476,8 @@ import {
   PhFilePlus,
   PhFileMinus,
   PhCircle,
-  PhDiscordLogo
+  PhDiscordLogo,
+  PhBell
 } from '@phosphor-icons/vue'
 
 const route = useRoute()
@@ -481,6 +495,7 @@ const showFullDescription = ref(false)
 const scanning = ref(false)
 const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
+const sendingNotification = ref(false)
 
 // History state
 const historyEntries = ref<History[]>([])
@@ -764,6 +779,38 @@ async function executeDelete() {
   }
 }
 
+async function testNotification(trigger: 'book-added' | 'book-available' | 'book-downloading') {
+  if (!audiobook.value) return
+  
+  sendingNotification.value = true
+  try {
+    // Prepare notification data matching the structure the backend expects
+    const notificationData = {
+      title: audiobook.value.title,
+      authors: audiobook.value.authors,
+      asin: audiobook.value.asin,
+      publisher: audiobook.value.publisher,
+      year: audiobook.value.publishYear?.toString(),
+      publishedDate: audiobook.value.publishYear?.toString(),
+      imageUrl: audiobook.value.imageUrl,
+      narrators: audiobook.value.narrators,
+      description: audiobook.value.description
+    }
+    
+    console.log('Sending test notification:', { trigger, data: notificationData })
+    
+    // Call via the apiService which handles authentication and base URL properly
+    await apiService.testNotification(trigger, notificationData)
+    
+    useToast().success(`Test ${trigger} notification sent!`, 'Notification sent successfully')
+  } catch (err) {
+    console.error('Notification test failed:', err)
+    useToast().error('Failed to send test notification', String(err))
+  } finally {
+    sendingNotification.value = false
+  }
+}
+
 function formatRuntime(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
@@ -967,6 +1014,15 @@ function formatDate(dateString?: string): string {
 
 .nav-btn.delete-btn:hover {
   background-color: #c0392b;
+}
+
+.nav-btn.debug-btn {
+  background-color: #5865F2;
+  border-color: #4752C4;
+}
+
+.nav-btn.debug-btn:hover {
+  background-color: #4752C4;
 }
 
 .hero-section {

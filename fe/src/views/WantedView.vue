@@ -38,12 +38,15 @@
     </div>
 
     <!-- Wanted List -->
-    <div v-else-if="filteredWanted.length > 0" class="wanted-list">
-      <div 
-        v-for="item in filteredWanted" 
-        :key="item.id"
-        class="wanted-item"
-      >
+    <div v-else-if="filteredWanted.length > 0" ref="scrollContainer" class="wanted-list-container" @scroll="updateVisibleRange">
+      <div class="wanted-list-spacer" :style="{ height: `${totalHeight}px` }">
+        <div class="wanted-list" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div 
+            v-for="item in visibleWanted" 
+            :key="item.id"
+            v-memo="[item.id, item.monitored, item.filePath]"
+            class="wanted-item"
+          >
         <div class="wanted-poster">
           <img 
             :src="apiService.getImageUrl(item.imageUrl) || `https://via.placeholder.com/60x90?text=No+Image`" 
@@ -105,7 +108,9 @@
           </button>
         </div>
       </div>
-    </div>
+        </div>  <!-- Close wanted-list -->
+      </div>    <!-- Close wanted-list-spacer -->
+    </div>      <!-- Close wanted-list-container -->
 
     <!-- Empty State -->
     <div v-else class="empty-state">
@@ -134,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
@@ -147,6 +152,13 @@ import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCh
 const libraryStore = useLibraryStore()
 
 const configurationStore = useConfigurationStore()
+
+// Virtual scrolling setup
+const scrollContainer = ref<HTMLElement | null>(null)
+const ROW_HEIGHT = 140 // Approximate height of each wanted item
+const BUFFER_ROWS = 3
+
+const visibleRange = ref({ start: 0, end: 20 })
 
 const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
   console.log('Getting quality profile for audiobook:', audiobook.title, 'qualityProfileId:', audiobook.qualityProfileId)
@@ -174,6 +186,11 @@ onMounted(async () => {
   await libraryStore.fetchLibrary()
   await configurationStore.loadQualityProfiles()
   loading.value = false
+  
+  // Initialize virtual scrolling
+  nextTick(() => {
+    updateVisibleRange()
+  })
   
   // Debug logging
   console.log('Total audiobooks in library:', libraryStore.audiobooks.length)
@@ -243,6 +260,33 @@ const filteredWanted = computed(() => {
     default:
       return categorizedWanted.value.all
   }
+})
+
+const visibleWanted = computed(() => {
+  return filteredWanted.value.slice(visibleRange.value.start, visibleRange.value.end)
+})
+
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+  
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+  
+  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+  
+  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
+  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, filteredWanted.value.length)
+  
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
+const totalHeight = computed(() => {
+  return filteredWanted.value.length * ROW_HEIGHT
+})
+
+const topPadding = computed(() => {
+  return visibleRange.value.start * ROW_HEIGHT
 })
 
 function getStatusClass(item: Audiobook): string {
@@ -410,6 +454,28 @@ const markAsSkipped = async (item: Audiobook) => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+}
+
+/* Virtual scrolling container */
+.wanted-list-container {
+  height: calc(100vh - 320px);
+  overflow-y: auto;
+  position: relative;
+}
+
+.wanted-list-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.wanted-list {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .page-header h1 {

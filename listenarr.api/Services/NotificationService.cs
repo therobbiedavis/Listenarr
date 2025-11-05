@@ -523,6 +523,21 @@ namespace Listenarr.Api.Services
             {
                 // Attach fields if any
                 if (fields.Count > 0) embed["fields"] = fields;
+                
+                // Add footer with publisher and year if available
+                if (!string.IsNullOrWhiteSpace(publisher) || !string.IsNullOrWhiteSpace(year))
+                {
+                    var footerText = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(publisher) && !string.IsNullOrWhiteSpace(year)) 
+                        footerText = $"{publisher} - {year}";
+                    else if (!string.IsNullOrWhiteSpace(publisher)) 
+                        footerText = publisher;
+                    else 
+                        footerText = year ?? string.Empty;
+
+                    embed["footer"] = new JsonObject { ["text"] = footerText };
+                }
+                
                 embeds.Add(embed);
             }
 
@@ -830,6 +845,7 @@ namespace Listenarr.Api.Services
 
         private static string BuildDiscordContent(string trigger, string title, string author)
         {
+            // Format message based on trigger type
             if (string.Equals(trigger, "book-added", StringComparison.OrdinalIgnoreCase))
             {
                 if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
@@ -845,6 +861,37 @@ namespace Listenarr.Api.Services
                 return "A new audiobook has been added";
             }
 
+            if (string.Equals(trigger, "book-available", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
+                {
+                    return $"{title} by {author} is now available";
+                }
+
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    return $"{title} is now available";
+                }
+
+                return "An audiobook is now available";
+            }
+
+            if (string.Equals(trigger, "book-downloading", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
+                {
+                    return $"{title} by {author} is downloading";
+                }
+
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    return $"{title} is downloading";
+                }
+
+                return "An audiobook is downloading";
+            }
+
+            // Fallback for unknown triggers
             if (!string.IsNullOrWhiteSpace(title))
             {
                 return $"[{trigger}] {title}";

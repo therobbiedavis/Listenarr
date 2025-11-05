@@ -281,6 +281,35 @@ namespace Listenarr.Api.Models
             modelBuilder.Entity<AudiobookFile>()
                 .HasIndex(f => new { f.AudiobookId, f.Path })
                 .IsUnique();
+
+            // Performance indexes for frequently queried columns
+            // Download table - optimized for status queries and download client filtering
+            modelBuilder.Entity<Download>()
+                .HasIndex(d => d.Status);
+            
+            modelBuilder.Entity<Download>()
+                .HasIndex(d => d.DownloadClientId);
+            
+            modelBuilder.Entity<Download>()
+                .HasIndex(d => d.CompletedAt);
+
+            // DownloadProcessingJob table - optimized for job status queries
+            modelBuilder.Entity<DownloadProcessingJob>()
+                .HasIndex(j => new { j.DownloadId, j.Status });
+            
+            modelBuilder.Entity<DownloadProcessingJob>()
+                .HasIndex(j => j.Status);
+
+            // Audiobook table - optimized for monitoring and search
+            modelBuilder.Entity<Audiobook>()
+                .HasIndex(a => a.Monitored);
+            
+            modelBuilder.Entity<Audiobook>()
+                .HasIndex(a => a.LastSearchTime);
+
+            // History table - optimized for recent activity queries
+            modelBuilder.Entity<History>()
+                .HasIndex(h => h.Timestamp);
         }
     }
 }
