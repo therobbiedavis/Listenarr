@@ -455,6 +455,7 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
+import { logger } from '@/utils/logger'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import { 
   PhArrowLeft, 
@@ -697,10 +698,10 @@ async function loadHistory() {
   
   try {
     historyEntries.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
-    console.log('Loaded history:', historyEntries.value)
+    logger.debug('Loaded history:', historyEntries.value)
   } catch (err) {
     historyError.value = err instanceof Error ? err.message : 'Failed to load history'
-    console.error('Failed to load history:', err)
+    logger.error('Failed to load history:', err)
   } finally {
     historyLoading.value = false
   }
@@ -713,7 +714,7 @@ async function scanFiles() {
   scanJobId.value = null
   try {
     const res = await apiService.scanAudiobook(audiobook.value.id) as { message: string; scannedPath?: string; found: number; created: number; audiobook?: AudiobookType; jobId?: string }
-    console.log('Scan result:', res)
+    logger.debug('Scan result:', res)
     // If backend enqueued the job it will return 202 Accepted with { jobId }
     if (res?.jobId) {
       scanQueued.value = true
@@ -761,10 +762,10 @@ function toggleMonitored() {
     // Persist to API
     apiService.updateAudiobook(audiobook.value.id, { monitored: newMonitoredValue })
       .then(() => {
-        console.log('Monitored status updated successfully')
+        logger.debug('Monitored status updated successfully')
       })
       .catch((err) => {
-        console.error('Failed to update monitored status:', err)
+        logger.error('Failed to update monitored status:', err)
         // Revert on error
         if (audiobook.value) {
           audiobook.value = { ...audiobook.value, monitored: !newMonitoredValue }
@@ -830,7 +831,7 @@ async function testNotification(trigger: 'book-added' | 'book-available' | 'book
       description: audiobook.value.description
     }
     
-    console.log('Sending test notification:', { trigger, data: notificationData })
+    logger.debug('Sending test notification:', { trigger, data: notificationData })
     
     // Call via the apiService which handles authentication and base URL properly
     await apiService.testNotification(trigger, notificationData)

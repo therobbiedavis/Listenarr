@@ -37,11 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed 4 DownloadService constructor tests by adding IHttpClientFactory, IMemoryCache, and IDbContextFactory dependencies
   - Fixed 2 SearchController tests by properly mocking AudimetaService with required constructor parameters
   - Test files: `DownloadProcessingTests.cs`, `DownloadProcessing_NoDoubleMoveTests.cs`, `DownloadNaming_AudiobookMetadataTests.cs`, `SearchControllerTests.cs`
-- **Production Logging Cleanup**: Removed/replaced 31+ console.log statements for production readiness
+- **Production Logging Cleanup**: Removed/replaced 35+ console.log statements for production readiness
   - App.vue: 19 console statements replaced with logger calls
   - SettingsView.vue: 5 debug statements removed from webhook migration code
   - WantedView.vue: 5 statements replaced with logger.debug/error
   - SystemView.vue: 2 statements replaced with logger.debug/error
+  - AudiobookDetailView.vue: 4 console statements replaced with logger.debug/error
 - **Resource Management**: Fixed memory leaks by properly disposing HttpContent objects
   - DownloadService: Added `using var` to 8 FormUrlEncodedContent instances
   - DownloadService: Added `using var` to 1 StringContent instance (NZBGet ping)
