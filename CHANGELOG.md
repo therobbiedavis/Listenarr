@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.19] - 2025-11-05
+## [0.2.20] - 2025-11-05
 
 ### Added
 - **Production Logger Utility**: Environment-aware logging system (`fe/src/utils/logger.ts`)
@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Integrated across entire Vue.js frontend
 - **CHANGELOG.md**: Comprehensive changelog following Keep a Changelog format
 - **SECURITY.md**: Complete security policy with vulnerability reporting process, best practices, and audit trail
+- **Audiobook Status Indicators**: Visual border colors on audiobook cards
+  - Red border: No files (missing)
+  - Blue pulsing border: Currently downloading
+  - Yellow border: Quality mismatch (has files but doesn't meet cutoff)
+  - Green border: Quality match (meets requirements)
 
 ### Fixed
 - **Critical Test Failures**: Fixed 6 failing unit tests achieving 100% pass rate (50/50 tests passing)
@@ -25,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SettingsView.vue: 5 debug statements removed from webhook migration code
   - WantedView.vue: 5 statements replaced with logger.debug/error
   - SystemView.vue: 2 statements replaced with logger.debug/error
+- **Resource Management**: Fixed memory leaks by properly disposing HttpContent objects
+  - DownloadService: Added `using var` to 8 FormUrlEncodedContent instances
+  - DownloadService: Added `using var` to 1 StringContent instance (NZBGet ping)
+  - DownloadMonitorService: Added `using var` to 1 FormUrlEncodedContent instance
+  - NotificationService: Added `using var` to 1 StringContent instance
+- **Cross-Browser Compatibility**: Replaced `crypto.randomUUID()` with polyfill for Safari <15.4 and older browsers
+  - SettingsView: Implemented `generateUUID()` function using `Math.random()` with RFC 4122 v4 format
+- **Virtual Scrolling**: Fixed ROW_HEIGHT constant in WantedView (140 → 165) for accurate scroll positioning
+- **Performance Optimization**: Replaced inefficient `ContainsKey` + indexer pattern with `TryGetValue`
+  - DownloadService: 30+ instances optimized in qBittorrent queue parsing
+  - SearchService: Changed ASIN deduplication to use `TryAdd`
+- **Code Quality**: Fixed useless assignment in SystemService log reading
 
 ### Changed
 - **Code Documentation**: Replaced vague TODO comments with detailed NOTE explanations
@@ -42,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented supported versions and security update process
 - Created complete release documentation structure
 - Added GitHub repository links for version comparison
+- Fixed XML comment HTML entity encoding in NotificationService
 
 ### Technical Debt
 - Download-to-Audiobook linking system not yet implemented (documented in AudiobooksView.vue)
@@ -51,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Architecture decision: Queue fetched directly from qBittorrent, Transmission, SABnzbd, NZBGet
   - SignalR broadcasts handle real-time updates without polling
 
-## [0.2.18] - Previous Release
+## [0.2.19] - Previous Release
 
 ### Added
 - Initial beta release with core audiobook management features
@@ -76,5 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed**: Bug fixes
 - **Security**: Vulnerability fixes
 
+[0.2.20]: https://github.com/therobbiedavis/Listenarr/compare/v0.2.19...v0.2.20
 [0.2.19]: https://github.com/therobbiedavis/Listenarr/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/therobbiedavis/Listenarr/releases/tag/v0.2.18

@@ -766,6 +766,12 @@ const markAsSkipped = async (item: Audiobook) => {
   border-radius: 4px;
 }
 
+.wanted-meta span span {
+background-color: unset;
+  padding: 0;
+  border-radius: unset;
+}
+
 .wanted-quality {
   color: #ffd43b;
   font-size: 0.85rem;
