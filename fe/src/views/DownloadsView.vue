@@ -36,12 +36,15 @@
         <p>{{ getEmptyMessage() }}</p>
       </div>
       
-      <div v-else class="downloads-list">
-        <div 
-          v-for="download in currentDownloads" 
-          :key="download.id"
-          class="download-card"
-        >
+      <div v-else ref="scrollContainer" class="downloads-list-container" @scroll="updateVisibleRange">
+        <div class="downloads-list-spacer" :style="{ height: `${totalHeight}px` }">
+          <div class="downloads-list" :style="{ transform: `translateY(${topPadding}px)` }">
+            <div 
+              v-for="download in visibleDownloads" 
+              :key="download.id"
+              v-memo="[download.id, download.status, download.progress]"
+              class="download-card"
+            >
           <div class="download-info">
             <h3>{{ download.title }}</h3>
             <p class="download-artist">{{ download.artist }}</p>
@@ -103,13 +106,15 @@
             </button>
           </div>
         </div>
-      </div>
+          </div>  <!-- Close downloads-list -->
+        </div>    <!-- Close downloads-list-spacer -->
+      </div>      <!-- Close downloads-list-container -->
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useDownloadsStore } from '@/stores/downloads'
 import type { Download } from '@/types'
 import { useToast } from '@/services/toastService'
@@ -117,6 +122,13 @@ import { useToast } from '@/services/toastService'
 const downloadsStore = useDownloadsStore()
 const toast = useToast()
 const activeTab = ref<'active' | 'completed' | 'failed'>('active')
+
+// Virtual scrolling setup
+const scrollContainer = ref<HTMLElement | null>(null)
+const ROW_HEIGHT = 180 // Approximate height of each download card
+const BUFFER_ROWS = 3
+
+const visibleRange = ref({ start: 0, end: 20 })
 
 const currentDownloads = computed(() => {
   switch (activeTab.value) {
@@ -129,6 +141,33 @@ const currentDownloads = computed(() => {
     default:
       return []
   }
+})
+
+const visibleDownloads = computed(() => {
+  return currentDownloads.value.slice(visibleRange.value.start, visibleRange.value.end)
+})
+
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+  
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+  
+  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+  
+  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
+  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, currentDownloads.value.length)
+  
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
+const totalHeight = computed(() => {
+  return currentDownloads.value.length * ROW_HEIGHT
+})
+
+const topPadding = computed(() => {
+  return visibleRange.value.start * ROW_HEIGHT
 })
 
 const refreshDownloads = async () => {
@@ -189,6 +228,11 @@ onMounted(() => {
   // Load initial downloads from API
   refreshDownloads()
   
+  // Initialize virtual scrolling
+  nextTick(() => {
+    updateVisibleRange()
+  })
+  
   // No polling needed - SignalR pushes updates in real-time!
   // The downloads store automatically receives updates via WebSocket
 })
@@ -205,6 +249,28 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+}
+
+/* Virtual scrolling container */
+.downloads-list-container {
+  height: calc(100vh - 280px);
+  overflow-y: auto;
+  position: relative;
+}
+
+.downloads-list-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.downloads-list {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .downloads-header h2 {

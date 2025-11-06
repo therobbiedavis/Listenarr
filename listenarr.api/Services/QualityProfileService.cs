@@ -347,77 +347,83 @@ namespace Listenarr.Api.Services
             }
 
             // Language: missing or mismatched
-            if (string.IsNullOrEmpty(searchResult.Language) && profile.PreferredLanguages != null && profile.PreferredLanguages.Count > 0)
+            if (HasPreferredLanguages(profile))
             {
-                var langPenalty = -10;
-                score.TotalScore += langPenalty;
-                score.ScoreBreakdown["Language"] = langPenalty;
-            }
-            else if (!string.IsNullOrEmpty(searchResult.Language) && profile.PreferredLanguages != null && profile.PreferredLanguages.Count > 0)
-            {
-                var matches = profile.PreferredLanguages.Any(l => searchResult.Language.Equals(l, StringComparison.OrdinalIgnoreCase));
-                if (!matches)
+                if (string.IsNullOrEmpty(searchResult.Language))
                 {
-                    var langMismatchPenalty = -15;
-                    score.TotalScore += langMismatchPenalty;
-                    score.ScoreBreakdown["LanguageMismatch"] = langMismatchPenalty;
+                    var langPenalty = -10;
+                    score.TotalScore += langPenalty;
+                    score.ScoreBreakdown["Language"] = langPenalty;
+                }
+                else
+                {
+                    var matches = profile.PreferredLanguages.Any(l => searchResult.Language.Equals(l, StringComparison.OrdinalIgnoreCase));
+                    if (!matches)
+                    {
+                        var langMismatchPenalty = -15;
+                        score.TotalScore += langMismatchPenalty;
+                        score.ScoreBreakdown["LanguageMismatch"] = langMismatchPenalty;
+                    }
                 }
             }
 
             // Format: missing or mismatched
-            if (string.IsNullOrEmpty(searchResult.Format) && profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
+            if (HasPreferredFormats(profile))
             {
-                var formatPenalty = -8;
-                score.TotalScore += formatPenalty;
-                score.ScoreBreakdown["Format"] = formatPenalty;
-            }
-            else if (!string.IsNullOrEmpty(searchResult.Format) && profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
-            {
-                // Make format matching more robust:
-                // - Check if any preferred token appears in the reported format string
-                // - Or appears in the detected quality token (e.g. Quality="M4B")
-                // - Or appears as a file extension or token in the torrent/DDL URL or source
-                var formatMatches = false;
-                var formatLower = searchResult.Format.ToLower();
-                var qualityLower = (searchResult.Quality ?? string.Empty).ToLower();
-                var urlLower = (searchResult.TorrentUrl ?? searchResult.Source ?? string.Empty).ToLower();
-
-                foreach (var f in profile.PreferredFormats)
+                if (string.IsNullOrEmpty(searchResult.Format))
                 {
-                    if (string.IsNullOrWhiteSpace(f)) continue;
-                    var token = f.ToLower().Trim();
-
-                    if (formatLower.Contains(token) || qualityLower.Contains(token))
-                    {
-                        formatMatches = true;
-                        if (formatLower.Contains(token))
-                        {
-                            score.ScoreBreakdown["FormatMatchedInFormat"] = 1;
-                            score.TotalScore += 1; // credit for matching format
-                        }
-                        if (qualityLower.Contains(token))
-                        {
-                            score.ScoreBreakdown["FormatMatchedInQuality"] = 1;
-                            score.TotalScore += 1; // credit for matching quality token
-                        }
-                        break;
-                    }
-
-                    // check url for ".{token}" extension or token inside url (e.g., ".m4b" or "m4b")
-                    if (!string.IsNullOrEmpty(urlLower) && (urlLower.Contains("." + token) || urlLower.Contains(token)))
-                    {
-                        formatMatches = true;
-                        score.ScoreBreakdown["FormatMatchedInUrl"] = 1;
-                        score.TotalScore += 1; // credit for matching token in URL/source
-                        break;
-                    }
+                    var formatPenalty = -8;
+                    score.TotalScore += formatPenalty;
+                    score.ScoreBreakdown["Format"] = formatPenalty;
                 }
-
-                if (!formatMatches)
+                else
                 {
-                    var formatMismatchPenalty = -12;
-                    score.TotalScore += formatMismatchPenalty;
-                    score.ScoreBreakdown["FormatMismatch"] = formatMismatchPenalty;
+                    // Make format matching more robust:
+                    // - Check if any preferred token appears in the reported format string
+                    // - Or appears in the detected quality token (e.g. Quality="M4B")
+                    // - Or appears as a file extension or token in the torrent/DDL URL or source
+                    var formatMatches = false;
+                    var formatLower = searchResult.Format.ToLower();
+                    var qualityLower = (searchResult.Quality ?? string.Empty).ToLower();
+                    var urlLower = (searchResult.TorrentUrl ?? searchResult.Source ?? string.Empty).ToLower();
+
+                    foreach (var f in profile.PreferredFormats)
+                    {
+                        if (string.IsNullOrWhiteSpace(f)) continue;
+                        var token = f.ToLower().Trim();
+
+                        if (formatLower.Contains(token) || qualityLower.Contains(token))
+                        {
+                            formatMatches = true;
+                            if (formatLower.Contains(token))
+                            {
+                                score.ScoreBreakdown["FormatMatchedInFormat"] = 1;
+                                score.TotalScore += 1; // credit for matching format
+                            }
+                            if (qualityLower.Contains(token))
+                            {
+                                score.ScoreBreakdown["FormatMatchedInQuality"] = 1;
+                                score.TotalScore += 1; // credit for matching quality token
+                            }
+                            break;
+                        }
+
+                        // check url for ".{token}" extension or token inside url (e.g., ".m4b" or "m4b")
+                        if (!string.IsNullOrEmpty(urlLower) && (urlLower.Contains("." + token) || urlLower.Contains(token)))
+                        {
+                            formatMatches = true;
+                            score.ScoreBreakdown["FormatMatchedInUrl"] = 1;
+                            score.TotalScore += 1; // credit for matching token in URL/source
+                            break;
+                        }
+                    }
+
+                    if (!formatMatches)
+                    {
+                        var formatMismatchPenalty = -12;
+                        score.TotalScore += formatMismatchPenalty;
+                        score.ScoreBreakdown["FormatMismatch"] = formatMismatchPenalty;
+                    }
                 }
             }
 
@@ -553,11 +559,11 @@ namespace Listenarr.Api.Services
                 return 85;
 
             // VBR quality presets (LAME VBR presets like V0/V1/V2)
-            if (lowerQuality.Contains("v0") || lowerQuality.Contains("-v0") || lowerQuality.Contains(" v0") )
+            if (ContainsVbrPreset(lowerQuality, "v0"))
                 return 82;
-            if (lowerQuality.Contains("v1") || lowerQuality.Contains("-v1") || lowerQuality.Contains(" v1"))
+            if (ContainsVbrPreset(lowerQuality, "v1"))
                 return 76;
-            if (lowerQuality.Contains("v2") || lowerQuality.Contains("-v2") || lowerQuality.Contains(" v2"))
+            if (ContainsVbrPreset(lowerQuality, "v2"))
                 return 70;
 
 
@@ -581,7 +587,7 @@ namespace Listenarr.Api.Services
             }
 
             // Generic MP3 mention without explicit bitrate -> mid-range
-            if (lowerQuality.Contains("mp3") && !lowerQuality.Contains("64") && !lowerQuality.Contains("128") && !lowerQuality.Contains("192") && !lowerQuality.Contains("256") && !lowerQuality.Contains("320"))
+            if (lowerQuality.Contains("mp3") && !ContainsAnyBitrate(lowerQuality, "64", "128", "192", "256", "320"))
                 return 65;
 
             if (lowerQuality.Contains("128"))
@@ -609,6 +615,40 @@ namespace Listenarr.Api.Services
                 .OrderBy(s => s.IsRejected) // false (not rejected) first
                 .ThenByDescending(s => s.TotalScore)
                 .ToList();
+        }
+
+        /// <summary>
+        /// Checks if a quality string contains VBR preset indicators (v0, v1, v2).
+        /// </summary>
+        private static bool ContainsVbrPreset(string qualityLower, string preset)
+        {
+            return qualityLower.Contains(preset) || 
+                   qualityLower.Contains($"-{preset}") || 
+                   qualityLower.Contains($" {preset}");
+        }
+
+        /// <summary>
+        /// Checks if a quality string contains any of the specified bitrate indicators.
+        /// </summary>
+        private static bool ContainsAnyBitrate(string qualityLower, params string[] bitrates)
+        {
+            return bitrates.Any(b => qualityLower.Contains(b));
+        }
+
+        /// <summary>
+        /// Determines if the profile has preferred languages configured.
+        /// </summary>
+        private static bool HasPreferredLanguages(QualityProfile profile)
+        {
+            return profile.PreferredLanguages != null && profile.PreferredLanguages.Count > 0;
+        }
+
+        /// <summary>
+        /// Determines if the profile has preferred formats configured.
+        /// </summary>
+        private static bool HasPreferredFormats(QualityProfile profile)
+        {
+            return profile.PreferredFormats != null && profile.PreferredFormats.Count > 0;
         }
     }
 }

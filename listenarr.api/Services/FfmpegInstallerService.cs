@@ -30,7 +30,7 @@ namespace Listenarr.Api.Services
             _startupConfigService = startupConfigService;
         }
 
-        private static void TryDeleteFile(string path, int retries = 3, int delayMs = 100)
+        private static async Task TryDeleteFileAsync(string path, int retries = 3, int delayMs = 100, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(path)) return;
             for (int i = 0; i < retries; i++)
@@ -43,7 +43,7 @@ namespace Listenarr.Api.Services
                 catch
                 {
                     if (i == retries - 1) return;
-                    try { Thread.Sleep(delayMs); } catch { }
+                    try { await Task.Delay(delayMs, cancellationToken); } catch (OperationCanceledException) { return; }
                 }
             }
         }
@@ -186,7 +186,7 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrEmpty(expected) && !string.IsNullOrEmpty(computedHash) && !string.Equals(expected, computedHash, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning("Downloaded ffprobe checksum mismatch (expected {Expected} != actual {Actual}). Aborting install.", expected, computedHash);
-                    TryDeleteFile(tmpFile);
+                    await TryDeleteFileAsync(tmpFile);
                     return null;
                 }
 
@@ -201,7 +201,7 @@ namespace Listenarr.Api.Services
                         entry.WriteToFile(outPath, new ExtractionOptions() { ExtractFullPath = true, Overwrite = true });
                         _logger.LogDebug("Extracted archive entry to {OutPath}", outPath);
                     }
-                    TryDeleteFile(tmpFile);
+                    await TryDeleteFileAsync(tmpFile);
                 }
                 else if (downloadUrl.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
                 {
@@ -222,7 +222,7 @@ namespace Listenarr.Api.Services
                                 _logger.LogDebug("Extracted archive entry to {OutPath}", outPath);
                             }
                         }
-                        TryDeleteFile(tmpFile);
+                        await TryDeleteFileAsync(tmpFile);
                     }
                     catch (Exception ex)
                     {
@@ -240,7 +240,7 @@ namespace Listenarr.Api.Services
                             };
                             using var p = System.Diagnostics.Process.Start(psi);
                             p?.WaitForExit(30000);
-                            TryDeleteFile(tmpFile);
+                            await TryDeleteFileAsync(tmpFile);
                         }
                         catch { /* best-effort */ }
                     }

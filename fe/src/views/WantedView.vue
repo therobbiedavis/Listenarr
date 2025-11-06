@@ -38,12 +38,15 @@
     </div>
 
     <!-- Wanted List -->
-    <div v-else-if="filteredWanted.length > 0" class="wanted-list">
-      <div 
-        v-for="item in filteredWanted" 
-        :key="item.id"
-        class="wanted-item"
-      >
+    <div v-else-if="filteredWanted.length > 0" ref="scrollContainer" class="wanted-list-container" @scroll="updateVisibleRange">
+      <div class="wanted-list-spacer" :style="{ height: `${totalHeight}px` }">
+        <div class="wanted-list" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div 
+            v-for="item in visibleWanted" 
+            :key="item.id"
+            v-memo="[item.id, item.monitored, item.filePath]"
+            class="wanted-item"
+          >
         <div class="wanted-poster">
           <img 
             :src="apiService.getImageUrl(item.imageUrl) || `https://via.placeholder.com/60x90?text=No+Image`" 
@@ -60,11 +63,14 @@
           </div>
           <div class="wanted-quality">
             <template v-if="getQualityProfileForAudiobook(item)">
-              Wanted Quality Profile:
+              Wanted Quality:
               <span class="profile-name">{{ getQualityProfileForAudiobook(item)?.name ?? 'Unknown' }}</span>
             </template>
+            <template v-else-if="item.quality">
+              Wanted Quality: {{ item.quality }}
+            </template>
             <template v-else>
-              Wanted Quality: {{ item.quality || 'Any' }}
+              Wanted Quality: Any
             </template>
           </div>
           <div v-if="searchResults[item.id]" class="search-status">
@@ -105,7 +111,9 @@
           </button>
         </div>
       </div>
-    </div>
+        </div>  <!-- Close wanted-list -->
+      </div>    <!-- Close wanted-list-spacer -->
+    </div>      <!-- Close wanted-list-container -->
 
     <!-- Empty State -->
     <div v-else class="empty-state">
@@ -134,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
@@ -143,21 +151,26 @@ import ManualImportModal from '@/components/ManualImportModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
 import { safeText } from '@/utils/textUtils'
 import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle } from '@phosphor-icons/vue'
+import { logger } from '@/utils/logger'
 
 const libraryStore = useLibraryStore()
 
 const configurationStore = useConfigurationStore()
 
+// Virtual scrolling setup
+const scrollContainer = ref<HTMLElement | null>(null)
+const ROW_HEIGHT = 165 // Height of wanted item: 120px poster + 40px padding (20px*2) + 5px gap/border
+const BUFFER_ROWS = 3
+
+const visibleRange = ref({ start: 0, end: 20 })
+
 const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
-  console.log('Getting quality profile for audiobook:', audiobook.title, 'qualityProfileId:', audiobook.qualityProfileId)
   if (!audiobook || !audiobook.qualityProfileId) {
-    console.log('No qualityProfileId for audiobook:', audiobook.title)
     return null
   }
   const profile = configurationStore.qualityProfiles.find(
     (profile) => profile.id === audiobook.qualityProfileId
   )
-  console.log('Found profile:', profile ? profile.name : 'null')
   return profile || null
 }
 
@@ -175,17 +188,10 @@ onMounted(async () => {
   await configurationStore.loadQualityProfiles()
   loading.value = false
   
-  // Debug logging
-  console.log('Total audiobooks in library:', libraryStore.audiobooks.length)
-  console.log('Monitored audiobooks:', libraryStore.audiobooks.filter(a => a.monitored).length)
-  console.log('Audiobooks without files:', libraryStore.audiobooks.filter(a => !a.filePath || a.filePath.trim() === '').length)
-  console.log('Wanted audiobooks:', wantedAudiobooks.value.length)
-  console.log('Quality profiles loaded:', configurationStore.qualityProfiles.length)
-  
-  // Log first few audiobooks for inspection
-  if (libraryStore.audiobooks.length > 0) {
-    console.log('Sample audiobook:', libraryStore.audiobooks[0])
-  }
+  // Initialize virtual scrolling
+  nextTick(() => {
+    updateVisibleRange()
+  })
 })
 
 // Filter audiobooks that are monitored and missing files
@@ -243,6 +249,33 @@ const filteredWanted = computed(() => {
     default:
       return categorizedWanted.value.all
   }
+})
+
+const visibleWanted = computed(() => {
+  return filteredWanted.value.slice(visibleRange.value.start, visibleRange.value.end)
+})
+
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+  
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+  
+  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+  
+  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
+  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, filteredWanted.value.length)
+  
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
+const totalHeight = computed(() => {
+  return filteredWanted.value.length * ROW_HEIGHT
+})
+
+const topPadding = computed(() => {
+  return visibleRange.value.start * ROW_HEIGHT
 })
 
 function getStatusClass(item: Audiobook): string {
@@ -309,7 +342,7 @@ const formatDate = (date: string | undefined): string => {
 }
 
 const searchMissing = async () => {
-  console.log('Automatic search for all missing audiobooks')
+  logger.debug('Automatic search for all missing audiobooks')
   
   // Search all missing audiobooks sequentially
   for (const audiobook of categorizedWanted.value.missing) {
@@ -333,7 +366,7 @@ function closeManualImport() {
 }
 
 async function handleImported(result: { imported: number }) {
-  console.log('Manual import completed, imported:', result.imported)
+  logger.debug('Manual import completed, imported:', result.imported)
   // Refresh library
   await libraryStore.fetchLibrary()
   closeManualImport()
@@ -345,7 +378,7 @@ function closeManualSearch() {
 }
 
 function handleDownloaded(result: SearchResult) {
-  console.log('Downloaded:', result)
+  logger.debug('Downloaded:', result)
   // Refresh library after successful download
   setTimeout(async () => {
     await libraryStore.fetchLibrary()
@@ -354,7 +387,7 @@ function handleDownloaded(result: SearchResult) {
 }
 
 const searchAudiobook = async (item: Audiobook) => {
-  console.log('Searching audiobook:', item.title)
+  logger.debug('Searching audiobook:', item.title)
   
   searching.value[item.id] = true
   searchResults.value[item.id] = 'Searching...'
@@ -389,20 +422,20 @@ const searchAudiobook = async (item: Audiobook) => {
 }
 
 const markAsSkipped = async (item: Audiobook) => {
-  console.log('Mark as skipped:', item.title)
+  logger.debug('Mark as skipped:', item.title)
   
   try {
     await apiService.updateAudiobook(item.id, { monitored: false })
     await libraryStore.fetchLibrary()
   } catch (err) {
-    console.error('Failed to unmonitor audiobook:', err)
+    logger.error('Failed to unmonitor audiobook:', err)
   }
 }
 </script>
 
 <style scoped>
 .wanted-view {
-  padding: 2em;
+  padding: 1em;
 }
 
 .page-header {
@@ -410,6 +443,29 @@ const markAsSkipped = async (item: Audiobook) => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
+}
+
+/* Virtual scrolling container */
+.wanted-list-container {
+  height: calc(100vh - 254px);
+  overflow-y: auto;
+  position: relative;
+  padding: 0 .5em 0 0;
+}
+
+.wanted-list-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.wanted-list {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .page-header h1 {
@@ -654,8 +710,8 @@ const markAsSkipped = async (item: Audiobook) => {
 }
 
 .wanted-poster {
-  width: 80px;
-  height: 80px;
+  width: 120px;
+  height: 120px;
   margin-right: 1.25rem;
   background-color: rgba(255, 255, 255, 0.05);
   border-radius: 6px;
@@ -708,6 +764,12 @@ const markAsSkipped = async (item: Audiobook) => {
   background-color: rgba(255, 255, 255, 0.05);
   padding: 0.25rem 0.6rem;
   border-radius: 4px;
+}
+
+.wanted-meta span span {
+background-color: unset;
+  padding: 0;
+  border-radius: unset;
 }
 
 .wanted-quality {

@@ -24,6 +24,23 @@
           <span v-else-if="scanQueued">Scan queued</span>
           <span v-else>Scan Folder</span>
         </button>
+        <!-- Debug Notification Buttons -->
+        <button class="nav-btn debug-btn" @click="testNotification('book-added')" :disabled="sendingNotification" title="Test 'Book Added' notification">
+          <PhBell />
+          Test Added
+        </button>
+        <button class="nav-btn debug-btn" @click="testNotification('book-available')" :disabled="sendingNotification" title="Test 'Book Available' notification">
+          <PhBell />
+          Test Available
+        </button>
+        <button class="nav-btn debug-btn" @click="testNotification('book-downloading')" :disabled="sendingNotification" title="Test 'Book Downloading' notification">
+          <PhBell />
+          Test Downloading
+        </button>
+        <button class="nav-btn" @click="openEditModal">
+          <PhPencil />
+          Edit
+        </button>
         <button class="nav-btn delete-btn" @click="confirmDelete">
           <PhTrash />
           Delete
@@ -71,7 +88,7 @@
             </div>
             <div class="detail-item" v-if="audiobook.language">
               <PhGlobe />
-              <span>{{ audiobook.language }}</span>
+              <span>{{ capitalizeFirst(audiobook.language) }}</span>
             </div>
             <div class="detail-item">
               <PhTag />
@@ -90,7 +107,7 @@
             </span>
             <span class="badge language">
               <PhChatCircle />
-              {{ audiobook.language || 'English' }}
+              {{ capitalizeFirst(audiobook.language) || 'English' }}
             </span>
             <span class="badge tlc" v-if="audiobook.version">
               <PhMusicNotes />
@@ -182,7 +199,7 @@
             </div>
             <div class="detail-row" v-if="audiobook.language">
               <span class="label">Language:</span>
-              <span class="value">{{ audiobook.language }}</span>
+              <span class="value">{{ capitalizeFirst(audiobook.language) }}</span>
             </div>
           </div>
 
@@ -221,8 +238,8 @@
 
           <div class="detail-card" v-if="audiobook.tags && audiobook.tags.length">
             <h3>Tags</h3>
-            <div class="genre-tags">
-              <span v-for="tag in audiobook.tags" :key="tag" class="genre-tag">
+            <div class="tags-list">
+              <span v-for="tag in audiobook.tags" :key="tag" class="tag-badge">
                 {{ tag }}
               </span>
             </div>
@@ -417,6 +434,14 @@
       Back to Library
     </button>
   </div>
+
+  <!-- Edit Audiobook Modal -->
+  <EditAudiobookModal
+    :is-open="showEditModal"
+    :audiobook="audiobook"
+    @close="closeEditModal"
+    @saved="handleEditSaved"
+  />
 </template>
 
 <script setup lang="ts">
@@ -430,6 +455,8 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
+import { logger } from '@/utils/logger'
+import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import { 
   PhArrowLeft, 
   PhArrowClockwise, 
@@ -463,7 +490,8 @@ import {
   PhFilePlus,
   PhFileMinus,
   PhCircle,
-  PhDiscordLogo
+  PhDiscordLogo,
+  PhBell
 } from '@phosphor-icons/vue'
 
 const route = useRoute()
@@ -481,6 +509,8 @@ const showFullDescription = ref(false)
 const scanning = ref(false)
 const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
+const sendingNotification = ref(false)
+const showEditModal = ref(false)
 
 // History state
 const historyEntries = ref<History[]>([])
@@ -496,6 +526,12 @@ const assignedProfileName = computed(() => {
   const p = qualityProfiles.value.find(q => q.id === id)
   return p ? p.name : null
 })
+
+// Utility function to capitalize first letter
+const capitalizeFirst = (str: string | undefined): string => {
+  if (!str) return ''
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+}
 
 // Show a base path even when no files exist yet by falling back to configured outputPath
 const displayBasePath = computed(() => {
@@ -662,10 +698,10 @@ async function loadHistory() {
   
   try {
     historyEntries.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
-    console.log('Loaded history:', historyEntries.value)
+    logger.debug('Loaded history:', historyEntries.value)
   } catch (err) {
     historyError.value = err instanceof Error ? err.message : 'Failed to load history'
-    console.error('Failed to load history:', err)
+    logger.error('Failed to load history:', err)
   } finally {
     historyLoading.value = false
   }
@@ -678,7 +714,7 @@ async function scanFiles() {
   scanJobId.value = null
   try {
     const res = await apiService.scanAudiobook(audiobook.value.id) as { message: string; scannedPath?: string; found: number; created: number; audiobook?: AudiobookType; jobId?: string }
-    console.log('Scan result:', res)
+    logger.debug('Scan result:', res)
     // If backend enqueued the job it will return 202 Accepted with { jobId }
     if (res?.jobId) {
       scanQueued.value = true
@@ -726,10 +762,10 @@ function toggleMonitored() {
     // Persist to API
     apiService.updateAudiobook(audiobook.value.id, { monitored: newMonitoredValue })
       .then(() => {
-        console.log('Monitored status updated successfully')
+        logger.debug('Monitored status updated successfully')
       })
       .catch((err) => {
-        console.error('Failed to update monitored status:', err)
+        logger.error('Failed to update monitored status:', err)
         // Revert on error
         if (audiobook.value) {
           audiobook.value = { ...audiobook.value, monitored: !newMonitoredValue }
@@ -761,6 +797,51 @@ async function executeDelete() {
   } finally {
     deleting.value = false
     showDeleteDialog.value = false
+  }
+}
+
+function openEditModal() {
+  showEditModal.value = true
+}
+
+function closeEditModal() {
+  showEditModal.value = false
+}
+
+async function handleEditSaved() {
+  // Refresh the audiobook data after edit
+  await loadAudiobook()
+}
+
+async function testNotification(trigger: 'book-added' | 'book-available' | 'book-downloading') {
+  if (!audiobook.value) return
+  
+  sendingNotification.value = true
+  try {
+    // Prepare notification data matching the structure the backend expects
+    const notificationData = {
+      title: audiobook.value.title,
+      authors: audiobook.value.authors,
+      asin: audiobook.value.asin,
+      publisher: audiobook.value.publisher,
+      year: audiobook.value.publishYear?.toString(),
+      publishedDate: audiobook.value.publishYear?.toString(),
+      imageUrl: audiobook.value.imageUrl,
+      narrators: audiobook.value.narrators,
+      description: audiobook.value.description
+    }
+    
+    logger.debug('Sending test notification:', { trigger, data: notificationData })
+    
+    // Call via the apiService which handles authentication and base URL properly
+    await apiService.testNotification(trigger, notificationData)
+    
+    useToast().success(`Test ${trigger} notification sent!`, 'Notification sent successfully')
+  } catch (err) {
+    console.error('Notification test failed:', err)
+    useToast().error('Failed to send test notification', String(err))
+  } finally {
+    sendingNotification.value = false
   }
 }
 
@@ -967,6 +1048,15 @@ function formatDate(dateString?: string): string {
 
 .nav-btn.delete-btn:hover {
   background-color: #c0392b;
+}
+
+.nav-btn.debug-btn {
+  background-color: #5865F2;
+  border-color: #4752C4;
+}
+
+.nav-btn.debug-btn:hover {
+  background-color: #4752C4;
 }
 
 .hero-section {
@@ -1391,6 +1481,31 @@ function formatDate(dateString?: string): string {
   border-radius: 4px;
   color: #fff;
   font-size: 12px;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.tag-badge:hover {
+  background-color: #333;
+  border-color: #007acc;
+  color: white;
 }
 
 .files-content, .history-content {

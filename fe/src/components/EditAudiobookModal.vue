@@ -27,23 +27,29 @@
               Monitored Status
             </label>
             <div class="radio-group">
-              <label class="radio-label">
+              <label class="radio-label" :class="{ active: formData.monitored === true }">
                 <input
                   type="radio"
                   v-model="formData.monitored"
                   :value="true"
                   name="monitored"
                 />
-                <span>Monitored</span>
+                <div class="radio-content">
+                  <span class="radio-title">Monitored</span>
+                  <small>Automatically search for and upgrade releases</small>
+                </div>
               </label>
-              <label class="radio-label">
+              <label class="radio-label" :class="{ active: formData.monitored === false }">
                 <input
                   type="radio"
                   v-model="formData.monitored"
                   :value="false"
                   name="monitored"
                 />
-                <span>Unmonitored</span>
+                <div class="radio-content">
+                  <span class="radio-title">Unmonitored</span>
+                  <small>Do not search for new releases</small>
+                </div>
               </label>
             </div>
             <p class="help-text">
@@ -62,6 +68,7 @@
               v-model="formData.qualityProfileId"
               class="form-select"
             >
+              <option :value="null">Use Default Profile</option>
               <option
                 v-for="profile in qualityProfiles"
                 :key="profile.id"
@@ -71,8 +78,93 @@
               </option>
             </select>
             <p class="help-text">
-              Controls which quality standards to use for downloads and upgrades
+              Controls which quality standards to use for downloads and upgrades. Leave as "Use Default Profile" to automatically use the default profile.
             </p>
+          </div>
+
+          <!-- Tags -->
+          <div class="form-group">
+            <label class="form-label">
+              <i class="ph ph-tag"></i>
+              Tags
+            </label>
+            <div class="tags-container">
+              <div class="tags-list">
+                <span 
+                  v-for="(tag, index) in formData.tags" 
+                  :key="index"
+                  class="tag-item"
+                >
+                  {{ tag }}
+                  <button 
+                    type="button" 
+                    class="tag-remove"
+                    @click="removeTag(index)"
+                    title="Remove tag"
+                  >
+                    <PhX :size="16" weight="bold" />
+                  </button>
+                </span>
+                <span v-if="formData.tags.length === 0" class="tags-empty">
+                  No tags added yet
+                </span>
+              </div>
+              <div class="tag-input-group">
+                <input
+                  type="text"
+                  v-model="newTag"
+                  @keypress.enter.prevent="addTag"
+                  placeholder="Add a tag..."
+                  class="tag-input"
+                />
+                <button 
+                  type="button" 
+                  @click="addTag"
+                  class="btn-add-tag"
+                  :disabled="!newTag.trim()"
+                >
+                  <i class="ph ph-plus"></i>
+                  Add
+                </button>
+              </div>
+            </div>
+            <p class="help-text">
+              Custom tags for organizing and filtering audiobooks
+            </p>
+          </div>
+
+          <!-- Content Flags -->
+          <div class="form-group">
+            <label class="form-label">
+              <i class="ph ph-info"></i>
+              Content Information
+            </label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <div class="checkbox-wrapper">
+                  <input
+                    type="checkbox"
+                    v-model="formData.abridged"
+                  />
+                  <div class="checkbox-content">
+                    <span class="checkbox-title">Abridged</span>
+                    <small>This is an abridged (shortened) version</small>
+                  </div>
+                </div>
+              </label>
+              <label class="checkbox-label">
+                <div class="checkbox-wrapper">
+                  <input
+                    type="checkbox"
+                    v-model="formData.explicit"
+                  />
+                  <div class="checkbox-content">
+                    <span class="checkbox-title">Explicit Content</span>
+                    <small>Contains explicit language or mature content</small>
+                  </div>
+                </div>
+              </label>
+            </div>
           </div>
 
           <!-- Action Buttons -->
@@ -101,6 +193,7 @@ import { ref, computed, watch } from 'vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import type { Audiobook, QualityProfile } from '@/types'
+import { PhX } from '@phosphor-icons/vue'
 
 interface Props {
   isOpen: boolean
@@ -109,7 +202,10 @@ interface Props {
 
 interface FormData {
   monitored: boolean
-  qualityProfileId: number
+  qualityProfileId: number | null
+  tags: string[]
+  abridged: boolean
+  explicit: boolean
 }
 
 const props = defineProps<Props>()
@@ -121,17 +217,26 @@ const emit = defineEmits<{
 const qualityProfiles = ref<QualityProfile[]>([])
 const rootFolders = ref<string[]>([])
 const saving = ref(false)
+const newTag = ref('')
 
 const formData = ref<FormData>({
   monitored: true,
-  qualityProfileId: 0
+  qualityProfileId: null,
+  tags: [],
+  abridged: false,
+  explicit: false
 })
 
 const hasChanges = computed(() => {
   if (!props.audiobook) return false
 
+  const tagsChanged = JSON.stringify([...formData.value.tags].sort()) !== JSON.stringify([...(props.audiobook.tags || [])].sort())
+
   return formData.value.monitored !== Boolean(props.audiobook.monitored) ||
-    formData.value.qualityProfileId !== (props.audiobook.qualityProfileId || 0)
+    formData.value.qualityProfileId !== (props.audiobook.qualityProfileId ?? null) ||
+    tagsChanged ||
+    formData.value.abridged !== Boolean(props.audiobook.abridged) ||
+    formData.value.explicit !== Boolean(props.audiobook.explicit)
 })
 
 watch(() => props.isOpen, async (isOpen) => {
@@ -162,7 +267,10 @@ function initializeForm() {
 
   formData.value = {
     monitored: Boolean(props.audiobook.monitored),
-    qualityProfileId: props.audiobook.qualityProfileId || 0
+    qualityProfileId: props.audiobook.qualityProfileId ?? null,
+    tags: [...(props.audiobook.tags || [])],
+    abridged: Boolean(props.audiobook.abridged),
+    explicit: Boolean(props.audiobook.explicit)
   }
 }
 
@@ -174,7 +282,17 @@ async function handleSave() {
     // Build update payload with current form values
     const updates: Partial<Audiobook> = {
       monitored: formData.value.monitored,
-      qualityProfileId: formData.value.qualityProfileId
+      tags: formData.value.tags,
+      abridged: formData.value.abridged,
+      explicit: formData.value.explicit
+    }
+    
+    // If qualityProfileId is null, send -1 to signal "use default"
+    // Otherwise send the actual ID
+    if (formData.value.qualityProfileId === null) {
+      (updates as {qualityProfileId?: number}).qualityProfileId = -1 // -1 means "use default profile"
+    } else {
+      updates.qualityProfileId = formData.value.qualityProfileId
     }
 
     // Call single update API
@@ -189,6 +307,18 @@ async function handleSave() {
   } finally {
     saving.value = false
   }
+}
+
+function addTag() {
+  const tag = newTag.value.trim()
+  if (tag && !formData.value.tags.includes(tag)) {
+    formData.value.tags.push(tag)
+    newTag.value = ''
+  }
+}
+
+function removeTag(index: number) {
+  formData.value.tags.splice(index, 1)
 }
 
 function close() {
@@ -215,11 +345,12 @@ function close() {
   background-color: #1e1e1e;
   border-radius: 8px;
   width: 100%;
-  max-width: 600px;
-  max-height: 90vh;
+  max-width: 650px;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
 }
 
 .modal-header {
@@ -262,6 +393,23 @@ function close() {
   padding: 2rem;
   overflow-y: auto;
   flex: 1;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: #666;
 }
 
 .info-section {
@@ -325,32 +473,57 @@ function close() {
 
 .radio-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 1rem;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
-  color: #ccc;
 }
 
 .radio-label:hover {
   background-color: #333;
+  border-color: #555;
+}
+
+.radio-label.active {
+  background-color: rgba(0, 122, 204, 0.15);
   border-color: #007acc;
 }
 
 .radio-label input[type="radio"] {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   cursor: pointer;
   accent-color: #007acc;
+  margin-top: 0.125rem;
+  flex-shrink: 0;
 }
 
-.radio-label input[type="radio"]:checked + span {
-  color: white;
+.radio-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.radio-title {
+  color: #ccc;
   font-weight: 500;
+  font-size: 0.95rem;
+  transition: color 0.2s;
+}
+
+.radio-label.active .radio-title {
+  color: white;
+}
+
+.radio-content small {
+  color: #999;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 .form-select {
@@ -429,6 +602,208 @@ function close() {
 
 .btn i.ph-spin {
   animation: spin 1s linear infinite;
+}
+
+.tags-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 1rem;
+  background-color: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  min-height: 3.5rem;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.tag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid #3a3a3a;
+  transition: all 0.2s ease;
+}
+
+.tag-item:hover {
+  background-color: #333;
+  border-color: #007acc;
+  color: white;
+}
+
+.tag-item:hover::before {
+  opacity: 1;
+}
+
+.tags-empty {
+  color: #888;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.5rem;
+}
+
+.tag-remove {
+  background: rgba(0, 0, 0, 0.2);
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  margin-left: 0.25rem;
+}
+
+.tag-remove:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.tag-remove:active {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.tag-input-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tag-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.tag-input:hover {
+  border-color: #555;
+}
+
+.tag-input:focus {
+  outline: none;
+  border-color: #007acc;
+  background-color: #2d2d2d;
+  box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+}
+
+.tag-input::placeholder {
+  color: #666;
+}
+
+.btn-add-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background-color: #007acc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-add-tag:hover:not(:disabled) {
+  background-color: #005fa3;
+}
+
+.btn-add-tag:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-add-tag:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.checkbox-label {
+  padding: 1rem;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: block;
+}
+
+.checkbox-label:hover {
+  background-color: #333;
+  border-color: #555;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #007acc;
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+
+.checkbox-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.checkbox-title {
+  color: #ccc;
+  font-weight: 500;
+  font-size: 0.95rem;
+  transition: color 0.2s;
+}
+
+.checkbox-label:has(input[type="checkbox"]:checked) .checkbox-title {
+  color: white;
+}
+
+.checkbox-label:has(input[type="checkbox"]:checked) {
+  background-color: rgba(0, 122, 204, 0.15);
+  border-color: #007acc;
+}
+
+.checkbox-content small {
+  color: #999;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 @keyframes spin {

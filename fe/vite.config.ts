@@ -9,7 +9,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     vue(),
     vueDevTools(),
@@ -22,6 +22,10 @@ export default defineConfig({
   build: {
     // Generate sourcemaps for bundle analysis tools (source-map-explorer)
     sourcemap: true,
+  },
+  esbuild: {
+    // Remove console.log and debugger statements from production builds
+    drop: mode === 'production' ? ['console', 'debugger'] : [],
   },
   resolve: {
     alias: {
@@ -58,4 +62,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -250,7 +251,7 @@ namespace Listenarr.Api.Services
             };
 
             var defaultJson = JsonSerializer.Serialize(defaultPayload, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-            var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
+            using var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
 
             try
             {
@@ -324,6 +325,13 @@ namespace Listenarr.Api.Services
                 // Extract description
                 if (obj.TryGetPropertyValue("description", out var d) && d != null) description = d.ToString();
             }
+
+            // Decode HTML entities from all text fields (e.g., "Simon &amp; Schuster" -> "Simon & Schuster")
+            title = DecodeHtml(title);
+            author = DecodeHtml(author);
+            publisher = DecodeHtml(publisher);
+            narrators = DecodeHtml(narrators);
+            description = DecodeHtml(description);
 
             // Discord limits
             const int MAX_TITLE = 256;
@@ -405,62 +413,90 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
+                    _logger.LogInformation("Attempting to download image for attachment: {Url}", absoluteImageUrl);
                     var imageResponse = await httpClient.GetAsync(absoluteImageUrl);
                     if (imageResponse.IsSuccessStatusCode)
                     {
                         var imageData = await imageResponse.Content.ReadAsByteArrayAsync();
-                        var contentType = imageResponse.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-
-                        // Generate filename based on ASIN or title
-                        var filename = !string.IsNullOrWhiteSpace(asin)
-                            ? $"{asin}.jpg"
-                            : $"{title.Replace(" ", "_").Replace("/", "_")}.jpg";
-
-                        attachmentInfo = new AttachmentInfo
+                        
+                        // Validate we got actual image data
+                        if (imageData != null && imageData.Length > 0)
                         {
-                            ImageData = imageData,
-                            Filename = filename,
-                            ContentType = contentType
-                        };
+                            var contentType = imageResponse.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
 
-                        attachmentFilename = filename;
+                            // Generate filename based on ASIN or title
+                            var sanitizedTitle = title?.Replace(" ", "_").Replace("/", "_") ?? "unknown";
+                            if (string.IsNullOrWhiteSpace(sanitizedTitle)) sanitizedTitle = "unknown";
+                            var filename = !string.IsNullOrWhiteSpace(asin)
+                                ? $"{asin}.jpg"
+                                : $"{sanitizedTitle.Substring(0, Math.Min(50, sanitizedTitle.Length))}.jpg";
 
-                        _logger.LogInformation("Downloaded image for notification: {Url} ({Size} bytes)", absoluteImageUrl, imageData.Length);
+                            attachmentInfo = new AttachmentInfo
+                            {
+                                ImageData = imageData,
+                                Filename = filename,
+                                ContentType = contentType
+                            };
+
+                            attachmentFilename = filename;
+
+                            _logger.LogInformation("Successfully downloaded image for notification: {Url} ({Size} bytes, {ContentType})", 
+                                absoluteImageUrl, imageData.Length, contentType);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Downloaded image has no data: {Url}", absoluteImageUrl);
+                        }
                     }
                     else
                     {
-                        _logger.LogWarning("Failed to download image for notification: {Url} - {StatusCode}", absoluteImageUrl, imageResponse.StatusCode);
+                        _logger.LogWarning("Failed to download image for notification: {Url} - HTTP {StatusCode} {ReasonPhrase}", 
+                            absoluteImageUrl, (int)imageResponse.StatusCode, imageResponse.ReasonPhrase);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error downloading image for notification: {Url}", absoluteImageUrl);
+                    _logger.LogWarning(ex, "Error downloading image for notification from {Url}: {Message}", absoluteImageUrl, ex.Message);
                 }
             }
+            else
+            {
+                _logger.LogWarning("Cannot download image attachment - no absolute URL available. ImageUrl: {ImageUrl}, ASIN: {Asin}, BaseUrl: {BaseUrl}", 
+                    imageUrl ?? "null", asin ?? "null", startupBaseUrl ?? "null");
+            }
 
+            // Set thumbnail with best available option
+            bool thumbnailSet = false;
+            
             if (attachmentInfo != null && !string.IsNullOrWhiteSpace(attachmentFilename))
             {
                 // Use the attachment as the embed thumbnail (single image). Discord places thumbnails top-right.
                 embed["thumbnail"] = new JsonObject { ["url"] = $"attachment://{attachmentFilename}" };
-                _logger.LogDebug("Using attachment reference for thumbnail: {Reference}", $"attachment://{attachmentFilename}");
+                _logger.LogInformation("✓ Using attachment reference for thumbnail: {Reference}", $"attachment://{attachmentFilename}");
+                thumbnailSet = true;
             }
             else if (!string.IsNullOrWhiteSpace(absoluteImageUrl) &&
                      (absoluteImageUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
                       absoluteImageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
             {
+                // Fall back to direct URL reference if attachment download failed
                 embed["thumbnail"] = new JsonObject { ["url"] = Truncate(absoluteImageUrl, 2000) };
-                _logger.LogDebug("Using URL reference for image: {Url}", absoluteImageUrl);
+                _logger.LogInformation("✓ Using direct image URL for thumbnail (attachment download failed): {Url}", absoluteImageUrl);
+                thumbnailSet = true;
             }
             else if (!string.IsNullOrWhiteSpace(thumbnailUrl) &&
                      (thumbnailUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || thumbnailUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
             {
-                // For ASIN-derived thumbnails, set the thumbnail only (single image). This places it at the top-right of the embed.
+                // Use ASIN-based API thumbnail as last resort (requires Discord can reach your server)
                 embed["thumbnail"] = new JsonObject { ["url"] = thumbnailUrl };
-                _logger.LogDebug("Using computed thumbnail URL for embed: {Url}", thumbnailUrl);
+                _logger.LogInformation("✓ Using ASIN-based API thumbnail URL (requires public URL): {Url}", thumbnailUrl);
+                thumbnailSet = true;
             }
-            else
+            
+            if (!thumbnailSet)
             {
-                _logger.LogDebug("No valid image URL available for embed");
+                _logger.LogWarning("✗ No valid thumbnail available - ASIN: {Asin}, ImageUrl: {ImageUrl}, AbsoluteUrl: {AbsoluteUrl}, BaseUrl: {BaseUrl}", 
+                    asin ?? "null", imageUrl ?? "null", absoluteImageUrl ?? "null", startupBaseUrl ?? "null");
             }
 
             var embeds = new JsonArray();
@@ -523,6 +559,21 @@ namespace Listenarr.Api.Services
             {
                 // Attach fields if any
                 if (fields.Count > 0) embed["fields"] = fields;
+                
+                // Add footer with publisher and year if available
+                if (!string.IsNullOrWhiteSpace(publisher) || !string.IsNullOrWhiteSpace(year))
+                {
+                    var footerText = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(publisher) && !string.IsNullOrWhiteSpace(year)) 
+                        footerText = $"{publisher} - {year}";
+                    else if (!string.IsNullOrWhiteSpace(publisher)) 
+                        footerText = publisher;
+                    else 
+                        footerText = year ?? string.Empty;
+
+                    embed["footer"] = new JsonObject { ["text"] = footerText };
+                }
+                
                 embeds.Add(embed);
             }
 
@@ -580,7 +631,7 @@ namespace Listenarr.Api.Services
             }
 
             var payload = new JsonObject();
-            var shortContent = BuildDiscordContent(trigger, title, author);
+            var shortContent = BuildDiscordContent(trigger, title ?? string.Empty, author ?? string.Empty);
             payload["content"] = shortContent;
             // Use a friendly webhook username and avatar so messages show as coming from the app
             payload["username"] = "Listenarr";
@@ -654,6 +705,13 @@ namespace Listenarr.Api.Services
                 if (obj.TryGetPropertyValue("description", out var d) && d != null) description = d.ToString();
             }
 
+            // Decode HTML entities from all text fields
+            title = DecodeHtml(title);
+            author = DecodeHtml(author);
+            publisher = DecodeHtml(publisher);
+            narrators = DecodeHtml(narrators);
+            description = DecodeHtml(description);
+
             const int MAX_TITLE = 256;
             const int MAX_DESCRIPTION = 4096;
             const int MAX_FIELD_NAME = 256;
@@ -689,14 +747,15 @@ namespace Listenarr.Api.Services
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(absoluteImageUrl))
+            // Prioritize ASIN-based thumbnail (most reliable), then fall back to absolute imageUrl
+            if (!string.IsNullOrWhiteSpace(thumbnailUrl))
+            {
+                embed["thumbnail"] = new JsonObject { ["url"] = thumbnailUrl };
+            }
+            else if (!string.IsNullOrWhiteSpace(absoluteImageUrl))
             {
                 // Use thumbnail instead of bottom 'image' to keep the cover at the top-right and avoid large bottom images
                 embed["thumbnail"] = new JsonObject { ["url"] = Truncate(absoluteImageUrl, 2000) };
-            }
-            else if (!string.IsNullOrWhiteSpace(thumbnailUrl))
-            {
-                embed["thumbnail"] = new JsonObject { ["url"] = thumbnailUrl };
             }
 
             var embeds = new JsonArray();
@@ -818,7 +877,7 @@ namespace Listenarr.Api.Services
             }
 
             var payload = new JsonObject();
-            var shortContent = BuildDiscordContent(trigger, title, author);
+            var shortContent = BuildDiscordContent(trigger, title ?? string.Empty, author ?? string.Empty);
             payload["content"] = shortContent;
             // Use a friendly webhook username and avatar so messages show as coming from the app
             payload["username"] = "Listenarr";
@@ -830,6 +889,7 @@ namespace Listenarr.Api.Services
 
         private static string BuildDiscordContent(string trigger, string title, string author)
         {
+            // Format message based on trigger type
             if (string.Equals(trigger, "book-added", StringComparison.OrdinalIgnoreCase))
             {
                 if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
@@ -845,12 +905,52 @@ namespace Listenarr.Api.Services
                 return "A new audiobook has been added";
             }
 
+            if (string.Equals(trigger, "book-available", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
+                {
+                    return $"{title} by {author} is now available";
+                }
+
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    return $"{title} is now available";
+                }
+
+                return "An audiobook is now available";
+            }
+
+            if (string.Equals(trigger, "book-downloading", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
+                {
+                    return $"{title} by {author} is downloading";
+                }
+
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    return $"{title} is downloading";
+                }
+
+                return "An audiobook is downloading";
+            }
+
+            // Fallback for unknown triggers
             if (!string.IsNullOrWhiteSpace(title))
             {
                 return $"[{trigger}] {title}";
             }
 
             return $"[{trigger}]";
+        }
+
+        /// <summary>
+        /// Decode HTML entities from text (e.g., "&amp;amp;" becomes "&amp;", "&amp;lt;" becomes "&lt;")
+        /// </summary>
+        private static string DecodeHtml(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            return WebUtility.HtmlDecode(text);
         }
 
         /// <summary>
@@ -864,7 +964,7 @@ namespace Listenarr.Api.Services
             var cleaned = System.Text.RegularExpressions.Regex.Replace(html, @"<[^>]+>", string.Empty);
 
             // Decode HTML entities
-            cleaned = System.Net.WebUtility.HtmlDecode(cleaned);
+            cleaned = WebUtility.HtmlDecode(cleaned);
 
             // Clean up extra whitespace
             cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ").Trim();

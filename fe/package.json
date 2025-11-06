@@ -22,12 +22,13 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@microsoft/signalr": "^9.0.6",
     "@phosphor-icons/vue": "^2.2.1",
-    "@phosphor-icons/web": "^2.1.2",
-    "phosphor-icons": "^1.4.2",
+    "@vueuse/core": "^14.0.0",
     "pinia": "^3.0.3",
     "vue": "^3.5.22",
-    "vue-router": "^4.5.1"
+    "vue-router": "^4.5.1",
+    "web-vitals": "^5.1.0"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.2",

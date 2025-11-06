@@ -242,7 +242,7 @@ namespace Listenarr.Api.Services
                     using var http = new HttpClient();
 
                     // Login
-                    var loginData = new FormUrlEncodedContent(new[]
+                    using var loginData = new FormUrlEncodedContent(new[]
                     {
                         new KeyValuePair<string, string>("username", client.Username),
                         new KeyValuePair<string, string>("password", client.Password)

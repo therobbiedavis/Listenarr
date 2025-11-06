@@ -81,7 +81,7 @@ namespace Listenarr.Api.Services
             }
 
             // Allow requeue for Failed jobs or Completed (explicit re-run)
-            if (!string.Equals(job.Status, "Failed", StringComparison.OrdinalIgnoreCase) && !string.Equals(job.Status, "Completed", StringComparison.OrdinalIgnoreCase) && !string.Equals(job.Status, "Queued", StringComparison.OrdinalIgnoreCase))
+            if (!CanRequeueJobStatus(job.Status))
             {
                 _logger.LogInformation("Scan job {JobId} has status {Status} and cannot be requeued", jobId, job.Status);
                 return null;
@@ -92,6 +92,16 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Requeueing scan job {OldJobId} as new job {NewJobId} for audiobook {AudiobookId}", jobId, newJob.Id, job.AudiobookId);
             await _channel.Writer.WriteAsync(newJob);
             return newJob.Id;
+        }
+
+        /// <summary>
+        /// Determines if a job with the given status can be requeued.
+        /// </summary>
+        private static bool CanRequeueJobStatus(string status)
+        {
+            return string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status, "Queued", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
