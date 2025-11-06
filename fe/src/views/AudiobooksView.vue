@@ -209,6 +209,7 @@ import { PhGridFour, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookO
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
 import BulkEditModal from '@/components/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
@@ -218,6 +219,7 @@ import { safeText } from '@/utils/textUtils'
 const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
+const downloadsStore = useDownloadsStore()
 
 const audiobooks = computed(() => libraryStore.audiobooks || [])
 const loading = computed(() => libraryStore.loading)
@@ -287,12 +289,17 @@ const lastClickedIndex = ref<number | null>(null)
 
 // Get the download status for an audiobook
 // Returns:
+// - 'downloading': Currently being downloaded (blue border)
 // - 'no-file': No file downloaded yet (red border)
 // - 'quality-mismatch': Has file but doesn't meet quality cutoff (blue border)
 // - 'quality-match': Has file and meets quality cutoff (green border)
-// NOTE: 'downloading' status not yet implemented - would require linking Download records to Audiobook IDs
-// Currently downloads are tracked separately in DownloadsView until they complete and create AudiobookFile records
-function getAudiobookStatus(audiobook: Audiobook): 'no-file' | 'quality-mismatch' | 'quality-match' {
+function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match' {
+  // Check if this audiobook is currently being downloaded
+  const isDownloading = downloadsStore.activeDownloads.some(d => d.audiobookId === audiobook.id)
+  if (isDownloading) {
+    return 'downloading'
+  }
+
   // If there are no files at all, treat as no-file
   if (!audiobook.files || audiobook.files.length === 0) {
     return 'no-file'
@@ -684,8 +691,22 @@ function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: 
   border-bottom: 3px solid #e74c3c;
 }
 
-.audiobook-item.status-quality-mismatch .audiobook-poster-container {
+.audiobook-item.status-downloading .audiobook-poster-container {
   border-bottom: 3px solid #3498db;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    border-bottom-color: #3498db;
+  }
+  50% {
+    border-bottom-color: #5dade2;
+  }
+}
+
+.audiobook-item.status-quality-mismatch .audiobook-poster-container {
+  border-bottom: 3px solid #f39c12;
 }
 
 .audiobook-item.status-quality-match .audiobook-poster-container {
