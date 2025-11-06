@@ -434,7 +434,7 @@ namespace Listenarr.Api.Services
                 }
 
                 // Read the last N lines from the log file with shared read access
-                var lines = new List<string>();
+                List<string> lines;
                 using (var fileStream = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (var reader = new StreamReader(fileStream))
                 {
