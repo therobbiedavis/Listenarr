@@ -33,8 +33,9 @@ using Polly.Extensions.Http;
 // Pass a non-null args array to satisfy nullable analysis
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
-// Configure Serilog for file logging with rotation
+// Configure Serilog for file logging with rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
+var signalRSink = new SignalRLogSink();
 Log.Logger = new Serilog.LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.Console()
@@ -43,6 +44,7 @@ Log.Logger = new Serilog.LoggerConfiguration()
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 30, // Keep 30 days of logs
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.Sink(signalRSink) // Add SignalR sink for real-time log broadcasting
     .CreateLogger();
 
 // Use Serilog for logging
@@ -492,6 +494,9 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// Initialize the SignalR sink now that the service provider is available
+signalRSink.Initialize(app.Services);
+
 // Ensure ffprobe is available on first launch (best-effort). Installation runs in background via
 // the registered hosted service so the app can serve requests immediately.
 
@@ -553,7 +558,17 @@ if (app.Environment.IsDevelopment())
 app.MapControllers();
 
 // Map SignalR hub for real-time download updates
-app.MapHub<DownloadHub>("/hubs/downloads");
+if (app.Environment.IsDevelopment())
+{
+    app.MapHub<DownloadHub>("/hubs/downloads").RequireCors("DevOnly");
+    // Map SignalR hub for real-time log broadcasting
+    app.MapHub<LogHub>("/hubs/logs").RequireCors("DevOnly");
+}
+else
+{
+    app.MapHub<DownloadHub>("/hubs/downloads");
+    app.MapHub<LogHub>("/hubs/logs");
+}
 
     // SPA fallback: serve index.html for non-API routes so client-side routing works
     app.MapFallbackToFile("index.html");

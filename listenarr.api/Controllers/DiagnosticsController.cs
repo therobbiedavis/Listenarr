@@ -55,10 +55,14 @@ public class DiagnosticsController : ControllerBase
                 return BadRequest("Webhook URL is not configured");
             }
 
-            if (settings.EnabledNotificationTriggers == null || !settings.EnabledNotificationTriggers.Contains(request.Trigger))
+            // For test notifications, allow testing any trigger even if not enabled
+            // This lets users verify webhook configuration before enabling specific triggers
+            var triggersToUse = settings.EnabledNotificationTriggers ?? new List<string>();
+            if (!triggersToUse.Contains(request.Trigger))
             {
-                _logger.LogWarning("Test notification for trigger '{Trigger}' requested but trigger is not enabled", request.Trigger);
-                return BadRequest($"Notification trigger '{request.Trigger}' is not enabled in settings");
+                _logger.LogInformation("Test notification for trigger '{Trigger}' - trigger not enabled but allowing for testing purposes", request.Trigger);
+                // Temporarily add the trigger to the list for this test
+                triggersToUse = new List<string>(triggersToUse) { request.Trigger };
             }
 
             // Send the notification
@@ -66,7 +70,7 @@ public class DiagnosticsController : ControllerBase
                 request.Trigger,
                 request.Data ?? new object(),
                 settings.WebhookUrl,
-                settings.EnabledNotificationTriggers
+                triggersToUse
             );
 
             return Ok(new { message = "Test notification sent successfully" });

@@ -210,11 +210,20 @@
 
       <div class="section">
         <div class="section-header">
-          <h2>
-            <PhFileText />
-            Recent Logs
-          </h2>
-            <div class="section-actions">
+          <div class="section-title-with-status">
+            <h2>
+              <PhFileText />
+              Recent Logs
+            </h2>
+            <div class="connection-status" :class="{ connected: logsConnected, disconnected: !logsConnected }">
+              <span class="status-dot"></span>
+              {{ logsConnected ? 'Live' : 'Disconnected' }}
+            </div>
+          </div>
+          <div class="section-actions">
+            <button class="icon-button" @click="clearSystemLogs" title="Clear Logs">
+              <PhTrash />
+            </button>
             <button class="icon-button" @click="viewFullLogs" title="View Full Logs">
               <PhEye />
             </button>
@@ -242,11 +251,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { PhCpu, PhSpinner, PhArrowClockwise, PhWarning, PhCheckCircle, PhXCircle, PhCode, PhClock, PhDownload, PhInfo, PhHardDrives, PhFolderOpen, PhChartBar, PhCloud, PhWifiX, PhBroadcast, PhActivity, PhDesktopTower, PhMemory, PhFileText, PhEye, PhDownloadSimple } from '@phosphor-icons/vue'
+import { PhCpu, PhSpinner, PhArrowClockwise, PhWarning, PhCheckCircle, PhXCircle, PhCode, PhClock, PhDownload, PhInfo, PhHardDrives, PhFolderOpen, PhChartBar, PhCloud, PhWifiX, PhBroadcast, PhActivity, PhDesktopTower, PhMemory, PhFileText, PhEye, PhDownloadSimple, PhTrash } from '@phosphor-icons/vue'
 import { useSignalR } from '@/composables/useSignalR'
+import { useSystemLogs } from '@/composables/useSystemLogs'
 import { useRouter } from 'vue-router'
-import { getSystemInfo, getStorageInfo, getServiceHealth, getLogs, downloadLogs as downloadLogsApi } from '@/services/api'
-import type { SystemInfo, StorageInfo, ServiceHealth, LogEntry } from '@/types'
+import { getSystemInfo, getStorageInfo, getServiceHealth, downloadLogs as downloadLogsApi } from '@/services/api'
+import type { SystemInfo, StorageInfo, ServiceHealth } from '@/types'
 
 const router = useRouter()
 
@@ -279,7 +289,8 @@ const externalApis = ref({
   apis: [] as Array<{ name: string; status: string }>
 })
 
-const recentLogs = ref<LogEntry[]>([])
+// Real-time logs using SignalR
+const { logs: recentLogs, isConnected: logsConnected, clearLogs: clearSystemLogs } = useSystemLogs(50)
 
 // Load all system data
 const loadSystemData = async () => {
@@ -288,11 +299,10 @@ const loadSystemData = async () => {
   
   try {
     // Load all data in parallel
-    const [sysInfo, storage, health, logs] = await Promise.all([
+    const [sysInfo, storage, health] = await Promise.all([
       getSystemInfo(),
       getStorageInfo(),
-      getServiceHealth(),
-      getLogs(10) // Get last 10 logs for recent logs section
+      getServiceHealth()
     ])
     
     systemInfo.value = sysInfo
@@ -328,9 +338,6 @@ const loadSystemData = async () => {
         status: api.status
       }))
     }
-    
-    // Update logs
-    recentLogs.value = logs
     
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load system data'
@@ -737,6 +744,49 @@ onMounted(() => {
 .section-header h2 i {
   font-size: 1.5rem;
   color: #007acc;
+}
+
+.section-title-with-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.connection-status.connected {
+  background: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.3);
+}
+
+.connection-status.disconnected {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .section-actions {

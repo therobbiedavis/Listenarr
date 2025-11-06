@@ -110,6 +110,26 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
+        /// Test log broadcasting (generates test log messages)
+        /// </summary>
+        [HttpPost("logs/test")]
+        public ActionResult TestLogs()
+        {
+            try
+            {
+                _logger.LogInformation("Test Info log generated from API");
+                _logger.LogWarning("Test Warning log generated from API");
+                _logger.LogError("Test Error log generated from API");
+                return Ok(new { message = "Test logs generated successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating test logs");
+                return StatusCode(500, new { error = "Failed to generate test logs" });
+            }
+        }
+
+        /// <summary>
         /// Download log file
         /// </summary>
         [HttpGet("logs/download")]

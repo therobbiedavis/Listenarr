@@ -71,39 +71,18 @@
       <p>Loading logs...</p>
     </div>
 
-    <!-- Logs Table -->
-    <div v-else-if="filteredLogs.length > 0" class="logs-container">
-      <div class="logs-table">
-        <div class="table-header">
-          <div class="col-timestamp">Timestamp</div>
-          <div class="col-level">Level</div>
-          <div class="col-source">Source</div>
-          <div class="col-message">Message</div>
-        </div>
-        <div class="table-body">
-          <div 
-            v-for="log in paginatedLogs" 
-            :key="log.id"
-            :class="['log-row', `level-${log.level.toLowerCase()}`]"
-          >
-            <div class="col-timestamp">
-              <component :is="getLogIconComponent(log.level)" />
-              {{ formatTimestamp(log.timestamp) }}
-            </div>
-            <div class="col-level">
-              <span :class="['level-badge', log.level.toLowerCase()]">
-                {{ log.level }}
-              </span>
-            </div>
-            <div class="col-source">{{ log.source || '-' }}</div>
-            <div class="col-message">
-              <div class="message-text">{{ log.message }}</div>
-              <div v-if="log.exception" class="exception-text">
-                <PhWarning />
-                {{ log.exception }}
-              </div>
-            </div>
-          </div>
+    <!-- Logs Container -->
+    <div v-else-if="filteredLogs.length > 0" class="logs-wrapper">
+      <div class="logs-container">
+        <div 
+          v-for="log in paginatedLogs" 
+          :key="log.id"
+          :class="['log-entry', log.level.toLowerCase()]"
+        >
+          <component :is="getLogIconComponent(log.level)" class="log-icon" />
+          <span class="log-time">{{ formatTimestamp(log.timestamp) }}</span>
+          <span class="log-level">{{ log.level.toUpperCase() }}</span>
+          <span class="log-message">{{ log.message }}</span>
         </div>
       </div>
 
@@ -444,27 +423,45 @@ onMounted(() => {
 
 .search-input {
   position: relative;
-  display: flex;
-  align-items: center;
+  display: block;
 }
 
-.search-input i.ph-magnifying-glass {
+.search-input > svg {
   position: absolute;
   left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
   color: #666;
-  font-size: 1rem;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .search-input input {
-  flex: 1;
-  padding-left: 2.5rem;
-  padding-right: 2.5rem;
+  width: 100%;
+  padding: 0.65rem 2.75rem 0.65rem 2.5rem;
+  background: #252525;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.search-input input:focus {
+  outline: none;
+  border-color: #007acc;
+  background: #2a2a2a;
 }
 
 .clear-button {
   position: absolute;
   right: 0.5rem;
-  padding: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.35rem;
   background: transparent;
   color: #666;
   border: none;
@@ -474,11 +471,17 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
+  z-index: 1;
 }
 
 .clear-button:hover {
   color: #fff;
   background: #333;
+}
+
+.clear-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* Error Message */
@@ -525,147 +528,131 @@ onMounted(() => {
   color: #007acc;
 }
 
-/* Logs Table */
-.logs-container {
+/* Logs Container */
+.logs-wrapper {
   background: #1e1e1e;
   border: 1px solid #333;
   border-radius: 8px;
   overflow: hidden;
 }
 
-.logs-table {
-  overflow-x: auto;
-}
-
-.table-header {
-  display: grid;
-  grid-template-columns: 200px 100px 150px 1fr;
-  gap: 1rem;
-  padding: 1rem;
-  background: #252525;
-  border-bottom: 1px solid #333;
-  color: #999;
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.table-body {
+.logs-container {
   max-height: calc(100vh - 400px);
   overflow-y: auto;
+  background: #252525;
 }
 
-.log-row {
+.log-entry {
   display: grid;
-  grid-template-columns: 200px 100px 150px 1fr;
+  grid-template-columns: auto auto auto 1fr;
   gap: 1rem;
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   border-bottom: 1px solid #2a2a2a;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85rem;
+  align-items: center;
   transition: background 0.2s;
 }
 
-.log-row:hover {
-  background: #252525;
+.log-entry:hover {
+  background: #2a2a2a;
 }
 
-.log-row:last-child {
+.log-entry:last-child {
   border-bottom: none;
 }
 
-.col-timestamp {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #999;
-  font-size: 0.9rem;
-  font-family: 'Courier New', monospace;
+.log-entry.info {
+  border-left: 3px solid #007acc;
 }
 
-.col-timestamp i {
-  font-size: 1.1rem;
-  flex-shrink: 0;
+.log-entry.warning {
+  border-left: 3px solid #f39c12;
 }
 
-.level-info .col-timestamp i { color: #3498db; }
-.level-warning .col-timestamp i { color: #f39c12; }
-.level-error .col-timestamp i { color: #e74c3c; }
-.level-debug .col-timestamp i { color: #9b59b6; }
-
-.col-level {
-  display: flex;
-  align-items: center;
+.log-entry.error {
+  border-left: 3px solid #e74c3c;
 }
 
-.level-badge {
-  padding: 0.35rem 0.75rem;
-  border-radius: 12px;
+.log-entry.debug {
+  border-left: 3px solid #9b59b6;
+}
+
+.log-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.log-entry.info .log-icon svg {
+  color: #007acc;
+}
+
+.log-entry.warning .log-icon svg {
+  color: #f39c12;
+}
+
+.log-entry.error .log-icon svg {
+  color: #e74c3c;
+}
+
+.log-entry.debug .log-icon svg {
+  color: #9b59b6;
+}
+
+.log-time {
+  color: #666;
   font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
+}
+
+.log-level {
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
   letter-spacing: 0.5px;
 }
 
-.level-badge.info {
-  background: rgba(52, 152, 219, 0.15);
-  color: #3498db;
-  border: 1px solid rgba(52, 152, 219, 0.3);
+.log-entry.info .log-level {
+  background: rgba(0, 122, 204, 0.15);
+  color: #007acc;
 }
 
-.level-badge.warning {
+.log-entry.warning .log-level {
   background: rgba(243, 156, 18, 0.15);
   color: #f39c12;
-  border: 1px solid rgba(243, 156, 18, 0.3);
 }
 
-.level-badge.error {
+.log-entry.error .log-level {
   background: rgba(231, 76, 60, 0.15);
   color: #e74c3c;
-  border: 1px solid rgba(231, 76, 60, 0.3);
 }
 
-.level-badge.debug {
+.log-entry.debug .log-level {
   background: rgba(155, 89, 182, 0.15);
   color: #9b59b6;
-  border: 1px solid rgba(155, 89, 182, 0.3);
 }
 
-.col-source {
-  display: flex;
-  align-items: center;
-  color: #999;
-  font-size: 0.9rem;
+.log-message {
+  color: #ccc;
 }
 
-.col-message {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+/* Scrollbar Styles */
+.logs-container::-webkit-scrollbar {
+  width: 8px;
 }
 
-.message-text {
-  color: #fff;
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.exception-text {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background: rgba(231, 76, 60, 0.1);
-  border-left: 3px solid #e74c3c;
+.logs-container::-webkit-scrollbar-track {
+  background: #1e1e1e;
   border-radius: 4px;
-  color: #e74c3c;
-  font-size: 0.85rem;
-  font-family: 'Courier New', monospace;
-  line-height: 1.4;
 }
 
-.exception-text i {
-  flex-shrink: 0;
-  margin-top: 0.2rem;
+.logs-container::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+
+.logs-container::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 
 /* Pagination */
@@ -674,7 +661,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  background: #252525;
+  background: #1e1e1e;
   border-top: 1px solid #333;
 }
 
@@ -805,21 +792,23 @@ onMounted(() => {
     flex-direction: column;
   }
 
-  .table-header {
-    display: none;
-  }
-
-  .log-row {
+  .log-entry {
     grid-template-columns: 1fr;
-    gap: 0.75rem;
+    gap: 0.5rem;
     padding: 0.75rem;
   }
 
-  .col-timestamp,
-  .col-level,
-  .col-source,
-  .col-message {
-    display: flex;
+  .log-time {
+    order: 1;
+  }
+
+  .log-level {
+    order: 2;
+  }
+
+  .log-message {
+    order: 3;
+    grid-column: 1;
   }
 
   .pagination {
