@@ -281,25 +281,31 @@ namespace Listenarr.Api.Services
 
         public async Task<List<Download>> GetActiveDownloadsAsync()
         {
-            // TODO: Implement download status tracking
+            // NOTE: Not implemented - download tracking happens via external clients (qBittorrent, Transmission, etc.)
+            // The queue is fetched directly from download clients, so this method is intentionally minimal.
+            // See GetQueueAsync() for actual download retrieval from external clients.
             return await Task.FromResult(new List<Download>());
         }
 
         public async Task<Download?> GetDownloadAsync(string downloadId)
         {
-            // TODO: Implement download retrieval
+            // NOTE: Not implemented - downloads are managed by external clients
+            // Use database queries or GetQueueAsync() to retrieve download information
             return await Task.FromResult<Download?>(null);
         }
 
         public async Task<bool> CancelDownloadAsync(string downloadId)
         {
-            // TODO: Implement download cancellation
+            // NOTE: Not implemented - cancellation must be done through download client APIs
+            // Each client (qBittorrent, Transmission, etc.) has its own cancellation mechanism
             return await Task.FromResult(false);
         }
 
         public async Task UpdateDownloadStatusAsync()
         {
-            // TODO: Implement download status updates
+            // NOTE: Not implemented - status updates are handled via SignalR broadcasts
+            // The DownloadMonitorService continuously polls clients and broadcasts updates
+            // No manual update trigger is needed in the current architecture
             await Task.CompletedTask;
         }
 

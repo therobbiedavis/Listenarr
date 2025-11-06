@@ -151,6 +151,7 @@ import ManualImportModal from '@/components/ManualImportModal.vue'
 import type { Audiobook, SearchResult } from '@/types'
 import { safeText } from '@/utils/textUtils'
 import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle } from '@phosphor-icons/vue'
+import { logger } from '@/utils/logger'
 
 const libraryStore = useLibraryStore()
 
@@ -341,7 +342,7 @@ const formatDate = (date: string | undefined): string => {
 }
 
 const searchMissing = async () => {
-  console.log('Automatic search for all missing audiobooks')
+  logger.debug('Automatic search for all missing audiobooks')
   
   // Search all missing audiobooks sequentially
   for (const audiobook of categorizedWanted.value.missing) {
@@ -365,7 +366,7 @@ function closeManualImport() {
 }
 
 async function handleImported(result: { imported: number }) {
-  console.log('Manual import completed, imported:', result.imported)
+  logger.debug('Manual import completed, imported:', result.imported)
   // Refresh library
   await libraryStore.fetchLibrary()
   closeManualImport()
@@ -377,7 +378,7 @@ function closeManualSearch() {
 }
 
 function handleDownloaded(result: SearchResult) {
-  console.log('Downloaded:', result)
+  logger.debug('Downloaded:', result)
   // Refresh library after successful download
   setTimeout(async () => {
     await libraryStore.fetchLibrary()
@@ -386,7 +387,7 @@ function handleDownloaded(result: SearchResult) {
 }
 
 const searchAudiobook = async (item: Audiobook) => {
-  console.log('Searching audiobook:', item.title)
+  logger.debug('Searching audiobook:', item.title)
   
   searching.value[item.id] = true
   searchResults.value[item.id] = 'Searching...'
@@ -421,13 +422,13 @@ const searchAudiobook = async (item: Audiobook) => {
 }
 
 const markAsSkipped = async (item: Audiobook) => {
-  console.log('Mark as skipped:', item.title)
+  logger.debug('Mark as skipped:', item.title)
   
   try {
     await apiService.updateAudiobook(item.id, { monitored: false })
     await libraryStore.fetchLibrary()
   } catch (err) {
-    console.error('Failed to unmonitor audiobook:', err)
+    logger.error('Failed to unmonitor audiobook:', err)
   }
 }
 </script>

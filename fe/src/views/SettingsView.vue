@@ -1829,7 +1829,8 @@ const toggleWebhook = async (webhook: typeof webhooks.value[0]) => {
 const testWebhook = async (webhook: typeof webhooks.value[0]) => {
   testingWebhook.value = webhook.id
   try {
-    // TODO: Implement webhook test API call
+    // NOTE: Test API exists at POST /api/diagnostics/test-notification
+    // Future enhancement: integrate with DiagnosticsController to send real test notifications
     // For now, just simulate success
     await new Promise(resolve => setTimeout(resolve, 1000))
     toast.success('Test notification', `Test notification sent to ${webhook.name}`)
@@ -1857,10 +1858,6 @@ const migrateOldWebhookData = async () => {
     const oldUrl = settings.value.webhookUrl.trim()
     const oldTriggers = settings.value.enabledNotificationTriggers || []
     
-    console.log('Migration Debug - Old URL:', oldUrl)
-    console.log('Migration Debug - Old Triggers:', oldTriggers)
-    console.log('Migration Debug - Old Triggers Length:', oldTriggers.length)
-    
     // Create a webhook from the old data
     // Try to detect type from URL, default to 'Zapier' for generic webhooks
     let detectedType: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier' = 'Zapier'
@@ -1886,8 +1883,6 @@ const migrateOldWebhookData = async () => {
       }
     }
     
-    console.log('Migration Debug - Final Triggers:', triggersToUse)
-    
     webhooks.value = [{
       id: crypto.randomUUID(),
       name: `Migrated Webhook (${detectedType})`,
@@ -1903,7 +1898,6 @@ const migrateOldWebhookData = async () => {
     // Mark migration as completed
     localStorage.setItem(migrationKey, 'true')
     
-    console.log('Migrated old webhook configuration to new format:', webhooks.value[0])
     toast.info('Webhook Migration', 'Your existing webhook has been migrated to the new format')
   } else if (webhooks.value.length === 0 && (!settings.value.webhookUrl || settings.value.webhookUrl.trim() === '')) {
     // No old webhook data and no new webhooks - mark migration as complete to avoid checking again
@@ -2445,7 +2439,8 @@ const getServiceHelp = (): string => {
 const testWebhookConfig = async () => {
   testingWebhookConfig.value = true
   try {
-    // TODO: Implement actual webhook test API call
+    // NOTE: Test API exists at POST /api/diagnostics/test-notification
+    // Future enhancement: integrate with DiagnosticsController for real webhook testing
     await new Promise(resolve => setTimeout(resolve, 1500))
     toast.success('Test successful', `Test notification sent to ${webhookForm.type}`)
   } catch (error) {

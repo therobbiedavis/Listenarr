@@ -257,6 +257,7 @@ import { useSystemLogs } from '@/composables/useSystemLogs'
 import { useRouter } from 'vue-router'
 import { getSystemInfo, getStorageInfo, getServiceHealth, downloadLogs as downloadLogsApi } from '@/services/api'
 import type { SystemInfo, StorageInfo, ServiceHealth } from '@/types'
+import { logger } from '@/utils/logger'
 
 const router = useRouter()
 
@@ -341,7 +342,7 @@ const loadSystemData = async () => {
     
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load system data'
-    console.error('Error loading system data:', err)
+    logger.error('Error loading system data:', err)
   } finally {
     loading.value = false
   }
@@ -368,7 +369,7 @@ const getLogIconComponent = (level: string) => {
 }
 
 const refreshStatus = async () => {
-  console.log('Refreshing system status')
+  logger.debug('Refreshing system status')
   await loadSystemData()
 }
 

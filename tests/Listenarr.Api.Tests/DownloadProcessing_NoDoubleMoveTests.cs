@@ -2,8 +2,10 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Net.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 using Moq;
 using Listenarr.Api.Models;
@@ -85,19 +87,26 @@ namespace Listenarr.Api.Tests
             var repoMock = new Mock<IAudiobookRepository>();
             var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<DownloadService>>();
             var httpClient = new System.Net.Http.HttpClient();
+            var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+            httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
+            var cacheMock = new Mock<IMemoryCache>();
+            var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
+            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(db);
             var pathMappingMock = new Mock<IRemotePathMappingService>();
             var searchMock = new Mock<ISearchService>();
 
             var downloadService = new DownloadService(
                 repoMock.Object,
                 configMock.Object,
-                db,
+                dbFactoryMock.Object,
                 loggerMock.Object,
                 httpClient,
+                httpClientFactoryMock.Object,
                 scopeFactory,
                 pathMappingMock.Object,
                 searchMock.Object,
-                hubContextMock.Object);
+                hubContextMock.Object,
+                cacheMock.Object);
 
             // Act - process completed download
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);

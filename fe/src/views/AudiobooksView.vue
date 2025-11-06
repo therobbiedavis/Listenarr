@@ -290,7 +290,8 @@ const lastClickedIndex = ref<number | null>(null)
 // - 'no-file': No file downloaded yet (red border)
 // - 'quality-mismatch': Has file but doesn't meet quality cutoff (blue border)
 // - 'quality-match': Has file and meets quality cutoff (green border)
-// TODO: Add 'downloading' status when download-audiobook linking is implemented
+// NOTE: 'downloading' status not yet implemented - would require linking Download records to Audiobook IDs
+// Currently downloads are tracked separately in DownloadsView until they complete and create AudiobookFile records
 function getAudiobookStatus(audiobook: Audiobook): 'no-file' | 'quality-mismatch' | 'quality-match' {
   // If there are no files at all, treat as no-file
   if (!audiobook.files || audiobook.files.length === 0) {
