@@ -159,7 +159,7 @@ const configurationStore = useConfigurationStore()
 
 // Virtual scrolling setup
 const scrollContainer = ref<HTMLElement | null>(null)
-const ROW_HEIGHT = 140 // Approximate height of each wanted item
+const ROW_HEIGHT = 165 // Height of wanted item: 120px poster + 40px padding (20px*2) + 5px gap/border
 const BUFFER_ROWS = 3
 
 const visibleRange = ref({ start: 0, end: 20 })

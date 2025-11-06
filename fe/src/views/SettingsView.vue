@@ -1367,6 +1367,15 @@ import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
 import { useToast } from '@/services/toastService'
 import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile, getRemotePathMappings, createRemotePathMapping, updateRemotePathMapping, deleteRemotePathMapping, testDownloadClient as apiTestDownloadClient } from '@/services/api'
 
+// Generate UUID v4 compatible across all browsers
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
 const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
@@ -1768,7 +1777,7 @@ const saveWebhook = async () => {
   savingWebhook.value = true
   try {
     const webhook = {
-      id: webhookForm.id || crypto.randomUUID(),
+      id: webhookForm.id || generateUUID(),
       name: webhookForm.name.trim(),
       url: webhookForm.url.trim(),
       type: webhookForm.type as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier',
@@ -1884,7 +1893,7 @@ const migrateOldWebhookData = async () => {
     }
     
     webhooks.value = [{
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: `Migrated Webhook (${detectedType})`,
       url: oldUrl,
       type: detectedType,
@@ -1941,7 +1950,7 @@ const saveApiConfig = async () => {
     }
 
     const apiData: ApiConfiguration = {
-      id: apiForm.id || crypto.randomUUID(),
+      id: apiForm.id || generateUUID(),
       name: apiForm.name,
       baseUrl: apiForm.baseUrl,
       apiKey: apiForm.apiKey,
