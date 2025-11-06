@@ -136,6 +136,11 @@ builder.Services.AddHttpClient("DownloadClient")
 
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")
+    .ConfigureHttpClient(client =>
+    {
+        // Allow up to 2 hours for large file downloads
+        client.Timeout = TimeSpan.FromHours(2);
+    })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All

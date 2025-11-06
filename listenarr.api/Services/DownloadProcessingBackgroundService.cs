@@ -174,7 +174,10 @@ namespace Listenarr.Api.Services
                     try
                     {
                         // Skip if there is already a job for this download pending/processing/retry
-                        var existingJobs = jobsByDownloadId.ContainsKey(dl.Id) ? jobsByDownloadId[dl.Id] : new List<DownloadProcessingJob>();
+                        if (!jobsByDownloadId.TryGetValue(dl.Id, out var existingJobs))
+                        {
+                            existingJobs = new List<DownloadProcessingJob>();
+                        }
                         if (existingJobs.Any(j => j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
                         {
                             continue;

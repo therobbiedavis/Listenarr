@@ -425,9 +425,11 @@ namespace Listenarr.Api.Services
                             var contentType = imageResponse.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
 
                             // Generate filename based on ASIN or title
+                            var sanitizedTitle = title?.Replace(" ", "_").Replace("/", "_") ?? "unknown";
+                            if (string.IsNullOrWhiteSpace(sanitizedTitle)) sanitizedTitle = "unknown";
                             var filename = !string.IsNullOrWhiteSpace(asin)
                                 ? $"{asin}.jpg"
-                                : $"{title.Replace(" ", "_").Replace("/", "_").Substring(0, Math.Min(50, title.Length))}.jpg";
+                                : $"{sanitizedTitle.Substring(0, Math.Min(50, sanitizedTitle.Length))}.jpg";
 
                             attachmentInfo = new AttachmentInfo
                             {

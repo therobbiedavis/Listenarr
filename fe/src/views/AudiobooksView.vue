@@ -254,9 +254,10 @@ const updateVisibleRange = () => {
   const firstVisibleRow = Math.floor(scrollTop / ROW_HEIGHT)
   const visibleRowCount = Math.ceil(viewportHeight / ROW_HEIGHT)
   
-  // Add buffer rows
+  // Add buffer rows with boundary validation
+  const totalRows = Math.ceil(audiobooks.value.length / ITEMS_PER_ROW.value)
   const startRow = Math.max(0, firstVisibleRow - BUFFER_ROWS)
-  const endRow = firstVisibleRow + visibleRowCount + BUFFER_ROWS
+  const endRow = Math.min(firstVisibleRow + visibleRowCount + BUFFER_ROWS, totalRows)
   
   // Convert to item indices
   const startIndex = startRow * ITEMS_PER_ROW.value

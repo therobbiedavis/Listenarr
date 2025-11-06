@@ -3358,8 +3358,8 @@ namespace Listenarr.Api.Services
                     try
                     {
                         // Use factory-created HttpClient (no cookies needed for direct downloads)
+                        // Timeout is configured in the factory registration (2 hours for large files)
                         using var httpClient = _httpClientFactory.CreateClient("DirectDownload");
-                        httpClient.Timeout = TimeSpan.FromHours(DirectDownloadTimeoutHours); // Allow up to 2 hours for large files
                         
                         using (var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
                         {

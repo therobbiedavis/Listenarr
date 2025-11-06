@@ -45,9 +45,15 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
         }
       }
 
+      // Get API base URL - use same configuration as API calls
+      const apiBaseUrl = import.meta.env.DEV
+        ? ''  // In dev, SignalR uses same origin (proxied)
+        : (import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || '')
+      const hubUrl = `${apiBaseUrl}/hubs/logs`
+
       // Create SignalR connection
       connection.value = new signalR.HubConnectionBuilder()
-        .withUrl('http://localhost:5000/hubs/logs', {
+        .withUrl(hubUrl, {
           transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents,
           skipNegotiation: false,
           accessTokenFactory: () => accessToken || ''

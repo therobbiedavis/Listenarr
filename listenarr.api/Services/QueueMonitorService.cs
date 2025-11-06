@@ -140,9 +140,10 @@ namespace Listenarr.Api.Services
             }
 
             // Check for active downloads (downloading, queued, or paused with progress < 100)
+            // Use HashSet for O(1) lookups instead of multiple string comparisons
+            var activeStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "downloading", "queued" };
             var hasActiveDownloads = queue.Any(q => 
-                q.Status.Equals("downloading", StringComparison.OrdinalIgnoreCase) ||
-                q.Status.Equals("queued", StringComparison.OrdinalIgnoreCase) ||
+                activeStatuses.Contains(q.Status) ||
                 (q.Status.Equals("paused", StringComparison.OrdinalIgnoreCase) && q.Progress < 100));
 
             if (hasActiveDownloads)
