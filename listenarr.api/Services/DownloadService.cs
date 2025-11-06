@@ -870,9 +870,9 @@ namespace Listenarr.Api.Services
                         {
                             foreach (var t in beforeTorrents)
                             {
-                                if (t.ContainsKey("hash"))
+                                if (t.TryGetValue("hash", out var hashEl))
                                 {
-                                    var hash = t["hash"].GetString();
+                                    var hash = hashEl.GetString();
                                     if (!string.IsNullOrEmpty(hash))
                                         existingHashes.Add(hash);
                                 }
@@ -938,12 +938,12 @@ namespace Listenarr.Api.Services
                             // Find the new torrent by comparing with existing hashes
                             foreach (var t in afterTorrents)
                             {
-                                if (t.ContainsKey("hash"))
+                                if (t.TryGetValue("hash", out var hashEl))
                                 {
-                                    var hash = t["hash"].GetString();
+                                    var hash = hashEl.GetString();
                                     if (!string.IsNullOrEmpty(hash) && !existingHashes.Contains(hash))
                                     {
-                                        var name = t.ContainsKey("name") ? t["name"].GetString() ?? "" : "";
+                                        var name = t.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
                                         _logger.LogInformation("Found newly added qBittorrent torrent: {Name} with hash {Hash}", name, hash);
                                         return hash;
                                     }
@@ -1955,19 +1955,19 @@ namespace Listenarr.Api.Services
                 {
                     foreach (var torrent in torrents)
                     {
-                        var name = torrent.ContainsKey("name") ? torrent["name"].GetString() ?? "" : "";
-                        var progress = torrent.ContainsKey("progress") ? torrent["progress"].GetDouble() * 100 : 0;
-                        var size = torrent.ContainsKey("size") ? torrent["size"].GetInt64() : 0;
-                        var downloaded = torrent.ContainsKey("downloaded") ? torrent["downloaded"].GetInt64() : 0;
-                        var dlspeed = torrent.ContainsKey("dlspeed") ? torrent["dlspeed"].GetDouble() : 0;
-                        var eta = torrent.ContainsKey("eta") ? (int?)torrent["eta"].GetInt32() : null;
-                        var state = torrent.ContainsKey("state") ? torrent["state"].GetString() ?? "unknown" : "unknown";
-                        var hash = torrent.ContainsKey("hash") ? torrent["hash"].GetString() ?? "" : "";
-                        var addedOn = torrent.ContainsKey("added_on") ? torrent["added_on"].GetInt64() : 0;
-                        var numSeeds = torrent.ContainsKey("num_seeds") ? (int?)torrent["num_seeds"].GetInt32() : null;
-                        var numLeechs = torrent.ContainsKey("num_leechs") ? (int?)torrent["num_leechs"].GetInt32() : null;
-                        var ratio = torrent.ContainsKey("ratio") ? (double?)torrent["ratio"].GetDouble() : null;
-                        var savePath = torrent.ContainsKey("save_path") ? torrent["save_path"].GetString() ?? "" : "";
+                        var name = torrent.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
+                        var progress = torrent.TryGetValue("progress", out var progressEl) ? progressEl.GetDouble() * 100 : 0;
+                        var size = torrent.TryGetValue("size", out var sizeEl) ? sizeEl.GetInt64() : 0;
+                        var downloaded = torrent.TryGetValue("downloaded", out var downloadedEl) ? downloadedEl.GetInt64() : 0;
+                        var dlspeed = torrent.TryGetValue("dlspeed", out var dlspeedEl) ? dlspeedEl.GetDouble() : 0;
+                        var eta = torrent.TryGetValue("eta", out var etaEl) ? (int?)etaEl.GetInt32() : null;
+                        var state = torrent.TryGetValue("state", out var stateEl) ? stateEl.GetString() ?? "unknown" : "unknown";
+                        var hash = torrent.TryGetValue("hash", out var hashEl) ? hashEl.GetString() ?? "" : "";
+                        var addedOn = torrent.TryGetValue("added_on", out var addedOnEl) ? addedOnEl.GetInt64() : 0;
+                        var numSeeds = torrent.TryGetValue("num_seeds", out var numSeedsEl) ? (int?)numSeedsEl.GetInt32() : null;
+                        var numLeechs = torrent.TryGetValue("num_leechs", out var numLeechsEl) ? (int?)numLeechsEl.GetInt32() : null;
+                        var ratio = torrent.TryGetValue("ratio", out var ratioEl) ? (double?)ratioEl.GetDouble() : null;
+                        var savePath = torrent.TryGetValue("save_path", out var savePathEl) ? savePathEl.GetString() ?? "" : "";
 
                         // Apply remote path mapping for Docker scenarios
                         var localPath = !string.IsNullOrEmpty(savePath)
@@ -2152,18 +2152,18 @@ namespace Listenarr.Api.Services
                     // Convert to QueueItems (same logic as GetQBittorrentQueueAsync)
                     foreach (var (hash, torrent) in torrents)
                     {
-                        var name = torrent.ContainsKey("name") ? torrent["name"].GetString() ?? "" : "";
-                        var progress = torrent.ContainsKey("progress") ? torrent["progress"].GetDouble() * 100 : 0;
-                        var size = torrent.ContainsKey("size") ? torrent["size"].GetInt64() : 0;
-                        var downloaded = torrent.ContainsKey("downloaded") ? torrent["downloaded"].GetInt64() : 0;
-                        var dlspeed = torrent.ContainsKey("dlspeed") ? torrent["dlspeed"].GetDouble() : 0;
-                        var eta = torrent.ContainsKey("eta") ? (int?)torrent["eta"].GetInt32() : null;
-                        var state = torrent.ContainsKey("state") ? torrent["state"].GetString() ?? "unknown" : "unknown";
-                        var addedOn = torrent.ContainsKey("added_on") ? torrent["added_on"].GetInt64() : 0;
-                        var numSeeds = torrent.ContainsKey("num_seeds") ? (int?)torrent["num_seeds"].GetInt32() : null;
-                        var numLeechs = torrent.ContainsKey("num_leechs") ? (int?)torrent["num_leechs"].GetInt32() : null;
-                        var ratio = torrent.ContainsKey("ratio") ? (double?)torrent["ratio"].GetDouble() : null;
-                        var savePath = torrent.ContainsKey("save_path") ? torrent["save_path"].GetString() ?? "" : "";
+                        var name = torrent.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
+                        var progress = torrent.TryGetValue("progress", out var progressEl) ? progressEl.GetDouble() * 100 : 0;
+                        var size = torrent.TryGetValue("size", out var sizeEl) ? sizeEl.GetInt64() : 0;
+                        var downloaded = torrent.TryGetValue("downloaded", out var downloadedEl) ? downloadedEl.GetInt64() : 0;
+                        var dlspeed = torrent.TryGetValue("dlspeed", out var dlspeedEl) ? dlspeedEl.GetDouble() : 0;
+                        var eta = torrent.TryGetValue("eta", out var etaEl) ? (int?)etaEl.GetInt32() : null;
+                        var state = torrent.TryGetValue("state", out var stateEl) ? stateEl.GetString() ?? "unknown" : "unknown";
+                        var addedOn = torrent.TryGetValue("added_on", out var addedOnEl) ? addedOnEl.GetInt64() : 0;
+                        var numSeeds = torrent.TryGetValue("num_seeds", out var numSeedsEl) ? (int?)numSeedsEl.GetInt32() : null;
+                        var numLeechs = torrent.TryGetValue("num_leechs", out var numLeechsEl) ? (int?)numLeechsEl.GetInt32() : null;
+                        var ratio = torrent.TryGetValue("ratio", out var ratioEl) ? (double?)ratioEl.GetDouble() : null;
+                        var savePath = torrent.TryGetValue("save_path", out var savePathEl) ? savePathEl.GetString() ?? "" : "";
 
                         var localPath = !string.IsNullOrEmpty(savePath)
                             ? await _pathMappingService.TranslatePathAsync(client.Id, savePath)

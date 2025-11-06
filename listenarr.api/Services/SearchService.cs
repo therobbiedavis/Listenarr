@@ -348,10 +348,9 @@ namespace Listenarr.Api.Services
                 
                 foreach (var a in audibleResults.Where(a => !string.IsNullOrEmpty(a.Asin) && IsValidAsin(a.Asin!)))
                 {
-                    if (!asinToRawResult.ContainsKey(a.Asin!))
+                    if (asinToRawResult.TryAdd(a.Asin!, (a.Title, a.Author, a.ImageUrl)))
                     {
                         asinCandidates.Add(a.Asin!);
-                        asinToRawResult[a.Asin!] = (a.Title, a.Author, a.ImageUrl);
                         asinToAudibleResult[a.Asin!] = a;  // Store full Audible search result
                         asinToSource[a.Asin!] = "Audible";
                     }
