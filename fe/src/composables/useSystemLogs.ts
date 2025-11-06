@@ -45,9 +45,9 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
         }
       }
 
-      // Get API base URL - use same configuration as API calls
+      // Get API base URL - SignalR needs direct backend connection in dev
       const apiBaseUrl = import.meta.env.DEV
-        ? ''  // In dev, SignalR uses same origin (proxied)
+        ? 'http://localhost:5000'  // In dev, SignalR connects directly to backend (bypasses Vite proxy)
         : (import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || '')
       const hubUrl = `${apiBaseUrl}/hubs/logs`
 
