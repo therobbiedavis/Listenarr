@@ -119,7 +119,12 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
 
   const loadInitialLogs = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/system/logs?limit=100')
+      // Use the same base URL logic as the SignalR connection
+      const apiBaseUrl = import.meta.env.DEV
+        ? 'http://localhost:5000'
+        : (import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || '')
+      
+      const response = await fetch(`${apiBaseUrl}/api/system/logs?limit=100`)
       if (response.ok) {
         const initialLogs = await response.json() as LogEntry[]
         // Sort by timestamp descending (newest first)

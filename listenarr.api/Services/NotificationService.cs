@@ -945,7 +945,7 @@ namespace Listenarr.Api.Services
         }
 
         /// <summary>
-        /// Decode HTML entities from text (e.g., "Simon &amp;amp; Schuster" -> "Simon &amp; Schuster")
+        /// Decode HTML entities from text (e.g., "&amp;amp;" becomes "&amp;", "&amp;lt;" becomes "&lt;")
         /// </summary>
         private static string DecodeHtml(string? text)
         {

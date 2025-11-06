@@ -51,14 +51,20 @@ namespace Listenarr.Api.Services
         // Track qBittorrent sync state for incremental updates (clientId -> last rid)
         private readonly Dictionary<string, int> _qbittorrentSyncState = new();
         
+        // Track qBittorrent torrent cache for merging incremental updates (clientId -> (torrentHash -> QueueItem))
+        private readonly Dictionary<string, Dictionary<string, QueueItem>> _qbittorrentTorrentCache = new();
+        
         // Track Transmission torrent IDs and their last known state for change detection
-        private readonly Dictionary<string, Dictionary<int, long>> _transmissionTorrentStates = new(); // clientId -> (torrentId -> lastActivityDate)
+        // clientId -> (torrentId -> lastActivityDate)
+        private readonly Dictionary<string, Dictionary<int, long>> _transmissionTorrentStates = new();
         
         // Track SABnzbd last change timestamp
-        private readonly Dictionary<string, long> _sabnzbdLastChange = new(); // clientId -> last_change_timestamp
+        // clientId -> last_change_timestamp
+        private readonly Dictionary<string, long> _sabnzbdLastChange = new();
         
         // Track NZBGet last update ID
-        private readonly Dictionary<string, int> _nzbgetLastUpdate = new(); // clientId -> last_update_id
+        // clientId -> last_update_id
+        private readonly Dictionary<string, int> _nzbgetLastUpdate = new();
 
         public DownloadService(
             IAudiobookRepository audiobookRepository,
@@ -2137,19 +2143,49 @@ namespace Listenarr.Api.Services
                     var isFullUpdate = syncData.TryGetValue("full_update", out var fullUpdateElement) && 
                                       fullUpdateElement.GetBoolean();
 
+                    // Initialize or get cache for this client
+                    if (!_qbittorrentTorrentCache.ContainsKey(client.Id))
+                    {
+                        _qbittorrentTorrentCache[client.Id] = new Dictionary<string, QueueItem>();
+                    }
+
+                    var cache = _qbittorrentTorrentCache[client.Id];
+
+                    // On full update, clear the cache first
+                    if (isFullUpdate)
+                    {
+                        cache.Clear();
+                        _logger.LogDebug("qBittorrent full sync update for client {ClientId}, clearing cache", client.Id);
+                    }
+
+                    // Handle torrents_removed (torrents that have been deleted)
+                    if (syncData.TryGetValue("torrents_removed", out var torrentsRemovedElement))
+                    {
+                        var removedHashes = JsonSerializer.Deserialize<List<string>>(torrentsRemovedElement.GetRawText());
+                        if (removedHashes != null)
+                        {
+                            foreach (var hash in removedHashes)
+                            {
+                                cache.Remove(hash);
+                            }
+                            _logger.LogDebug("Removed {Count} torrents from qBittorrent cache", removedHashes.Count);
+                        }
+                    }
+
+                    // Process torrents (changed torrents in incremental update, or all torrents in full update)
                     if (!syncData.TryGetValue("torrents", out var torrentsElement))
                     {
-                        // No torrents in response (no changes)
-                        return items;
+                        // No torrent changes, return cached torrents
+                        return cache.Values.ToList();
                     }
 
                     var torrents = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, JsonElement>>>(torrentsElement.GetRawText());
                     if (torrents == null)
                     {
-                        return items;
+                        return cache.Values.ToList();
                     }
 
-                    // Convert to QueueItems (same logic as GetQBittorrentQueueAsync)
+                    // Update cache with changed torrents
                     foreach (var (hash, torrent) in torrents)
                     {
                         var name = torrent.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
@@ -2199,7 +2235,7 @@ namespace Listenarr.Api.Services
                             status = "completed";
                         }
 
-                        items.Add(new QueueItem
+                        var queueItem = new QueueItem
                         {
                             Id = hash,
                             Title = name,
@@ -2221,11 +2257,17 @@ namespace Listenarr.Api.Services
                             CanRemove = true,
                             RemotePath = savePath,
                             LocalPath = localPath
-                        });
+                        };
+
+                        // Update cache with this torrent
+                        cache[hash] = queueItem;
                     }
 
-                    _logger.LogDebug("qBittorrent sync update: {UpdateType}, {Count} torrents (rid: {Rid})", 
-                        isFullUpdate ? "full" : "incremental", items.Count, 
+                    // Return all cached torrents (merged full list)
+                    items = cache.Values.ToList();
+
+                    _logger.LogDebug("qBittorrent sync update: {UpdateType}, {ChangedCount} changed, {TotalCount} total torrents (rid: {Rid})", 
+                        isFullUpdate ? "full" : "incremental", torrents.Count, items.Count,
                         _qbittorrentSyncState.TryGetValue(client.Id, out var r) ? r : 0);
                 }
             }

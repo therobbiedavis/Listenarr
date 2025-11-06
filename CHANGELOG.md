@@ -9,18 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Production Logger Utility**: Environment-aware logging system (`fe/src/utils/logger.ts`)
-  - Automatically disabled in production (except errors) for performance
-  - Supports debug, info, warn, and error levels
-  - Integrated across entire Vue.js frontend
+- Automatically disabled in production (except errors) for performance
+- Supports debug, info, warn, and error levels
+- Integrated across entire Vue.js frontend
 - **CHANGELOG.md**: Comprehensive changelog following Keep a Changelog format
 - **SECURITY.md**: Complete security policy with vulnerability reporting process, best practices, and audit trail
 - **Audiobook Status Indicators**: Visual border colors on audiobook cards
-  - Red border: No files (missing)
-  - Blue pulsing border: Currently downloading
-  - Yellow border: Quality mismatch (has files but doesn't meet cutoff)
-  - Green border: Quality match (meets requirements)
+- Red border: No files (missing)
+- Blue pulsing border: Currently downloading
+- Yellow border: Quality mismatch (has files but doesn't meet cutoff)
+- Green border: Quality match (meets requirements)
 
 ### Fixed
+- **CRITICAL: qBittorrent Incremental Sync Cache**: Fixed torrents disappearing from queue UI on incremental updates
+- The `/api/v2/sync/maindata` endpoint only returns changed torrents, not the full list
+- Implemented `_qbittorrentTorrentCache` dictionary to maintain complete torrent state across polls
+- Incremental updates now merge into cache instead of replacing it
+- Handles `torrents_removed` to properly clean up deleted torrents
+- Full updates clear cache and rebuild from scratch
+- Queue UI now shows all torrents consistently, regardless of which ones changed
+- **Production URL Configuration**: Fixed hardcoded localhost in `loadInitialLogs` function
+- Now uses environment-aware URL: localhost in dev, configured base URL in production
+- Ensures system logs load correctly in all deployment scenarios
+- **XML Documentation**: Fixed incorrect HTML entity decode example in NotificationService
+- Changed from confusing double-encoded example to accurate single-decode: "&amp;amp;" -> "&amp;"
 - **Critical Test Failures**: Fixed 6 failing unit tests achieving 100% pass rate (50/50 tests passing)
   - Fixed 4 DownloadService constructor tests by adding IHttpClientFactory, IMemoryCache, and IDbContextFactory dependencies
   - Fixed 2 SearchController tests by properly mocking AudimetaService with required constructor parameters
@@ -45,9 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Code Documentation**: Replaced vague TODO comments with detailed NOTE explanations
-  - DownloadService: Documented 4 minimal method implementations (GetActiveDownloadsAsync, GetDownloadAsync, CancelDownloadAsync, UpdateDownloadStatusAsync)
-  - AudiobooksView: Explained downloading status requires Download-to-Audiobook linking
-  - SettingsView: Documented webhook test API integration path for future enhancement
+- DownloadService: Documented 4 minimal method implementations (GetActiveDownloadsAsync, GetDownloadAsync, CancelDownloadAsync, UpdateDownloadStatusAsync)
+- AudiobooksView: Explained downloading status requires Download-to-Audiobook linking
+- SettingsView: Documented webhook test API integration path for future enhancement
+- **Code Formatting**: Moved inline comments to separate lines for better readability
+- DownloadService: Fixed 3 inline comments in dictionary declarations following C# conventions
 - **Logger Integration**: Systematic replacement of console statements with environment-aware logging
   - Development: Full debug logging enabled
   - Production: Only error logging for performance and log pollution prevention
@@ -68,6 +82,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DownloadService methods remain minimal as downloads managed by external clients
   - Architecture decision: Queue fetched directly from qBittorrent, Transmission, SABnzbd, NZBGet
   - SignalR broadcasts handle real-time updates without polling
+- **Generic Exception Catches**: Program.cs uses generic catches for startup resilience (intentional design)
+  - Proxy configuration (line 331): Non-critical, logs warning and continues
+  - Swagger XML comments (line 378): Non-critical, logs warning and continues
+  - Database migration (line 465): Has detailed fallback strategy for test compatibility
+  - EnsureCreated fallback (line 493): Explicitly designed for test harness flexibility
+  - All catches log appropriately and allow app to start despite configuration failures
 
 ## [0.2.19] - Previous Release
 
