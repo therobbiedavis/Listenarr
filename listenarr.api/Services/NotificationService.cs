@@ -251,7 +251,7 @@ namespace Listenarr.Api.Services
             };
 
             var defaultJson = JsonSerializer.Serialize(defaultPayload, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-            var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
+            using var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
 
             try
             {

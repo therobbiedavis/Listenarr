@@ -76,6 +76,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed**: Bug fixes
 - **Security**: Vulnerability fixes
 
-[Unreleased]: https://github.com/therobbiedavis/Listenarr/compare/v0.2.19...HEAD
 [0.2.19]: https://github.com/therobbiedavis/Listenarr/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/therobbiedavis/Listenarr/releases/tag/v0.2.18

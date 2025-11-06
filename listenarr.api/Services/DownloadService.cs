@@ -107,7 +107,7 @@ namespace Listenarr.Api.Services
                             // Note: For cookie support, we still need a custom handler here
                             // This is acceptable for testing as it's not high-frequency
                             using var testClient = new HttpClient(handler);
-                            var loginData = new FormUrlEncodedContent(new[] {
+                            using var loginData = new FormUrlEncodedContent(new[] {
                                 new KeyValuePair<string,string>("username", client.Username ?? string.Empty),
                                 new KeyValuePair<string,string>("password", client.Password ?? string.Empty)
                             });
@@ -189,7 +189,7 @@ namespace Listenarr.Api.Services
                             // NZBGet uses JSON-RPC - call a harmless method like 'version'
                             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
                             var pingReq = new { method = "version", @params = new object[] { }, id = 1 };
-                            var content = new StringContent(JsonSerializer.Serialize(pingReq), Encoding.UTF8, "application/json");
+                            using var content = new StringContent(JsonSerializer.Serialize(pingReq), Encoding.UTF8, "application/json");
                             var resp = await _httpClient.PostAsync(baseUrl, content);
                             var txt = await resp.Content.ReadAsStringAsync();
                             if (!resp.IsSuccessStatusCode)
@@ -803,7 +803,7 @@ namespace Listenarr.Api.Services
                 using var httpClient = new HttpClient(handler);
             
             // Check if authentication is required by attempting login
-            var loginData = new FormUrlEncodedContent(new[]
+            using var loginData = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("username", client.Username),
                 new KeyValuePair<string, string>("password", client.Password)
@@ -911,7 +911,7 @@ namespace Listenarr.Api.Services
                 }
 
                 // Add torrent
-                var addData = new FormUrlEncodedContent(formData);
+                using var addData = new FormUrlEncodedContent(formData);
 
                 var addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
                 if (!addResponse.IsSuccessStatusCode)
@@ -1906,7 +1906,7 @@ namespace Listenarr.Api.Services
                 using (var httpClient = new HttpClient(handler))
                 {
                     // Try to login first
-                    var loginData = new FormUrlEncodedContent(new[]
+                    using var loginData = new FormUrlEncodedContent(new[]
                     {
                         new KeyValuePair<string, string>("username", client.Username),
                         new KeyValuePair<string, string>("password", client.Password)
@@ -2077,7 +2077,7 @@ namespace Listenarr.Api.Services
                 using (var httpClient = new HttpClient(handler))
                 {
                     // Try to login first
-                    var loginData = new FormUrlEncodedContent(new[]
+                    using var loginData = new FormUrlEncodedContent(new[]
                     {
                         new KeyValuePair<string, string>("username", client.Username),
                         new KeyValuePair<string, string>("password", client.Password)
@@ -2999,7 +2999,7 @@ namespace Listenarr.Api.Services
             try
             {
                 // Login
-                var loginData = new FormUrlEncodedContent(new[]
+                using var loginData = new FormUrlEncodedContent(new[]
                 {
                     new KeyValuePair<string, string>("username", client.Username),
                     new KeyValuePair<string, string>("password", client.Password)
@@ -3009,7 +3009,7 @@ namespace Listenarr.Api.Services
                 if (!loginResponse.IsSuccessStatusCode) return false;
 
                 // Delete torrent
-                var deleteData = new FormUrlEncodedContent(new[]
+                using var deleteData = new FormUrlEncodedContent(new[]
                 {
                     new KeyValuePair<string, string>("hashes", hash),
                     new KeyValuePair<string, string>("deleteFiles", "true")
