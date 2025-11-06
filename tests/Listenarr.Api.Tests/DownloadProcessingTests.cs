@@ -98,7 +98,8 @@ namespace Listenarr.Api.Tests
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,
-                cacheMock.Object);
+                cacheMock.Object,
+                null); // NotificationService is optional
 
             // Act
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
@@ -227,7 +228,8 @@ namespace Listenarr.Api.Tests
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,
-                cacheMock.Object);
+                cacheMock.Object,
+                null); // NotificationService is optional
 
             // Act
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);

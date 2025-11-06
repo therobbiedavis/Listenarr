@@ -631,7 +631,7 @@ namespace Listenarr.Api.Services
             }
 
             var payload = new JsonObject();
-            var shortContent = BuildDiscordContent(trigger, title, author);
+            var shortContent = BuildDiscordContent(trigger, title ?? string.Empty, author ?? string.Empty);
             payload["content"] = shortContent;
             // Use a friendly webhook username and avatar so messages show as coming from the app
             payload["username"] = "Listenarr";
@@ -877,7 +877,7 @@ namespace Listenarr.Api.Services
             }
 
             var payload = new JsonObject();
-            var shortContent = BuildDiscordContent(trigger, title, author);
+            var shortContent = BuildDiscordContent(trigger, title ?? string.Empty, author ?? string.Empty);
             payload["content"] = shortContent;
             // Use a friendly webhook username and avatar so messages show as coming from the app
             payload["username"] = "Listenarr";

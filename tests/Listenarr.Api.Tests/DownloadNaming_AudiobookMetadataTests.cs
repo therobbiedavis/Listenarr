@@ -106,7 +106,8 @@ namespace Listenarr.Api.Tests
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,
-                cacheMock.Object);
+                cacheMock.Object,
+                null); // NotificationService is optional
 
             // Act: call ProcessCompletedDownloadAsync which should generate a destination using audiobook metadata
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
