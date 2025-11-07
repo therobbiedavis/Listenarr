@@ -50,7 +50,42 @@ public class DiagnosticsController : ControllerBase
 
             // Get settings to check webhook configuration
             var settings = await _configurationService.GetApplicationSettingsAsync();
-            if (settings == null || string.IsNullOrWhiteSpace(settings.WebhookUrl))
+            if (settings?.Webhooks == null || !settings.Webhooks.Any())
+            {
+                return BadRequest("No webhooks are configured");
+            }
+
+            // If specific webhookId provided, test only that webhook
+            if (!string.IsNullOrWhiteSpace(request.WebhookId))
+            {
+                var webhook = settings.Webhooks.FirstOrDefault(w => w.Id == request.WebhookId);
+                if (webhook == null)
+                {
+                    return BadRequest($"Webhook with ID '{request.WebhookId}' not found");
+                }
+
+                if (!webhook.IsEnabled)
+                {
+                    _logger.LogInformation("Test notification for disabled webhook '{WebhookName}' - allowing for testing purposes", webhook.Name);
+                }
+
+                // Send to specific webhook (allow testing even if trigger not in webhook's trigger list)
+                var triggersForTest = webhook.Triggers.Contains(request.Trigger) 
+                    ? webhook.Triggers 
+                    : new List<string>(webhook.Triggers) { request.Trigger };
+
+                await _notificationService.SendNotificationAsync(
+                    request.Trigger,
+                    request.Data ?? new object(),
+                    webhook.Url,
+                    triggersForTest
+                );
+
+                return Ok(new { message = $"Test notification sent successfully to {webhook.Name}" });
+            }
+
+            // No specific webhook - use legacy behavior (single webhook URL)
+            if (string.IsNullOrWhiteSpace(settings.WebhookUrl))
             {
                 return BadRequest("Webhook URL is not configured");
             }
@@ -86,5 +121,6 @@ public class DiagnosticsController : ControllerBase
     {
         public required string Trigger { get; set; }
         public object? Data { get; set; }
+        public string? WebhookId { get; set; }
     }
 }

@@ -376,12 +376,12 @@ class ApiService {
     })
   }
 
-  async testNotification(trigger?: string, data?: Record<string, unknown>): Promise<{ success: boolean; message: string }> {
+  async testNotification(trigger?: string, data?: Record<string, unknown>, webhookId?: string): Promise<{ success: boolean; message: string }> {
     // If trigger and data are provided, use the new diagnostics endpoint
     if (trigger && data) {
       return this.request<{ success: boolean; message: string }>('/diagnostics/test-notification', {
         method: 'POST',
-        body: JSON.stringify({ trigger, data })
+        body: JSON.stringify({ trigger, data, webhookId })
       })
     }
     // Otherwise use the old configuration endpoint for backward compatibility

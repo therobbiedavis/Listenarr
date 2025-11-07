@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Professional Webhook Test Menu**: Enhanced notification testing UI
+  - Bell icon dropdown menu in AudiobookDetailView with 3 trigger options
+  - Only appears when webhooks are configured and enabled
+  - Automatic webhook selector modal for multiple webhook configurations
+  - Targeted testing: Send test notifications to specific webhooks
+  - Backend support: DiagnosticsController now accepts optional webhookId parameter
+  - Improved UX: Shows webhook name in success toast notifications
+
+### Fixed
+- **Development-Only UI Elements**: Hidden test notification buttons in production
+  - AudiobookDetailView: Wrapped 3 test notification buttons in `v-if="isDevelopment"` check
+  - Buttons only visible in development mode, preventing confusion in production deployments
+
+### Changed
+
 ## [0.2.20] - 2025-11-05
 
 ### Added
