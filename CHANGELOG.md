@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Professional Webhook Test Menu**: Enhanced notification testing UI
   - Bell icon dropdown menu in AudiobookDetailView with 3 trigger options
-  - Only appears when webhooks are configured and enabled
+  - Only appears in development builds when webhooks are configured and at least one is enabled
   - Automatic webhook selector modal for multiple webhook configurations
   - Targeted testing: Send test notifications to specific webhooks
   - Backend support: DiagnosticsController now accepts optional webhookId parameter
@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Buttons only visible in development mode, preventing confusion in production deployments
 
 ### Changed
+- **Webhook Test Menu**: Gate Test menu to development builds and require at least one enabled webhook for visibility
 
 ## [0.2.20] - 2025-11-05
 
