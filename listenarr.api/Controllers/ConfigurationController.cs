@@ -18,8 +18,10 @@
 
 using Listenarr.Api.Models;
 using Listenarr.Api.Services;
+using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
 using System.Linq;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Listenarr.Api.Controllers
 {
@@ -30,12 +32,14 @@ namespace Listenarr.Api.Controllers
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<ConfigurationController> _logger;
         private readonly IUserService _userService;
+        private readonly IHubContext<SettingsHub> _settingsHub;
 
-        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger, IUserService userService)
+        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger, IUserService userService, IHubContext<SettingsHub> settingsHub)
         {
             _configurationService = configurationService;
             _logger = logger;
             _userService = userService;
+            _settingsHub = settingsHub;
         }
 
         // API Configuration endpoints
@@ -322,7 +326,10 @@ namespace Listenarr.Api.Controllers
                 savedSettings.AdminUsername = null;
                 savedSettings.AdminPassword = null;
                 
-                _logger.LogDebug("Application settings saved successfully");
+                // Broadcast settings change to all connected clients (including Discord bot)
+                await _settingsHub.Clients.All.SendAsync("SettingsUpdated", savedSettings);
+                
+                _logger.LogDebug("Application settings saved successfully and broadcasted via SignalR");
                 return Ok(savedSettings);
             }
             catch (Exception ex)
@@ -465,4 +472,5 @@ namespace Listenarr.Api.Controllers
                 return StatusCode(500, new { success = false, message = "Failed to send test notification", error = ex.Message });
             }
         }
-}}
+    }
+}

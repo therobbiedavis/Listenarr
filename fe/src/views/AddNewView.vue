@@ -311,7 +311,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
-import type { AudibleBookMetadata, SearchResult, Audiobook } from '@/types'
+import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre } from '@/types'
 import { apiService } from '@/services/api'
 import type { OpenLibraryBook } from '@/services/openlibrary'
 import { isbnService, type ISBNBook } from '@/services/isbn'
@@ -845,15 +845,15 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         asin: audimetaData.asin || asin,
         title: audimetaData.title || 'Unknown Title',
         subtitle: audimetaData.subtitle,
-        authors: audimetaData.authors?.map((a: any) => a.name).filter((n: any) => n) as string[] || [],
-        narrators: audimetaData.narrators?.map((n: any) => n.name).filter((n: any) => n) as string[] || [],
+        authors: audimetaData.authors?.map((a: AudimetaAuthor) => a.name).filter((n: string | undefined) => n) as string[] || [],
+        narrators: audimetaData.narrators?.map((n: AudimetaNarrator) => n.name).filter((n: string | undefined) => n) as string[] || [],
         publisher: audimetaData.publisher,
         publishYear: publishYear,
         description: audimetaData.description,
         imageUrl: audimetaData.imageUrl,
         runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes * 60 : undefined,
         language: audimetaData.language,
-        genres: audimetaData.genres?.map((g: any) => g.name).filter((n: any) => n) as string[] || [],
+        genres: audimetaData.genres?.map((g: AudimetaGenre) => g.name).filter((n: string | undefined) => n) as string[] || [],
         series: audimetaData.series?.[0]?.name,
         seriesNumber: audimetaData.series?.[0]?.position,
         abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
@@ -923,15 +923,15 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
           asin: audimetaData.asin || asin,
           title: audimetaData.title || 'Unknown Title',
           subtitle: audimetaData.subtitle,
-          authors: audimetaData.authors?.map((a: any) => a.name).filter((n: string) => n) as string[] || [],
-          narrators: audimetaData.narrators?.map((n: any) => n.name).filter((n: string) => n) as string[] || [],
+          authors: audimetaData.authors?.map((a: AudimetaAuthor) => a.name).filter((n: string | undefined) => n) as string[] || [],
+          narrators: audimetaData.narrators?.map((n: AudimetaNarrator) => n.name).filter((n: string | undefined) => n) as string[] || [],
           publisher: audimetaData.publisher,
           publishYear: publishYear,
           description: audimetaData.description,
           imageUrl: audimetaData.imageUrl,
           runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes * 60 : undefined,
           language: audimetaData.language,
-          genres: audimetaData.genres?.map((g: any) => g.name).filter((n: string) => n) as string[] || [],
+          genres: audimetaData.genres?.map((g: AudimetaGenre) => g.name).filter((n: string | undefined) => n) as string[] || [],
           series: audimetaData.series?.[0]?.name,
           seriesNumber: audimetaData.series?.[0]?.position,
           abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,

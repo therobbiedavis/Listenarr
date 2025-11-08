@@ -402,6 +402,27 @@ class ApiService {
     })
   }
 
+  // Discord integration helpers
+  async getDiscordStatus(): Promise<{ success: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string }> {
+    return this.request<{ success: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string }>('/discord/status')
+  }
+
+  async registerDiscordCommands(): Promise<{ success: boolean; message?: string; body?: unknown }> {
+    return this.request<{ success: boolean; message?: string; body?: unknown }>('/discord/register-commands', { method: 'POST' })
+  }
+
+  async startDiscordBot(): Promise<{ success: boolean; message: string; status?: string }> {
+    return this.request<{ success: boolean; message: string; status?: string }>('/discord/start-bot', { method: 'POST' })
+  }
+
+  async stopDiscordBot(): Promise<{ success: boolean; message: string; status?: string }> {
+    return this.request<{ success: boolean; message: string; status?: string }>('/discord/stop-bot', { method: 'POST' })
+  }
+
+  async getDiscordBotStatus(): Promise<{ success: boolean; status: string; isRunning: boolean }> {
+    return this.request<{ success: boolean; status: string; isRunning: boolean }>('/discord/bot-status')
+  }
+
   // Startup configuration (read + write) — backend exposes under /configuration/startupconfig
   async getStartupConfig(): Promise<import('@/types').StartupConfig> {
     // Make a direct fetch here to avoid calling `request()` which itself uses

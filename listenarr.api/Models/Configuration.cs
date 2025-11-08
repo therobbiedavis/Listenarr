@@ -139,5 +139,56 @@ namespace Listenarr.Api.Models
 
         [NotMapped]
         public string? AdminPassword { get; set; }
+        
+    // Discord bot integration settings (used by external Discord bot or interactions)
+    /// <summary>
+    /// Enable (persisted) Discord bot integration settings. The bot process may read these settings to
+    /// automatically login / register commands.
+    /// </summary>
+    public bool DiscordBotEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Discord Application (Client) ID for registering application commands.
+    /// </summary>
+    public string? DiscordApplicationId { get; set; }
+
+    /// <summary>
+    /// Optional Guild ID to register commands in a single guild for faster deployment during testing.
+    /// </summary>
+    public string? DiscordGuildId { get; set; }
+
+    /// <summary>
+    /// Optional Channel ID to restrict bot interactions to a single channel. If set, the bot
+    /// will ignore interactions from other channels unless the bot configuration allows it.
+    /// </summary>
+    public string? DiscordChannelId { get; set; }
+
+    /// <summary>
+    /// Bot token used by an external bot process to authenticate to Discord.
+    /// NOTE: Storing tokens in the database has security implications. Consider using a secrets manager
+    /// for production deployments.
+    /// </summary>
+    public string? DiscordBotToken { get; set; }
+
+    /// <summary>
+    /// Primary command group name (e.g. "request"). We'll create a slash command with this group and
+    /// a subcommand for specific request types (e.g. "audiobook").
+    /// </summary>
+    public string? DiscordCommandGroupName { get; set; } = "request";
+
+    /// <summary>
+    /// Subcommand name for audiobooks (e.g. "audiobook"). Combined with the group this yields "/request audiobook".
+    /// </summary>
+    public string? DiscordCommandSubcommandName { get; set; } = "audiobook";
+
+    /// <summary>
+    /// Optional custom username for the Discord bot. If set, the bot will attempt to change its username.
+    /// </summary>
+    public string? DiscordBotUsername { get; set; }
+
+    /// <summary>
+    /// Optional avatar URL for the Discord bot. If set, the bot will attempt to change its avatar.
+    /// </summary>
+    public string? DiscordBotAvatar { get; set; }
     }
 }

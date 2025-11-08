@@ -84,6 +84,33 @@ namespace Listenarr.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DiscordApplicationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscordBotAvatar")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("DiscordBotEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DiscordBotToken")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscordBotUsername")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscordChannelId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscordCommandGroupName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscordCommandSubcommandName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiscordGuildId")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("EnableCoverArtDownload")
                         .HasColumnType("INTEGER");
 

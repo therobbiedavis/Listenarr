@@ -209,6 +209,9 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
 builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
 
+// Discord bot service for managing bot process
+builder.Services.AddSingleton<IDiscordBotService, DiscordBotService>();
+
 // Toast service for broadcasting UI toasts via SignalR
 builder.Services.AddSingleton<IToastService, ToastService>();
 
@@ -568,11 +571,15 @@ if (app.Environment.IsDevelopment())
     app.MapHub<DownloadHub>("/hubs/downloads").RequireCors("DevOnly");
     // Map SignalR hub for real-time log broadcasting
     app.MapHub<LogHub>("/hubs/logs").RequireCors("DevOnly");
+    // Map SignalR hub for real-time settings updates
+    app.MapHub<SettingsHub>("/hubs/settings").RequireCors("DevOnly");
 }
 else
 {
     app.MapHub<DownloadHub>("/hubs/downloads");
     app.MapHub<LogHub>("/hubs/logs");
+    // Map SignalR hub for real-time settings updates
+    app.MapHub<SettingsHub>("/hubs/settings");
 }
 
     // SPA fallback: serve index.html for non-API routes so client-side routing works

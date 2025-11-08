@@ -57,6 +57,14 @@
   <PhBell />
         Notifications
       </button>
+      <button 
+        @click="router.push({ hash: '#requests' })" 
+        :class="{ active: activeTab === 'requests' }"
+        class="tab-button"
+      >
+  <PhGlobe />
+        Requests
+      </button>
     </div>
 
     <div class="settings-content">
@@ -815,6 +823,190 @@
       </div>
 
       <!-- Notifications Tab -->
+      
+  <!-- Requests (Discord Bot) Tab -->
+  <div v-if="activeTab === 'requests' && settings" class="tab-content">
+        <div class="section-header">
+          <h3>Requests (Discord Bot)</h3>
+          <button @click="saveSettings" :disabled="configStore.isLoading" class="save-button">
+            <template v-if="configStore.isLoading">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else>
+              <PhFloppyDisk />
+            </template>
+            Save Settings
+          </button>
+        </div>
+
+        <div class="form-section">
+          <div class="form-group checkbox-group">
+            <label>
+              <input v-model="settings.discordBotEnabled" type="checkbox">
+              <span>
+                <strong>Enable Discord Bot Integration</strong>
+                <small>Allow an external Discord bot to read these settings and register slash commands.</small>
+              </span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>Discord Application ID</label>
+            <input v-model="settings.discordApplicationId" type="text" placeholder="Discord Application ID (client id)" />
+            <span class="form-help">Used to register application commands. For per-guild testing, set a Guild ID below.</span>
+          </div>
+
+          <div class="form-group">
+            <label>Discord Guild ID (optional)</label>
+            <input v-model="settings.discordGuildId" type="text" placeholder="Optional guild id for testing" />
+            <span class="form-help">If provided, commands will be registered to this guild for faster updates (useful for development).</span>
+          </div>
+
+          <div class="form-group">
+            <label>Discord Channel ID (optional)</label>
+            <input v-model="settings.discordChannelId" type="text" placeholder="Optional channel id to restrict commands" />
+            <span class="form-help">If provided, the bot will only accept request commands from this channel. You can also set this via the bot using the <code>/request-config set-channel</code> command.</span>
+          </div>
+
+          <!-- Invite / Register Controls -->
+          <div v-if="settings.discordApplicationId" class="form-group invite-row">
+            <label>Invite Bot to Server</label>
+            <div class="invite-controls">
+              <button @click="openInviteLink" class="invite-button">Open Invite</button>
+              <button @click="copyInviteLink" class="icon-button">Copy Invite Link</button>
+              <button @click="checkDiscordStatus" class="icon-button" :disabled="checkingDiscord">Check Install</button>
+              <button @click="registerCommands" class="save-button" :disabled="registeringCommands || !settings.discordBotToken">Register commands now</button>
+            </div>
+            <div class="form-help">
+              Use this to invite the bot with the minimal permissions needed for requests. Make sure <strong>Discord Application ID</strong> is filled in above. Optionally set a Guild ID to preselect a server.
+            </div>
+            <div v-if="inviteLinkPreview" class="invite-link-preview">
+              <small>Preview: <a :href="inviteLinkPreview" target="_blank" rel="noopener noreferrer">{{ inviteLinkPreview }}</a></small>
+            </div>
+
+            <div v-if="discordStatus" class="discord-status">
+              <template v-if="discordStatus.installed === true">
+                <span class="status-pill installed">Installed in guild {{ discordStatus.guildId || '' }}</span>
+              </template>
+              <template v-else-if="discordStatus.installed === false">
+                <span class="status-pill not-installed">Not installed in configured guild</span>
+              </template>
+              <template v-else>
+                <span class="status-pill unknown">Token validated</span>
+              </template>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Bot Token</label>
+            <div class="password-field">
+              <input :type="showPassword ? 'text' : 'password'" v-model="settings.discordBotToken" placeholder="Bot token (keep secret)" class="admin-input password-input" />
+              <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide token' : 'Show token'">
+                <template v-if="showPassword">
+                  <PhEyeSlash />
+                </template>
+                <template v-else>
+                  <PhEye />
+                </template>
+              </button>
+            </div>
+            <span class="form-help">The bot process will use this token to login. Be careful with this value.</span>
+          </div>
+
+          <div class="form-group">
+            <label>Command Group Name</label>
+            <input v-model="settings.discordCommandGroupName" type="text" placeholder="request" />
+            <span class="form-help">Primary command group (e.g. <code>request</code>)</span>
+          </div>
+
+          <div class="form-group">
+            <label>Subcommand Name</label>
+            <input v-model="settings.discordCommandSubcommandName" type="text" placeholder="audiobook" />
+            <span class="form-help">Subcommand for audiobooks (e.g. <code>audiobook</code>) — results in <code>/request audiobook &lt;title&gt;</code></span>
+          </div>
+
+          <div class="form-group">
+            <label>Bot Username (optional)</label>
+            <input v-model="settings.discordBotUsername" type="text" placeholder="Custom bot username" />
+            <span class="form-help">Optional custom username for the bot. Leave empty to use the default username from Discord.</span>
+          </div>
+
+          <div class="form-group">
+            <label>Bot Avatar URL (optional)</label>
+            <input v-model="settings.discordBotAvatar" type="url" placeholder="https://example.com/avatar.png" />
+            <span class="form-help">Optional avatar image URL for the bot. Leave empty to use the default avatar from Discord.</span>
+          </div>
+        </div>
+
+        <!-- Discord Bot Process Controls -->
+        <div class="form-section">
+          <h4><PhRobot /> Discord Bot Process Control</h4>
+          
+          <div class="bot-status-section">
+            <div class="bot-status-display">
+              <div class="status-indicator" :class="botStatusClass">
+                <PhCircle v-if="botStatus === 'unknown'" />
+                <PhSpinner v-else-if="botStatus === 'checking'" class="ph-spin" />
+                <PhCheckCircle v-else-if="botStatus === 'running'" />
+                <PhXCircle v-else-if="botStatus === 'stopped'" />
+                <PhWarning v-else />
+              </div>
+              <div class="status-text">
+                <strong>Bot Status:</strong> {{ botStatusText }}
+              </div>
+            </div>
+            
+            <div class="bot-controls">
+              <button 
+                @click="checkBotStatus" 
+                class="status-button"
+                :disabled="checkingBotStatus"
+              >
+                <template v-if="checkingBotStatus">
+                  <PhSpinner class="ph-spin" />
+                </template>
+                <template v-else>
+                  <PhArrowClockwise />
+                </template>
+                Refresh Status
+              </button>
+              
+              <button 
+                @click="startBot" 
+                class="start-button"
+                :disabled="startingBot || botStatus === 'running'"
+              >
+                <template v-if="startingBot">
+                  <PhSpinner class="ph-spin" />
+                </template>
+                <template v-else>
+                  <PhPlay />
+                </template>
+                Start Bot
+              </button>
+              
+              <button 
+                @click="stopBot" 
+                class="stop-button"
+                :disabled="stoppingBot || botStatus === 'stopped'"
+              >
+                <template v-if="stoppingBot">
+                  <PhSpinner class="ph-spin" />
+                </template>
+                <template v-else>
+                  <PhStop />
+                </template>
+                Stop Bot
+              </button>
+            </div>
+          </div>
+          
+          <div class="form-help">
+            Control the Discord bot process directly from here. The bot will use the token configured above to connect to Discord and register slash commands.
+          </div>
+        </div>
+      </div>
+
       <div v-if="activeTab === 'notifications'" class="tab-content">
         <div class="section-header">
           <div class="section-title-wrapper">
@@ -1358,6 +1550,8 @@ import {
   PhFolder, PhLinkSimple, PhBrowser, PhFloppyDisk, PhFiles,
   // Users
   PhUsers, PhUserCircle,
+  // Bot Controls
+  PhRobot, PhPlay, PhStop, PhArrowClockwise, PhCircle,
   // Misc
   PhTextAa, PhEye, PhEyeSlash
 } from '@phosphor-icons/vue'
@@ -1380,7 +1574,7 @@ const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
 const toast = useToast()
-const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'notifications'>('indexers')
+const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'>('indexers')
 const showApiForm = ref(false)
 const showClientForm = ref(false)
 const showIndexerForm = ref(false)
@@ -1542,6 +1736,27 @@ const adminUsers = ref<Array<{ id: number; username: string; email?: string; isA
       if (!port || port <= 0 || port > 65535) errs.push('US proxy port must be between 1 and 65535')
     }
     return errs
+  })
+
+  // Bot status computed properties
+  const botStatusClass = computed(() => {
+    switch (botStatus.value) {
+      case 'running': return 'status-running'
+      case 'stopped': return 'status-stopped'
+      case 'checking': return 'status-checking'
+      case 'error': return 'status-error'
+      default: return 'status-unknown'
+    }
+  })
+
+  const botStatusText = computed(() => {
+    switch (botStatus.value) {
+      case 'running': return 'Running'
+      case 'stopped': return 'Stopped'
+      case 'checking': return 'Checking...'
+      case 'error': return 'Error'
+      default: return 'Unknown'
+    }
   })
 
   // Expose a toggle function for unit tests and template interactions that
@@ -2382,6 +2597,164 @@ const isWebhookFormValid = computed(() => {
          !webhookFormErrors.triggers
 })
 
+// Invite link helpers and Discord status
+// Ensure Manage Messages (8192) is included so the bot can delete ack/select messages
+const PERMISSIONS_MINIMAL = 19456 | 8192 // 19456 (existing minimal) OR 8192 (Manage Messages) => 27648
+const inviteLinkPreview = computed(() => {
+  const appId = settings.value?.discordApplicationId?.trim()
+  if (!appId) return ''
+  const scopes = encodeURIComponent('bot applications.commands')
+  const guildPart = settings.value?.discordGuildId?.trim() ? `&guild_id=${encodeURIComponent(settings.value.discordGuildId)}` : ''
+  return `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(appId)}&permissions=${PERMISSIONS_MINIMAL}&scope=${scopes}${guildPart}`
+})
+
+const openInviteLink = () => {
+  if (!inviteLinkPreview.value) {
+    toast.error('Missing Application ID', 'Please enter the Discord Application ID first.')
+    return
+  }
+  window.open(inviteLinkPreview.value, '_blank', 'noopener')
+}
+
+const copyInviteLink = async () => {
+  if (!inviteLinkPreview.value) {
+    toast.error('Missing Application ID', 'Please enter the Discord Application ID first.')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(inviteLinkPreview.value)
+    toast.success('Copied', 'Invite link copied to clipboard.')
+  } catch (err) {
+    console.error('Failed to copy invite link', err)
+    toast.error('Copy failed', 'Unable to copy invite link to clipboard.')
+  }
+}
+
+const discordStatus = ref<{ success?: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string } | null>(null)
+const checkingDiscord = ref(false)
+const registeringCommands = ref(false)
+
+// Bot process control
+const botStatus = ref<'unknown' | 'checking' | 'running' | 'stopped' | 'error'>('unknown')
+const checkingBotStatus = ref(false)
+const startingBot = ref(false)
+const stoppingBot = ref(false)
+
+const checkDiscordStatus = async () => {
+  if (!settings.value?.discordBotToken) {
+    toast.error('Missing token', 'Please enter the bot token to check install status.')
+    return
+  }
+  checkingDiscord.value = true
+  try {
+    const resp = await apiService.getDiscordStatus()
+    discordStatus.value = resp
+  } catch (err) {
+    console.error('Failed to check discord status', err)
+    const errorMessage = formatApiError(err)
+    toast.error('Status failed', errorMessage)
+  } finally {
+    checkingDiscord.value = false
+  }
+}
+
+const registerCommands = async () => {
+  if (!settings.value?.discordBotToken) {
+    toast.error('Missing token', 'Please enter the bot token to register commands.')
+    return
+  }
+  registeringCommands.value = true
+  try {
+    const resp = await apiService.registerDiscordCommands()
+    if (resp?.success) {
+      toast.success('Registered', resp.message || 'Commands registered')
+      // Refresh status after registering
+      await checkDiscordStatus()
+    } else {
+      toast.error('Register failed', JSON.stringify(resp?.body || resp?.message || resp))
+    }
+  } catch (err) {
+    console.error('Failed to register commands', err)
+    const errorMessage = formatApiError(err)
+    toast.error('Register failed', errorMessage)
+  } finally {
+    registeringCommands.value = false
+  }
+}
+
+// Bot process control functions
+const checkBotStatus = async () => {
+  checkingBotStatus.value = true
+  botStatus.value = 'checking'
+  try {
+    const resp = await apiService.getDiscordBotStatus()
+    if (resp.success) {
+      botStatus.value = resp.isRunning ? 'running' : 'stopped'
+      toast.info('Bot Status', resp.status)
+    } else {
+      botStatus.value = 'error'
+      toast.error('Status check failed', resp.status || 'Failed to check bot status')
+    }
+  } catch (err) {
+    console.error('Failed to check bot status', err)
+    botStatus.value = 'error'
+    const errorMessage = formatApiError(err)
+    toast.error('Status check failed', errorMessage)
+  } finally {
+    checkingBotStatus.value = false
+  }
+}
+
+const startBot = async () => {
+  if (!settings.value?.discordBotToken) {
+    toast.error('Missing token', 'Please enter the bot token to start the bot.')
+    return
+  }
+  startingBot.value = true
+  try {
+    const resp = await apiService.startDiscordBot()
+    if (resp.success) {
+      botStatus.value = 'running'
+      toast.success('Bot Started', resp.message || 'Discord bot started successfully')
+      // Auto-refresh status after a short delay
+      setTimeout(() => checkBotStatus(), 2000)
+    } else {
+      botStatus.value = 'error'
+      toast.error('Start failed', resp.message || 'Failed to start Discord bot')
+    }
+  } catch (err) {
+    console.error('Failed to start bot', err)
+    botStatus.value = 'error'
+    const errorMessage = formatApiError(err)
+    toast.error('Start failed', errorMessage)
+  } finally {
+    startingBot.value = false
+  }
+}
+
+const stopBot = async () => {
+  stoppingBot.value = true
+  try {
+    const resp = await apiService.stopDiscordBot()
+    if (resp.success) {
+      botStatus.value = 'stopped'
+      toast.success('Bot Stopped', resp.message || 'Discord bot stopped successfully')
+      // Auto-refresh status after a short delay
+      setTimeout(() => checkBotStatus(), 2000)
+    } else {
+      botStatus.value = 'error'
+      toast.error('Stop failed', resp.message || 'Failed to stop Discord bot')
+    }
+  } catch (err) {
+    console.error('Failed to stop bot', err)
+    botStatus.value = 'error'
+    const errorMessage = formatApiError(err)
+    toast.error('Stop failed', errorMessage)
+  } finally {
+    stoppingBot.value = false
+  }
+}
+
 const validateWebhookField = (field: 'name' | 'url' | 'type' | 'triggers') => {
   switch (field) {
     case 'name':
@@ -2469,8 +2842,8 @@ const resetWebhookFormErrors = () => {
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
-  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'notifications'
-  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'notifications'].includes(hash)) {
+  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'
+  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'requests', 'notifications'].includes(hash)) {
     activeTab.value = hash
   } else {
     // Default to indexers and update URL
@@ -2492,7 +2865,8 @@ const loaded = reactive({
   profiles: false,
   admins: false,
   mappings: false,
-  general: false
+  general: false,
+  requests: false
 })
 
 async function loadTabContents(tab: string) {
@@ -2551,6 +2925,19 @@ async function loadTabContents(tab: string) {
           }
 
           loaded.general = true
+        }
+        break
+      case 'requests':
+        if (!loaded.requests) {
+          // Requests tab needs application settings and quality profiles
+          await configStore.loadApplicationSettings()
+          settings.value = configStore.applicationSettings
+          try {
+            await loadQualityProfiles()
+          } catch (e) {
+            console.debug('Failed to load quality profiles for requests tab', e)
+          }
+          loaded.requests = true
         }
         break
       case 'notifications':
@@ -3568,6 +3955,78 @@ onMounted(async () => {
   color: #868e96;
   font-style: italic;
   line-height: 1.5;
+}
+
+/* Invite controls for Discord bot */
+.invite-row {
+  margin-top: 1rem;
+}
+.invite-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.invite-button {
+  padding: 0.6rem 1rem;
+  background: linear-gradient(135deg, #20c997 0%, #198754 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.invite-button:hover {
+  transform: translateY(-1px);
+}
+.invite-link-preview small a {
+  color: #74c0fc;
+  text-decoration: underline;
+}
+.invite-link-preview small a {
+  /* allow long oauth links to wrap cleanly in the preview */
+  word-break: break-all;
+  white-space: normal;
+}
+.invite-controls .icon-button {
+  /* When using icon-style buttons inside invite-controls we want them to
+     expand to fit labels (e.g. "Copy Invite Link") instead of being forced
+     into the square icon-button size used elsewhere in the UI. */
+  width: auto;
+  height: auto;
+  min-width: 36px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.95rem;
+}
+
+.invite-controls .save-button {
+  /* keep primary register action prominent but avoid forcing full-width */
+  white-space: nowrap;
+}
+.discord-status {
+  margin-top: 0.5rem;
+}
+.status-pill {
+  display: inline-block;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.status-pill.installed {
+  background-color: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.18);
+}
+.status-pill.not-installed {
+  background-color: rgba(244, 67, 54, 0.08);
+  color: #ff6b6b;
+  border: 1px solid rgba(244, 67, 54, 0.12);
+}
+.status-pill.unknown {
+  background-color: rgba(77, 171, 247, 0.08);
+  color: #4dabf7;
+  border: 1px solid rgba(77, 171, 247, 0.12);
 }
 
 .checkbox-group {
@@ -4804,6 +5263,130 @@ onMounted(async () => {
 
   .trigger-count {
     align-self: flex-start;
+  }
+}
+
+/* Discord Bot Process Controls */
+.bot-status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.bot-status-display {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background-color: var(--card-bg);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.status-indicator.status-running {
+  color: #4caf50;
+}
+
+.status-indicator.status-stopped {
+  color: #f44336;
+}
+
+.status-indicator.status-checking {
+  color: #ff9800;
+}
+
+.status-indicator.status-error {
+  color: #f44336;
+}
+
+.status-indicator.status-unknown {
+  color: #9e9e9e;
+}
+
+.status-text {
+  font-size: 0.9rem;
+}
+
+.bot-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.status-button,
+.start-button,
+.stop-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.status-button {
+  background-color: #2196f3;
+  color: white;
+}
+
+.status-button:hover:not(:disabled) {
+  background-color: #1976d2;
+}
+
+.start-button {
+  background-color: #4caf50;
+  color: white;
+}
+
+.start-button:hover:not(:disabled) {
+  background-color: #388e3c;
+}
+
+.stop-button {
+  background-color: #f44336;
+  color: white;
+}
+
+.stop-button:hover:not(:disabled) {
+  background-color: #d32f2f;
+}
+
+.status-button:disabled,
+.start-button:disabled,
+.stop-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Mobile styles for bot controls */
+@media (max-width: 768px) {
+  .bot-status-display {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .bot-controls {
+    width: 100%;
+  }
+
+  .status-button,
+  .start-button,
+  .stop-button {
+    flex: 1;
+    justify-content: center;
   }
 }
 </style>

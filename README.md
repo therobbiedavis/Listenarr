@@ -51,7 +51,6 @@ cd .\publish\win-x64
 .\Listenarr.Api.exe
 ```
 
-#### MacOS (port 5000 is used by Airplay, please disable or override port)
 ```terminal
 cd ./publish/osx-x64  # or osx-arm64 for Apple Silicon
 chmod +x Listenarr.Api
@@ -74,7 +73,6 @@ If you need to override the port, use `--urls "http://localhost:5656"` when runn
 ### Docker
 
 ```bash
-docker-compose up -d
 ```
 
 **Service will be available at:**
@@ -86,10 +84,9 @@ The Docker image includes both the backend API and frontend in a single containe
 - `latest` / `stable` - Latest stable release
 - `canary` - Latest canary build (pre-release)
 - `canary-X.Y.Z` - Specific canary version
-- `nightly` - Latest nightly build (pre-release)
 - `nightly-X.Y.Z` - Specific nightly version
 - `X.Y.Z` - Specific release version
-
+LISTENARR_URL=http://localhost:5000 node index.js
 ### Manual Setup
 
 If you prefer to run the services separately:
