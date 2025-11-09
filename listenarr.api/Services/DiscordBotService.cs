@@ -15,12 +15,16 @@ namespace Listenarr.Api.Services
     public class DiscordBotService : IDiscordBotService
     {
         private readonly ILogger<DiscordBotService> _logger;
+        private readonly IStartupConfigService _startupConfigService;
+        private readonly IHostEnvironment _hostEnvironment;
         private Process? _botProcess;
         private readonly object _processLock = new object();
 
-        public DiscordBotService(ILogger<DiscordBotService> logger)
+        public DiscordBotService(ILogger<DiscordBotService> logger, IStartupConfigService startupConfigService, IHostEnvironment hostEnvironment)
         {
             _logger = logger;
+            _startupConfigService = startupConfigService;
+            _hostEnvironment = hostEnvironment;
         }
 
         public async Task<bool> StartBotAsync()
@@ -42,10 +46,24 @@ namespace Listenarr.Api.Services
 
             try
             {
+                var botDirectory = Path.Combine(_hostEnvironment.ContentRootPath, "tools", "discord-bot");
+                if (!Directory.Exists(botDirectory))
+                {
+                    _logger.LogError("Discord bot directory not found at {Path}", botDirectory);
+                    return false;
+                }
+
+                var indexJsPath = Path.Combine(botDirectory, "index.js");
+                if (!File.Exists(indexJsPath))
+                {
+                    _logger.LogError("Discord bot index.js not found at {Path}", indexJsPath);
+                    return false;
+                }
+
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "cmd.exe" : "bash",
-                    WorkingDirectory = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "tools", "discord-bot"),
+                    WorkingDirectory = botDirectory,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -53,7 +71,16 @@ namespace Listenarr.Api.Services
                 };
 
                 // Set environment variable for API URL
-                startInfo.EnvironmentVariables["LISTENARR_URL"] = "http://localhost:5000";
+                var config = _startupConfigService.GetConfig();
+                var protocol = (config?.EnableSsl ?? false) ? "https" : "http";
+                var port = config?.Port ?? 5000;
+                var urlBase = config?.UrlBase?.TrimEnd('/') ?? "";
+                
+                // For production, try to get the URL from environment or use localhost as fallback
+                var listenarrUrl = Environment.GetEnvironmentVariable("LISTENARR_PUBLIC_URL") 
+                    ?? $"{protocol}://localhost:{port}{urlBase}";
+                
+                startInfo.EnvironmentVariables["LISTENARR_URL"] = listenarrUrl;
 
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {

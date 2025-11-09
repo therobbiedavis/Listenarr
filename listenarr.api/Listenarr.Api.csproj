@@ -98,4 +98,11 @@
     <None Remove="config\config.json" />
   </ItemGroup>
 
+  <!-- Include tools directory in publish for Discord bot -->
+  <ItemGroup>
+    <Content Include="tools\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

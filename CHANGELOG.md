@@ -5,10 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.25] - 2025-11-09
+### Added
+- **Docker as Primary Production Method**: Promoted Docker as the recommended production deployment method in README.md
+  - Docker section moved to first position with clear benefits highlighted
+  - Added Docker Compose example for easier production deployments
+  - Emphasized Docker's advantages: isolation, updates, consistency, security, and included Node.js
+- **Pre-built Executables for Production**: Promoted executable downloads as secondary production deployment method
+  - Clear instructions for downloading from GitHub Releases
+  - Emphasized self-contained executables with no .NET Runtime requirement
+  - Added Node.js and LISTENARR_PUBLIC_URL prerequisites for Discord bot functionality
+  - Reorganized deployment options to prioritize Docker over executables for production
+- **Docker Environment Configuration**: Added `LISTENARR_PUBLIC_URL` environment variable to `docker-compose.yml`
+  - Required for Discord bot functionality in Docker production deployments
+  - Enables proper URL configuration for bot interactions with the Listenarr API
+  - Users must replace `https://your-domain.com` with their actual domain or IP address
+- **Non-Docker Production Deployment Guide**: Added comprehensive instructions for production deployments without Docker
+  - Publishing instructions for Windows, Linux, and macOS platforms
+  - Environment variable configuration for Discord bot functionality
+  - IIS deployment guidance for Windows servers
+  - Node.js installation requirements for Discord bot support
+
+### Fixed
+- **Docker Runtime**: Added Node.js 20 installation to final runtime image for Discord bot support
+  - Resolves "Failed to start bot" errors in Docker production deployments
+  - Ensures Node.js runtime is available for Discord bot process execution
+
 ## [0.2.24] - 2025-11-08
 ### Fixed
+- **Database migration: Discord settings**: recreated migration with new timestamp `20251109043000_AddDiscordSettingsToApplicationSettings` to ensure it runs on all databases, including those with broken migration history
+  - Migration adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
   - **Automatic fix for existing users**: Renamed migration ensures it executes regardless of previous broken migration state, fixing databases without manual intervention
   - Verified migration applies correctly and resolves 'no such column' errors
+- **Discord bot service**: fixed production deployment issues and URL configuration
+  - **Working directory**: Changed from hardcoded relative path to use `IHostEnvironment.ContentRootPath` for correct path resolution in published applications
+  - **Directory inclusion**: Added tools directory to project publish to ensure discord-bot files are available in production
+  - **URL configuration**: Added support for `LISTENARR_PUBLIC_URL` environment variable for production deployments, with fallback to startup config
+  - **Error handling**: Added validation for bot directory and index.js existence with detailed error logging
+  - **Dependencies**: Injected `IStartupConfigService` and `IHostEnvironment` for proper configuration access
 
 ## [0.2.23] - 2025-11-08
 
