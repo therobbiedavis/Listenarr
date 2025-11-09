@@ -5,12 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.24] - 2025-11-08
+### Fixed
+  - **Automatic fix for existing users**: Renamed migration ensures it executes regardless of previous broken migration state, fixing databases without manual intervention
+  - Verified migration applies correctly and resolves 'no such column' errors
+
 ## [0.2.23] - 2025-11-08
 
 ### Fixed
-- **Database migration: Discord settings**: recreated and applied missing Discord-related columns migration to `ApplicationSettings` to resolve runtime SQLite errors when upgrading older databases
-  - Migration `20251109042119_AddDiscordSettingsToApplicationSettings` adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
-  - Verified migration applies correctly and resolves 'no such column' errors
+- **Database migration: Discord settings**: recreated migration with new timestamp `20251109043000_AddDiscordSettingsToApplicationSettings` to ensure it runs on all databases, including those with broken migration history
+  - Migration adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
 
 ## [0.2.22] - 2025-11-08
 
