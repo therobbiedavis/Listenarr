@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.2.25</Version>
-    <AssemblyVersion>0.2.25</AssemblyVersion>
+    <Version>0.2.26</Version>
+    <AssemblyVersion>0.2.26</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -102,7 +102,7 @@
   <ItemGroup>
     <Content Include="tools\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <!-- Ensure tools are included in the publish output that is copied into the runtime image -->
+      
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
