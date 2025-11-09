@@ -5,11 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.23] - 2025-11-08
+
+### Fixed
+- **Database migration: Discord settings**: recreated and applied missing Discord-related columns migration to `ApplicationSettings` to resolve runtime SQLite errors when upgrading older databases
+  - Migration `20251109042119_AddDiscordSettingsToApplicationSettings` adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
+  - Verified migration applies correctly and resolves 'no such column' errors
+
 ## [0.2.22] - 2025-11-08
 
 ### Fixed
-- **Database migration: Discord settings**: add missing Discord-related columns to `ApplicationSettings` to avoid runtime SQLite errors when upgrading older databases
-  - Adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
 - **Backend: warning cleanup**: silence CS1998 compiler warnings in `DiscordBotService` by returning completed tasks for synchronous methods (StopBotAsync, IsBotRunningAsync)
 
 ## [0.2.21] - 2025-11-08
