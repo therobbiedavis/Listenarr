@@ -5,21 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.29] - 2025-11-09
+
+### Changed
+
+- Key changes for 0.2.29 (URL resolution & Docker-aware fallbacks)
+  - Added `IHttpContextAccessor` usage/injection to support constructing the Listenarr public URL from the current HTTP request when available (useful behind reverse proxies)
+  - Improved URL resolution priority (used when the app needs to provide an absolute Listenarr URL to helper processes or external systems):
+    1. `LISTENARR_PUBLIC_URL` environment variable (highest priority)
+    2. Current HTTP request (uses `IHttpContextAccessor` and honors X-Forwarded-* headers)
+    3. Startup config (configured via the existing startup JSON/config service)
+    4. Fallback: `host.docker.internal` (when running in Docker) or `localhost` (non-Docker fallback)
+  - Docker-aware fallback: when `DOCKER_ENV` environment variable is present/true the runtime will prefer `host.docker.internal` instead of `localhost` for local host fallbacks
+  - Additional per-step logging added to help diagnose URL resolution issues (logs which source was selected and any header-based values used)
+
+### Recommendations
+
+- Update your runtime Dockerfile to explicitly set the `DOCKER_ENV` environment variable so Docker-aware fallbacks are enabled. Example (in `listenarr.api/Dockerfile.runtime`):
+
+  ENV DOCKER_ENV=true
+
+- Prefer setting `LISTENARR_PUBLIC_URL` in production environments (recommended) so the runtime does not need to infer the value from request headers.
+
+### Notes
+
+- These changes make URL resolution more robust behind reverse proxies and in Docker-based deployments, and provide better logging to debug any cases where the helper bot (or external integrations) cannot reach the Listenarr API.
+
 ## [0.2.28] - 2025-11-09
 
 ### Changed
 
-- Publish and deployment reliability improvements
+ - Publish and deployment reliability improvements
   - Ensure `tools/**` is included in publish output and runtime images by updating `listenarr.api/Listenarr.Api.csproj` and adding an explicit MSBuild `CopyToolsToPublish` target as a fallback.
   - The runtime Dockerfile (`listenarr.api/Dockerfile.runtime`) now accepts a build-arg `PUBLISH_DIR` and copies from that path; CI workflows were updated to pass the appropriate publish directory so images are built from the exact CI publish output (for example `listenarr.api/publish/linux-x64`).
   - CI and Canary workflows: added publish sanity checks, artifact upload (for debug), a fail-fast check in CI, and a copy-then-verify safety step in Canary so builds abort or repair when `tools` is missing from publish output.
 
 ### Fixed
 
-- Verified that local `dotnet publish` now includes `listenarr.api/publish/tools/discord-bot` and adjusted workflows and Docker build logic to make image builds deterministic and reproducible locally and in CI.
-
-
-
+ - Verified that local `dotnet publish` now includes `listenarr.api/publish/tools/discord-bot` and adjusted workflows and Docker build logic to make image builds deterministic and reproducible locally and in CI.
 ## [0.2.27] - 2025-11-09
 
 ### Fixed
