@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.2.27</Version>
-    <AssemblyVersion>0.2.27</AssemblyVersion>
+    <Version>0.2.28</Version>
+    <AssemblyVersion>0.2.28</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -35,44 +35,44 @@
 
   
   <PropertyGroup>
-    <!-- Skip frontend build if explicitly requested (e.g., when Node.js is unavailable) -->
+    
     <SkipFrontendBuild Condition="'$(SkipFrontendBuild)'==''">false</SkipFrontendBuild>
   
     <FrontendDir>$(MSBuildProjectDirectory)\..\fe</FrontendDir>
     <FrontendDist>$(FrontendDir)\dist</FrontendDist>
     
-    <!-- Define path to tools folder at repository root -->
+    
     <ToolsDir>$(MSBuildProjectDirectory)\..\tools</ToolsDir>
   </PropertyGroup>
 
   <Target Name="BuildFrontend" BeforeTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
     <Message Importance="high" Text="Building frontend (fe) at $(FrontendDir)" />
 
-    <!-- Install dependencies and build frontend -->
+    
     <Exec WorkingDirectory="$(FrontendDir)" Command="npm ci" />
     <Exec WorkingDirectory="$(FrontendDir)" Command="npm run build" />
 
-    <!-- Ensure wwwroot exists -->
+    
     <MakeDir Directories="$(MSBuildProjectDirectory)\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot')" />
 
     <ItemGroup>
       <FrontendDistFiles Include="$(FrontendDist)\**\*.*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(FrontendDistFiles)" DestinationFiles="@(FrontendDistFiles->'$(MSBuildProjectDirectory)\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(FrontendDistFiles)" DestinationFiles="@(FrontendDistFiles-&gt;'$(MSBuildProjectDirectory)\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- Copy frontend to publish directory (multiple fallback locations for different publish scenarios) -->
+  
   <Target Name="CopyFrontendToPublish" AfterTargets="Publish" Condition="'$(SkipFrontendBuild)'!='true'">
     <Message Importance="high" Text="Copying frontend dist to publish folder ($(PublishDir)wwwroot)" />
     <ItemGroup>
       <FrontendDistFilesForPublish Include="$(FrontendDist)\**\*.*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(FrontendDistFilesForPublish)" DestinationFiles="@(FrontendDistFilesForPublish->'$(PublishDir)wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(FrontendDistFilesForPublish)" DestinationFiles="@(FrontendDistFilesForPublish-&gt;'$(PublishDir)wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
-  <!-- Fallback: Copy to project-relative publish folder -->
+  
   <Target Name="CopyFrontendToProjectPublishFolder" AfterTargets="CopyFrontendToPublish" Condition="'$(SkipFrontendBuild)'!='true'">
     <Message Importance="high" Text="Also copying frontend dist to $(MSBuildProjectDirectory)\publish\wwwroot (fallback)" />
     <ItemGroup>
@@ -81,10 +81,10 @@
 
     <MakeDir Directories="$(MSBuildProjectDirectory)\publish\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\publish\wwwroot')" />
 
-    <Copy SourceFiles="@(FrontendDistFilesForPublishFallback)" DestinationFiles="@(FrontendDistFilesForPublishFallback->'$(MSBuildProjectDirectory)\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(FrontendDistFilesForPublishFallback)" DestinationFiles="@(FrontendDistFilesForPublishFallback-&gt;'$(MSBuildProjectDirectory)\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
-  <!-- Fallback: Copy to nested publish folder (handles some CI scenarios) -->
+  
   <Target Name="CopyFrontendToNestedPublishFolder" AfterTargets="CopyFrontendToProjectPublishFolder" Condition="'$(SkipFrontendBuild)'!='true'">
     <Message Importance="high" Text="Copying frontend dist to $(MSBuildProjectDirectory)\publish\publish\wwwroot (nested publish)" />
     <ItemGroup>
@@ -93,17 +93,17 @@
 
     <MakeDir Directories="$(MSBuildProjectDirectory)\publish\publish\wwwroot" Condition="!Exists('$(MSBuildProjectDirectory)\publish\publish\wwwroot')" />
 
-    <Copy SourceFiles="@(FrontendDistFilesForNestedPublish)" DestinationFiles="@(FrontendDistFilesForNestedPublish->'$(MSBuildProjectDirectory)\\publish\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(FrontendDistFilesForNestedPublish)" DestinationFiles="@(FrontendDistFilesForNestedPublish-&gt;'$(MSBuildProjectDirectory)\\publish\\publish\\wwwroot\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
-  <!-- Exclude config.json from being treated as content -->
+  
   <ItemGroup>
     <Content Remove="config\config.json" />
     <None Remove="config\config.json" />
   </ItemGroup>
 
-  <!-- FIXED: Copy tools from repository root, not from listenarr.api/tools -->
-  <!-- This uses Link to include files from outside the project directory -->
+  
+  
   <ItemGroup>
     <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -111,8 +111,8 @@
     </Content>
   </ItemGroup>
 
-  <!-- Explicit target to copy tools to publish directory -->
-  <!-- This ensures tools are copied even if the Content Include directive fails -->
+  
+  
   <Target Name="CopyToolsToPublish" AfterTargets="Publish">
     <Message Importance="high" Text="Copying tools folder from $(ToolsDir) to $(PublishDir)tools" />
     
@@ -120,19 +120,16 @@
       <ToolFiles Include="$(ToolsDir)\**\*.*" />
     </ItemGroup>
     
-    <!-- Create tools directory in publish output -->
+    
     <MakeDir Directories="$(PublishDir)tools" Condition="!Exists('$(PublishDir)tools')" />
     
-    <!-- Copy all files maintaining directory structure -->
-    <Copy 
-      SourceFiles="@(ToolFiles)" 
-      DestinationFiles="@(ToolFiles->'$(PublishDir)tools\%(RecursiveDir)%(Filename)%(Extension)')" 
-      SkipUnchangedFiles="false" />
+    
+    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles-&gt;'$(PublishDir)tools\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
     
     <Message Importance="high" Text="Tools copied to $(PublishDir)tools" />
   </Target>
   
-  <!-- Additional fallback targets for tools (mirrors frontend copy pattern) -->
+  
   <Target Name="CopyToolsToProjectPublishFolder" AfterTargets="CopyToolsToPublish">
     <Message Importance="high" Text="Also copying tools to $(MSBuildProjectDirectory)\publish\tools (fallback)" />
     
@@ -142,10 +139,7 @@
     
     <MakeDir Directories="$(MSBuildProjectDirectory)\publish\tools" Condition="!Exists('$(MSBuildProjectDirectory)\publish\tools')" />
     
-    <Copy 
-      SourceFiles="@(ToolFilesForFallback)" 
-      DestinationFiles="@(ToolFilesForFallback->'$(MSBuildProjectDirectory)\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" 
-      SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFilesForFallback)" DestinationFiles="@(ToolFilesForFallback-&gt;'$(MSBuildProjectDirectory)\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
   
   <Target Name="CopyToolsToNestedPublishFolder" AfterTargets="CopyToolsToProjectPublishFolder">
@@ -157,10 +151,7 @@
     
     <MakeDir Directories="$(MSBuildProjectDirectory)\publish\publish\tools" Condition="!Exists('$(MSBuildProjectDirectory)\publish\publish\tools')" />
     
-    <Copy 
-      SourceFiles="@(ToolFilesForNested)" 
-      DestinationFiles="@(ToolFilesForNested->'$(MSBuildProjectDirectory)\publish\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" 
-      SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFilesForNested)" DestinationFiles="@(ToolFilesForNested-&gt;'$(MSBuildProjectDirectory)\publish\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
 </Project>
