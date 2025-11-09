@@ -5,6 +5,8 @@ EXPOSE 5656
 # Set the URL to listen on port 5656
 ENV ASPNETCORE_URLS=http://*:5656
 
+ENV DOCKER_ENV=true
+
 # Install Node.js (LTS v20) into the final runtime image so the API can spawn the
 # helper Node process (tools/discord-bot/index.js). We keep this minimal and clean
 # up apt caches to keep the image small.
