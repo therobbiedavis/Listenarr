@@ -38,6 +38,26 @@ jobs:
         working-directory: ./listenarr.api
         run: dotnet publish Listenarr.Api.csproj -c Release -r linux-x64 --no-self-contained -o ./publish/linux-x64
 
+      - name: Fail if tools missing in publish (quick fail)
+        run: |
+          echo "Checking publish locations for tools folder"
+          # CI publishes into listenarr.api/publish/linux-x64 (relative to repo root)
+          if [ -d "listenarr.api/publish/linux-x64/tools" ]; then
+            echo "Found tools in listenarr.api/publish/linux-x64/tools"
+            ls -la listenarr.api/publish/linux-x64/tools || true
+          elif [ -d "listenarr.api/publish/tools" ]; then
+            echo "Found tools in listenarr.api/publish/tools"
+            ls -la listenarr.api/publish/tools || true
+          elif [ -d "listenarr.api/publish/linux-x64/publish/tools" ]; then
+            echo "Found tools in nested listenarr.api/publish/linux-x64/publish/tools"
+            ls -la listenarr.api/publish/linux-x64/publish/tools || true
+          else
+            echo "ERROR: tools folder not found in publish outputs. Listing publish directories for debugging:"
+            ls -la listenarr.api/publish || true
+            ls -la listenarr.api/publish/linux-x64 || true
+            exit 1
+          fi
+
       - name: Upload API artifact
         uses: actions/upload-artifact@v4
         with:
