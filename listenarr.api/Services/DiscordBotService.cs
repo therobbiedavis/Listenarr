@@ -100,14 +100,14 @@ namespace Listenarr.Api.Services
             }
         }
 
-        public async Task<bool> StopBotAsync()
+        public Task<bool> StopBotAsync()
         {
             lock (_processLock)
             {
                 if (_botProcess == null || _botProcess.HasExited)
                 {
                     _logger.LogInformation("Bot is not running");
-                    return true;
+                    return Task.FromResult(true);
                 }
 
                 try
@@ -116,21 +116,21 @@ namespace Listenarr.Api.Services
                     _botProcess.Kill(true); // Kill entire process tree
                     _botProcess.WaitForExit(5000); // Wait up to 5 seconds
                     _botProcess = null;
-                    return true;
+                    return Task.FromResult(true);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to stop Discord bot");
-                    return false;
+                    return Task.FromResult(false);
                 }
             }
         }
 
-        public async Task<bool> IsBotRunningAsync()
+        public Task<bool> IsBotRunningAsync()
         {
             lock (_processLock)
             {
-                return _botProcess != null && !_botProcess.HasExited;
+                return Task.FromResult(_botProcess != null && !_botProcess.HasExited);
             }
         }
 
