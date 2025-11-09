@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.2.24</Version>
-    <AssemblyVersion>0.2.24</AssemblyVersion>
+    <Version>0.2.25</Version>
+    <AssemblyVersion>0.2.25</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -98,7 +98,7 @@
     <None Remove="config\config.json" />
   </ItemGroup>
 
-  <!-- Include tools directory in publish for Discord bot -->
+  
   <ItemGroup>
     <Content Include="tools\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
