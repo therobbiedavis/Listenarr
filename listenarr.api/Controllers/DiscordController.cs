@@ -322,5 +322,71 @@ namespace Listenarr.Api.Controllers
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
         }
+
+        /// <summary>
+        /// Lightweight diagnostics to help debug bot startup issues in production.
+        /// Returns whether the bot directory and index.js exist and whether `node` is available.
+        /// </summary>
+        [HttpGet("diagnostics")]
+        public IActionResult Diagnostics()
+        {
+            try
+            {
+                var contentRoot = System.IO.Path.Combine(AppContext.BaseDirectory);
+                // In ASP.NET Core the content root is typically the ContentRootPath, but in controllers we can use AppContext.BaseDirectory
+                var botDirectory = System.IO.Path.Combine(contentRoot, "tools", "discord-bot");
+                var indexJsPath = System.IO.Path.Combine(botDirectory, "index.js");
+
+                var botDirExists = System.IO.Directory.Exists(botDirectory);
+                var indexExists = System.IO.File.Exists(indexJsPath);
+
+                // Check for node availability by running `node --version` (best-effort, non-blocking)
+                string? nodeVersion = null;
+                string? nodeError = null;
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? "cmd.exe" : "bash",
+                        Arguments = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? "/c node --version" : "-c \"node --version\"",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WorkingDirectory = botDirectory
+                    };
+
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    if (proc != null)
+                    {
+                        // Give it up to 2s to respond
+                        if (!proc.WaitForExit(2000)) proc.Kill(true);
+                        nodeVersion = proc.StandardOutput.ReadToEnd()?.Trim();
+                        nodeError = proc.StandardError.ReadToEnd()?.Trim();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    nodeError = ex.Message;
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    contentRoot,
+                    botDirectory = botDirectory,
+                    botDirExists,
+                    indexJsPath,
+                    indexExists,
+                    nodeVersion,
+                    nodeError
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error running Discord diagnostics");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
     }
 }

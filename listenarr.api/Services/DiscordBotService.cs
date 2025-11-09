@@ -17,14 +17,20 @@ namespace Listenarr.Api.Services
         private readonly ILogger<DiscordBotService> _logger;
         private readonly IStartupConfigService _startupConfigService;
         private readonly IHostEnvironment _hostEnvironment;
+        private readonly IHttpContextAccessor _httpContextAccessor;
         private Process? _botProcess;
         private readonly object _processLock = new object();
 
-        public DiscordBotService(ILogger<DiscordBotService> logger, IStartupConfigService startupConfigService, IHostEnvironment hostEnvironment)
+        public DiscordBotService(
+            ILogger<DiscordBotService> logger, 
+            IStartupConfigService startupConfigService, 
+            IHostEnvironment hostEnvironment,
+            IHttpContextAccessor httpContextAccessor)
         {
             _logger = logger;
             _startupConfigService = startupConfigService;
             _hostEnvironment = hostEnvironment;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         public async Task<bool> StartBotAsync()
@@ -70,16 +76,10 @@ namespace Listenarr.Api.Services
                     CreateNoWindow = true
                 };
 
-                // Set environment variable for API URL
-                var config = _startupConfigService.GetConfig();
-                var protocol = (config?.EnableSsl ?? false) ? "https" : "http";
-                var port = config?.Port ?? 5000;
-                var urlBase = config?.UrlBase?.TrimEnd('/') ?? "";
+                // Determine the Listenarr API URL with proper fallbacks for Docker
+                var listenarrUrl = GetListenarrUrl();
                 
-                // For production, try to get the URL from environment or use localhost as fallback
-                var listenarrUrl = Environment.GetEnvironmentVariable("LISTENARR_PUBLIC_URL") 
-                    ?? $"{protocol}://localhost:{port}{urlBase}";
-                
+                _logger.LogInformation("Starting Discord bot with LISTENARR_URL: {Url}", listenarrUrl);
                 startInfo.EnvironmentVariables["LISTENARR_URL"] = listenarrUrl;
 
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -125,6 +125,81 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Failed to start Discord bot");
                 return false;
             }
+        }
+
+        private string GetListenarrUrl()
+        {
+            // Priority 1: LISTENARR_PUBLIC_URL environment variable (Docker deployments)
+            var envUrl = Environment.GetEnvironmentVariable("LISTENARR_PUBLIC_URL");
+            if (!string.IsNullOrWhiteSpace(envUrl))
+            {
+                _logger.LogInformation("Using LISTENARR_PUBLIC_URL from environment: {Url}", envUrl);
+                return envUrl.TrimEnd('/');
+            }
+
+            // Priority 2: Construct from current HTTP request (when available)
+            try
+            {
+                var httpContext = _httpContextAccessor.HttpContext;
+                if (httpContext != null)
+                {
+                    var request = httpContext.Request;
+                    var scheme = request.Scheme;
+                    var host = request.Host.Value;
+                    
+                    // Check if we're behind a reverse proxy (X-Forwarded headers)
+                    if (request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto))
+                    {
+                        scheme = forwardedProto.ToString();
+                    }
+                    if (request.Headers.TryGetValue("X-Forwarded-Host", out var forwardedHost))
+                    {
+                        host = forwardedHost.ToString();
+                    }
+
+                    var url = $"{scheme}://{host}";
+                    _logger.LogInformation("Constructed URL from HTTP context: {Url}", url);
+                    return url;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to construct URL from HTTP context");
+            }
+
+            // Priority 3: Use startup config
+            try
+            {
+                var config = _startupConfigService.GetConfig();
+                if (config != null)
+                {
+                    var protocol = (config.EnableSsl ?? false) ? "https" : "http";
+                    var port = config.Port ?? 5000;
+                    var urlBase = config.UrlBase?.TrimEnd('/') ?? "";
+                    
+                    // In Docker, use host.docker.internal instead of localhost for better compatibility
+                    var host = Environment.GetEnvironmentVariable("DOCKER_ENV") != null 
+                        ? "host.docker.internal" 
+                        : "localhost";
+                    
+                    var url = $"{protocol}://{host}:{port}{urlBase}";
+                    _logger.LogInformation("Constructed URL from startup config: {Url}", url);
+                    return url;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to construct URL from startup config");
+            }
+
+            // Priority 4: Final fallback - try host.docker.internal first in Docker, then localhost
+            var fallbackHost = Environment.GetEnvironmentVariable("DOCKER_ENV") != null 
+                ? "host.docker.internal" 
+                : "localhost";
+            
+            var fallbackUrl = $"http://{fallbackHost}:5000";
+            _logger.LogWarning("Using fallback URL: {Url}", fallbackUrl);
+            return fallbackUrl;
         }
 
         public Task<bool> StopBotAsync()
