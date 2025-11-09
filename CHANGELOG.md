@@ -37,9 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Webhook Test Menu**: Gate Test menu to development builds and require at least one enabled webhook for visibility
 
-
-
-
 ## [0.2.20] - 2025-11-05
 
 ### Added
