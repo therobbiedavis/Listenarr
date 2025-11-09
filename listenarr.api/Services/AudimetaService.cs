@@ -19,6 +19,7 @@
 using System;
 using System.Net.Http;
 using System.Text.Json;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -106,13 +107,48 @@ namespace Listenarr.Api.Services
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
-                var result = JsonSerializer.Deserialize<AudimetaSearchResponse>(json, new JsonSerializerOptions
+
+                // audimeta.de may return either a JSON object with a 'results' array or a raw JSON array.
+                // Try to deserialize into the envelope first, otherwise fall back to an array of results.
+                try
                 {
-                    PropertyNameCaseInsensitive = true
-                });
+                    var envelope = JsonSerializer.Deserialize<AudimetaSearchResponse>(json, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                    if (envelope != null && envelope.Results != null)
+                    {
+                        _logger.LogInformation("Successfully searched audimeta.de for query: {Query} (enveloped)", query);
+                        return envelope;
+                    }
+                }
+                catch (JsonException) { /* fall through to try array */ }
+
+                try
+                {
+                    var list = JsonSerializer.Deserialize<List<AudimetaSearchResult>>(json, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                    if (list != null)
+                    {
+                        _logger.LogInformation("Successfully searched audimeta.de for query: {Query} (array)", query);
+                        return new AudimetaSearchResponse
+                        {
+                            Results = list,
+                            TotalResults = list.Count
+                        };
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse audimeta search response for query {Query}", query);
+                }
 
                 _logger.LogInformation("Successfully searched audimeta.de for query: {Query}", query);
-                return result;
+                return null;
             }
             catch (Exception ex)
             {
@@ -189,7 +225,9 @@ namespace Listenarr.Api.Services
     {
         public string? Asin { get; set; }
         public string? Title { get; set; }
-        public List<string>? Authors { get; set; }
+        // audimeta now returns authors as objects (e.g. { name: "Author Name", asin: "..." })
+        // keep a typed representation so deserialization succeeds
+        public List<AudimetaAuthor>? Authors { get; set; }
         public string? ImageUrl { get; set; }
         public int? RuntimeLengthMin { get; set; }
         public string? Language { get; set; }

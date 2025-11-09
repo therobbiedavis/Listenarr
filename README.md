@@ -51,7 +51,6 @@ cd .\publish\win-x64
 .\Listenarr.Api.exe
 ```
 
-#### MacOS (port 5000 is used by Airplay, please disable or override port)
 ```terminal
 cd ./publish/osx-x64  # or osx-arm64 for Apple Silicon
 chmod +x Listenarr.Api
@@ -74,7 +73,6 @@ If you need to override the port, use `--urls "http://localhost:5656"` when runn
 ### Docker
 
 ```bash
-docker-compose up -d
 ```
 
 **Service will be available at:**
@@ -86,10 +84,9 @@ The Docker image includes both the backend API and frontend in a single containe
 - `latest` / `stable` - Latest stable release
 - `canary` - Latest canary build (pre-release)
 - `canary-X.Y.Z` - Specific canary version
-- `nightly` - Latest nightly build (pre-release)
 - `nightly-X.Y.Z` - Specific nightly version
 - `X.Y.Z` - Specific release version
-
+LISTENARR_URL=http://localhost:5000 node index.js
 ### Manual Setup
 
 If you prefer to run the services separately:
@@ -114,6 +111,78 @@ npm run dev:web      # Start only frontend web
 **Services will be available at:**
 - Backend API: http://localhost:5000
 - Frontend Web: http://localhost:5173
+
+## Discord bot (optional)
+
+Listenarr includes a small reference Discord bot (in `tools/discord-bot`) that registers a slash command and forwards requests to the running Listenarr API. The bot is optional — the preferred integration is configuring the Discord settings from the Listenarr UI so the server manages the registration for you. Use the steps below for local development or to run the bot separately.
+
+Prerequisites:
+- A running Listenarr instance (see steps above)
+- Node.js 18+ and npm
+- A Discord application with a bot token and application ID
+
+Quick start (development):
+
+1. Create a Discord application and bot at https://discord.com/developers/applications. Copy the Application (client) ID and the Bot Token.
+2. Invite the bot to your guild with the following OAuth2 URL (replace <APP_ID>):
+
+```text
+https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot%20applications.commands&permissions=27648
+```
+
+The `permissions=27648` value requests the View Channels, Send Messages, Manage Messages, and Embed Links permissions which is the bare minimum permissions needed for the bot to function.
+
+3. Configure Listenarr (recommended):
+
+- Open the Listenarr web UI and go to Settings → Integrations → Discord (or the Discord section in Configuration).
+- Set the **Discord Application ID** to the Application ID you copied.
+- Set the **Discord Bot Token** to the bot token you copied.
+- Optionally set **Discord Guild ID** and **Discord Channel ID** so the bot registers commands in a specific guild and limits responses to one channel.
+- Enable the Discord integration and Save.
+
+When the Listenarr server has the bot token and application ID saved, the server will register the slash command and manage the bot. The `tools/discord-bot` helper is provided for local development or troubleshooting.
+
+Run the bot standalone (development):
+
+```bash
+cd tools/discord-bot
+npm install
+# Point the helper at your running Listenarr instance (defaults to http://localhost:5000)
+LISTENARR_URL=http://localhost:5000 npm start
+```
+
+Windows (PowerShell):
+
+```powershell
+cd tools\discord-bot
+npm install
+$env:LISTENARR_URL = 'http://localhost:5000'
+npm start
+```
+
+Notes and troubleshooting:
+- The helper bot reads settings from the Listenarr API; configuring the settings in the Listenarr UI is the recommended path.
+- For antiforgery (CSRF) support the helper tries to use `fetch-cookie` + `tough-cookie` if installed — install them to avoid occasional CSRF errors:
+
+```bash
+npm install fetch-cookie tough-cookie
+```
+
+- If you see permissions errors when deleting messages, ensure the bot has **Manage Messages** in the configured channel or invite it again with the proper permissions.
+- The helper borrows ephemeral replies (application interaction tokens) to remove ephemeral messages; this is best-effort and may not work across restarts.
+
+Auto-persist Listenarr URL
+---------------------------
+
+To make the helper easier to run, it will automatically persist the Listenarr base URL when first started interactively. Order of precedence:
+
+1. `LISTENARR_URL` environment variable (explicit)
+2. `tools/discord-bot/.env` file with `LISTENARR_URL=` (created automatically on first run)
+3. Interactive prompt on first run (saved to `.env`)
+4. Fallback `http://localhost:5000`
+
+This means you can run the helper once and enter your public domain (for example `https://listenarr.example.com`) when prompted. The URL is saved to `tools/discord-bot/.env` so you don't need to export environment variables on subsequent runs.
+
 
 ## CI/CD
 

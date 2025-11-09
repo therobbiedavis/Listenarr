@@ -24,19 +24,44 @@
           <span v-else-if="scanQueued">Scan queued</span>
           <span v-else>Scan Folder</span>
         </button>
-        <!-- Debug Notification Buttons -->
-        <button class="nav-btn debug-btn" @click="testNotification('book-added')" :disabled="sendingNotification" title="Test 'Book Added' notification">
-          <PhBell />
-          Test Added
-        </button>
-        <button class="nav-btn debug-btn" @click="testNotification('book-available')" :disabled="sendingNotification" title="Test 'Book Available' notification">
-          <PhBell />
-          Test Available
-        </button>
-        <button class="nav-btn debug-btn" @click="testNotification('book-downloading')" :disabled="sendingNotification" title="Test 'Book Downloading' notification">
-          <PhBell />
-          Test Downloading
-        </button>
+        <!-- Test Notification Menu (only if webhooks configured) -->
+  <div class="test-menu-container" v-if="isDevelopment && hasWebhooksConfigured">
+          <button 
+            class="nav-btn test-menu-btn" 
+            @click.stop="showTestMenu = !showTestMenu"
+            :disabled="sendingNotification"
+            title="Test Notifications"
+          >
+            <PhBell />
+            Test
+          </button>
+          <div class="test-dropdown" v-if="showTestMenu" @click.stop>
+            <button 
+              class="dropdown-item" 
+              @click="openTestMenu('book-added'); showTestMenu = false"
+              :disabled="sendingNotification"
+            >
+              <PhBookmark />
+              Book Added
+            </button>
+            <button 
+              class="dropdown-item" 
+              @click="openTestMenu('book-available'); showTestMenu = false"
+              :disabled="sendingNotification"
+            >
+              <PhCheckCircle />
+              Book Available
+            </button>
+            <button 
+              class="dropdown-item" 
+              @click="openTestMenu('book-downloading'); showTestMenu = false"
+              :disabled="sendingNotification"
+            >
+              <PhDownload />
+              Book Downloading
+            </button>
+          </div>
+        </div>
         <button class="nav-btn" @click="openEditModal">
           <PhPencil />
           Edit
@@ -442,10 +467,37 @@
     @close="closeEditModal"
     @saved="handleEditSaved"
   />
+
+  <!-- Webhook Selector Modal -->
+  <Teleport to="body">
+    <div v-if="showWebhookSelector" class="modal-overlay" @click="closeWebhookSelector">
+      <div class="modal-dialog webhook-selector-modal" @click.stop>
+        <div class="modal-header">
+          <h3>Select Webhook to Test</h3>
+          <button class="close-btn" @click="closeWebhookSelector">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-description">Choose which webhook to send the test notification to:</p>
+          <div class="webhook-list">
+            <button 
+              v-for="webhook in webhooks" 
+              :key="webhook.id"
+              class="webhook-item"
+              @click="selectWebhook(webhook.id)"
+              :disabled="sendingNotification"
+            >
+              <PhBell />
+              <span class="webhook-name">{{ webhook.name }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, type Component } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, type Component } from 'vue'
 import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
@@ -491,13 +543,17 @@ import {
   PhFileMinus,
   PhCircle,
   PhDiscordLogo,
-  PhBell
+  PhBell,
+  PhCheckCircle
 } from '@phosphor-icons/vue'
 
 const route = useRoute()
 const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
+
+// Show developer-only test UI in development builds
+const isDevelopment = import.meta.env.DEV
 
 const audiobook = ref<Audiobook | null>(null)
 const loading = ref(true)
@@ -511,6 +567,11 @@ const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
 const sendingNotification = ref(false)
 const showEditModal = ref(false)
+const showTestMenu = ref(false)
+const showWebhookSelector = ref(false)
+const selectedTrigger = ref<'book-added' | 'book-available' | 'book-downloading' | ''>('')
+const webhooks = ref<Array<{ id: string; name: string; isEnabled: boolean }>>([])
+const selectedWebhookId = ref<string | null>(null)
 
 // History state
 const historyEntries = ref<History[]>([])
@@ -518,6 +579,11 @@ const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
 const qualityProfiles = ref<import('@/types').QualityProfile[]>([])
 const expandedFileAccordions = ref<Set<number>>(new Set())
+
+// Check if any webhooks are configured
+const hasWebhooksConfigured = computed(() => {
+  return webhooks.value.length > 0 && webhooks.value.some(w => w.isEnabled)
+})
 
 const assignedProfileName = computed(() => {
   if (!audiobook.value) return null
@@ -618,6 +684,19 @@ onMounted(() => {
     // small timeout to allow DOM to render
     // setTimeout(() => scrollToAnchor(hash), 150)
   }
+  
+  // Close test menu when clicking outside
+  document.addEventListener('click', handleClickOutside)
+})
+
+function handleClickOutside() {
+  if (showTestMenu.value) {
+    showTestMenu.value = false
+  }
+}
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 
 // When the active tab changes update the hash and scroll
@@ -628,6 +707,11 @@ watch(activeTab, (newTab) => {
   } catch {}
   // Scroll to anchored section
   // setTimeout(() => scrollToAnchor(newTab), 120)
+})
+
+// Debug: Watch showTestMenu changes
+watch(showTestMenu, (newVal) => {
+  logger.debug('showTestMenu changed:', newVal)
 })
 
 async function loadAudiobook() {
@@ -668,6 +752,25 @@ async function loadAudiobook() {
 // After loading audiobook, also fetch quality profiles so we can display the assigned profile
 async function afterLoad() {
   await loadQualityProfilesForDetail()
+  await loadWebhooks()
+}
+
+async function loadWebhooks() {
+  try {
+    const settings = configStore.applicationSettings
+    logger.debug('Loading webhooks, settings:', settings)
+    if (settings?.webhooks) {
+      webhooks.value = settings.webhooks
+        .filter(w => w.isEnabled)
+        .map(w => ({ id: w.id, name: w.name, isEnabled: w.isEnabled }))
+      logger.debug('Loaded webhooks:', webhooks.value)
+      logger.debug('hasWebhooksConfigured:', hasWebhooksConfigured.value)
+    } else {
+      logger.debug('No webhooks found in settings')
+    }
+  } catch (err) {
+    logger.error('Failed to load webhooks:', err)
+  }
 }
 
 async function loadQualityProfilesForDetail() {
@@ -813,7 +916,41 @@ async function handleEditSaved() {
   await loadAudiobook()
 }
 
-async function testNotification(trigger: 'book-added' | 'book-available' | 'book-downloading') {
+function openTestMenu(trigger: 'book-added' | 'book-available' | 'book-downloading') {
+  selectedTrigger.value = trigger
+  
+  if (webhooks.value.length === 0) {
+    useToast().error('No webhooks configured', 'Please configure at least one webhook in settings')
+    return
+  }
+  
+  if (webhooks.value.length === 1) {
+    // Only one webhook, test it directly
+    const firstWebhook = webhooks.value[0]
+    if (firstWebhook) {
+      testNotification(trigger, firstWebhook.id)
+    }
+  } else {
+    // Multiple webhooks, show selector
+    showWebhookSelector.value = true
+  }
+}
+
+function closeWebhookSelector() {
+  showWebhookSelector.value = false
+  selectedWebhookId.value = null
+  selectedTrigger.value = ''
+}
+
+function selectWebhook(webhookId: string) {
+  const trigger = selectedTrigger.value
+  if (!trigger) return
+  
+  testNotification(trigger, webhookId)
+  closeWebhookSelector()
+}
+
+async function testNotification(trigger: 'book-added' | 'book-available' | 'book-downloading', webhookId?: string) {
   if (!audiobook.value) return
   
   sendingNotification.value = true
@@ -831,14 +968,18 @@ async function testNotification(trigger: 'book-added' | 'book-available' | 'book
       description: audiobook.value.description
     }
     
-    logger.debug('Sending test notification:', { trigger, data: notificationData })
+    logger.debug('Sending test notification:', { trigger, data: notificationData, webhookId })
     
     // Call via the apiService which handles authentication and base URL properly
-    await apiService.testNotification(trigger, notificationData)
+    await apiService.testNotification(trigger, notificationData, webhookId)
     
-    useToast().success(`Test ${trigger} notification sent!`, 'Notification sent successfully')
+    const webhookName = webhookId 
+      ? webhooks.value.find(w => w.id === webhookId)?.name 
+      : 'configured webhook'
+    
+    useToast().success(`Test ${trigger} notification sent to ${webhookName}!`, 'Notification sent successfully')
   } catch (err) {
-    console.error('Notification test failed:', err)
+    logger.error('Notification test failed:', err)
     useToast().error('Failed to send test notification', String(err))
   } finally {
     sendingNotification.value = false
@@ -1057,6 +1198,114 @@ function formatDate(dateString?: string): string {
 
 .nav-btn.debug-btn:hover {
   background-color: #4752C4;
+}
+
+/* Test Menu Styles */
+.test-menu-container {
+  position: relative;
+}
+
+.test-menu-btn {
+  background-color: #5865F2;
+  border-color: #4752C4;
+}
+
+.test-menu-btn:hover {
+  background-color: #4752C4;
+}
+
+.test-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background-color: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 180px;
+  z-index: 100;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  text-align: left;
+}
+
+.dropdown-item:first-child {
+  border-radius: 4px 4px 0 0;
+}
+
+.dropdown-item:last-child {
+  border-radius: 0 0 4px 4px;
+}
+
+.dropdown-item:hover:not(:disabled) {
+  background-color: #3a3a3a;
+}
+
+.dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Webhook Selector Modal */
+.webhook-selector-modal {
+  max-width: 500px;
+}
+
+.modal-description {
+  margin-bottom: 16px;
+  color: #aaa;
+  font-size: 14px;
+}
+
+.webhook-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.webhook-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background-color: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.webhook-item:hover:not(:disabled) {
+  background-color: #3a3a3a;
+  border-color: #5865F2;
+  transform: translateX(4px);
+}
+
+.webhook-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.webhook-name {
+  flex: 1;
+  font-weight: 500;
 }
 
 .hero-section {

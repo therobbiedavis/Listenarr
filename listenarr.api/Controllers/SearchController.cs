@@ -215,74 +215,108 @@ namespace Listenarr.Api.Controllers
 
                 _logger.LogInformation("Searching by title: {Query}", query);
 
-                // Step 1: Search Audimeta to get ASINs
-                var searchResponse = await _audimetaService.SearchBooksAsync(query, region);
-                if (searchResponse?.Results == null || !searchResponse.Results.Any())
+                // If the query looks like an ASIN, short-circuit to metadata lookup so we don't run
+                // a full Amazon/Audible text search that can return unrelated items.
+                bool IsAsin(string s)
                 {
-                    _logger.LogWarning("No results found for title search: {Query}", query);
-                    return Ok(new List<object>());
+                    if (string.IsNullOrEmpty(s)) return false;
+                    if (s.Length != 10) return false;
+                    if (!(s.StartsWith("B0") || char.IsDigit(s[0]))) return false;
+                    return s.All(char.IsLetterOrDigit);
                 }
 
-                // Step 2: Get metadata sources
-                var metadataSources = await _searchService.GetEnabledMetadataSourcesAsync();
-                if (metadataSources == null || !metadataSources.Any())
+                if (IsAsin(query.Trim()))
                 {
-                    _logger.LogWarning("No enabled metadata sources found");
-                    return BadRequest("No metadata sources configured. Please configure at least one enabled metadata source in Settings.");
-                }
+                    var asin = query.Trim();
+                    _logger.LogInformation("Query appears to be an ASIN; attempting direct metadata lookup for: {Asin}", asin);
 
-                // Step 3: Fetch full metadata for each ASIN
-                var results = new List<object>();
-                var resultsToFetch = searchResponse.Results.Take(limit).ToList();
-
-                foreach (var searchResult in resultsToFetch)
-                {
-                    if (string.IsNullOrWhiteSpace(searchResult.Asin))
-                    {
-                        continue;
-                    }
-
+                    // Try configured metadata sources (audimeta, audnexus, etc.) via AudimetaService first
                     try
                     {
-                        // Try each metadata source in priority order
-                        foreach (var source in metadataSources)
+                        var audimeta = await _audimetaService.GetBookMetadataAsync(asin, region, true);
+                        if (audimeta != null)
                         {
-                            try
+                            var metadataObj = new
                             {
-                                object? metadata = null;
+                                metadata = audimeta,
+                                source = "Audimeta",
+                                sourceUrl = "https://audimeta.de"
+                            };
+                            return Ok(new List<object> { metadataObj });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Audimeta lookup failed for ASIN {Asin}, trying other configured metadata sources", asin);
+                    }
 
-                                if (source.BaseUrl.Contains("audimeta.de", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    metadata = await _audimetaService.GetBookMetadataAsync(searchResult.Asin, region, true);
-                                }
-                                else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    // Audnexus support would go here
-                                    continue;
-                                }
-
-                                if (metadata != null)
-                                {
-                                    results.Add(new
-                                    {
-                                        metadata = metadata,
-                                        source = source.Name,
-                                        sourceUrl = source.BaseUrl
-                                    });
-                                    break; // Found metadata, move to next search result
-                                }
-                            }
-                            catch (Exception sourceEx)
+                    // If audimeta didn't return anything, try all configured metadata sources via GetMetadata
+                    try
+                    {
+                        var metaAction = await GetMetadata(asin, region, true);
+                        if (metaAction.Result is Microsoft.AspNetCore.Mvc.OkObjectResult objResult)
+                        {
+                            // Return the single metadata object wrapped in a list to match the title endpoint shape
+                            var val = objResult.Value;
+                            if (val != null)
                             {
-                                _logger.LogWarning(sourceEx, "Failed to fetch metadata from {SourceName} for ASIN {Asin}", 
-                                    source.Name, searchResult.Asin);
-                                continue;
+                                return Ok(new List<object> { val });
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to fetch metadata for ASIN: {Asin}", searchResult.Asin);
+                        _logger.LogWarning(ex, "GetMetadata lookup failed for ASIN {Asin}, falling back to intelligent search", asin);
+                    }
+
+                    // If no metadata found via configured sources, fall back to the generic intelligent search below
+                }
+
+                // Use intelligent search (Amazon/Audible + metadata enrichment) for Discord bot
+                // This excludes indexer results which are not suitable for bot interactions
+                var searchResults = await _searchService.IntelligentSearchAsync(query);
+                
+                if (searchResults == null || !searchResults.Any())
+                {
+                    _logger.LogWarning("No results found for title search: {Query}", query);
+                    return Ok(new List<object>());
+                }
+
+                // Convert SearchResult objects to the expected format for Discord bot
+                var results = new List<object>();
+                var resultsToReturn = searchResults.Take(limit).ToList();
+
+                foreach (var searchResult in resultsToReturn)
+                {
+                    try
+                    {
+                        // Create a metadata-like object from the SearchResult
+                        var metadata = new
+                        {
+                            Asin = searchResult.Asin,
+                            Title = searchResult.Title,
+                            Subtitle = searchResult.Series != null ? $"{searchResult.Series} #{searchResult.SeriesNumber}" : null,
+                            Authors = !string.IsNullOrEmpty(searchResult.Artist) ? new[] { new { Name = searchResult.Artist } } : null,
+                            Narrators = !string.IsNullOrEmpty(searchResult.Narrator) ? searchResult.Narrator.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries).Select(n => new { Name = n.Trim() }) : null,
+                            Publisher = searchResult.Publisher,
+                            Description = searchResult.Description,
+                            ImageUrl = searchResult.ImageUrl,
+                            LengthMinutes = searchResult.Runtime,
+                            Language = searchResult.Language,
+                            ReleaseDate = searchResult.PublishedDate != DateTime.MinValue ? searchResult.PublishedDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") : null,
+                            Series = !string.IsNullOrEmpty(searchResult.Series) ? new[] { new { Name = searchResult.Series, Position = searchResult.SeriesNumber } } : null
+                        };
+
+                        results.Add(new
+                        {
+                            metadata = metadata,
+                            source = searchResult.MetadataSource ?? searchResult.Source ?? "Amazon/Audible",
+                            sourceUrl = "https://www.amazon.com"
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to convert search result for title: {Title}", searchResult.Title);
                         continue;
                     }
                 }

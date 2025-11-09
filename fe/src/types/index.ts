@@ -169,6 +169,21 @@ export interface ApplicationSettings {
     triggers: string[]
     isEnabled: boolean
   }>
+  
+  // Discord bot integration settings (optional)
+  discordBotEnabled?: boolean
+  discordApplicationId?: string
+  discordGuildId?: string
+  // Optional Discord channel id to restrict commands to a single channel
+  discordChannelId?: string
+  // Stored token (if provided via Settings). Note security implications.
+  discordBotToken?: string
+  // Command group and subcommand names, resulting in `/group subcommand` usage
+  discordCommandGroupName?: string
+  discordCommandSubcommandName?: string
+  // Optional bot appearance customization
+  discordBotUsername?: string
+  discordBotAvatar?: string
 }
 
 export interface StartupConfig {

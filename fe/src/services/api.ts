@@ -376,12 +376,12 @@ class ApiService {
     })
   }
 
-  async testNotification(trigger?: string, data?: Record<string, unknown>): Promise<{ success: boolean; message: string }> {
+  async testNotification(trigger?: string, data?: Record<string, unknown>, webhookId?: string): Promise<{ success: boolean; message: string }> {
     // If trigger and data are provided, use the new diagnostics endpoint
     if (trigger && data) {
       return this.request<{ success: boolean; message: string }>('/diagnostics/test-notification', {
         method: 'POST',
-        body: JSON.stringify({ trigger, data })
+        body: JSON.stringify({ trigger, data, webhookId })
       })
     }
     // Otherwise use the old configuration endpoint for backward compatibility
@@ -400,6 +400,27 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(settings)
     })
+  }
+
+  // Discord integration helpers
+  async getDiscordStatus(): Promise<{ success: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string }> {
+    return this.request<{ success: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string }>('/discord/status')
+  }
+
+  async registerDiscordCommands(): Promise<{ success: boolean; message?: string; body?: unknown }> {
+    return this.request<{ success: boolean; message?: string; body?: unknown }>('/discord/register-commands', { method: 'POST' })
+  }
+
+  async startDiscordBot(): Promise<{ success: boolean; message: string; status?: string }> {
+    return this.request<{ success: boolean; message: string; status?: string }>('/discord/start-bot', { method: 'POST' })
+  }
+
+  async stopDiscordBot(): Promise<{ success: boolean; message: string; status?: string }> {
+    return this.request<{ success: boolean; message: string; status?: string }>('/discord/stop-bot', { method: 'POST' })
+  }
+
+  async getDiscordBotStatus(): Promise<{ success: boolean; status: string; isRunning: boolean }> {
+    return this.request<{ success: boolean; status: string; isRunning: boolean }>('/discord/bot-status')
   }
 
   // Startup configuration (read + write) — backend exposes under /configuration/startupconfig
