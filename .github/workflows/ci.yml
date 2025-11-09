@@ -75,6 +75,8 @@ jobs:
         with:
           context: .
           file: listenarr.api/Dockerfile.runtime
+          build-args: |
+            PUBLISH_DIR=listenarr.api/publish/linux-x64
           push: false
           tags: |
             ${{ github.repository_owner }}/listenarr:ci-publish
