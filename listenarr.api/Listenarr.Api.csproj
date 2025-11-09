@@ -6,6 +6,8 @@
     
     <Version>0.2.27</Version>
     <AssemblyVersion>0.2.27</AssemblyVersion>
+    <Version>0.2.27</Version>
+    <AssemblyVersion>0.2.27</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -111,8 +113,7 @@
     </Content>
   </ItemGroup>
 
-  <!-- Explicit target to copy tools to publish directory -->
-  <!-- This ensures tools are copied even if the Content Include directive fails -->
+  <!-- Explicit fallback: copy tools into publish output to ensure runtime images get them -->
   <Target Name="CopyToolsToPublish" AfterTargets="Publish">
     <Message Importance="high" Text="Copying tools folder from $(ToolsDir) to $(PublishDir)tools" />
     
@@ -122,45 +123,7 @@
     
     <!-- Create tools directory in publish output -->
     <MakeDir Directories="$(PublishDir)tools" Condition="!Exists('$(PublishDir)tools')" />
-    
-    <!-- Copy all files maintaining directory structure -->
-    <Copy 
-      SourceFiles="@(ToolFiles)" 
-      DestinationFiles="@(ToolFiles->'$(PublishDir)tools\%(RecursiveDir)%(Filename)%(Extension)')" 
-      SkipUnchangedFiles="false" />
-    
-    <Message Importance="high" Text="Tools copied to $(PublishDir)tools" />
-  </Target>
-  
-  <!-- Additional fallback targets for tools (mirrors frontend copy pattern) -->
-  <Target Name="CopyToolsToProjectPublishFolder" AfterTargets="CopyToolsToPublish">
-    <Message Importance="high" Text="Also copying tools to $(MSBuildProjectDirectory)\publish\tools (fallback)" />
-    
-    <ItemGroup>
-      <ToolFilesForFallback Include="$(ToolsDir)\**\*.*" />
-    </ItemGroup>
-    
-    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\tools" Condition="!Exists('$(MSBuildProjectDirectory)\publish\tools')" />
-    
-    <Copy 
-      SourceFiles="@(ToolFilesForFallback)" 
-      DestinationFiles="@(ToolFilesForFallback->'$(MSBuildProjectDirectory)\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" 
-      SkipUnchangedFiles="false" />
-  </Target>
-  
-  <Target Name="CopyToolsToNestedPublishFolder" AfterTargets="CopyToolsToProjectPublishFolder">
-    <Message Importance="high" Text="Copying tools to $(MSBuildProjectDirectory)\publish\publish\tools (nested publish)" />
-    
-    <ItemGroup>
-      <ToolFilesForNested Include="$(ToolsDir)\**\*.*" />
-    </ItemGroup>
-    
-    <MakeDir Directories="$(MSBuildProjectDirectory)\publish\publish\tools" Condition="!Exists('$(MSBuildProjectDirectory)\publish\publish\tools')" />
-    
-    <Copy 
-      SourceFiles="@(ToolFilesForNested)" 
-      DestinationFiles="@(ToolFilesForNested->'$(MSBuildProjectDirectory)\publish\publish\tools\%(RecursiveDir)%(Filename)%(Extension)')" 
-      SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles->'$(PublishDir)tools\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
 </Project>
