@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.21] - 2025-11-08
 
 ### Added
 - **Professional Webhook Test Menu**: Enhanced notification testing UI
@@ -15,14 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Targeted testing: Send test notifications to specific webhooks
   - Backend support: DiagnosticsController now accepts optional webhookId parameter
   - Improved UX: Shows webhook name in success toast notifications
+- **Discord helper bot (tools/discord-bot)**: reference Node.js bot to register a slash command and forward requests to the Listenarr API for development and troubleshooting
+  - Ephemeral interactive flow: search → select → quality → confirm → request
+  - Automatic Listenarr URL persistence: prompts once and saves `tools/discord-bot/.env` (or reads `LISTENARR_URL` env)
+  - README documentation for bot setup and troubleshooting
 
 ### Fixed
 - **Development-Only UI Elements**: Hidden test notification buttons in production
   - AudiobookDetailView: Wrapped 3 test notification buttons in `v-if="isDevelopment"` check
   - Buttons only visible in development mode, preventing confusion in production deployments
+- **Discord bot session & CSRF flows**: improved reliability when users interact with the ephemeral select/confirm flow
+  - Preserve interaction tokens so ephemeral replies can be removed when a request completes
+  - Fetch antiforgery token from `/api/antiforgery/token` and retry POST /api/library/add with `X-XSRF-TOKEN` when the server returns CSRF errors
+  - Implement cookie-aware fetch where possible (optional `fetch-cookie` + `tough-cookie` packages)
+- **Metadata validation**: normalize metadata shapes before POSTing to `/api/library/add` so authors, narrators, tags and genres are always string arrays and series fields are stringified
+- **Idempotency**: add `Idempotency-Key` header to library add requests to enable safe retries and deduplication
+- **Message lifecycle & UX**: make the interactive flow ephemeral-only to avoid duplicate channel posts and update the original message instead of replying
+  - On success the confirm button is updated to a disabled green “Added” button
+  - Components are disabled immediately after Request to prevent double-processing
 
 ### Changed
 - **Webhook Test Menu**: Gate Test menu to development builds and require at least one enabled webhook for visibility
+- **Deprecation compatibility**: replaced deprecated `ephemeral: true` usage with `flags: 64` and added a small compatibility shim to map old calls during runtime
+- **Commands temporarily disabled**: `/request-config set-channel` and `/request-debug perms` are commented out in the helper bot to avoid exposing admin/debug commands in test runs
+
+
 
 ## [0.2.20] - 2025-11-05
 
