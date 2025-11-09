@@ -171,6 +171,18 @@ npm install fetch-cookie tough-cookie
 - If you see permissions errors when deleting messages, ensure the bot has **Manage Messages** in the configured channel or invite it again with the proper permissions.
 - The helper borrows ephemeral replies (application interaction tokens) to remove ephemeral messages; this is best-effort and may not work across restarts.
 
+Auto-persist Listenarr URL
+---------------------------
+
+To make the helper easier to run, it will automatically persist the Listenarr base URL when first started interactively. Order of precedence:
+
+1. `LISTENARR_URL` environment variable (explicit)
+2. `tools/discord-bot/.env` file with `LISTENARR_URL=` (created automatically on first run)
+3. Interactive prompt on first run (saved to `.env`)
+4. Fallback `http://localhost:5000`
+
+This means you can run the helper once and enter your public domain (for example `https://listenarr.example.com`) when prompted. The URL is saved to `tools/discord-bot/.env` so you don't need to export environment variables on subsequent runs.
+
 
 ## CI/CD
 

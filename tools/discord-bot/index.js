@@ -65,7 +65,72 @@ try {
 const POLL_INTERVAL_MS = 15_000
 const SESSION_TIMEOUT_MS = 1000 * 60 * 10 // 10 minutes
 
-const listenarrUrl = process.env.LISTENARR_URL || 'http://localhost:5000'
+// Determine Listenarr base URL with several fallbacks:
+// 1) process.env.LISTENARR_URL
+// 2) tools/discord-bot/.env (key LISTENARR_URL)
+// 3) prompt the user (interactive) and persist to .env
+// 4) fallback to http://localhost:5000
+function readLocalEnvFile(envPath) {
+  try {
+    if (!fs.existsSync(envPath)) return null
+    const txt = fs.readFileSync(envPath, 'utf8')
+    const lines = txt.split(/\r?\n/)
+    for (const line of lines) {
+      const m = line.match(/^\s*LISTENARR_URL\s*=\s*(.+)\s*$/)
+      if (m) return m[1].trim().replace(/^"|"$/g, '')
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null
+}
+
+function writeLocalEnvFile(envPath, url) {
+  try {
+    const content = `LISTENARR_URL=${url}\n`
+    fs.writeFileSync(envPath, content, { encoding: 'utf8', flag: 'w' })
+    console.log(`Saved LISTENARR_URL to ${envPath}`)
+  } catch (e) {
+    console.warn('Failed to write .env file for listenarr url:', e && e.message ? e.message : e)
+  }
+}
+
+function promptForListenarrUrl(defaultUrl) {
+  try {
+    if (!process.stdin.isTTY) return defaultUrl
+    const readline = require('readline')
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    return new Promise(resolve => {
+      rl.question(`Enter Listenarr URL [${defaultUrl}]: `, answer => {
+        rl.close()
+        const val = (answer && answer.trim()) || defaultUrl
+        resolve(val)
+      })
+    })
+  } catch (e) {
+    return Promise.resolve(defaultUrl)
+  }
+}
+
+async function resolveListenarrUrl() {
+  // env var takes precedence
+  if (process.env.LISTENARR_URL && process.env.LISTENARR_URL.trim()) return process.env.LISTENARR_URL.trim()
+  const envPath = require('path').join(__dirname, '.env')
+  const local = readLocalEnvFile(envPath)
+  if (local) return local
+  // prompt interactively and persist
+  const defaultUrl = 'http://localhost:5000'
+  const chosen = await promptForListenarrUrl(defaultUrl)
+  if (chosen && chosen.trim()) {
+    writeLocalEnvFile(envPath, chosen.trim())
+    return chosen.trim()
+  }
+  return defaultUrl
+}
+
+// listenarrUrl will be resolved at startup (may prompt once and write tools/discord-bot/.env)
+let listenarrUrl = 'http://localhost:5000'
+resolveListenarrUrl().then(u => { listenarrUrl = (u || listenarrUrl).replace(/\/$/, '') }).catch(() => {})
 
 let currentSettings = null
 let client = null
