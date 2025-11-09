@@ -36,8 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Webhook Test Menu**: Gate Test menu to development builds and require at least one enabled webhook for visibility
-- **Deprecation compatibility**: replaced deprecated `ephemeral: true` usage with `flags: 64` and added a small compatibility shim to map old calls during runtime
-- **Commands temporarily disabled**: `/request-config set-channel` and `/request-debug perms` are commented out in the helper bot to avoid exposing admin/debug commands in test runs
+
 
 
 
