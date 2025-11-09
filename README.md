@@ -38,47 +38,28 @@ Join our community on Discord for help, announcements, and discussion: https://d
 
 ## Setup
 
-The easiest way to get started is to use Docker/Executables or npm scripts:
+The easiest way to get started is to use Docker (recommended for production), pre-built executables, or npm scripts:
 
-### Executables
-While Listenarr provides executables for Windows, Linux, and MacOS, only Windows is tested due to hardware access limitations.
-
-- Download and extract the release that matches your system
-
- #### Windows
- ```cmd
-cd .\publish\win-x64
-.\Listenarr.Api.exe
-```
-
-```terminal
-cd ./publish/osx-x64  # or osx-arm64 for Apple Silicon
-chmod +x Listenarr.Api
-./Listenarr.Api
-```
-
-#### Linux
-```terminal
-cd ./publish/linux-x64
-chmod +x Listenarr.Api
-./Listenarr.Api
-```
-
-**Service will be available at:**
-- Web App: http://localhost:5000
-
-**Note**:
-If you need to override the port, use `--urls "http://localhost:5656"` when running the executable
-
-### Docker
+### Docker (Recommended for Production)
 
 ```bash
+docker run -d \
+  --name listenarr \
+  -p 5000:5000 \
+  -e LISTENARR_PUBLIC_URL=https://your-domain.com \
+  -v listenarr_data:/app/config \
+  therobbiedavis/listenarr:latest
 ```
+
+**Why Docker for Production:**
+- ✅ **Complete isolation** - All dependencies included
+- ✅ **Easy updates** - Pull new images seamlessly  
+- ✅ **Consistent deployments** - Same environment everywhere
+- ✅ **Security** - Minimal attack surface
+- ✅ **Node.js included** - Discord bot ready out-of-the-box
 
 **Service will be available at:**
 - Web App: http://localhost:5000
-
-The Docker image includes both the backend API and frontend in a single container. For production, use the latest stable image from Docker Hub.
 
 **Available Tags:**
 - `latest` / `stable` - Latest stable release
@@ -86,6 +67,94 @@ The Docker image includes both the backend API and frontend in a single containe
 - `canary-X.Y.Z` - Specific canary version
 - `nightly-X.Y.Z` - Specific nightly version
 - `X.Y.Z` - Specific release version
+
+**Docker Compose (Recommended):**
+```yaml
+version: '3.8'
+services:
+  listenarr:
+    image: therobbiedavis/listenarr:latest
+    ports:
+      - "5000:5000"
+    environment:
+      - LISTENARR_PUBLIC_URL=https://your-domain.com
+    volumes:
+      - listenarr_data:/app/config
+    restart: unless-stopped
+
+volumes:
+  listenarr_data:
+```
+
+### Pre-built Executables
+
+**Download the latest release** from [GitHub Releases](https://github.com/therobbiedavis/Listenarr/releases) and extract the archive for your platform.
+
+#### Windows
+```cmd
+cd .\listenarr-win-x64
+.\Listenarr.Api.exe
+```
+
+#### Linux
+```bash
+cd ./listenarr-linux-x64
+chmod +x Listenarr.Api
+./Listenarr.Api
+```
+
+#### macOS
+```bash
+cd ./listenarr-osx-x64  # or osx-arm64 for Apple Silicon
+chmod +x Listenarr.Api
+./Listenarr.Api
+```
+
+**Prerequisites:**
+- **Node.js 20.x or later** (required for Discord bot functionality)
+- Set environment variable: `LISTENARR_PUBLIC_URL=https://your-domain.com`
+
+**Service will be available at:**
+- Web App: http://localhost:5000
+
+**Note:**
+- Pre-built executables are self-contained and include all dependencies
+- Override port with: `--urls "http://localhost:5656"`
+- For production, set `LISTENARR_PUBLIC_URL` to your actual domain
+
+### Production Deployment (Advanced)
+
+For custom deployments or when you need to build from source:
+
+**Prerequisites:**
+- .NET 8.0 Runtime or later (for framework-dependent deployments)
+- Node.js 20.x or later (for Discord bot)
+- Set `LISTENARR_PUBLIC_URL` environment variable to your production domain
+
+**Option 1: Use Self-Contained Executables (Recommended)**
+```bash
+# Build self-contained executable for your platform
+dotnet publish listenarr.api/Listenarr.Api.csproj -c Release -r win-x64 --self-contained
+cd ./bin/Release/net8.0/win-x64/publish
+./Listenarr.Api.exe
+```
+
+**Option 2: Framework-Dependent Deployment**
+```bash
+# Requires .NET Runtime installed on target system
+dotnet publish listenarr.api/Listenarr.Api.csproj -c Release
+cd ./bin/Release/net8.0/publish
+dotnet Listenarr.Api.dll
+```
+
+**IIS Deployment (Windows):**
+1. Install ASP.NET Core Hosting Bundle
+2. Copy published files to IIS site directory
+3. Set environment variable in IIS Manager or web.config
+4. Ensure Node.js is installed on the server
+
+**Service will be available at:**
+- Web App: http://localhost:5000 (or your configured port)
 LISTENARR_URL=http://localhost:5000 node index.js
 ### Manual Setup
 

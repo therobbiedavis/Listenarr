@@ -6,6 +6,8 @@ services:
     container_name: listenarr
     ports:
       - "5000:5000"  # Map host port 5000 to container port 5000 (standard ASP.NET Core port)
+    environment:
+      - LISTENARR_PUBLIC_URL=https://your-domain.com  # Replace with your actual domain/IP
     volumes:
       - listenarr_data:/app/config  # Mount for SQLite database (listenarr.db) and any config
     restart: unless-stopped
