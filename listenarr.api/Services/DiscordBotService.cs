@@ -1,200 +1,193 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.Threading.Tasks;
+using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Api.Services
 {
-    /// <summary>
-    /// Service for managing Discord bot operations
-    /// </summary>
     public interface IDiscordBotService
     {
-        Task<object> GetBotStatusAsync();
-        Task<bool> RestartBotAsync();
-        Task<string[]> GetBotLogsAsync(int lines = 100);
+        Task<bool> StartBotAsync();
+        Task<bool> StopBotAsync();
+        Task<bool> IsBotRunningAsync();
+        Task<string?> GetBotStatusAsync();
     }
 
-    /// <summary>
-    /// Implementation of Discord bot service
-    /// </summary>
     public class DiscordBotService : IDiscordBotService
     {
-        private readonly string _botDirectory;
-        private readonly string _botScriptPath;
+        private readonly ILogger<DiscordBotService> _logger;
+        private Process? _botProcess;
+        private readonly object _processLock = new object();
 
-        public DiscordBotService()
+        public DiscordBotService(ILogger<DiscordBotService> logger)
         {
-            // Assume the bot is in tools/discord-bot relative to the API project
-            var apiDirectory = Path.GetDirectoryName(typeof(DiscordBotService).Assembly.Location);
-            // Navigate up to the solution root, then to tools/discord-bot
-            var solutionRoot = Path.GetFullPath(Path.Combine(apiDirectory, "..", "..", ".."));
-            _botDirectory = Path.Combine(solutionRoot, "tools", "discord-bot");
-            _botScriptPath = Path.Combine(_botDirectory, "index.js");
+            _logger = logger;
         }
 
-        public async Task<object> GetBotStatusAsync()
+        public async Task<bool> StartBotAsync()
         {
+            lock (_processLock)
+            {
+                // Clear the process reference if it has exited
+                if (_botProcess != null && _botProcess.HasExited)
+                {
+                    _botProcess = null;
+                }
+
+                if (_botProcess != null && !_botProcess.HasExited)
+                {
+                    _logger.LogInformation("Bot is already running");
+                    return true;
+                }
+            }
+
             try
             {
-                // Check if bot process is running
-                var processes = Process.GetProcessesByName("node");
-                bool isRunning = false;
-                Process botProcess = null;
-
-                foreach (var process in processes)
+                var startInfo = new ProcessStartInfo
                 {
-                    try
+                    FileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "cmd.exe" : "bash",
+                    WorkingDirectory = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "tools", "discord-bot"),
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                // Set environment variable for API URL
+                startInfo.EnvironmentVariables["LISTENARR_URL"] = "http://localhost:5000";
+
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    startInfo.Arguments = "/c node index.js";
+                }
+                else
+                {
+                    startInfo.Arguments = "-c \"node index.js\"";
+                }
+
+                _logger.LogInformation("Starting Discord bot with command: {Command} {Args} in {WorkingDir}",
+                    startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory);
+
+                lock (_processLock)
+                {
+                    _botProcess = Process.Start(startInfo);
+                    if (_botProcess != null)
                     {
-                        // Check if this node process is running our bot script
-                        var commandLine = GetProcessCommandLine(process);
-                        if (commandLine != null && commandLine.Contains("discord-bot") && commandLine.Contains("index.js"))
+                        _botProcess.Exited += (sender, e) =>
                         {
-                            isRunning = true;
-                            botProcess = process;
-                            break;
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore processes we can't access
+                            _logger.LogInformation("Discord bot process exited with code: {ExitCode}", _botProcess.ExitCode);
+                            // Clear the process reference so it can be restarted
+                            lock (_processLock)
+                            {
+                                _botProcess = null;
+                            }
+                        };
+
+                        // Start async reading of output to prevent deadlocks
+                        _ = Task.Run(() => ReadOutputAsync(_botProcess));
+                        _ = Task.Run(() => ReadErrorAsync(_botProcess));
                     }
                 }
 
-                var status = new
-                {
-                    isRunning,
-                    botDirectory = _botDirectory,
-                    botScriptExists = File.Exists(_botScriptPath),
-                    processId = botProcess?.Id,
-                    startTime = botProcess?.StartTime,
-                    totalProcessorTime = botProcess?.TotalProcessorTime
-                };
+                // Give the process a moment to start
+                await Task.Delay(1000);
 
-                return status;
+                return await IsBotRunningAsync();
             }
             catch (Exception ex)
             {
-                return new { error = ex.Message, isRunning = false };
+                _logger.LogError(ex, "Failed to start Discord bot");
+                return false;
             }
         }
 
-        public async Task<bool> RestartBotAsync()
+        public async Task<bool> StopBotAsync()
         {
-            try
+            lock (_processLock)
             {
-                // First, try to kill any existing bot processes
-                var processes = Process.GetProcessesByName("node");
-                foreach (var process in processes)
+                if (_botProcess == null || _botProcess.HasExited)
                 {
-                    try
-                    {
-                        var commandLine = GetProcessCommandLine(process);
-                        if (commandLine != null && commandLine.Contains("discord-bot") && commandLine.Contains("index.js"))
-                        {
-                            process.Kill();
-                            await Task.Delay(1000); // Wait for process to terminate
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore processes we can't kill
-                    }
+                    _logger.LogInformation("Bot is not running");
+                    return true;
                 }
 
-                // Start the bot if the script exists
-                if (!File.Exists(_botScriptPath))
+                try
                 {
+                    _logger.LogInformation("Stopping Discord bot process");
+                    _botProcess.Kill(true); // Kill entire process tree
+                    _botProcess.WaitForExit(5000); // Wait up to 5 seconds
+                    _botProcess = null;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to stop Discord bot");
                     return false;
                 }
-
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "node",
-                    Arguments = _botScriptPath,
-                    WorkingDirectory = _botDirectory,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-
-                // Set environment variable for the URL if not already set
-                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LISTENARR_URL")))
-                {
-                    // Try to determine the URL from current request context
-                    // For now, use a default
-                    startInfo.EnvironmentVariables["LISTENARR_URL"] = "http://localhost:5000";
-                }
-
-                var newProcess = Process.Start(startInfo);
-                if (newProcess != null)
-                {
-                    // Wait a bit to see if the process starts successfully
-                    await Task.Delay(2000);
-                    return !newProcess.HasExited;
-                }
-
-                return false;
-            }
-            catch (Exception)
-            {
-                return false;
             }
         }
 
-        public async Task<string[]> GetBotLogsAsync(int lines = 100)
+        public async Task<bool> IsBotRunningAsync()
         {
-            try
+            lock (_processLock)
             {
-                var logFiles = new[] { "bot-session.log", "bot-search-errors.log" };
-                var allLines = new List<string>();
-
-                foreach (var logFile in logFiles)
-                {
-                    var logPath = Path.Combine(_botDirectory, logFile);
-                    if (File.Exists(logPath))
-                    {
-                        var fileLines = await File.ReadAllLinesAsync(logPath);
-                        allLines.AddRange(fileLines);
-                    }
-                }
-
-                // Sort by timestamp (assuming ISO format at start of line) and take the most recent lines
-                allLines.Sort((a, b) =>
-                {
-                    try
-                    {
-                        var aTime = DateTime.Parse(a.Split(' ')[0]);
-                        var bTime = DateTime.Parse(b.Split(' ')[0]);
-                        return bTime.CompareTo(aTime); // Descending order
-                    }
-                    catch
-                    {
-                        return 0;
-                    }
-                });
-
-                return allLines.Take(Math.Min(lines, allLines.Count)).ToArray();
-            }
-            catch (Exception)
-            {
-                return new[] { "Error reading bot logs" };
+                return _botProcess != null && !_botProcess.HasExited;
             }
         }
 
-        private string GetProcessCommandLine(Process process)
+        public async Task<string?> GetBotStatusAsync()
+        {
+            var isRunning = await IsBotRunningAsync();
+            if (!isRunning)
+            {
+                return "stopped";
+            }
+
+            lock (_processLock)
+            {
+                if (_botProcess != null)
+                {
+                    return $"running (PID: {_botProcess.Id})";
+                }
+            }
+
+            return "unknown";
+        }
+
+        private async Task ReadOutputAsync(Process process)
         {
             try
             {
-                // This is a simplified approach - in production you might use WMI or other methods
-                // to get the full command line of a process
-                return process.MainModule?.FileName;
+                while (!process.HasExited)
+                {
+                    var line = await process.StandardOutput.ReadLineAsync();
+                    if (line != null)
+                    {
+                        _logger.LogInformation("Bot stdout: {Line}", line);
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                return null;
+                _logger.LogError(ex, "Error reading bot stdout");
+            }
+        }
+
+        private async Task ReadErrorAsync(Process process)
+        {
+            try
+            {
+                while (!process.HasExited)
+                {
+                    var line = await process.StandardError.ReadLineAsync();
+                    if (line != null)
+                    {
+                        _logger.LogError("Bot stderr: {Line}", line);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading bot stderr");
             }
         }
     }
