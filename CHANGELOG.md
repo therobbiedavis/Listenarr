@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.26] - 2025-11-09
+
+### Fixed
+ - **Publish: include tools folder**: Ensured `tools/**` is copied to the publish output by updating `Listenarr.Api.csproj` (added <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory> for `tools\**\*.*`)
+   - Fixes missing `/app/tools/discord-bot` inside runtime containers when publishing + copying publish output into images
+   - After this change, run `dotnet publish` and rebuild your image so the tooling directory is included in the container
+
 ## [0.2.25] - 2025-11-09
+
 ### Added
 - **Docker as Primary Production Method**: Promoted Docker as the recommended production deployment method in README.md
   - Docker section moved to first position with clear benefits highlighted
@@ -32,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Ensures Node.js runtime is available for Discord bot process execution
 
 ## [0.2.24] - 2025-11-08
+
 ### Fixed
 - **Database migration: Discord settings**: recreated migration with new timestamp `20251109043000_AddDiscordSettingsToApplicationSettings` to ensure it runs on all databases, including those with broken migration history
   - Migration adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
