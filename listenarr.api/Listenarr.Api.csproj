@@ -107,4 +107,14 @@
     </Content>
   </ItemGroup>
 
+  <!-- Explicit fallback: copy tools into publish output to ensure runtime images get them -->
+  <Target Name="CopyToolsToPublish" AfterTargets="Publish">
+    <Message Importance="high" Text="Copying tools folder to publish folder ($(PublishDir)tools)" />
+    <ItemGroup>
+      <ToolFiles Include="$(MSBuildProjectDirectory)\tools\**\*.*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)tools" Condition="!Exists('$(PublishDir)tools')" />
+    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles->'$(PublishDir)tools\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+  </Target>
+
 </Project>
