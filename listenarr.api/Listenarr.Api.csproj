@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.2.26</Version>
-    <AssemblyVersion>0.2.26</AssemblyVersion>
+    <Version>0.2.27</Version>
+    <AssemblyVersion>0.2.27</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -107,14 +107,14 @@
     </Content>
   </ItemGroup>
 
-  <!-- Explicit fallback: copy tools into publish output to ensure runtime images get them -->
+  
   <Target Name="CopyToolsToPublish" AfterTargets="Publish">
     <Message Importance="high" Text="Copying tools folder to publish folder ($(PublishDir)tools)" />
     <ItemGroup>
       <ToolFiles Include="$(MSBuildProjectDirectory)\tools\**\*.*" />
     </ItemGroup>
     <MakeDir Directories="$(PublishDir)tools" Condition="!Exists('$(PublishDir)tools')" />
-    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles->'$(PublishDir)tools\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(ToolFiles)" DestinationFiles="@(ToolFiles-&gt;'$(PublishDir)tools\\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
 </Project>
