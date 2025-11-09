@@ -112,6 +112,66 @@ npm run dev:web      # Start only frontend web
 - Backend API: http://localhost:5000
 - Frontend Web: http://localhost:5173
 
+## Discord bot (optional)
+
+Listenarr includes a small reference Discord bot (in `tools/discord-bot`) that registers a slash command and forwards requests to the running Listenarr API. The bot is optional — the preferred integration is configuring the Discord settings from the Listenarr UI so the server manages the registration for you. Use the steps below for local development or to run the bot separately.
+
+Prerequisites:
+- A running Listenarr instance (see steps above)
+- Node.js 18+ and npm
+- A Discord application with a bot token and application ID
+
+Quick start (development):
+
+1. Create a Discord application and bot at https://discord.com/developers/applications. Copy the Application (client) ID and the Bot Token.
+2. Invite the bot to your guild with the following OAuth2 URL (replace <APP_ID>):
+
+```text
+https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot%20applications.commands&permissions=27648
+```
+
+The `permissions=27648` value requests the View Channels, Send Messages, Manage Messages, and Embed Links permissions which is the bare minimum permissions needed for the bot to function.
+
+3. Configure Listenarr (recommended):
+
+- Open the Listenarr web UI and go to Settings → Integrations → Discord (or the Discord section in Configuration).
+- Set the **Discord Application ID** to the Application ID you copied.
+- Set the **Discord Bot Token** to the bot token you copied.
+- Optionally set **Discord Guild ID** and **Discord Channel ID** so the bot registers commands in a specific guild and limits responses to one channel.
+- Enable the Discord integration and Save.
+
+When the Listenarr server has the bot token and application ID saved, the server will register the slash command and manage the bot. The `tools/discord-bot` helper is provided for local development or troubleshooting.
+
+Run the bot standalone (development):
+
+```bash
+cd tools/discord-bot
+npm install
+# Point the helper at your running Listenarr instance (defaults to http://localhost:5000)
+LISTENARR_URL=http://localhost:5000 npm start
+```
+
+Windows (PowerShell):
+
+```powershell
+cd tools\discord-bot
+npm install
+$env:LISTENARR_URL = 'http://localhost:5000'
+npm start
+```
+
+Notes and troubleshooting:
+- The helper bot reads settings from the Listenarr API; configuring the settings in the Listenarr UI is the recommended path.
+- For antiforgery (CSRF) support the helper tries to use `fetch-cookie` + `tough-cookie` if installed — install them to avoid occasional CSRF errors:
+
+```bash
+npm install fetch-cookie tough-cookie
+```
+
+- If you see permissions errors when deleting messages, ensure the bot has **Manage Messages** in the configured channel or invite it again with the proper permissions.
+- The helper borrows ephemeral replies (application interaction tokens) to remove ephemeral messages; this is best-effort and may not work across restarts.
+
+
 ## CI/CD
 
 Listenarr uses GitHub Actions for automated building and deployment:

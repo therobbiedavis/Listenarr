@@ -387,13 +387,15 @@ async function ensureClient(settings) {
           await handleSearchCommand(interaction, title)
         }
         // admin config command: set-channel
-        if (interaction.commandName === 'request-config' && interaction.options.getSubcommand(false) === 'set-channel') {
-          await handleSetChannelCommand(interaction)
-        }
+        // NOTE: temporarily disabled — uncomment to re-enable
+        // if (interaction.commandName === 'request-config' && interaction.options.getSubcommand(false) === 'set-channel') {
+        //   await handleSetChannelCommand(interaction)
+        // }
         // debug command: request-debug perms
-        if (interaction.commandName === 'request-debug' && interaction.options.getSubcommand(false) === 'perms') {
-          await handleDebugCommand(interaction)
-        }
+        // NOTE: temporarily disabled — uncomment to re-enable
+        // if (interaction.commandName === 'request-debug' && interaction.options.getSubcommand(false) === 'perms') {
+        //   await handleDebugCommand(interaction)
+        // }
       } else if (interaction.isStringSelectMenu()) {
         if (interaction.customId.startsWith('listenarr_results_')) {
           await handleSelectMenuInteraction(interaction)
@@ -487,10 +489,12 @@ async function registerCommands(settings) {
   try {
     if (settings.discordGuildId) {
       console.log(`Registering commands in guild ${settings.discordGuildId}`)
-      await rest.put(Routes.applicationGuildCommands(appId, settings.discordGuildId), { body: [command.toJSON(), configCommand.toJSON(), debugCommand.toJSON()] })
+      // Commented out admin/debug commands for now: only register the main request command
+      await rest.put(Routes.applicationGuildCommands(appId, settings.discordGuildId), { body: [command.toJSON()] })
     } else {
       console.log('Registering global commands')
-      await rest.put(Routes.applicationCommands(appId), { body: [command.toJSON(), configCommand.toJSON(), debugCommand.toJSON()] })
+      // Commented out admin/debug commands for now: only register the main request command
+      await rest.put(Routes.applicationCommands(appId), { body: [command.toJSON()] })
     }
     console.log('Commands registered')
   } catch (err) {
