@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Api.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20251109042119_AddDiscordSettingsToApplicationSettings")]
+    [Migration("20251109043000_AddDiscordSettingsToApplicationSettings")]
     partial class AddDiscordSettingsToApplicationSettings
     {
         /// <inheritdoc />
