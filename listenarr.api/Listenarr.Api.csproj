@@ -102,6 +102,8 @@
   <ItemGroup>
     <Content Include="tools\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <!-- Ensure tools are included in the publish output that is copied into the runtime image -->
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 
