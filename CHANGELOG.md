@@ -5,20 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.26] - 2025-11-09
+## [0.2.28] - 2025-11-09
+
+### Changed
+
+- Publish and deployment reliability improvements
+  - Ensure `tools/**` is included in publish output and runtime images by updating `listenarr.api/Listenarr.Api.csproj` and adding an explicit MSBuild `CopyToolsToPublish` target as a fallback.
+  - The runtime Dockerfile (`listenarr.api/Dockerfile.runtime`) now accepts a build-arg `PUBLISH_DIR` and copies from that path; CI workflows were updated to pass the appropriate publish directory so images are built from the exact CI publish output (for example `listenarr.api/publish/linux-x64`).
+  - CI and Canary workflows: added publish sanity checks, artifact upload (for debug), a fail-fast check in CI, and a copy-then-verify safety step in Canary so builds abort or repair when `tools` is missing from publish output.
 
 ### Fixed
- - **Publish: include tools folder**: Ensured `tools/**` is copied to the publish output by updating `Listenarr.Api.csproj` (added <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory> for `tools\**\*.*`)
-   - Fixes missing `/app/tools/discord-bot` inside runtime containers when publishing + copying publish output into images
-   - After this change, run `dotnet publish` and rebuild your image so the tooling directory is included in the container
+
+- Verified that local `dotnet publish` now includes `listenarr.api/publish/tools/discord-bot` and adjusted workflows and Docker build logic to make image builds deterministic and reproducible locally and in CI.
+
+
+
+## [0.2.27] - 2025-11-09
+
+### Fixed
+
   - **CI: fail-fast & publish verification**: Added quick-fail checks and publish-folder verification to CI and Canary workflows so builds abort if the `tools` folder is missing from publish output
     - Canary workflow now lists the publish folder, uploads the publish artifact for inspection, and contains a copy-then-verify step that will copy `tools` into the publish folder if CIS publish missed them
     - Main CI workflow now performs a fail-fast check after `dotnet publish` to avoid building/pushing images that don't include the discord helper files
     - These steps reduce the risk of releasing runtime images that cannot start the Discord helper bot
 
+## [0.2.26] - 2025-11-09
+
+### Fixed
+
+ - **Publish: include tools folder**: Ensured `tools/**` is copied to the publish output by updating `Listenarr.Api.csproj` (added <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory> for `tools\**\*.*`)
+   - Fixes missing `/app/tools/discord-bot` inside runtime containers when publishing + copying publish output into images
+   - After this change, run `dotnet publish` and rebuild your image so the tooling directory is included in the container
+
 ## [0.2.25] - 2025-11-09
 
 ### Added
+
 - **Docker as Primary Production Method**: Promoted Docker as the recommended production deployment method in README.md
   - Docker section moved to first position with clear benefits highlighted
   - Added Docker Compose example for easier production deployments
@@ -39,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Node.js installation requirements for Discord bot support
 
 ### Fixed
+
 - **Docker Runtime**: Added Node.js 20 installation to final runtime image for Discord bot support
   - Resolves "Failed to start bot" errors in Docker production deployments
   - Ensures Node.js runtime is available for Discord bot process execution
@@ -46,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.24] - 2025-11-08
 
 ### Fixed
+
 - **Database migration: Discord settings**: recreated migration with new timestamp `20251109043000_AddDiscordSettingsToApplicationSettings` to ensure it runs on all databases, including those with broken migration history
   - Migration adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
   - **Automatic fix for existing users**: Renamed migration ensures it executes regardless of previous broken migration state, fixing databases without manual intervention
@@ -60,17 +84,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.23] - 2025-11-08
 
 ### Fixed
+
 - **Database migration: Discord settings**: recreated migration with new timestamp `20251109043000_AddDiscordSettingsToApplicationSettings` to ensure it runs on all databases, including those with broken migration history
   - Migration adds `DiscordApplicationId`, `DiscordBotAvatar`, `DiscordBotEnabled`, `DiscordBotToken`, `DiscordBotUsername`, `DiscordChannelId`, `DiscordCommandGroupName`, `DiscordCommandSubcommandName`, and `DiscordGuildId`
 
 ## [0.2.22] - 2025-11-08
 
 ### Fixed
+
 - **Backend: warning cleanup**: silence CS1998 compiler warnings in `DiscordBotService` by returning completed tasks for synchronous methods (StopBotAsync, IsBotRunningAsync)
 
 ## [0.2.21] - 2025-11-08
 
 ### Added
+
 - **Professional Webhook Test Menu**: Enhanced notification testing UI
   - Bell icon dropdown menu in AudiobookDetailView with 3 trigger options
   - Only appears in development builds when webhooks are configured and at least one is enabled
@@ -84,6 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - README documentation for bot setup and troubleshooting
 
 ### Fixed
+
 - **Development-Only UI Elements**: Hidden test notification buttons in production
   - AudiobookDetailView: Wrapped 3 test notification buttons in `v-if="isDevelopment"` check
   - Buttons only visible in development mode, preventing confusion in production deployments
@@ -98,11 +126,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Components are disabled immediately after Request to prevent double-processing
 
 ### Changed
+
 - **Webhook Test Menu**: Gate Test menu to development builds and require at least one enabled webhook for visibility
 
 ## [0.2.20] - 2025-11-05
 
 ### Added
+
 - **Production Logger Utility**: Environment-aware logging system (`fe/src/utils/logger.ts`)
 - Automatically disabled in production (except errors) for performance
 - Supports debug, info, warn, and error levels
@@ -116,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Green border: Quality match (meets requirements)
 
 ### Fixed
+
 - **CRITICAL: qBittorrent Incremental Sync Cache**: Fixed torrents disappearing from queue UI on incremental updates
 - The `/api/v2/sync/maindata` endpoint only returns changed torrents, not the full list
 - Implemented `_qbittorrentTorrentCache` dictionary to maintain complete torrent state across polls
@@ -152,6 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Code Quality**: Fixed useless assignment in SystemService log reading
 
 ### Changed
+
 - **Code Documentation**: Replaced vague TODO comments with detailed NOTE explanations
 - DownloadService: Documented 4 minimal method implementations (GetActiveDownloadsAsync, GetDownloadAsync, CancelDownloadAsync, UpdateDownloadStatusAsync)
 - AudiobooksView: Explained downloading status requires Download-to-Audiobook linking
@@ -165,6 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release Readiness**: Comprehensive polish for stable production deployment
 
 ### Documentation
+
 - Added security best practices for deployment, configuration, and known security considerations
 - Documented supported versions and security update process
 - Created complete release documentation structure
@@ -172,6 +205,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed XML comment HTML entity encoding in NotificationService
 
 ### Technical Debt
+
 - Download-to-Audiobook linking system not yet implemented (documented in AudiobooksView.vue)
   - Currently downloads tracked separately in DownloadsView until completion
   - Future enhancement: Link Download records to Audiobook IDs for real-time status
@@ -188,6 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.19] - Previous Release
 
 ### Added
+
 - Initial beta release with core audiobook management features
 - Multi-API search across torrent and NZB providers
 - Download client integration (qBittorrent, Transmission, SABnzbd, NZBGet)
@@ -209,7 +244,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed**: Removed features
 - **Fixed**: Bug fixes
 - **Security**: Vulnerability fixes
-
-[0.2.20]: https://github.com/therobbiedavis/Listenarr/compare/v0.2.19...v0.2.20
-[0.2.19]: https://github.com/therobbiedavis/Listenarr/compare/v0.2.18...v0.2.19
-[0.2.18]: https://github.com/therobbiedavis/Listenarr/releases/tag/v0.2.18

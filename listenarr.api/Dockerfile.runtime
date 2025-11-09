@@ -18,6 +18,18 @@ RUN apt-get update \
 # The workflows publish into listenarr.api/publish, so copy that directory into the image root.
 COPY listenarr.api/publish/ /app/
 
+# Explicitly copy tools directory from source if not already in publish output
+# This ensures the Discord bot and any other tools are available at runtime
+COPY tools/ /app/tools/
+
+# Install Discord bot dependencies
+# We do this in the runtime image to ensure npm packages are available when the bot runs
+WORKDIR /app/tools/discord-bot
+RUN npm ci --omit=dev
+
+# Return to app root
+WORKDIR /app
+
 # Ensure database directory exists
 RUN mkdir -p /app/config/database
 

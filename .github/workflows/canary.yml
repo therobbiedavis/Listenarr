@@ -375,6 +375,8 @@ jobs:
         with:
           context: .
           file: listenarr.api/Dockerfile.runtime
+          build-args: |
+            PUBLISH_DIR=listenarr.api/publish
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
