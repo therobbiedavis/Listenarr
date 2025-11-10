@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.30] - 2025-11-09
+
+### Fixed
+
+- Discord helper bot startup race: the Node helper resolved `LISTENARR_URL` asynchronously at module load time which allowed the initial network calls to default to `http://localhost:5000`, causing authentication failures (SignalR negotiation and settings fetch returned 401) in containerized production. The startup routine now awaits `resolveListenarrUrl()` before performing any outbound requests so the environment-provided `LISTENARR_URL` (or `.env`) is used immediately.
+
 ## [0.2.29] - 2025-11-09
 
 ### Changed
@@ -18,14 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     4. Fallback: `host.docker.internal` (when running in Docker) or `localhost` (non-Docker fallback)
   - Docker-aware fallback: when `DOCKER_ENV` environment variable is present/true the runtime will prefer `host.docker.internal` instead of `localhost` for local host fallbacks
   - Additional per-step logging added to help diagnose URL resolution issues (logs which source was selected and any header-based values used)
-
-### Recommendations
-
-- Update your runtime Dockerfile to explicitly set the `DOCKER_ENV` environment variable so Docker-aware fallbacks are enabled. Example (in `listenarr.api/Dockerfile.runtime`):
-
-  ENV DOCKER_ENV=true
-
-- Prefer setting `LISTENARR_PUBLIC_URL` in production environments (recommended) so the runtime does not need to infer the value from request headers.
+  - Updated Dockerfile to explicitly set the `DOCKER_ENV` environment variable so Docker-aware fallbacks are enabled.
 
 ### Notes
 
