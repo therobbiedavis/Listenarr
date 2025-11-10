@@ -1298,7 +1298,17 @@ function cleanupSessions() {
 
 async function start() {
   console.log('Starting Listenarr Discord bot (tools/discord-bot)')
-  // initial fetch
+  // Resolve the Listenarr URL synchronously from env/.env before making any requests.
+  // This avoids a race where the module-level resolver runs async and the initial
+  // fetchSettings() call happens with the default 'http://localhost:5000'.
+  try {
+    const resolved = await resolveListenarrUrl()
+    if (resolved && resolved.trim()) listenarrUrl = resolved.trim().replace(/\/$/, '')
+  } catch (e) {
+    // ignore and fall back to existing value
+  }
+
+  // initial fetch (now guaranteed to use the resolved listenarrUrl)
   currentSettings = await fetchSettings()
   if (currentSettings) await ensureClient(currentSettings)
 
