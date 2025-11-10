@@ -18,16 +18,28 @@
     </div>
 
     <div class="wanted-filters">
-      <div class="filter-tabs">
-        <button 
-          v-for="tab in filterTabs" 
-          :key="tab.value"
-          :class="['tab', { active: selectedTab === tab.value }]"
-          @click="selectedTab = tab.value"
-        >
-          {{ tab.label }}
-          <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span>
-        </button>
+      <!-- Mobile dropdown -->
+      <div class="filter-tabs-mobile">
+        <CustomSelect
+          v-model="selectedTab"
+          :options="mobileTabOptions"
+          class="tab-dropdown"
+        />
+      </div>
+
+      <!-- Desktop tabs -->
+      <div class="filter-tabs-desktop">
+        <div class="filter-tabs">
+          <button 
+            v-for="tab in filterTabs" 
+            :key="tab.value"
+            :class="['tab', { active: selectedTab === tab.value }]"
+            @click="selectedTab = tab.value"
+          >
+            {{ tab.label }}
+            <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -50,7 +62,8 @@
         <div class="wanted-poster">
           <img 
             :src="apiService.getImageUrl(item.imageUrl) || `https://via.placeholder.com/60x90?text=No+Image`" 
-            :alt="item.title" 
+            :alt="item.title"
+            loading="lazy"
           />
         </div>
         <div class="wanted-info">
@@ -148,9 +161,10 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
+import CustomSelect from '@/components/CustomSelect.vue'
 import type { Audiobook, SearchResult } from '@/types'
 import { safeText } from '@/utils/textUtils'
-import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle } from '@phosphor-icons/vue'
+import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle, PhBooks, PhQuestion, PhXCircle, PhSkipForward } from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
 
 const libraryStore = useLibraryStore()
@@ -181,6 +195,14 @@ const searchResults = ref<Record<number, string>>({})
 const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
 const showManualImportModal = ref(false)
+
+const mobileTabOptions = computed(() => [
+  { value: 'all', label: 'All', icon: PhBooks },
+  { value: 'missing', label: 'Missing', icon: PhQuestion },
+  { value: 'searching', label: 'Searching', icon: PhMagnifyingGlass },
+  { value: 'failed', label: 'Failed', icon: PhXCircle },
+  { value: 'skipped', label: 'Skipped', icon: PhSkipForward }
+])
 
 onMounted(async () => {
   loading.value = true
@@ -431,6 +453,13 @@ const markAsSkipped = async (item: Audiobook) => {
     logger.error('Failed to unmonitor audiobook:', err)
   }
 }
+
+// Handle dropdown tab change
+// const onTabChange = (event: Event) => {
+//   const target = event.target as HTMLSelectElement
+//   const newTab = target.value as 'all' | 'missing' | 'searching' | 'failed' | 'skipped'
+//   selectedTab.value = newTab
+// }
 </script>
 
 <style scoped>
@@ -447,10 +476,12 @@ const markAsSkipped = async (item: Audiobook) => {
 
 /* Virtual scrolling container */
 .wanted-list-container {
-  height: calc(100vh - 254px);
+  height: calc(100vh - 291px);
   overflow-y: auto;
   position: relative;
   padding: 0 .5em 0 0;
+  scrollbar-gutter: stable; /* Reserve space for scrollbar to prevent layout shifts */
+  width: calc(100% + 0.5em); /* Leaves space for scrollbar without cutting off content */
 }
 
 .wanted-list-spacer {
@@ -903,6 +934,71 @@ background-color: unset;
   
   .wanted-actions-cell {
     justify-content: flex-end;
+    gap: 0.75rem;
+  }
+
+  .wanted-actions-cell .btn-icon {
+    padding: 0.75rem;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .wanted-actions-cell .btn-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Stack page header actions vertically on mobile */
+  .wanted-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .wanted-actions .btn {
+    width: 80%;
+    justify-content: center;
+    margin: 0 0 0 auto;
+    font-size: 0.85rem;
+  }
+
+  /* Mobile filter tabs */
+  .filter-tabs-mobile {
+    display: block;
+  }
+
+  .filter-tabs-desktop {
+    display: none;
+  }
+
+  .tab-dropdown {
+    width: 100%;
+    color: #fff;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tab-dropdown:focus {
+    outline: none;
+    border-color: #4dabf7;
+    box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
+  }
+
+  .tab-dropdown option {
+    background-color: #2a2a2a;
+    color: #fff;
+  }
+}
+
+/* Desktop filter tabs */
+@media (min-width: 769px) {
+  .filter-tabs-mobile {
+    display: none;
+  }
+
+  .filter-tabs-desktop {
+    display: block;
   }
 }
 </style>

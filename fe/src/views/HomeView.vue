@@ -81,7 +81,7 @@
               class="episode-item"
             >
               <div class="episode-poster">
-                <img :src="audiobook.poster || '/placeholder-poster.jpg'" :alt="audiobook.title" />
+                <img :src="audiobook.poster || '/placeholder-poster.jpg'" :alt="audiobook.title" loading="lazy" />
               </div>
               <div class="episode-info">
                 <h4>{{ safeText(audiobook.title) }}</h4>

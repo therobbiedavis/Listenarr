@@ -7,69 +7,116 @@
         Back
       </button>
       <div class="nav-actions">
-        <button class="nav-btn" @click="refresh">
-          <PhArrowClockwise />
-          Refresh
-        </button>
-        <button class="nav-btn" @click="toggleMonitored">
-          <PhBookmark :weight="audiobook.monitored ? 'fill' : 'regular'" />
-          {{ audiobook.monitored ? 'Monitored' : 'Monitor' }}
-        </button>
-        <!-- Scan button moved to top nav: enqueues a background scan and shows queued feedback -->
-        <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
-          <PhSpinner v-if="scanning" class="ph-spin" />
-          <PhClock v-else-if="scanQueued" />
-          <PhMagnifyingGlass v-else />
-          <span v-if="scanning">Scanning...</span>
-          <span v-else-if="scanQueued">Scan queued</span>
-          <span v-else>Scan Folder</span>
-        </button>
-        <!-- Test Notification Menu (only if webhooks configured) -->
-  <div class="test-menu-container" v-if="isDevelopment && hasWebhooksConfigured">
-          <button 
-            class="nav-btn test-menu-btn" 
-            @click.stop="showTestMenu = !showTestMenu"
-            :disabled="sendingNotification"
-            title="Test Notifications"
-          >
-            <PhBell />
-            Test
+        <div class="primary-actions">
+          <button class="nav-btn" @click="refresh">
+            <PhArrowClockwise />
+            Refresh
           </button>
-          <div class="test-dropdown" v-if="showTestMenu" @click.stop>
+          <button class="nav-btn" @click="toggleMonitored">
+            <PhBookmark :weight="audiobook.monitored ? 'fill' : 'regular'" />
+            {{ audiobook.monitored ? 'Monitored' : 'Monitor' }}
+          </button>
+        </div>
+
+        <!-- Desktop: show all actions inline -->
+        <div class="secondary-actions tabs-desktop">
+          <!-- Scan button moved to top nav: enqueues a background scan and shows queued feedback -->
+          <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
+            <PhSpinner v-if="scanning" class="ph-spin" />
+            <PhClock v-else-if="scanQueued" />
+            <PhMagnifyingGlass v-else />
+            <span v-if="scanning">Scanning...</span>
+            <span v-else-if="scanQueued">Scan queued</span>
+            <span v-else>Scan Folder</span>
+          </button>
+
+          <!-- Test Notification Menu (only if webhooks configured) -->
+          <div class="test-menu-container" v-if="isDevelopment && hasWebhooksConfigured">
             <button 
-              class="dropdown-item" 
-              @click="openTestMenu('book-added'); showTestMenu = false"
+              class="nav-btn test-menu-btn" 
+              @click.stop="showTestMenu = !showTestMenu"
               :disabled="sendingNotification"
+              title="Test Notifications"
             >
-              <PhBookmark />
-              Book Added
+              <PhBell />
+              Test
             </button>
-            <button 
-              class="dropdown-item" 
-              @click="openTestMenu('book-available'); showTestMenu = false"
-              :disabled="sendingNotification"
-            >
-              <PhCheckCircle />
-              Book Available
+            <div class="test-dropdown" v-if="showTestMenu" @click.stop>
+              <button 
+                class="dropdown-item" 
+                @click="openTestMenu('book-added'); showTestMenu = false"
+                :disabled="sendingNotification"
+              >
+                <PhBookmark />
+                Book Added
+              </button>
+              <button 
+                class="dropdown-item" 
+                @click="openTestMenu('book-available'); showTestMenu = false"
+                :disabled="sendingNotification"
+              >
+                <PhCheckCircle />
+                Book Available
+              </button>
+              <button 
+                class="dropdown-item" 
+                @click="openTestMenu('book-downloading'); showTestMenu = false"
+                :disabled="sendingNotification"
+              >
+                <PhDownload />
+                Book Downloading
+              </button>
+            </div>
+          </div>
+
+          <button class="nav-btn" @click="openEditModal">
+            <PhPencil />
+            Edit
+          </button>
+          <button class="nav-btn delete-btn" @click="confirmDelete">
+            <PhTrash />
+            Delete
+          </button>
+        </div>
+
+        <!-- Mobile: collapse remaining actions into a More dropdown -->
+        <div class="more-wrapper tabs-mobile">
+          <button class="nav-btn more-btn" @click.stop="showMoreActions = !showMoreActions" :aria-expanded="showMoreActions" title="More actions">
+            <PhCaretDown />
+            More
+          </button>
+          <div v-if="showMoreActions" class="more-dropdown" @click.stop>
+            <button class="dropdown-item" @click="refresh; showMoreActions = false">
+              <PhArrowClockwise />
+              <span>Refresh</span>
             </button>
-            <button 
-              class="dropdown-item" 
-              @click="openTestMenu('book-downloading'); showTestMenu = false"
-              :disabled="sendingNotification"
-            >
-              <PhDownload />
-              Book Downloading
+            <button class="dropdown-item" @click="toggleMonitored; showMoreActions = false">
+              <PhBookmark :weight="audiobook.monitored ? 'fill' : 'regular'" />
+              <span>{{ audiobook.monitored ? 'Monitored' : 'Monitor' }}</span>
+            </button>
+            <button class="dropdown-item" :disabled="scanning || scanQueued" @click="scanFiles; showMoreActions = false">
+              <PhMagnifyingGlass />
+              <span>Scan Folder</span>
+            </button>
+
+            <div v-if="isDevelopment && hasWebhooksConfigured" class="mobile-test-group">
+              <button class="dropdown-item" @click="showWebhookSelector = true; showMoreActions = false">
+                <PhBell />
+                <span>Test Notification</span>
+              </button>
+            </div>
+
+            <button class="dropdown-item" @click="openEditModal; showMoreActions = false">
+              <PhPencil />
+              <span>Edit</span>
+            </button>
+
+            <button class="dropdown-item delete" @click="confirmDelete; showMoreActions = false">
+              <PhTrash />
+              <span>Delete</span>
             </button>
           </div>
         </div>
-        <button class="nav-btn" @click="openEditModal">
-          <PhPencil />
-          Edit
-        </button>
-        <button class="nav-btn delete-btn" @click="confirmDelete">
-          <PhTrash />
-          Delete
-        </button>
       </div>
     </div>
 
@@ -82,6 +129,7 @@
             :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
             :alt="audiobook.title"
             class="poster"
+            loading="lazy"
           />
         </div>
         <div class="info-section">
@@ -167,31 +215,43 @@
 
     <!-- Tabs Section -->
     <div class="tabs-container">
-      <div class="tabs">
-        <button 
-          class="tab" 
-          :class="{ active: activeTab === 'details' }"
-          @click="activeTab = 'details'"
-        >
-          <PhInfo />
-          Details
-        </button>
-        <button 
-          class="tab" 
-          :class="{ active: activeTab === 'files' }"
-          @click="activeTab = 'files'"
-        >
-          <PhFile />
-          Files
-        </button>
-        <button 
-          class="tab" 
-          :class="{ active: activeTab === 'history' }"
-          @click="activeTab = 'history'"
-        >
-          <PhClockCounterClockwise />
-          History
-        </button>
+      <!-- Mobile dropdown -->
+      <div class="tabs-mobile">
+        <CustomSelect
+          v-model="activeTab"
+          :options="mobileTabOptions"
+          class="tab-dropdown"
+        />
+      </div>
+
+      <!-- Desktop tabs -->
+      <div class="tabs-desktop">
+        <div class="tabs">
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'details' }"
+            @click="activeTab = 'details'"
+          >
+            <PhInfo />
+            Details
+          </button>
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'files' }"
+            @click="activeTab = 'files'"
+          >
+            <PhFile />
+            Files
+          </button>
+          <button 
+            class="tab" 
+            :class="{ active: activeTab === 'history' }"
+            @click="activeTab = 'history'"
+          >
+            <PhClockCounterClockwise />
+            History
+          </button>
+        </div>
       </div>
     </div>
 
@@ -509,6 +569,7 @@ import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
+import CustomSelect from '@/components/CustomSelect.vue'
 import { 
   PhArrowLeft, 
   PhArrowClockwise, 
@@ -568,6 +629,7 @@ const scanJobId = ref<string | null>(null)
 const sendingNotification = ref(false)
 const showEditModal = ref(false)
 const showTestMenu = ref(false)
+const showMoreActions = ref(false)
 const showWebhookSelector = ref(false)
 const selectedTrigger = ref<'book-added' | 'book-available' | 'book-downloading' | ''>('')
 const webhooks = ref<Array<{ id: string; name: string; isEnabled: boolean }>>([])
@@ -579,6 +641,13 @@ const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
 const qualityProfiles = ref<import('@/types').QualityProfile[]>([])
 const expandedFileAccordions = ref<Set<number>>(new Set())
+
+// Mobile tab options for CustomSelect
+const mobileTabOptions = computed(() => [
+  { value: 'details', label: 'Details', icon: PhInfo },
+  { value: 'files', label: 'Files', icon: PhFile },
+  { value: 'history', label: 'History', icon: PhClockCounterClockwise }
+])
 
 // Check if any webhooks are configured
 const hasWebhooksConfigured = computed(() => {
@@ -657,6 +726,13 @@ watch(activeTab, async (newTab) => {
   }
 })
 
+// Handle dropdown tab change
+// const onTabChange = (event: Event) => {
+//   const target = event.target as HTMLSelectElement
+//   const newTab = target.value as 'details' | 'files' | 'history'
+//   activeTab.value = newTab
+// }
+
 onMounted(async () => {
   await loadAudiobook()
   // subscribe to scan job updates
@@ -692,6 +768,9 @@ onMounted(() => {
 function handleClickOutside() {
   if (showTestMenu.value) {
     showTestMenu.value = false
+  }
+  if (showMoreActions.value) {
+    showMoreActions.value = false
   }
 }
 
@@ -1227,6 +1306,30 @@ function formatDate(dateString?: string): string {
   z-index: 100;
 }
 
+/* More dropdown (mobile) should be absolutely positioned so it doesn't expand the top-nav */
+.more-wrapper {
+  position: relative;
+}
+
+.more-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  margin-top: 4px;
+  background-color: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  min-width: 200px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+}
+
+.more-dropdown .dropdown-item {
+  border-radius: 0;
+}
+
 .dropdown-item {
   display: flex;
   align-items: center;
@@ -1358,6 +1461,12 @@ function formatDate(dateString?: string): string {
   flex-shrink: 0;
 }
 
+@media (max-width: 768px) {
+  .poster-container {
+    margin: 0 auto;
+  }
+}
+
 .poster {
   width: 350px;
   height: 350px;
@@ -1390,6 +1499,7 @@ function formatDate(dateString?: string): string {
 @media (max-width: 768px) {
   .title {
     font-size: 2rem;
+    text-align: center;
   }
 }
 
@@ -1402,6 +1512,7 @@ function formatDate(dateString?: string): string {
 @media (max-width: 768px) {
   .subtitle {
     font-size: 1rem;
+    text-align: center;
   }
 }
 
@@ -1423,6 +1534,12 @@ function formatDate(dateString?: string): string {
 
 .runtime i, .rating i {
   color: #007acc;
+}
+
+@media (max-width: 768px) {
+  .meta-info {
+    justify-content: center;
+  }
 }
 
 .file-path {
@@ -1617,6 +1734,111 @@ function formatDate(dateString?: string): string {
 @media (max-width: 768px) {
   .tabs-container {
     padding: 0 20px;
+  }
+}
+
+/* Show mobile select and hide desktop tabs where appropriate */
+.tabs-mobile {
+  display: none;
+}
+.tabs-desktop {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .tabs-mobile {
+    display: block;
+  }
+
+  .tab-dropdown {
+    width: 100%;
+  }
+
+  .tabs-desktop {
+    display: none;
+  }
+
+  /* Make top nav buttons wrap and be touch friendly on small screens */
+  .top-nav {
+    padding: 10px 12px;
+    right: 0;
+  }
+
+  .nav-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .nav-btn {
+    padding: 8px 10px;
+    min-width: 44px;
+  }
+}
+
+/* Improved mobile layout for nav actions: keep nav and actions inline on mobile */
+@media (max-width: 768px) {
+  .top-nav {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  /* Keep the back button prominent but inline with actions on mobile */
+  .top-nav > .nav-btn:first-of-type {
+    width: auto;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    font-weight: 600;
+    min-width: 0;
+  }
+
+  /* On mobile hide the primary-actions container (we surface primary actions inside the More menu) */
+  .primary-actions {
+    display: none;
+  }
+
+  /* Make nav-actions size to content so they stay inline with the back button */
+  .nav-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: auto;
+    gap: 8px;
+    width: auto;
+    align-items: center;
+  }
+
+  @media (max-width: 480px) {
+    .nav-actions {
+      grid-auto-columns: auto;
+    }
+  }
+
+  .nav-actions .nav-btn {
+    width: auto;
+    justify-content: center;
+    padding: 10px 8px;
+    font-size: 14px;
+    border-radius: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Make icon slightly larger to improve affordance */
+  .nav-actions .nav-btn svg,
+  .top-nav > .nav-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Reduce visual noise for disabled buttons and keep them tappable */
+  .nav-actions .nav-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 }
 
@@ -1961,6 +2183,97 @@ function formatDate(dateString?: string): string {
   font-size: 14px;
   color: #555;
   margin-top: 8px;
+}
+
+/* Mobile-specific refinements to improve layout and prevent overflow */
+@media (max-width: 768px) {
+  /* Make poster a bit smaller and centered for narrow viewports */
+  .poster {
+    width: 200px;
+    height: 200px;
+    margin: 0 auto;
+    display: block;
+  }
+
+  .hero-content {
+    align-items: flex-start;
+  }
+
+  .info-section {
+    padding: 0 8px;
+  }
+
+  /* Allow long titles and metadata to wrap instead of causing horizontal scroll */
+  .title {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .detail-item span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  /* Stack metadata table rows on small screens so the table doesn't overflow */
+  .metadata-table tbody tr {
+    display: block;
+    padding: 8px 0;
+    border-bottom: 1px solid #444;
+  }
+
+  .metadata-label {
+    display: block;
+    width: auto;
+    padding-bottom: 6px;
+  }
+
+  .metadata-value {
+    display: block;
+    padding-bottom: 12px;
+    word-break: break-word;
+  }
+
+  /* Make file lists and tab content reserve space for scrollbars to avoid layout shifts */
+  .file-list,
+  .tab-content,
+  .search-results-inline {
+    scrollbar-gutter: stable;
+  }
+
+  /* Ensure dropdowns and test menus sit above the fixed top-nav */
+  .test-dropdown,
+  .test-menu-container .test-dropdown,
+  .test-menu-container .test-dropdown .dropdown-item {
+    z-index: 1200;
+  }
+
+  /* Tweak top nav spacing for very small screens */
+  .nav-actions {
+    gap: 8px;
+  }
+
+  .nav-btn {
+    min-width: 0;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .poster {
+    width: 160px;
+    height: 160px;
+  }
+
+  .title {
+    font-size: 1.4rem;
+  }
+
+  .nav-btn {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
 }
 
 /* History Styles */

@@ -9,62 +9,96 @@
     </div>
 
     <div class="settings-tabs">
-      <button 
-        @click="router.push({ hash: '#indexers' })" 
-        :class="{ active: activeTab === 'indexers' }"
-        class="tab-button"
-      >
-  <PhListMagnifyingGlass />
-        Indexers
-      </button>
-      <button 
-        @click="router.push({ hash: '#apis' })" 
-        :class="{ active: activeTab === 'apis' }"
-        class="tab-button"
-      >
-  <PhCloud />
-        Metadata Sources
-      </button>
-      <button 
-        @click="router.push({ hash: '#clients' })" 
-        :class="{ active: activeTab === 'clients' }"
-        class="tab-button"
-      >
-  <PhDownload />
-        Download Clients
-      </button>
-      <button 
-        @click="router.push({ hash: '#quality-profiles' })" 
-        :class="{ active: activeTab === 'quality-profiles' }"
-        class="tab-button"
-      >
-  <PhStar />
-        Quality Profiles
-      </button>
-      <button 
-        @click="router.push({ hash: '#general' })" 
-        :class="{ active: activeTab === 'general' }"
-        class="tab-button"
-      >
-  <PhSliders />
-        General Settings
-      </button>
-      <button 
-        @click="router.push({ hash: '#notifications' })" 
-        :class="{ active: activeTab === 'notifications' }"
-        class="tab-button"
-      >
-  <PhBell />
-        Notifications
-      </button>
-      <button 
-        @click="router.push({ hash: '#requests' })" 
-        :class="{ active: activeTab === 'requests' }"
-        class="tab-button"
-      >
-  <PhGlobe />
-        Requests
-      </button>
+      <!-- Mobile dropdown -->
+      <div class="settings-tabs-mobile">
+        <CustomSelect
+          v-model="activeTab"
+          :options="mobileTabOptions"
+          class="tab-dropdown"
+        />
+      </div>
+
+      <!-- Desktop tabs (turns into a horizontal carousel when overflowing) -->
+      <div class="settings-tabs-desktop-wrapper">
+        <button
+          type="button"
+          class="tabs-scroll-btn left"
+          @click="scrollTabs(-1)"
+          v-show="hasTabOverflow && showLeftTabChevron"
+          aria-hidden="true"
+        >
+          ‹
+        </button>
+
+        <div ref="desktopTabsRef" class="settings-tabs-desktop">
+          <button 
+            @click="router.push({ hash: '#indexers' })" 
+            :class="{ active: activeTab === 'indexers' }"
+            class="tab-button"
+          >
+    <PhListMagnifyingGlass />
+          Indexers
+        </button>
+        <button 
+          @click="router.push({ hash: '#apis' })" 
+          :class="{ active: activeTab === 'apis' }"
+          class="tab-button"
+        >
+    <PhCloud />
+          Metadata Sources
+        </button>
+        <button 
+          @click="router.push({ hash: '#clients' })" 
+          :class="{ active: activeTab === 'clients' }"
+          class="tab-button"
+        >
+    <PhDownload />
+          Download Clients
+        </button>
+        <button 
+          @click="router.push({ hash: '#quality-profiles' })" 
+          :class="{ active: activeTab === 'quality-profiles' }"
+          class="tab-button"
+        >
+    <PhStar />
+          Quality Profiles
+        </button>
+        <button 
+          @click="router.push({ hash: '#general' })" 
+          :class="{ active: activeTab === 'general' }"
+          class="tab-button"
+        >
+    <PhSliders />
+          General Settings
+        </button>
+        <button 
+          @click="router.push({ hash: '#notifications' })" 
+          :class="{ active: activeTab === 'notifications' }"
+          class="tab-button"
+        >
+    <PhBell />
+          Notifications
+        </button>
+        <button 
+          @click="router.push({ hash: '#requests' })" 
+          :class="{ active: activeTab === 'requests' }"
+          class="tab-button"
+        >
+    <PhGlobe />
+          Requests
+        </button>
+        </div>
+
+        <button
+          type="button"
+          class="tabs-scroll-btn right"
+          @click="scrollTabs(1)"
+          v-show="hasTabOverflow && showRightTabChevron"
+          aria-hidden="true"
+        >
+          ›
+        </button>
+      </div>
     </div>
 
     <div class="settings-content">
@@ -1530,12 +1564,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
+import CustomSelect from '@/components/CustomSelect.vue'
 import {
   // Settings & Navigation
   PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus,
@@ -1575,6 +1610,91 @@ const router = useRouter()
 const configStore = useConfigurationStore()
 const toast = useToast()
 const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'>('indexers')
+
+const mobileTabOptions = computed(() => [
+  { value: 'indexers', label: 'Indexers', icon: PhListMagnifyingGlass },
+  { value: 'apis', label: 'Metadata Sources', icon: PhCloud },
+  { value: 'clients', label: 'Download Clients', icon: PhDownload },
+  { value: 'quality-profiles', label: 'Quality Profiles', icon: PhStar },
+  { value: 'general', label: 'General Settings', icon: PhSliders },
+  { value: 'notifications', label: 'Notifications', icon: PhBell },
+  { value: 'requests', label: 'Requests', icon: PhGlobe }
+])
+// Desktop tabs carousel refs/state
+const desktopTabsRef = ref<HTMLElement | null>(null)
+const hasTabOverflow = ref(false)
+const showLeftTabChevron = ref(false)
+const showRightTabChevron = ref(false)
+
+function updateTabOverflow() {
+  const el = desktopTabsRef.value
+  if (!el) return
+  hasTabOverflow.value = el.scrollWidth > el.clientWidth + 1
+  showLeftTabChevron.value = el.scrollLeft > 5
+  showRightTabChevron.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 5
+}
+
+function scrollTabs(direction = 1) {
+  const el = desktopTabsRef.value
+  if (!el) return
+  const amount = Math.round(el.clientWidth * 0.6) * direction
+  el.scrollBy({ left: amount, behavior: 'smooth' })
+}
+
+let tabsResizeObserver: ResizeObserver | null = null
+onMounted(async () => {
+  // Wait until DOM is fully painted (fonts, icons) so measurements are accurate
+  await nextTick()
+  updateTabOverflow()
+  window.addEventListener('resize', updateTabOverflow)
+
+  const el = desktopTabsRef.value
+  if (el) {
+    el.addEventListener('scroll', updateTabOverflow, { passive: true })
+
+    // Use ResizeObserver to detect when content/size changes cause overflow
+    if (typeof ResizeObserver !== 'undefined') {
+      tabsResizeObserver = new ResizeObserver(() => updateTabOverflow())
+      tabsResizeObserver.observe(el)
+      // also observe the parent in case the container resizes
+      if (el.parentElement) tabsResizeObserver.observe(el.parentElement)
+    } else {
+      // Fallback: run a delayed check to account for late layout shifts
+      setTimeout(updateTabOverflow, 250)
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateTabOverflow)
+  const el = desktopTabsRef.value
+  if (el) {
+    el.removeEventListener('scroll', updateTabOverflow)
+  }
+  if (tabsResizeObserver) {
+    tabsResizeObserver.disconnect()
+    tabsResizeObserver = null
+  }
+})
+
+// Ensure active tab is visible when switching tabs on desktop
+function ensureActiveTabVisible() {
+  const el = desktopTabsRef.value
+  if (!el) return
+  const active = el.querySelector('.tab-button.active') as HTMLElement | null
+  if (active) {
+    // center the active tab in view when overflowing
+    active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  }
+}
+
+watch(activeTab, () => {
+  // delay slightly to allow layout updates
+  setTimeout(() => {
+    updateTabOverflow()
+    if (hasTabOverflow.value) ensureActiveTabVisible()
+  }, 40)
+})
 const showApiForm = ref(false)
 const showClientForm = ref(false)
 const showIndexerForm = ref(false)
@@ -2852,6 +2972,14 @@ const syncTabFromHash = () => {
   }
 }
 
+// Handle dropdown tab change
+// const onTabChange = (event: Event) => {
+//   const target = event.target as HTMLSelectElement
+//   const newTab = target.value as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'
+//   activeTab.value = newTab
+//   router.push({ hash: `#${newTab}` })
+// }
+
 // Watch for hash changes
 watch(() => route.hash, () => {
   syncTabFromHash()
@@ -3077,6 +3205,80 @@ onMounted(async () => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 500px;
 }
+
+/* Desktop tabs carousel styles */
+.settings-tabs-desktop-wrapper {
+  position: relative;
+}
+
+.settings-tabs-desktop {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  padding-bottom: 4px; /* give space for hidden scrollbar */
+  scrollbar-gutter: stable both-edges;
+}
+
+/* keep the scrollable area clipped so overflowing tabs are hidden */
+.settings-tabs-desktop-wrapper {
+  overflow: hidden;
+}
+
+.settings-tabs-desktop {
+  align-items: center;
+  white-space: nowrap;
+  padding: 0 12px; /* space for chevron overlay */
+  scroll-padding-left: 48px;
+  scroll-padding-right: 48px;
+}
+
+.settings-tabs-desktop .tab-button {
+  flex: 0 0 auto;
+}
+
+.settings-tabs-desktop::-webkit-scrollbar {
+  height: 6px;
+}
+
+/* hide the native scrollbar while preserving scrollability */
+.settings-tabs-desktop::-webkit-scrollbar { display: none; }
+.settings-tabs-desktop { -ms-overflow-style: none; scrollbar-width: none; }
+
+.tabs-scroll-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1200;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.tabs-scroll-btn.left {
+  left: 0;
+}
+
+.tabs-scroll-btn.right {
+  right: 0;
+}
+
+.tabs-scroll-btn:hover {
+  background: rgba(0, 0, 0, 1);
+  transform: translateY(-50%) scale(1.02);
+}
+
+/* When tabs don't overflow hide the scrollbar and buttons via v-show in template */
 
 .tab-content {
   padding: 2rem;
@@ -5387,6 +5589,58 @@ onMounted(async () => {
   .stop-button {
     flex: 1;
     justify-content: center;
+  }
+}
+
+/* Mobile settings tabs */
+@media (max-width: 768px) {
+
+  .settings-tabs {
+    flex-direction: column;
+    gap: 1rem;
+    border-bottom: unset;
+  }
+
+  .settings-tabs-mobile {
+    display: block;
+  }
+
+  .settings-tabs-desktop {
+    display: none;
+  }
+
+  .tab-dropdown {
+    width: 100%;
+    color: #fff;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tab-dropdown:focus {
+    outline: none;
+    border-color: #4dabf7;
+    box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
+  }
+
+  .tab-dropdown option {
+    background-color: #2a2a2a;
+    color: #fff;
+  }
+}
+
+/* Desktop settings tabs */
+@media (min-width: 769px) {
+  .settings-tabs {
+    flex-direction: row;
+  }
+
+  .settings-tabs-mobile {
+    display: none;
+  }
+
+  .settings-tabs-desktop {
+    display: flex;
   }
 }
 </style>

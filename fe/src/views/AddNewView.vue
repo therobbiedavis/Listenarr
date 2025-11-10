@@ -76,7 +76,7 @@
         <div class="title-results">
           <div class="title-result-card">
             <div class="result-poster">
-              <img v-if="audibleResult.imageUrl" :src="apiService.getImageUrl(audibleResult.imageUrl)" :alt="audibleResult.title" />
+              <img v-if="audibleResult.imageUrl" :src="apiService.getImageUrl(audibleResult.imageUrl)" :alt="audibleResult.title" loading="lazy" />
               <div v-else class="placeholder-cover">
                 <PhImage />
               </div>
@@ -158,7 +158,7 @@
         <div class="title-results">
           <div v-for="book in titleResults" :key="book.key" class="title-result-card">
               <div class="result-poster">
-              <img v-if="getCoverUrl(book)" :src="getCoverUrl(book)" :alt="book.title" />
+              <img v-if="getCoverUrl(book)" :src="getCoverUrl(book)" :alt="book.title" loading="lazy" />
               <div v-else class="placeholder-cover">
                 <PhBook />
               </div>
@@ -1859,7 +1859,15 @@ onMounted(async () => {
   .result-poster {
     width: 100px;
     height: 100px;
-    margin: 0 auto 1rem;
+    margin: 0 auto;
+  }
+
+  .result-info {
+    width: 100%;
+  }
+
+  .result-stats, .result-meta {
+    margin: 0 auto;
   }
   
   .result-actions, .helper-actions {
@@ -1870,6 +1878,58 @@ onMounted(async () => {
   .quick-actions {
     flex-direction: column;
     align-items: center;
+  }
+
+  /* Mobile improvements: stack unified search and make CTAs full width */
+  .unified-search-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .unified-search-bar .search-input {
+    width: 100%;
+    font-size: 1rem;
+  }
+
+  .unified-search-bar .search-btn {
+    width: 100%;
+    min-width: 0;
+    padding: 0.875rem;
+  }
+
+  /* Make result action buttons stack and be larger on mobile */
+  .title-result-card .result-actions,
+  .result-card .result-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .title-result-card .result-actions .btn,
+  .result-card .result-actions .btn {
+    width: 100%;
+    padding: 0.9rem 1rem;
+    font-size: 1rem;
+  }
+
+  /* Reduce page padding for small devices to maximize content space */
+  .add-new-view {
+    padding: 1rem;
+  }
+
+  /* Ensure results area keeps a stable gutter for scrollbars */
+  .search-results,
+  .title-results,
+  .search-section {
+    scrollbar-gutter: stable both-edges;
+  }
+
+  /* Allow long metadata badges and names to wrap instead of overflowing */
+  .result-meta span,
+  .metadata-source-badge,
+  .metadata-source-link {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 </style>

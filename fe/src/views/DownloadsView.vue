@@ -8,27 +8,39 @@
     </div>
 
     <div class="downloads-tabs">
-      <button 
-        @click="activeTab = 'active'" 
-        :class="{ active: activeTab === 'active' }"
-        class="tab-button"
-      >
-        Active ({{ downloadsStore.activeDownloads.length }})
-      </button>
-      <button 
-        @click="activeTab = 'completed'" 
-        :class="{ active: activeTab === 'completed' }"
-        class="tab-button"
-      >
-        Completed ({{ downloadsStore.completedDownloads.length }})
-      </button>
-      <button 
-        @click="activeTab = 'failed'" 
-        :class="{ active: activeTab === 'failed' }"
-        class="tab-button"
-      >
-        Failed ({{ downloadsStore.failedDownloads.length }})
-      </button>
+      <!-- Mobile dropdown -->
+      <div class="downloads-tabs-mobile">
+        <CustomSelect
+          v-model="activeTab"
+          :options="mobileTabOptions"
+          class="tab-dropdown"
+        />
+      </div>
+
+      <!-- Desktop tabs -->
+      <div class="downloads-tabs-desktop">
+        <button 
+          @click="activeTab = 'active'" 
+          :class="{ active: activeTab === 'active' }"
+          class="tab-button"
+        >
+          Active ({{ downloadsStore.activeDownloads.length }})
+        </button>
+        <button 
+          @click="activeTab = 'completed'" 
+          :class="{ active: activeTab === 'completed' }"
+          class="tab-button"
+        >
+          Completed ({{ downloadsStore.completedDownloads.length }})
+        </button>
+        <button 
+          @click="activeTab = 'failed'" 
+          :class="{ active: activeTab === 'failed' }"
+          class="tab-button"
+        >
+          Failed ({{ downloadsStore.failedDownloads.length }})
+        </button>
+      </div>
     </div>
 
     <div class="downloads-content">
@@ -116,12 +128,24 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useDownloadsStore } from '@/stores/downloads'
+import CustomSelect from '@/components/CustomSelect.vue'
 import type { Download } from '@/types'
 import { useToast } from '@/services/toastService'
+import { PhDownloadSimple, PhCheckCircle, PhXCircle } from '@phosphor-icons/vue'
 
 const downloadsStore = useDownloadsStore()
 const toast = useToast()
 const activeTab = ref<'active' | 'completed' | 'failed'>('active')
+
+const mobileTabOptions = computed(() => [
+  { value: 'active', label: 'Active', icon: PhDownloadSimple },
+  { value: 'completed', label: 'Completed', icon: PhCheckCircle },
+  { value: 'failed', label: 'Failed', icon: PhXCircle }
+])
+
+// const onTabChange = () => {
+//   // Tab change handler for mobile dropdown
+// }
 
 // Virtual scrolling setup
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -517,6 +541,52 @@ onMounted(() => {
   
   .download-actions {
     flex-direction: row;
+  }
+
+  .downloads-tabs {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .downloads-tabs-mobile {
+    display: block;
+  }
+
+  .downloads-tabs-desktop {
+    display: none;
+  }
+
+  .tab-dropdown {
+    width: 100%;
+    color: #fff;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tab-dropdown:focus {
+    outline: none;
+    border-color: #4dabf7;
+    box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
+  }
+
+  .tab-dropdown option {
+    background-color: #2a2a2a;
+    color: #fff;
+  }
+}
+
+@media (min-width: 769px) {
+  .downloads-tabs {
+    flex-direction: row;
+  }
+
+  .downloads-tabs-mobile {
+    display: none;
+  }
+
+  .downloads-tabs-desktop {
+    display: flex;
   }
 }
 </style>

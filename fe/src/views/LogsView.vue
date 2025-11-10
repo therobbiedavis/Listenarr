@@ -827,5 +827,10 @@ onMounted(() => {
   .pagination-size {
     order: 3;
   }
+
+  /* Avoid overly tall log container on small viewports — allow more breathing room */
+  .logs-container {
+    max-height: calc(100vh - 300px);
+  }
 }
 </style>
