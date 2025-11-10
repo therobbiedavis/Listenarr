@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Discord helper bot startup race: the Node helper resolved `LISTENARR_URL` asynchronously at module load time which allowed the initial network calls to default to `http://localhost:5000`, causing authentication failures (SignalR negotiation and settings fetch returned 401) in containerized production. The startup routine now awaits `resolveListenarrUrl()` before performing any outbound requests so the environment-provided `LISTENARR_URL` (or `.env`) is used immediately.
 
+## [0.2.31] - 2025-11-09
+
+### Added
+
+- Server-side API key passthrough: the `DiscordBotService` now injects a `LISTENARR_API_KEY` environment variable into the helper process when a startup-config API key exists. This allows trusted helper processes to authenticate programmatic requests to the backend without an interactive login.
+
+### Changed
+
+- Bot helper auth and networking:
+  - The Node helper (`tools/discord-bot/index.js`) now reads `process.env.LISTENARR_API_KEY` when present and automatically attaches `X-Api-Key: <key>` to outgoing fetch requests (unless a request explicitly provides its own ApiKey header).
+  - SignalR connections from the helper use the API key as the access token (via `accessTokenFactory`) so the `/hubs/*/negotiate` step accepts the helper in authenticated deployments.
+  - The same changes were applied to the published/bin copies of the helper (`listenarr.api/publish/...` and `listenarr.api/bin/Release/...`) so runtime images built from publish output include the fix.
+
+### Fixed
+
+- Resolved 401s observed in production where the helper used the correct `LISTENARR_URL` but did not present credentials when calling `/api/configuration/settings` or negotiating SignalR. Passing the API key into the helper and including it on requests resolves those authentication failures for programmatic helper flows.
+
 ## [0.2.29] - 2025-11-09
 
 ### Changed

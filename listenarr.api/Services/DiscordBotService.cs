@@ -82,6 +82,24 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Starting Discord bot with LISTENARR_URL: {Url}", listenarrUrl);
                 startInfo.EnvironmentVariables["LISTENARR_URL"] = listenarrUrl;
 
+                // Pass the server API key into the helper process so it can authenticate
+                // programmatic requests (SignalR negotiate, settings fetch, etc.). Only set
+                // when an API key is present in the startup config to avoid sending empty
+                // values into the child environment.
+                try
+                {
+                    var cfg = _startupConfigService.GetConfig();
+                    if (cfg != null && !string.IsNullOrWhiteSpace(cfg.ApiKey))
+                    {
+                        startInfo.EnvironmentVariables["LISTENARR_API_KEY"] = cfg.ApiKey;
+                        _logger.LogInformation("Passing LISTENARR_API_KEY to bot process (length={Len})", cfg.ApiKey.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to read startup config for API key passthrough");
+                }
+
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
                     startInfo.Arguments = "/c node index.js";
