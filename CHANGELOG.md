@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.31] - TBD
+
+### Changed
+
+- Admin command changes:
+  - Temporarily disabled the admin `request-config set-channel` subcommand to avoid accidental channel configuration changes while debugging production helper behavior. The change was applied in both the server command payload (`DiscordController`) and the helper `tools/discord-bot/index.js` (including published/bin copies) so the subcommand will not be registered until explicitly re-enabled.
+
 ## [0.2.30] - 2025-11-09
 
 ### Fixed
