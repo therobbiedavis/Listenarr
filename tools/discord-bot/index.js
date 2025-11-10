@@ -27,6 +27,27 @@ try {
 } catch (err) {
   console.warn('fetch-cookie/tough-cookie not available, antiforgery token requests may fail. Install fetch-cookie and tough-cookie to fix.', err)
 }
+
+// Read server-provided API key (if any) so we can authenticate programmatic requests
+const LISTENARR_API_KEY = process.env.LISTENARR_API_KEY || null
+if (LISTENARR_API_KEY) {
+  try {
+    // Wrap the fetch implementation to automatically add X-Api-Key header when not present
+    const rawFetch = fetch
+    fetch = async (url, opts) => {
+      opts = opts || {}
+      opts.headers = opts.headers || {}
+      // Do not overwrite an explicit X-Api-Key header set by the caller
+      if (!opts.headers['X-Api-Key'] && !opts.headers['x-api-key']) {
+        opts.headers['X-Api-Key'] = LISTENARR_API_KEY
+      }
+      return rawFetch(url, opts)
+    }
+    console.log('Configured bot to use LISTENARR_API_KEY for backend requests')
+  } catch (e) {
+    console.warn('Failed to wrap fetch with API key header', e)
+  }
+}
 const crypto = require('crypto')
 const fs = require('fs')
 const signalR = require('@microsoft/signalr')
@@ -347,8 +368,15 @@ async function createSignalRConnection() {
   const hubUrl = `${listenarrUrl.replace(/\/$/, '')}/hubs/settings`
   console.log(`Connecting to SignalR hub: ${hubUrl}`)
 
-  signalRConnection = new signalR.HubConnectionBuilder()
-    .withUrl(hubUrl)
+  // Include API key as access token for SignalR negotiate when provided so the
+  // hub negotiate endpoint accepts the connection in auth-required environments.
+  const hubBuilder = new signalR.HubConnectionBuilder()
+  if (LISTENARR_API_KEY) {
+    hubBuilder.withUrl(hubUrl, { accessTokenFactory: () => LISTENARR_API_KEY })
+  } else {
+    hubBuilder.withUrl(hubUrl)
+  }
+  signalRConnection = hubBuilder
     .withAutomaticReconnect()
     .configureLogging(signalR.LogLevel.Information)
     .build()
