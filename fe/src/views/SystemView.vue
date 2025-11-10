@@ -894,6 +894,8 @@ onMounted(() => {
   font-size: 0.85rem;
   align-items: center;
   transition: background 0.2s;
+  /* allow children to shrink so the last column (message) can wrap instead of forcing horizontal scroll */
+  min-width: 0;
 }
 
 .log-entry:hover {
@@ -989,6 +991,11 @@ onMounted(() => {
 
 .log-message {
   color: #ccc;
+  /* Prevent long unbroken strings from causing horizontal scroll */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 /* Scrollbar Styles */
@@ -1041,6 +1048,22 @@ onMounted(() => {
   .log-entry {
     grid-template-columns: 1fr;
     gap: 0.5rem;
+  }
+
+  /* Make header actions stack and buttons fill width on small screens */
+  .page-header-with-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .page-actions {
+    width: 100%;
+  }
+
+  .add-button {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

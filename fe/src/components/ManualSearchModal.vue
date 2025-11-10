@@ -1152,4 +1152,155 @@ function getScoreClass(score: number): string {
     min-width: 200px;
   }
 }
+
+/* Mobile search overlay styles */
+@media (max-width: 768px) {
+  .modal-overlay {
+    background-color: rgba(0, 0, 0, 0.9);
+    padding: 0;
+    align-items: flex-start;
+    padding-top: 2rem;
+  }
+
+  .modal-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 95%;
+    max-width: 500px;
+    max-height: 80vh;
+    border-radius: 12px;
+  }
+
+  .modal-header {
+    padding: 1rem 1.5rem;
+  }
+
+  .modal-header h2 {
+    font-size: 1.25rem;
+  }
+
+  .modal-body {
+    padding: 1rem 1.5rem;
+  }
+
+  /* Mobile search bar - position absolute at top center */
+  .search-bar {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 400px;
+    z-index: 1001;
+    background-color: #1e1e1e;
+    border-radius: 8px;
+    padding: 0.75rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    border: 1px solid #3a3a3a;
+  }
+
+  .search-input-wrapper {
+    gap: 0.25rem;
+  }
+
+  .search-input {
+    padding: 0.5rem 1rem 0.5rem 2.25rem;
+    font-size: 0.95rem;
+    height: 44px;
+  }
+
+  .search-icon {
+    left: 0.75rem;
+    font-size: 1.1rem;
+  }
+
+  .search-btn {
+    padding: 0 0.75rem;
+    min-width: 80px;
+    height: 44px;
+    font-size: 0.9rem;
+  }
+
+  /* Hide search bar from normal flow on mobile */
+  .results-header .search-bar {
+    display: none;
+  }
+
+  /* Adjust results header spacing on mobile */
+  .results-header {
+    padding-top: 5rem; /* Make room for fixed search bar */
+  }
+
+  .results-controls {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .results-count {
+    text-align: center;
+    font-size: 0.85rem;
+  }
+
+  .btn-sm {
+    align-self: center;
+    min-width: 120px;
+  }
+
+  /* Table responsiveness on mobile */
+  .results-table-wrapper {
+    margin: 0 -1rem;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .results-table {
+    font-size: 0.75rem;
+  }
+
+  .results-table th,
+  .results-table td {
+    padding: 0.5rem 0.25rem;
+  }
+
+  .col-title {
+    min-width: 150px;
+  }
+
+  .col-indexer {
+    width: 100px;
+  }
+
+  .col-size {
+    width: 80px;
+  }
+
+  .col-peers {
+    width: 100px;
+  }
+
+  .col-language,
+  .col-quality {
+    width: 90px;
+  }
+
+  .col-actions {
+    width: 50px;
+  }
+
+  /* Hide less important columns on very small screens */
+  @media (max-width: 480px) {
+    .col-age,
+    .col-language {
+      display: none;
+    }
+
+    .col-title {
+      min-width: 120px;
+    }
+  }
+}
 </style>

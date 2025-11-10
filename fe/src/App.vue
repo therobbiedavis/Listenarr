@@ -8,8 +8,15 @@
         <span v-if="version && version.length > 0" class="version">v{{ version }}</span>
       </div>
       <div class="nav-actions">
+        <!-- Mobile menu button -->
+        <button class="nav-btn mobile-menu-btn" @click="toggleMobileMenu" aria-label="Toggle navigation menu">
+          <PhList class="mobile-menu-icon" />
+        </button>
         <!-- Backend connection indicator moved to System view -->
-        <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
+  <!-- Mobile backdrop (real DOM element so clicks reliably close the search) -->
+  <div v-if="searchOpen" class="mobile-search-backdrop" @click="closeSearch" />
+
+  <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
           <input
             v-model="searchQuery"
             @input="onSearchInput"
@@ -112,14 +119,14 @@
 
   <div :class="['app-layout', { 'no-top': hideLayout }]">
       <!-- Sidebar Navigation -->
-      <aside v-if="!hideLayout" class="sidebar">
+      <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }">
         <nav class="sidebar-nav">
           <div class="nav-section">
-            <RouterLink to="/" class="nav-item" @mouseenter="preload('home')" @focus="preload('home')" @touchstart.passive="preload('home')">
+            <RouterLink to="/" class="nav-item" @mouseenter="preload('home')" @focus="preload('home')" @touchstart.passive="preload('home')" @click="closeMobileMenu">
               <PhBooks />
               <span>Audiobooks</span>
             </RouterLink>
-            <RouterLink to="/add-new" class="nav-item" @mouseenter="preload('add-new')" @focus="preload('add-new')" @touchstart.passive="preload('add-new')">
+            <RouterLink to="/add-new" class="nav-item" @mouseenter="preload('add-new')" @focus="preload('add-new')" @touchstart.passive="preload('add-new')" @click="closeMobileMenu">
               <PhPlus />
               <span>Add New</span>
             </RouterLink>
@@ -135,12 +142,12 @@
               <PhCalendar />
               <span>Calendar</span>
             </RouterLink> -->
-            <RouterLink to="/activity" class="nav-item" @mouseenter="preload('activity')" @focus="preload('activity')" @touchstart.passive="preload('activity')">
+            <RouterLink to="/activity" class="nav-item" @mouseenter="preload('activity')" @focus="preload('activity')" @touchstart.passive="preload('activity')" @click="closeMobileMenu">
               <PhActivity />
               <span>Activity</span>
               <span class="badge" v-if="activityCount > 0">{{ activityCount }}</span>
             </RouterLink>
-            <RouterLink to="/wanted" class="nav-item" @mouseenter="preload('wanted')" @focus="preload('wanted')" @touchstart.passive="preload('wanted')">
+            <RouterLink to="/wanted" class="nav-item" @mouseenter="preload('wanted')" @focus="preload('wanted')" @touchstart.passive="preload('wanted')" @click="closeMobileMenu">
               <PhHeart />
               <span>Wanted</span>
               <span class="badge" v-if="wantedCount > 0">{{ wantedCount }}</span>
@@ -148,11 +155,11 @@
           </div>
 
           <div class="nav-section">
-            <RouterLink to="/settings" class="nav-item" @mouseenter="preload('settings')" @focus="preload('settings')" @touchstart.passive="preload('settings')">
+            <RouterLink to="/settings" class="nav-item" @mouseenter="preload('settings')" @focus="preload('settings')" @touchstart.passive="preload('settings')" @click="closeMobileMenu">
               <PhGear />
               <span>Settings</span>
             </RouterLink>
-            <RouterLink to="/system" class="nav-item" @mouseenter="preload('system')" @focus="preload('system')" @touchstart.passive="preload('system')">
+            <RouterLink to="/system" class="nav-item" @mouseenter="preload('system')" @focus="preload('system')" @touchstart.passive="preload('system')" @click="closeMobileMenu">
               <PhMonitor />
               <span>System</span>
               <span class="badge error" v-if="systemIssues > 0">{{ systemIssues }}</span>
@@ -189,7 +196,7 @@
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
-import { PhMagnifyingGlass, PhBell, PhX, PhUsers, PhBooks, PhPlus, PhActivity, PhHeart, PhGear, PhMonitor, PhFileMinus, PhDownload, PhCheckCircle } from '@phosphor-icons/vue'
+import { PhMagnifyingGlass, PhBell, PhX, PhUsers, PhBooks, PhPlus, PhActivity, PhHeart, PhGear, PhMonitor, PhFileMinus, PhDownload, PhCheckCircle, PhList } from '@phosphor-icons/vue'
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { preloadRoute } from '@/router'
@@ -265,6 +272,15 @@ const handleDocumentClick = (e: MouseEvent) => {
   if (!el.contains(target)) {
     userMenuOpen.value = false
   }
+}
+
+// Mobile menu state
+const mobileMenuOpen = ref(false)
+const toggleMobileMenu = () => {
+  mobileMenuOpen.value = !mobileMenuOpen.value
+}
+const closeMobileMenu = () => {
+  mobileMenuOpen.value = false
 }
 
 // Reactive state for badges and counters
@@ -481,6 +497,7 @@ const handleSearchDocumentClick = (e: MouseEvent) => {
   const el = navSearchRef.value
   if (!el) return
   const target = e.target as Node
+  // Close search if clicking outside the search container (on mobile overlay)
   if (!el.contains(target)) {
     searchOpen.value = false
   }
@@ -1050,6 +1067,7 @@ const hideLayout = computed(() => {
   margin-left: 200px;
   background-color: #1a1a1a;
   min-height: calc(100vh - 60px);
+  width: calc(100vw - 217px);
 }
 
 .main-content.full-page {
@@ -1093,12 +1111,41 @@ const hideLayout = computed(() => {
     transition: transform 0.3s;
   }
   
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
   .main-content {
     margin-left: 0;
+    width: 100%;
   }
   
   .nav-brand h1 {
     font-size: 1.2rem;
+  }
+  
+  .top-nav .nav-btn.mobile-menu-btn {
+    display: block !important;
+  }
+  
+  .mobile-menu-icon {
+    font-size: 20px;
+  }
+  
+  /* Ensure nav stays above all content on mobile */
+  .top-nav {
+    z-index: 2000 !important;
+    background-color: #2a2a2a !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  
+  /* Ensure sidebar stays above images and is completely opaque on mobile */
+  .sidebar {
+    z-index: 1500 !important;
+    background-color: #2a2a2a !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }
 /* Header search styles */
@@ -1202,10 +1249,15 @@ const hideLayout = computed(() => {
   border-radius: 8px;
 }
 
-.top-nav .nav-btn {
+.top-nav .nav-btn.mobile-menu-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Mobile menu button should be hidden on desktop and only shown via media query on small screens */
+.top-nav .nav-btn.mobile-menu-btn {
+  display: none;
 }
 
 .top-nav .nav-user-btn .ph,
@@ -1349,8 +1401,111 @@ const hideLayout = computed(() => {
   font-size: 0.9rem;
 }
 
-/* Slide-left transition (popout from search button) */
-/* no transition needed for inline search */
+/* Mobile search overlay */
+@media (max-width: 768px) {
+  .nav-search-inline {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 400px;
+    z-index: 2001;
+    background-color: #1e1e1e;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    border: 1px solid #3a3a3a;
+  }
+
+  /* Backdrop element (renders in DOM) - clicks close the search reliably */
+  .mobile-search-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.9);
+    z-index: 2000;
+    cursor: pointer;
+  }
+
+  .search-input-inline {
+    position: static;
+    transform: none;
+    width: 100% !important;
+    opacity: 1;
+    pointer-events: auto;
+    background: #1e1e1e;
+    border: 0px solid transparent;
+    transform: translateX(0) !important;
+  }
+
+  .search-results-inline {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: none;
+    margin-top: 0.5rem;
+  }
+
+  .nav-search-inline .nav-btn {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #ccc;
+    padding: 0.5rem;
+    border-radius: 4px;
+    z-index: 1;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-search-inline .nav-btn:hover {
+    background-color: #3a3a3a;
+    color: white;
+  }
+
+  .search-input-inline {
+    padding-right: 3rem; /* Make room for the close button */
+    height: 44px;
+    box-sizing: border-box;
+  }
+
+  /* Hide search input and results when not open, but keep button visible */
+  .nav-search-inline:not(.open) .search-input-inline,
+  .nav-search-inline:not(.open) .search-results-inline,
+  .nav-search-inline:not(.open) .inline-spinner {
+    display: none;
+  }
+
+  /* Show search button in nav when search is not open */
+  .nav-search-inline:not(.open) {
+    position: static;
+    transform: none;
+    width: auto;
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    z-index: auto;
+  }
+
+  .nav-search-inline:not(.open)::before {
+    display: none;
+  }
+
+  .nav-search-inline:not(.open) .nav-btn {
+    position: static;
+    transform: none;
+    width: 44px;
+    height: 44px;
+  }
+}
 
 /* Notification dropdown styles */
 .notification-wrapper {

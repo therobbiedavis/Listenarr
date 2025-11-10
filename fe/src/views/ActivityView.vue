@@ -14,16 +14,28 @@
     </div>
 
     <div class="activity-filters">
-      <div class="filter-tabs">
-        <button 
-          v-for="tab in filterTabs" 
-          :key="tab.value"
-          :class="['tab', { active: selectedTab === tab.value }]"
-          @click="selectedTab = tab.value"
-        >
-          {{ tab.label }}
-          <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span>
-        </button>
+      <!-- Mobile dropdown -->
+      <div class="activity-filters-mobile">
+        <CustomSelect
+          v-model="selectedTab"
+          :options="mobileTabOptions"
+          class="tab-dropdown"
+        />
+      </div>
+
+      <!-- Desktop tabs -->
+      <div class="activity-filters-desktop">
+        <div class="filter-tabs">
+          <button 
+            v-for="tab in filterTabs" 
+            :key="tab.value"
+            :class="['tab', { active: selectedTab === tab.value }]"
+            @click="selectedTab = tab.value"
+          >
+            {{ tab.label }}
+            <span v-if="tab.count > 0" class="tab-badge">{{ tab.count }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -161,13 +173,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { PhActivity, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhDesktop, PhArrowDown, PhClock, PhX, PhQueue, PhWarningCircle, PhInfo, PhChartBar, PhTrash } from '@phosphor-icons/vue'
+import { PhActivity, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhDesktop, PhArrowDown, PhClock, PhX, PhQueue, PhWarningCircle, PhInfo, PhChartBar, PhTrash, PhPause, PhList, PhCheckCircle } from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { QueueItem, Download } from '@/types'
+import CustomSelect from '@/components/CustomSelect.vue'
 
 const downloadsStore = useDownloadsStore()
 const configStore = useConfigurationStore()
@@ -179,6 +192,19 @@ const itemToRemove = ref<QueueItem | null>(null)
 const removing = ref(false)
 let unsubscribeQueue: (() => void) | null = null
 let queueRefreshInterval: ReturnType<typeof setInterval> | null = null
+
+// Mobile tab options for CustomSelect
+const mobileTabOptions = computed(() => [
+  { value: 'all', label: `All (${allActivityItems.value.length})`, icon: PhList },
+  { value: 'downloading', label: `Downloading (${allActivityItems.value.filter(q => q.status === 'downloading').length})`, icon: PhDownloadSimple },
+  { value: 'paused', label: `Paused (${allActivityItems.value.filter(q => q.status === 'paused').length})`, icon: PhPause },
+  { value: 'queued', label: `Queued (${allActivityItems.value.filter(q => q.status === 'queued').length})`, icon: PhClock },
+  { value: 'completed', label: `Completed (${allActivityItems.value.filter(q => q.status === 'completed').length})`, icon: PhCheckCircle }
+])
+
+// const onTabChange = () => {
+//   // Tab change handler for mobile dropdown
+// }
 
 // Virtual scrolling setup
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -441,7 +467,7 @@ onUnmounted(() => {
 
 <style scoped>
 .activity-view {
-  padding: 2em;
+  padding: 1em;
 }
 
 .page-header {
@@ -1149,5 +1175,55 @@ onUnmounted(() => {
 .btn-danger svg {
   width: 16px;
   height: 16px;
+}
+
+/* Mobile activity filters */
+@media (max-width: 768px) {
+  .activity-filters {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .activity-filters-mobile {
+    display: block;
+  }
+
+  .activity-filters-desktop {
+    display: none;
+  }
+
+  .tab-dropdown {
+    width: 100%;
+    color: #fff;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tab-dropdown:focus {
+    outline: none;
+    border-color: #4dabf7;
+    box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
+  }
+
+  .tab-dropdown option {
+    background-color: #2a2a2a;
+    color: #fff;
+  }
+}
+
+/* Desktop activity filters */
+@media (min-width: 769px) {
+  .activity-filters {
+    flex-direction: row;
+  }
+
+  .activity-filters-mobile {
+    display: none;
+  }
+
+  .activity-filters-desktop {
+    display: flex;
+  }
 }
 </style>

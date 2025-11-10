@@ -5,13 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.30] - 2025-11-09
-
-### Fixed
-
-- Discord helper bot startup race: the Node helper resolved `LISTENARR_URL` asynchronously at module load time which allowed the initial network calls to default to `http://localhost:5000`, causing authentication failures (SignalR negotiation and settings fetch returned 401) in containerized production. The startup routine now awaits `resolveListenarrUrl()` before performing any outbound requests so the environment-provided `LISTENARR_URL` (or `.env`) is used immediately.
-
-## [0.2.31] - 2025-11-09
+## [0.2.31] - 2025-11-10
 
 ### Added
 
@@ -19,14 +13,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Admin command changes:
+  - Temporarily disabled the admin `request-config set-channel` subcommand to avoid accidental channel configuration changes while debugging production helper behavior. The change was applied in both the server command payload (`DiscordController`) and the helper `tools/discord-bot/index.js` (including published/bin copies) so the subcommand will not be registered until explicitly re-enabled.
+
 - Bot helper auth and networking:
   - The Node helper (`tools/discord-bot/index.js`) now reads `process.env.LISTENARR_API_KEY` when present and automatically attaches `X-Api-Key: <key>` to outgoing fetch requests (unless a request explicitly provides its own ApiKey header).
   - SignalR connections from the helper use the API key as the access token (via `accessTokenFactory`) so the `/hubs/*/negotiate` step accepts the helper in authenticated deployments.
   - The same changes were applied to the published/bin copies of the helper (`listenarr.api/publish/...` and `listenarr.api/bin/Release/...`) so runtime images built from publish output include the fix.
 
+- Frontend: Mobile & responsive UX improvements
+  - `SettingsView` desktop tabs now use a horizontal carousel when tabs overflow to prevent layout overflow and enable keyboard/chevron navigation.
+  - `App` header: mobile search replaced the pseudo-backdrop with a real DOM backdrop for reliable click-to-close behavior; mobile search input overlay behavior refined; mobile menu (hamburger) button hidden on desktop via responsive CSS.
+  - `AudiobookDetailView`: mobile actions reorganized — primary actions are surfaced inside a collapsed "More" menu on small screens and the dropdown is positioned as an absolute overlay to avoid expanding the top-nav.
+  - `AddNewView`: search and action controls improved for small screens (stacked, full-width CTAs, scrollbar-gutter stability) for better touch ergonomics.
+  - `SystemView` / `LogsView`: fixed horizontal overflow and long-line wrapping on narrow viewports.
+  - `CustomSelect` component: fixed click propagation race and replaced an unsafe `$event.target` access with a typed native input handler to resolve TypeScript build issues.
+  - Misc CSS tweaks: added `scrollbar-gutter`, ensured `min-width: 0` on flex children, and other responsive fixes to eliminate unintended horizontal scrolling across multiple views.
+
 ### Fixed
 
 - Resolved 401s observed in production where the helper used the correct `LISTENARR_URL` but did not present credentials when calling `/api/configuration/settings` or negotiating SignalR. Passing the API key into the helper and including it on requests resolves those authentication failures for programmatic helper flows.
+
+- Frontend fixes:
+  - Resolved a TypeScript build error caused by unsafe event target access in `CustomSelect.vue` by introducing a typed native input handler.
+  - Fixed mobile top-nav layout shift when opening the "More" actions menu by making the dropdown an absolute overlay.
+  - Prevented settings tabs from overflowing the header by adding an overflow-hidden carousel wrapper and navigation chevrons on desktop when needed.
+
+## [0.2.30] - 2025-11-09
+
+### Fixed
+
+- Discord helper bot startup race: the Node helper resolved `LISTENARR_URL` asynchronously at module load time which allowed the initial network calls to default to `http://localhost:5000`, causing authentication failures (SignalR negotiation and settings fetch returned 401) in containerized production. The startup routine now awaits `resolveListenarrUrl()` before performing any outbound requests so the environment-provided `LISTENARR_URL` (or `.env`) is used immediately.
+
 
 ## [0.2.29] - 2025-11-09
 

@@ -12,7 +12,7 @@
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" />
+            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" />
             <div v-else class="placeholder-cover">
               <i class="ph ph-image"></i>
               <span>No Cover</span>
