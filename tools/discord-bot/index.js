@@ -571,7 +571,8 @@ async function registerCommands(settings) {
   const configCommand = new SlashCommandBuilder()
     .setName('request-config')
     .setDescription('Configure Listenarr Discord integration')
-    .addSubcommand(sc => sc.setName('set-channel').setDescription('Set the channel the bot should respond in').addChannelOption(o => o.setName('channel').setDescription('Target channel').setRequired(false)));
+    // Temporarily disabled: comment out the admin 'set-channel' subcommand so it is not registered
+    // .addSubcommand(sc => sc.setName('set-channel').setDescription('Set the channel the bot should respond in').addChannelOption(o => o.setName('channel').setDescription('Target channel').setRequired(false)));
 
   // Debug command to inspect permissions and sessions
   const debugCommand = new SlashCommandBuilder()

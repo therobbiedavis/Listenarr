@@ -192,6 +192,8 @@ namespace Listenarr.Api.Controllers
                             }
                         }
                     },
+                    /*
+                    // Temporarily disabled: comment out the request-config set-channel admin subcommand so it is not registered.
                     new {
                         name = "request-config",
                         description = "Admin configuration for requests",
@@ -204,6 +206,7 @@ namespace Listenarr.Api.Controllers
                             }
                         }
                     }
+                    */
                 };
 
                 string url;
