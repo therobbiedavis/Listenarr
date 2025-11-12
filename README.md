@@ -19,16 +19,16 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 
 ## What Listenarr Provides
 
-- **Serve up Audiobooks** from multiple sources (torrents, NZBs) with support for various formats (MP3, M4A, M4B, FLAC, AAC, OGG, OPUS)
-- **First-class responsive web interface** that works great on any device (phone, tablet, desktop)
-- **Rich metadata support** with automatic enrichment from Audible and Amazon
-- **External API integration** for searching across multiple torrent and NZB indexers simultaneously
-- **Ways to organize your library**: Collections, Reading Lists, Want to Read
-- **Download management** with support for popular clients (qBittorrent, Transmission, SABnzbd, NZBGet)
-- **Flexible configuration** with role-based access control (coming soon)
-- **Real-time monitoring** of download progress and status
-- **Intelligent file organization** with customizable naming patterns
-- **Full localization support** (coming soon)
+- [x] **Serve up Audiobooks** from multiple sources (torrents, NZBs) with support for various formats (MP3, M4A, M4B, FLAC, AAC, OGG, OPUS)
+- [x] **First-class responsive web interface** that works great on any device (phone, tablet, desktop)
+- [x] **Rich metadata support** with automatic enrichment from Audible and Amazon
+- [x] **External API integration** for searching across multiple torrent and NZB indexers simultaneously
+- [ ] **Ways to organize your library**: Collections, Reading Lists, Want to Read
+- [x] **Download management** with support for popular clients (qBittorrent, Transmission, SABnzbd, NZBGet)
+- [ ] **Flexible configuration** with role-based access control
+- [x] **Real-time monitoring** of download progress and status
+- [x] **Intelligent file organization** with customizable naming patterns
+- [ ] **Full localization support**
 
 ## Support
 
@@ -50,13 +50,6 @@ docker run -d \
   -v listenarr_data:/app/config \
   therobbiedavis/listenarr:latest
 ```
-
-**Why Docker for Production:**
-- ✅ **Complete isolation** - All dependencies included
-- ✅ **Easy updates** - Pull new images seamlessly  
-- ✅ **Consistent deployments** - Same environment everywhere
-- ✅ **Security** - Minimal attack surface
-- ✅ **Node.js included** - Discord bot ready out-of-the-box
 
 **Service will be available at:**
 - Web App: http://localhost:5000
