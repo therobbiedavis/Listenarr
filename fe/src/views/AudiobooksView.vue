@@ -3,8 +3,8 @@
     <!-- Top Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <button class="toolbar-btn" :class="{ active: viewMode === 'grid' }" @click="toggleViewMode" title="Toggle view">
-          <PhGridFour v-if="viewMode === 'grid'" />
+        <button class="toolbar-btn" @click="toggleViewMode" title="Toggle view">
+          <PhGridFour v-if="viewMode === 'list'" />
           <PhList v-else />
         </button>
         <button class="toolbar-btn" @click="refreshLibrary">
@@ -108,6 +108,7 @@
             }"
             @click="navigateToDetail(audiobook.id)"
           >
+            <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
             <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
               <input
                 type="checkbox"
@@ -155,65 +156,79 @@
           </div>
         </div>
         <div v-else class="audiobooks-list" :style="{ transform: `translateY(${topPadding}px)` }">
-          <div v-if="audiobooks.length > 0" class="list-header" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div v-if="audiobooks.length > 0" class="list-header">
             <div class="col-select"> </div>
             <div class="col-cover">Cover</div>
             <div class="col-title">Title / Author</div>
             <div class="col-status">Status</div>
             <div class="col-actions">Actions</div>
           </div>
-          <div
-            v-for="audiobook in visibleAudiobooks"
-            :key="`list-${audiobook.id}`"
-            tabindex="0"
-            @keydown.enter="navigateToDetail(audiobook.id)"
-            class="audiobook-list-item"
-            :class="{
-              selected: libraryStore.isSelected(audiobook.id),
-              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
-              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
-              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
-              'status-downloading': getAudiobookStatus(audiobook) === 'downloading'
-            }"
-            @click="navigateToDetail(audiobook.id)"
-          >
-            <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
-              <input
-                type="checkbox"
-                :checked="libraryStore.isSelected(audiobook.id)"
-                @change="onCheckboxChange(audiobook, $event)"
-                @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
+          <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
+            <div
+              v-for="audiobook in visibleAudiobooks"
+              :key="`list-${audiobook.id}`"
+              tabindex="0"
+              @keydown.enter="navigateToDetail(audiobook.id)"
+              class="audiobook-list-item"
+              :class="{
+                selected: libraryStore.isSelected(audiobook.id),
+                'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+                'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+                'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
+                'status-downloading': getAudiobookStatus(audiobook) === 'downloading'
+              }"
+              @click="navigateToDetail(audiobook.id)"
+            >
+
+              <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
+                <input
+                  type="checkbox"
+                  :checked="libraryStore.isSelected(audiobook.id)"
+                  @change="onCheckboxChange(audiobook, $event)"
+                  @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
+                />
+              </div>
+              <img
+                class="list-thumb"
+                :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/80x80?text=No+Image`"
+                :alt="audiobook.title"
+                loading="lazy"
               />
-            </div>
-            <img
-              class="list-thumb"
-              :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/80x80?text=No+Image`"
-              :alt="audiobook.title"
-              loading="lazy"
-            />
-            <div class="list-details">
-              <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
-              <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
-            </div>
-            <div class="list-badges">
-              <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-                <PhStar />
-                {{ getQualityProfileName(audiobook.qualityProfileId) }}
+              <div class="list-details">
+                <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+                <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
               </div>
-              <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-                <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
-                {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+              <div class="list-badges">
+                <div
+                  class="status-badge"
+                  :class="getAudiobookStatus(audiobook)"
+                  role="button"
+                  tabindex="0"
+                  @click.stop="openStatusDetails(audiobook)"
+                  @keydown.enter.prevent="openStatusDetails(audiobook)"
+                  @keydown.space.prevent="openStatusDetails(audiobook)"
+                  :aria-label="`Show details for ${audiobook.title}`"
+                >
+                  {{ statusText(getAudiobookStatus(audiobook)) }}
+                </div>
+                <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+                  <PhStar />
+                  {{ getQualityProfileName(audiobook.qualityProfileId) }}
+                </div>
+                <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+                  <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                  {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+                </div>
+              </div>
+              <div class="list-actions">
+                <button class="action-btn edit-btn-small" @click.stop="openEditModal(audiobook)" title="Edit">
+                  <PhPencil />
+                </button>
+                <button class="action-btn delete-btn-small" @click.stop="confirmDelete(audiobook)" title="Delete">
+                  <PhTrash />
+                </button>
               </div>
             </div>
-            <div class="list-actions">
-              <button class="action-btn edit-btn-small" @click.stop="openEditModal(audiobook)" title="Edit">
-                <PhPencil />
-              </button>
-              <button class="action-btn delete-btn-small" @click.stop="confirmDelete(audiobook)" title="Delete">
-                <PhTrash />
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -301,6 +316,9 @@ const ITEMS_PER_ROW = ref(4) // Will be recalculated for grid; list uses 1
 const LIST_ROW_HEIGHT = 80
 const GRID_ROW_HEIGHT = 320 // item height + gap for grid
 const BUFFER_ROWS = 2 // Extra rows to render above and below viewport
+
+// Local storage key for persisting view mode
+const VIEWMODE_KEY = 'listenarr.viewMode'
 
 const viewMode = ref<'grid' | 'list'>('grid')
 
@@ -491,6 +509,16 @@ onMounted(async () => {
       }
     }
 
+    // Load persisted view mode (if available) before layout calc
+    try {
+      const stored = localStorage.getItem(VIEWMODE_KEY)
+      if (stored === 'list' || stored === 'grid') {
+        viewMode.value = stored as 'grid' | 'list'
+      }
+    } catch {
+      // ignore localStorage errors (e.g., privacy mode)
+    }
+
     // Initial calculation
     recalcItemsPerRow()
     // Initialize visible range
@@ -513,10 +541,20 @@ onMounted(async () => {
       updateVisibleRange()
     })
 
+    // Persist view mode whenever it changes
+    const stopPersist = watch(viewMode, (v) => {
+      try {
+        localStorage.setItem(VIEWMODE_KEY, v)
+      } catch {
+        /* ignore */
+      }
+    })
+
     // Clean up observer when component unmounts
     onUnmounted(() => {
       resizeObserver.disconnect()
       stopWatch()
+      stopPersist()
     })
   }
 })
@@ -534,6 +572,25 @@ async function loadQualityProfiles() {
   const profile = qualityProfiles.value.find(p => p.id === profileId)
   return profile?.name ?? null
 }
+
+  function statusText(status: 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match'): string {
+    switch (status) {
+      case 'downloading': return 'Downloading'
+      case 'no-file': return 'Missing'
+      case 'quality-mismatch': return 'Mismatch'
+      case 'quality-match': return 'Downloaded'
+      default: return ''
+    }
+  }
+
+  function openStatusDetails(audiobook: Audiobook) {
+    try {
+      // Navigate to audiobook detail page and open the downloads tab
+      void router.push({ path: `/audiobooks/${audiobook.id}`, query: { tab: 'downloads' } })
+    } catch (err) {
+      console.error('Failed to open status details', err)
+    }
+  }
 
 function navigateToDetail(id: number) {
   router.push(`/audiobooks/${id}`)
@@ -732,44 +789,55 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 }
 
 .toolbar-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background-color: #3a3a3a;
-  border: 1px solid #555;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 13px;
+  gap: 8px;
+  padding: 8px 14px;
+  background-color: transparent;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  color: #e6eef8;
+  font-size: 12px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.12s ease, transform 0.08s ease, box-shadow 0.12s ease;
 }
 
 .toolbar-btn:hover {
-  background-color: #4a4a4a;
+  background-color: rgba(255,255,255,0.03);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
 }
 
 .toolbar-btn.active {
-  background-color: #007acc;
-  border-color: #007acc;
+  background-color: #2196F3;
+  border-color: #2196F3;
+  color: #fff;
 }
 
 .toolbar-btn.edit-btn {
-  background-color: #3498db;
-  border-color: #2980b9;
+  background-color: #2196F3;
+  border-color: #1976d2;
+  color: #fff;
 }
 
 .toolbar-btn.edit-btn:hover {
-  background-color: #2980b9;
+  background-color: #1976d2;
 }
 
 .toolbar-btn.delete-btn {
   background-color: #e74c3c;
   border-color: #c0392b;
+  color: #fff;
 }
 
 .toolbar-btn.delete-btn:hover {
   background-color: #c0392b;
+}
+
+/* Accessibility: strong focus ring for keyboard users */
+.toolbar-btn:focus-visible {
+  outline: 3px solid rgba(33,150,243,0.18);
+  outline-offset: 2px;
 }
 
 .count-badge {
@@ -814,6 +882,16 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   transform: scale(1.05);
 }
 
+.row-click-target {
+  position: absolute;
+  inset: 0;
+  z-index: 10; /* sits below action buttons and checkboxes */
+  /* allow pointer events to pass through so hover/clicks on adjacent rows still work
+     clicks will fall through to the parent row's @click handler; controls remain interactive
+     because they have higher z-index and default pointer-events:auto */
+  pointer-events: none;
+}
+
 .audiobook-item.selected .audiobook-poster-container {
   outline: 3px solid #007acc;
   outline-offset: 2px;
@@ -851,7 +929,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   position: absolute;
   top: 8px;
   left: 8px;
-  z-index: 10;
+  z-index: 40; /* keep checkbox above row click overlay */
   height: 22px;
   width: 22px;
   display: flex;
@@ -880,7 +958,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   height: 100%;
   opacity: 0;
   cursor: pointer;
-  z-index: 3;
+  z-index: 41; /* ensure native input is above overlay and container pseudo-elements */
 }
 
 /* Draw a custom box and checkmark using container pseudo-elements */
@@ -982,7 +1060,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   position: relative;
   top: auto;
   left: auto;
-  z-index: auto;
+  z-index: 40; /* ensure list checkboxes stay above the row overlay */
   height: 20px;
   width: 20px;
   margin: 0;
@@ -991,6 +1069,17 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* In list view, always show checkboxes (outline). Filled/checkmark still only shows for selected items */
+.audiobooks-list .selection-checkbox {
+  opacity: 1;
+}
+.audiobooks-list .selection-checkbox::before {
+  opacity: 1;
+}
+.audiobooks-list .selection-checkbox input[type="checkbox"] {
+  opacity: 0; /* native input remains visually hidden */
 }
 
 .audiobooks-list .selection-checkbox {
@@ -1077,6 +1166,47 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   max-width: 100%;
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  margin-right: 0.5rem;
+  background-color: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #cfcfcf;
+  margin-top: 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-badge.no-file {
+  background-color: rgba(231,76,60,0.12);
+  border-color: rgba(231,76,60,0.18);
+  color: #e74c3c;
+}
+
+.status-badge.downloading {
+  background-color: rgba(52,152,219,0.10);
+  border-color: rgba(52,152,219,0.2);
+  color: #3498db;
+}
+
+.status-badge.quality-mismatch {
+  background-color: rgba(243,156,18,0.10);
+  border-color: rgba(243,156,18,0.18);
+  color: #f39c12;
+}
+
+.status-badge.quality-match {
+  background-color: rgba(46,204,113,0.10);
+  border-color: rgba(46,204,113,0.18);
+  color: #2ecc71;
+}
+
 .quality-profile-badge i {
   font-size: 12px;
   flex-shrink: 0;
@@ -1120,6 +1250,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   gap: 4px;
   opacity: 0;
   transition: opacity 0.2s;
+  z-index: 30; /* keep action buttons above the row click overlay */
 }
 
 .audiobook-item:hover .action-buttons {
@@ -1345,7 +1476,6 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 .audiobooks-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   padding: 8px 0;
 }
 
@@ -1360,9 +1490,16 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   border-radius: 6px;
   transition: background-color 0.12s, transform 0.12s;
   border-bottom: 1px solid rgba(255,255,255,0.03);
+  cursor: pointer;
 }
 
 .audiobook-list-item:hover {
+  background-color: rgba(255,255,255,0.02);
+  transform: translateY(-1px);
+}
+
+/* When a row is selected, apply the same hover visual treatment so it appears highlighted */
+.audiobook-list-item.selected {
   background-color: rgba(255,255,255,0.02);
   transform: translateY(-1px);
 }
@@ -1414,7 +1551,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   align-items: center;
 }
 
-.list-header .col-cover { opacity: 0.9 }
+.list-header .col-cover { opacity: 0.9; text-align: center; }
 .list-header .col-title { opacity: 0.9 }
 .list-header .col-status { opacity: 0.9 }
 .list-header .col-actions { text-align: right }
