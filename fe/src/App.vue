@@ -796,6 +796,21 @@ const hideLayout = computed(() => {
 // Note: Backend connection indicator was moved to the System view.
 </script>
 
+/* Self-hosted Figtree @font-face declarations. Place font files in `fe/public/fonts/`.
+   Recommended files: Figtree-VariableFont_wght.woff2 (preferred), Figtree-Regular.woff, Figtree-SemiBold.woff
+   If these are not present, the Google Fonts import in `fe/index.html` will be used as a fallback. */
+<style>
+@font-face {
+  font-family: 'Figtree';
+  src: url('/fonts/Figtree-VariableFont_wght.woff2') format('woff2'),
+       url('/fonts/Figtree-VariableFont_wght.woff') format('woff'),
+       url('/fonts/Figtree-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+</style>
+
 <style scoped>
 #app {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -841,8 +856,10 @@ const hideLayout = computed(() => {
 .nav-brand h1 {
   margin: 0;
   font-size: 1.5rem;
-  font-weight: bold;
+  font-weight: 600;
   color: #FFF;
+  /* Use Figtree for the brand heading when available */
+  font-family: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .version {

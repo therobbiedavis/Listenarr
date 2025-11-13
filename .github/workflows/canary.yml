@@ -382,7 +382,6 @@ jobs:
           tags: |
             ${{ steps.set-tags.outputs.API_IMAGE }}:canary
             ${{ steps.set-tags.outputs.API_IMAGE }}:canary-${{ steps.resolve-version.outputs.VERSION }}
-            ${{ steps.set-tags.outputs.API_IMAGE }}:${{ github.sha }}
 
       - name: Notify Discord
         uses: rjstone/discord-webhook-notify@v2.2.1

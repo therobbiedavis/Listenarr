@@ -3,8 +3,9 @@
     <!-- Top Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <button class="toolbar-btn active">
-          <PhGridFour />
+        <button class="toolbar-btn" :class="{ active: viewMode === 'grid' }" @click="toggleViewMode" title="Toggle view">
+          <PhGridFour v-if="viewMode === 'grid'" />
+          <PhList v-else />
         </button>
         <button class="toolbar-btn" @click="refreshLibrary">
           <PhArrowClockwise />
@@ -89,12 +90,14 @@
       </template>
     </div>
     
-    <div v-else ref="scrollContainer" class="audiobooks-scroll-container" @scroll="updateVisibleRange">
+  <div v-else ref="scrollContainer" :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]" @scroll="updateVisibleRange">
       <div class="audiobooks-scroll-spacer" :style="{ height: `${totalHeight}px` }">
-        <div class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
+        <div v-if="viewMode === 'grid'" class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
           <div 
             v-for="audiobook in visibleAudiobooks" 
             :key="audiobook.id"
+            tabindex="0"
+            @keydown.enter="navigateToDetail(audiobook.id)"
             v-memo="[audiobook.id, audiobook.monitored, libraryStore.isSelected(audiobook.id), getAudiobookStatus(audiobook)]"
             class="audiobook-item"
             :class="{ 
@@ -109,7 +112,8 @@
               <input
                 type="checkbox"
                 :checked="libraryStore.isSelected(audiobook.id)"
-                readonly
+                @change="onCheckboxChange(audiobook, $event)"
+                @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
               />
             </div>
             <div class="audiobook-poster-container">
@@ -147,6 +151,67 @@
                   <PhTrash />
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="audiobooks-list" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div v-if="audiobooks.length > 0" class="list-header" :style="{ transform: `translateY(${topPadding}px)` }">
+            <div class="col-select"> </div>
+            <div class="col-cover">Cover</div>
+            <div class="col-title">Title / Author</div>
+            <div class="col-status">Status</div>
+            <div class="col-actions">Actions</div>
+          </div>
+          <div
+            v-for="audiobook in visibleAudiobooks"
+            :key="`list-${audiobook.id}`"
+            tabindex="0"
+            @keydown.enter="navigateToDetail(audiobook.id)"
+            class="audiobook-list-item"
+            :class="{
+              selected: libraryStore.isSelected(audiobook.id),
+              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
+              'status-downloading': getAudiobookStatus(audiobook) === 'downloading'
+            }"
+            @click="navigateToDetail(audiobook.id)"
+          >
+            <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
+              <input
+                type="checkbox"
+                :checked="libraryStore.isSelected(audiobook.id)"
+                @change="onCheckboxChange(audiobook, $event)"
+                @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
+              />
+            </div>
+            <img
+              class="list-thumb"
+              :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/80x80?text=No+Image`"
+              :alt="audiobook.title"
+              loading="lazy"
+            />
+            <div class="list-details">
+              <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+              <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
+            </div>
+            <div class="list-badges">
+              <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+                <PhStar />
+                {{ getQualityProfileName(audiobook.qualityProfileId) }}
+              </div>
+              <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+                <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+              </div>
+            </div>
+            <div class="list-actions">
+              <button class="action-btn edit-btn-small" @click.stop="openEditModal(audiobook)" title="Edit">
+                <PhPencil />
+              </button>
+              <button class="action-btn delete-btn-small" @click.stop="confirmDelete(audiobook)" title="Delete">
+                <PhTrash />
+              </button>
             </div>
           </div>
         </div>
@@ -204,8 +269,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { PhGridFour, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhWarning } from '@phosphor-icons/vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhWarning } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -230,12 +295,14 @@ const hasRootFolderConfigured = computed(() => {
          configStore.applicationSettings.outputPath.trim().length > 0
 })
 
-// Virtual scrolling for grid layout
-// We'll render items in chunks as the user scrolls
+// Virtual scrolling supporting grid and list layouts
 const scrollContainer = ref<HTMLElement | null>(null)
-const ITEMS_PER_ROW = ref(4) // Default, will be calculated dynamically
-const ROW_HEIGHT = 320 // Approximate height of a row (item height + gap)
+const ITEMS_PER_ROW = ref(4) // Will be recalculated for grid; list uses 1
+const LIST_ROW_HEIGHT = 80
+const GRID_ROW_HEIGHT = 320 // item height + gap for grid
 const BUFFER_ROWS = 2 // Extra rows to render above and below viewport
+
+const viewMode = ref<'grid' | 'list'>('grid')
 
 const visibleRange = ref({ start: 0, end: 20 }) // Initially show first 20 items
 
@@ -243,39 +310,45 @@ const visibleAudiobooks = computed(() => {
   return audiobooks.value.slice(visibleRange.value.start, visibleRange.value.end)
 })
 
+function getRowHeight() {
+  return viewMode.value === 'grid' ? GRID_ROW_HEIGHT : LIST_ROW_HEIGHT
+}
+
 // Update visible range based on scroll position
 const updateVisibleRange = () => {
   if (!scrollContainer.value) return
-  
+
   const scrollTop = scrollContainer.value.scrollTop
   const viewportHeight = scrollContainer.value.clientHeight
-  
+
+  const rowHeight = getRowHeight()
+
   // Calculate which rows are visible
-  const firstVisibleRow = Math.floor(scrollTop / ROW_HEIGHT)
-  const visibleRowCount = Math.ceil(viewportHeight / ROW_HEIGHT)
-  
-  // Add buffer rows with boundary validation
+  const firstVisibleRow = Math.floor(scrollTop / rowHeight)
+  const visibleRowCount = Math.ceil(viewportHeight / rowHeight)
+
+  // Items per row already set (1 for list, >1 for grid)
   const totalRows = Math.ceil(audiobooks.value.length / ITEMS_PER_ROW.value)
   const startRow = Math.max(0, firstVisibleRow - BUFFER_ROWS)
   const endRow = Math.min(firstVisibleRow + visibleRowCount + BUFFER_ROWS, totalRows)
-  
+
   // Convert to item indices
   const startIndex = startRow * ITEMS_PER_ROW.value
   const endIndex = Math.min(endRow * ITEMS_PER_ROW.value, audiobooks.value.length)
-  
+
   visibleRange.value = { start: startIndex, end: endIndex }
 }
 
 // Calculate total height for proper scrollbar
 const totalHeight = computed(() => {
   const totalRows = Math.ceil(audiobooks.value.length / ITEMS_PER_ROW.value)
-  return totalRows * ROW_HEIGHT
+  return totalRows * getRowHeight()
 })
 
 // Padding for offset positioning
 const topPadding = computed(() => {
   const firstVisibleRow = Math.floor(visibleRange.value.start / ITEMS_PER_ROW.value)
-  return firstVisibleRow * ROW_HEIGHT
+  return firstVisibleRow * getRowHeight()
 })
 
 const showDeleteDialog = ref(false)
@@ -406,31 +479,44 @@ onMounted(async () => {
   
   // Calculate items per row based on container width
   if (scrollContainer.value) {
-    const containerWidth = scrollContainer.value.clientWidth - 40 // Subtract padding
     const minItemWidth = 180
     const gap = 20
-    ITEMS_PER_ROW.value = Math.floor((containerWidth + gap) / (minItemWidth + gap)) || 1
-    
+
+    const recalcItemsPerRow = () => {
+      if (!scrollContainer.value) return
+      const containerWidth = scrollContainer.value.clientWidth - 40 // Subtract padding
+      const newItems = viewMode.value === 'list' ? 1 : Math.floor((containerWidth + gap) / (minItemWidth + gap)) || 1
+      if (newItems !== ITEMS_PER_ROW.value) {
+        ITEMS_PER_ROW.value = newItems
+      }
+    }
+
+    // Initial calculation
+    recalcItemsPerRow()
     // Initialize visible range
     updateVisibleRange()
-    
+
     // Add resize observer to recalculate on window resize
     const resizeObserver = new ResizeObserver(() => {
       // Guard against null - element may be unmounted during navigation
       if (!scrollContainer.value) return
-      
-      const newContainerWidth = scrollContainer.value.clientWidth - 40
-      const newItemsPerRow = Math.floor((newContainerWidth + gap) / (minItemWidth + gap)) || 1
-      if (newItemsPerRow !== ITEMS_PER_ROW.value) {
-        ITEMS_PER_ROW.value = newItemsPerRow
-        updateVisibleRange()
-      }
+      recalcItemsPerRow()
+      updateVisibleRange()
     })
     resizeObserver.observe(scrollContainer.value)
-    
+
+    // Watch for view mode changes to recalc item layout
+    const stopWatch = watch(viewMode, async () => {
+      recalcItemsPerRow()
+      // wait a tick for layout to update then recalc range
+      await nextTick()
+      updateVisibleRange()
+    })
+
     // Clean up observer when component unmounts
     onUnmounted(() => {
       resizeObserver.disconnect()
+      stopWatch()
     })
   }
 })
@@ -451,6 +537,10 @@ async function loadQualityProfiles() {
 
 function navigateToDetail(id: number) {
   router.push(`/audiobooks/${id}`)
+}
+
+function toggleViewMode() {
+  viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
 }
 
 async function refreshLibrary() {
@@ -561,6 +651,47 @@ function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: 
   }
   
   // Update last clicked index
+  lastClickedIndex.value = currentIndex
+}
+
+function onCheckboxChange(audiobook: Audiobook, event: Event) {
+  // Handle native input change (e.g. mouse click)
+  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+
+  // Support Shift+click range selection when available
+  const shift = (event as MouseEvent | KeyboardEvent).shiftKey
+  if (shift && lastClickedIndex.value !== null) {
+    const startIndex = Math.min(lastClickedIndex.value, currentIndex)
+    const endIndex = Math.max(lastClickedIndex.value, currentIndex)
+    libraryStore.clearSelection()
+    for (let i = startIndex; i <= endIndex; i++) {
+      const book = audiobooks.value[i]
+      if (!book) continue
+      libraryStore.toggleSelection(book.id)
+    }
+  } else {
+    libraryStore.toggleSelection(audiobook.id)
+  }
+
+  lastClickedIndex.value = currentIndex
+}
+
+function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
+  // Handle keyboard spacebar toggle and support Shift+Space range selection
+  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  if (event.shiftKey && lastClickedIndex.value !== null) {
+    const startIndex = Math.min(lastClickedIndex.value, currentIndex)
+    const endIndex = Math.max(lastClickedIndex.value, currentIndex)
+    libraryStore.clearSelection()
+    for (let i = startIndex; i <= endIndex; i++) {
+      const book = audiobooks.value[i]
+      if (!book) continue
+      libraryStore.toggleSelection(book.id)
+    }
+  } else {
+    libraryStore.toggleSelection(audiobook.id)
+  }
+
   lastClickedIndex.value = currentIndex
 }
 </script>
@@ -714,57 +845,161 @@ function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: 
   border-bottom: 3px solid #2ecc71;
 }
 
+
 .selection-checkbox {
+  /* default used in grid; overridden in list below */
   position: absolute;
   top: 8px;
   left: 8px;
   z-index: 10;
-  height: 20px;
-  width: 20px;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: 2px solid #555;
-  border-radius: 4px;
+  height: 22px;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-sizing: border-box;
+  background-color: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.12s ease;
+  opacity: 0;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
 }
-
+/* Hide the native input visually but keep it accessible and interactive */
 .selection-checkbox input[type="checkbox"] {
   position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0;
   cursor: pointer;
-  height: 0;
-  width: 0;
+  z-index: 3;
 }
 
-.selection-checkbox:hover {
-  background-color: rgba(0, 0, 0, 0.8);
-  border-color: #777;
-}
-
-.audiobook-item.selected .selection-checkbox {
-  background-color: #007acc;
-  border-color: #007acc;
+/* Draw a custom box and checkmark using container pseudo-elements */
+.selection-checkbox::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 2px solid rgba(255,255,255,0.14);
+  background: transparent;
+  box-sizing: border-box;
+  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+  z-index: 1;
 }
 
 .selection-checkbox::after {
-  content: "";
+  content: '';
   position: absolute;
-  display: none;
-  left: 6px;
-  top: 2px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(45deg) scale(0);
   width: 6px;
   height: 10px;
-  border: solid white;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+  border-right: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+  z-index: 2;
+  transition: transform 0.12s ease, border-color 0.12s ease;
 }
 
-.audiobook-item.selected .selection-checkbox::after {
-  display: block;
+/* Hide the old pseudo-element checkmark (we now use the native control) */
+.selection-checkbox::after {
+  display: none !important;
+}
+
+.selection-checkbox:hover {
+  background-color: rgba(0, 0, 0, 0.6);
+  border-color: rgba(255,255,255,0.18);
+}
+
+/* Custom checkmark */
+
+
+/* Remove container hover darkening when focusing the native checkbox so contrast stays good */
+.selection-checkbox:hover input[type="checkbox"] {
+  transform: translateY(0);
+}
+
+/* Only show checkbox when hovered or selected */
+
+.audiobook-item:hover .selection-checkbox,
+.audiobook-item.selected .selection-checkbox,
+.audiobook-list-item:hover .selection-checkbox,
+.audiobook-list-item.selected .selection-checkbox,
+.audiobooks-scroll-container.has-selection .selection-checkbox {
+  opacity: 1;
+}
+
+/* When the item is selected, style the custom box and show the check */
+.audiobook-item.selected .selection-checkbox::before,
+.audiobook-list-item.selected .selection-checkbox::before {
+  background-color: #2196F3;
+  border-color: #2196F3;
+  box-shadow: 0 0 0 4px rgba(33,150,243,0.12);
+}
+
+.audiobook-item.selected .selection-checkbox::after,
+.audiobook-list-item.selected .selection-checkbox::after {
+  border-right-color: #fff;
+  border-bottom-color: #fff;
+  transform: translate(-50%, -50%) rotate(45deg) scale(1);
+}
+
+/* Checked state for grid and list rows */
+.audiobook-item.selected .selection-checkbox input[type="checkbox"],
+.audiobook-list-item.selected .selection-checkbox input[type="checkbox"] {
+  /* keep native checked UI; add slight background for custom look */
+  background-color: transparent;
+}
+
+/* Focus outlines for keyboard navigation */
+.selection-checkbox input[type="checkbox"]:focus-visible {
+  outline: 2px solid rgba(0,122,204,0.9);
+  outline-offset: 2px;
+}
+
+.audiobook-list-item:focus, .audiobook-list-item:focus-within,
+.audiobook-item:focus, .audiobook-item:focus-within {
+  outline: 2px solid rgba(0,122,204,0.18);
+  outline-offset: 2px;
+  background-color: rgba(255,255,255,0.02);
+}
+
+/* List-specific override for the checkbox so it participates in the grid */
+.audiobooks-list .selection-checkbox {
+  position: relative;
+  top: auto;
+  left: auto;
+  z-index: auto;
+  height: 20px;
+  width: 20px;
+  margin: 0;
+  background-color: rgba(0,0,0,0.0);
+  border: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audiobooks-list .selection-checkbox {
+  justify-self: center;
+}
+
+.audiobooks-list .selection-checkbox::after {
+  left: 6px;
+  top: 2px;
 }
 
 .audiobook-poster-container {
@@ -1104,5 +1339,107 @@ function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: 
 .confirm-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* List view styles */
+.audiobooks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.audiobook-list-item {
+  display: grid;
+  grid-template-columns: 40px 64px 1fr auto 120px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  height: 80px; /* match LIST_ROW_HEIGHT */
+  background-color: transparent;
+  border-radius: 6px;
+  transition: background-color 0.12s, transform 0.12s;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.audiobook-list-item:hover {
+  background-color: rgba(255,255,255,0.02);
+  transform: translateY(-1px);
+}
+
+.list-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.list-details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.list-details .audiobook-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  color: #fff;
+}
+
+.list-details .audiobook-author {
+  font-size: 12px;
+  color: #ccc;
+}
+
+.list-actions {
+  margin-left: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-self: end;
+}
+
+/* Header row to mimic table columns */
+.list-header {
+  display: grid;
+  grid-template-columns: 40px 64px 1fr auto 120px;
+  gap: 12px;
+  padding: 8px 12px;
+  color: #aaa;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  align-items: center;
+}
+
+.list-header .col-cover { opacity: 0.9 }
+.list-header .col-title { opacity: 0.9 }
+.list-header .col-status { opacity: 0.9 }
+.list-header .col-actions { text-align: right }
+
+/* Position badges between details and actions */
+.list-badges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: 12px;
+  justify-self: start;
+}
+
+/* Make sure badges don't push actions out of view on narrow screens */
+@media (max-width: 480px) {
+  .list-badges {
+    display: none;
+  }
+}
+
+/* Ensure list view text is visible (overrides poster-hover rules) */
+.audiobooks-list .audiobook-title,
+.audiobooks-list .audiobook-author {
+  opacity: 1;
+  transition: none;
+  color: inherit;
 }
 </style>

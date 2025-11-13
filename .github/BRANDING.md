@@ -143,3 +143,19 @@ If you have the original SVG/source vector files, please add them to `fe/public`
 ## Contact
 
 For questions about branding or logo usage, please open an issue in the GitHub repository.
+
+## Typography
+
+Primary UI and logo typeface
+
+- **Font**: Figtree
+- **Source**: Google Fonts — https://fonts.google.com/specimen/Figtree
+- **Usage**: The Listenarr logo (text in the header and other UI headings) uses the Figtree family for a clean, modern, and highly legible sans-serif look. When building or deploying the frontend, the application pulls Figtree from Google Fonts and applies it to the primary heading elements (for example, the `.nav-brand h1` selector in the frontend styles).
+
+Fallbacks
+
+- When Figtree isn't available (e.g., offline or blocked), fall back to a system sans-serif stack such as: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`.
+
+Licensing
+
+- Figtree is an open-source font available via Google Fonts (SIL Open Font License or similar).
