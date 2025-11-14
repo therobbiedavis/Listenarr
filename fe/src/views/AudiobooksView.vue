@@ -7,6 +7,9 @@
           <PhGridFour v-if="viewMode === 'list'" />
           <PhList v-else />
         </button>
+        <span v-if="audiobooks.length > 0" class="count-badge">
+          {{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}
+        </span>
         <button class="toolbar-btn" @click="refreshLibrary">
           <PhArrowClockwise />
           Refresh
@@ -42,11 +45,29 @@
           <PhCheckSquare />
           Select All
         </button>
+
       </div>
       <div class="toolbar-right">
-        <span v-if="audiobooks.length > 0" class="count-badge">
-          {{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}
-        </span>
+        <!-- Sort / Filter controls -->
+        <div class="toolbar-filters">
+          <input
+            type="search"
+            v-model="searchQuery"
+            class="toolbar-search"
+            placeholder="Search title or author"
+            aria-label="Search audiobooks"
+          />
+          <FiltersDropdown
+            :customFilters="customFilters"
+            v-model="selectedFilterId"
+            @create="handleCreateCustomFilter"
+            @edit="handleEditCustomFilter"
+            @delete="handleDeleteCustomFilter"
+            class="toolbar-filter-dropdown"
+          />
+          <CustomSelect v-model="sortKeyProxy" :options="sortOptions" class="toolbar-custom-select" aria-label="Sort by" />
+
+        </div>
       </div>
     </div>
 
@@ -68,7 +89,7 @@
       </button>
     </div>
     
-    <div v-else-if="audiobooks.length === 0" class="empty-state">
+  <div v-else-if="rawAudiobooksLength === 0" class="empty-state">
       <div class="empty-icon">
         <PhBookOpen />
       </div>
@@ -88,6 +109,23 @@
           Add Audiobooks
         </router-link>
       </template>
+    </div>
+
+    <!-- No results after applying filters/search -->
+    <div v-else-if="audiobooks.length === 0" class="empty-state">
+      <div class="empty-icon">
+        <PhBookOpen />
+      </div>
+      <h2>No audiobooks match your filters</h2>
+      <p>Try clearing your search or filters to see results.</p>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="add-button" @click="clearFilters">
+          Clear Filters
+        </button>
+        <button class="add-button" @click="refreshLibrary">
+          Refresh Library
+        </button>
+      </div>
     </div>
     
   <div v-else ref="scrollContainer" :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]" @scroll="updateVisibleRange">
@@ -163,7 +201,6 @@
             <div class="col-status">Status</div>
             <div class="col-actions">Actions</div>
           </div>
-          <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
             <div
               v-for="audiobook in visibleAudiobooks"
               :key="`list-${audiobook.id}`"
@@ -233,36 +270,7 @@
       </div>
     </div>
 
-    <!-- Delete Confirmation Dialog -->
-    <div v-if="showDeleteDialog" class="dialog-overlay" @click="cancelDelete">
-      <div class="dialog" @click.stop>
-        <div class="dialog-header">
-          <h3>
-            <PhWarning />
-            Confirm Deletion
-          </h3>
-        </div>
-        <div class="dialog-body">
-          <p v-if="deleteTarget">
-            Are you sure you want to delete <strong>{{ deleteTarget.title }}</strong>?
-          </p>
-          <p v-else-if="bulkDeleteCount > 0">
-            Are you sure you want to delete <strong>{{ bulkDeleteCount }} audiobook{{ bulkDeleteCount !== 1 ? 's' : '' }}</strong>?
-          </p>
-          <p class="warning-text">This action cannot be undone. The audiobook data and cached images will be permanently removed.</p>
-        </div>
-        <div class="dialog-actions">
-          <button class="dialog-btn cancel-btn" @click="cancelDelete">
-            Cancel
-          </button>
-          <button class="dialog-btn confirm-btn" @click="executeDelete" :disabled="deleting">
-            <component v-if="deleting" :is="PhSpinner" class="ph-spin" />
-            <PhTrash v-else />
-            {{ deleting ? 'Deleting...' : 'Delete' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- Delete confirmation handled via global ConfirmDialog (showConfirm) -->
 
     <!-- Bulk Edit Modal -->
     <BulkEditModal
@@ -280,12 +288,25 @@
       @close="closeEditModal"
       @saved="handleEditSaved"
     />
+    
+    <!-- Custom Filter Modal -->
+    <CustomFilterModal
+      :isOpen="showCustomFilterModal"
+      :filter="editingFilter"
+      :qualityProfiles="qualityProfiles"
+      :languages="availableLanguages"
+      :years="availableYears"
+      @save="handleSaveCustomFilterFromModal"
+      @close="() => { showCustomFilterModal = false }"
+    />
+    
+    <!-- Confirm delete custom filter handled via global showConfirm() -->
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhWarning } from '@phosphor-icons/vue'
+import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhCaretUp, PhCaretDown } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -293,7 +314,13 @@ import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
 import BulkEditModal from '@/components/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
+import CustomSelect from '@/components/CustomSelect.vue'
+import FiltersDropdown from '@/components/FiltersDropdown.vue'
+import CustomFilterModal from '@/components/CustomFilterModal.vue'
+import { showConfirm } from '@/composables/useConfirm'
 import type { Audiobook, QualityProfile } from '@/types'
+import { evaluateRules } from '@/utils/customFilterEvaluator'
+import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { safeText } from '@/utils/textUtils'
 
 const router = useRouter()
@@ -301,7 +328,285 @@ const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const downloadsStore = useDownloadsStore()
 
-const audiobooks = computed(() => libraryStore.audiobooks || [])
+// Computed list after applying search, filters and sorting
+const searchQuery = ref('')
+// use string here because CustomSelect emits strings
+const sortKey = ref<string>('title')
+const sortOrder = ref<'asc' | 'desc'>('asc')
+const filterMonitored = ref<'all' | 'monitored' | 'unmonitored'>('all')
+const filterStatus = ref<'all' | 'downloaded' | 'missing' | 'mismatch' | 'downloading'>('all')
+const filterQualityProfile = ref<string>('all')
+const filterLanguage = ref<string>('all')
+const filterYear = ref<string>('all')
+
+const availableLanguages = computed(() => {
+  const langs = new Set<string>()
+  for (const b of (libraryStore.audiobooks || [])) {
+    if (b.language) langs.add(b.language)
+  }
+  return Array.from(langs).sort()
+})
+
+const availableYears = computed(() => {
+  const years = new Set<string>()
+  for (const b of (libraryStore.audiobooks || [])) {
+    if (b.publishYear) years.add(b.publishYear)
+  }
+  // sort descending numeric where possible
+  return Array.from(years).sort((a, b) => Number(b) - Number(a))
+})
+
+// Custom filters stored in localStorage
+const CUSTOM_FILTERS_KEY = 'listenarr.customFilters'
+interface CustomFilterRule { field: string; operator: string; value: string }
+interface CustomFilter { id: string; label: string; rules: CustomFilterRule[] }
+
+const customFilters = ref<CustomFilter[]>([])
+const selectedFilterId = ref<string | null>(null)
+const showCustomFilterModal = ref(false)
+const editingFilter = ref<CustomFilter | null>(null)
+
+function loadCustomFilters() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_FILTERS_KEY)
+    if (raw) customFilters.value = JSON.parse(raw)
+  } catch {
+    customFilters.value = []
+  }
+}
+
+function saveCustomFilters() {
+  try {
+    localStorage.setItem(CUSTOM_FILTERS_KEY, JSON.stringify(customFilters.value || []))
+  } catch { }
+}
+
+function handleCreateCustomFilter() {
+  // New filter
+  editingFilter.value = null
+  showCustomFilterModal.value = true
+}
+
+function handleEditCustomFilter(f: CustomFilter) {
+  // Load a copy into the modal for editing
+  editingFilter.value = JSON.parse(JSON.stringify(f))
+  showCustomFilterModal.value = true
+}
+
+async function handleDeleteCustomFilter(f: CustomFilter) {
+  const ok = await showConfirm(`Delete custom filter "${f.label}"? This cannot be undone.`, 'Delete Custom Filter', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  if (!ok) return
+  const idx = customFilters.value.findIndex(x => x.id === f.id)
+  if (idx >= 0) {
+    customFilters.value.splice(idx, 1)
+    saveCustomFilters()
+    if (selectedFilterId.value === f.id) selectedFilterId.value = null
+  }
+}
+
+function handleSaveCustomFilter(f: CustomFilter) {
+  const idx = customFilters.value.findIndex(cf => cf.id === f.id)
+  if (idx >= 0) customFilters.value[idx] = f
+  else customFilters.value.push(f)
+  saveCustomFilters()
+}
+
+// when saving from modal, close modal and select the new filter
+function handleSaveCustomFilterFromModal(f: CustomFilter) {
+  handleSaveCustomFilter(f)
+  selectedFilterId.value = f.id
+  showCustomFilterModal.value = false
+}
+
+// load on mount
+try { loadCustomFilters() } catch {}
+
+// sortOrder toggled via sortKeyProxy when selecting same key; explicit toggle removed
+
+const filteredAndSortedAudiobooks = computed(() => {
+  const list = (libraryStore.audiobooks || []).slice()
+
+  // Apply search
+  const q = (searchQuery.value || '').trim().toLowerCase()
+  let filtered = list.filter(b => {
+    if (!q) return true
+    const title = (b.title || '').toString().toLowerCase()
+    const authors = (b.authors || []).map(a => (a || '').toString().toLowerCase()).join(' ')
+    const narrators = (b.narrators || []).map(n => (n || '').toString().toLowerCase()).join(' ')
+    const publisher = (b.publisher || '').toString().toLowerCase()
+    const year = (b.publishYear || '').toString().toLowerCase()
+    return title.includes(q) || authors.includes(q) || narrators.includes(q) || publisher.includes(q) || year.includes(q)
+  })
+
+  // Apply selected filter (built-in or custom)
+  if (selectedFilterId.value) {
+    const sid = selectedFilterId.value
+    if (sid === 'monitored') {
+      filtered = filtered.filter(b => !!b.monitored)
+    } else if (sid === 'unmonitored') {
+      filtered = filtered.filter(b => !b.monitored)
+    } else if (sid === 'missing') {
+      filtered = filtered.filter(b => getAudiobookStatus(b) === 'no-file')
+    } else if (sid === 'recent') {
+      // For now: approximate by publishYear being this year or last year
+      const thisYear = new Date().getFullYear()
+      filtered = filtered.filter(b => {
+        const y = Number(b.publishYear || 0)
+        return !isNaN(y) && (y === thisYear || y === thisYear - 1)
+      })
+    } else {
+      // custom filter (supports grouping/parentheses)
+      const cf = customFilters.value.find(x => x.id === sid)
+      if (cf) {
+        filtered = filtered.filter(b => {
+          // cf.rules is expected to include optional groupStart/groupEnd flags
+          // evaluateRules handles conjunction precedence and parentheses
+          return evaluateRules(b as Audiobook, cf.rules as RuleLike[])
+        })
+      }
+    }
+  }
+
+  // Filter monitored
+  if (filterMonitored.value === 'monitored') {
+    filtered = filtered.filter(b => !!b.monitored)
+  } else if (filterMonitored.value === 'unmonitored') {
+    filtered = filtered.filter(b => !b.monitored)
+  }
+
+  // Filter by quality profile
+  if (filterQualityProfile.value !== 'all') {
+    const qid = Number(filterQualityProfile.value)
+    filtered = filtered.filter(b => (b.qualityProfileId ?? null) === qid)
+  }
+
+  // Filter by language
+  if (filterLanguage.value !== 'all') {
+    const target = filterLanguage.value.toLowerCase()
+    filtered = filtered.filter(b => (b.language || '').toString().toLowerCase() === target)
+  }
+
+  // Filter by publish year
+  if (filterYear.value !== 'all') {
+    filtered = filtered.filter(b => (b.publishYear || '') === filterYear.value)
+  }
+
+  // Filter by status
+  if (filterStatus.value !== 'all') {
+    filtered = filtered.filter(b => {
+      const s = getAudiobookStatus(b)
+      switch (filterStatus.value) {
+        case 'downloaded': return s === 'quality-match'
+        case 'missing': return s === 'no-file'
+        case 'mismatch': return s === 'quality-mismatch'
+        case 'downloading': return s === 'downloading'
+      }
+      return true
+    })
+  }
+
+  // Sorting
+  filtered.sort((a, b) => {
+    let av: string | boolean = ''
+    let bv: string | boolean = ''
+    switch (sortKey.value) {
+      case 'title':
+        av = (a.title || '').toString().toLowerCase()
+        bv = (b.title || '').toString().toLowerCase()
+        break
+      case 'author':
+        av = (a.authors && a.authors[0]) ? (a.authors[0] || '').toString().toLowerCase() : ''
+        bv = (b.authors && b.authors[0]) ? (b.authors[0] || '').toString().toLowerCase() : ''
+        break
+      case 'narrator':
+        av = (a.narrators && a.narrators[0]) ? (a.narrators[0] || '').toString().toLowerCase() : ''
+        bv = (b.narrators && b.narrators[0]) ? (b.narrators[0] || '').toString().toLowerCase() : ''
+        break
+      case 'publisher':
+        av = (a.publisher || '').toString().toLowerCase()
+        bv = (b.publisher || '').toString().toLowerCase()
+        break
+      case 'year':
+        const ay = Number(a.publishYear || NaN)
+        const by = Number(b.publishYear || NaN)
+        if (!isNaN(ay) || !isNaN(by)) {
+          return ((isNaN(ay) ? 0 : ay) - (isNaN(by) ? 0 : by)) * (sortOrder.value === 'asc' ? 1 : -1)
+        }
+        av = (a.publishYear || '').toString().toLowerCase()
+        bv = (b.publishYear || '').toString().toLowerCase()
+        break
+      case 'monitored':
+        av = !!a.monitored
+        bv = !!b.monitored
+        break
+      case 'status':
+        av = getAudiobookStatus(a)
+        bv = getAudiobookStatus(b)
+        break
+    }
+
+    if (typeof av === 'boolean' && typeof bv === 'boolean') {
+      return (av === bv) ? 0 : (av ? -1 : 1) * (sortOrder.value === 'asc' ? 1 : -1)
+    }
+
+    return ((av as string) < (bv as string) ? -1 : (av as string) > (bv as string) ? 1 : 0) * (sortOrder.value === 'asc' ? 1 : -1)
+  })
+
+  return filtered
+})
+
+
+const audiobooks = computed(() => filteredAndSortedAudiobooks.value)
+
+// Options for custom selects used in the toolbar
+// Build sort options and attach an up/down caret icon for the currently selected key
+const sortOptions = computed(() => {
+  const opts = [
+    { value: 'title', label: 'Title' },
+    { value: 'author', label: 'Author' },
+    { value: 'narrator', label: 'Narrator' },
+    { value: 'publisher', label: 'Publisher' },
+    { value: 'year', label: 'Release Year' },
+    { value: 'monitored', label: 'Monitored' },
+    { value: 'status', label: 'Status' }
+  ]
+
+  // attach icon to the currently selected option to indicate sort direction
+  return opts.map(o => ({
+    ...o,
+    icon: o.value === sortKey.value ? (sortOrder.value === 'asc' ? PhCaretUp : PhCaretDown) : undefined
+  }))
+})
+
+// Proxy so selecting the same key toggles sort order, selecting a new key sets ascending
+const sortKeyProxy = computed<string>({
+  get: () => sortKey.value,
+  set: (val: string) => {
+    if (val === sortKey.value) {
+      // toggle
+      sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+    } else {
+      sortKey.value = val
+      sortOrder.value = 'asc'
+    }
+  }
+})
+
+// toolbar select option helpers were removed in favor of CustomSelect usage per control
+
+// Raw library length (unfiltered) so we can show appropriate empty-state vs no-results
+const rawAudiobooksLength = computed(() => (libraryStore.audiobooks || []).length)
+
+function clearFilters() {
+  searchQuery.value = ''
+  sortKey.value = 'title'
+  sortOrder.value = 'asc'
+  filterMonitored.value = 'all'
+  filterStatus.value = 'all'
+  filterQualityProfile.value = 'all'
+  filterLanguage.value = 'all'
+  filterYear.value = 'all'
+}
 const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
@@ -369,9 +674,7 @@ const topPadding = computed(() => {
   return firstVisibleRow * getRowHeight()
 })
 
-const showDeleteDialog = ref(false)
-const deleteTarget = ref<Audiobook | null>(null)
-const bulkDeleteCount = ref(0)
+// deletion dialog handled via global showConfirm()
 const deleting = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
@@ -604,40 +907,34 @@ async function refreshLibrary() {
   await libraryStore.fetchLibrary()
 }
 
-function confirmDelete(audiobook: Audiobook) {
-  deleteTarget.value = audiobook
-  bulkDeleteCount.value = 0
-  showDeleteDialog.value = true
-}
+async function confirmDelete(audiobook: Audiobook) {
+  const message = `Are you sure you want to delete "${audiobook.title}"? This action cannot be undone. The audiobook data and cached images will be permanently removed.`
+  const ok = await showConfirm(message, 'Confirm Deletion', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  if (!ok) return
 
-function confirmBulkDelete() {
-  deleteTarget.value = null
-  bulkDeleteCount.value = libraryStore.selectedIds.size
-  showDeleteDialog.value = true
-}
-
-function cancelDelete() {
-  showDeleteDialog.value = false
-  deleteTarget.value = null
-  bulkDeleteCount.value = 0
-}
-
-async function executeDelete() {
   deleting.value = true
   try {
-    if (deleteTarget.value) {
-      // Single delete
-      await libraryStore.removeFromLibrary(deleteTarget.value.id)
-    } else if (bulkDeleteCount.value > 0) {
-      // Bulk delete
-      const idsToDelete = Array.from(libraryStore.selectedIds)
-      await libraryStore.bulkRemoveFromLibrary(idsToDelete)
-    }
-    showDeleteDialog.value = false
-    deleteTarget.value = null
-    bulkDeleteCount.value = 0
+    await libraryStore.removeFromLibrary(audiobook.id)
   } catch (err) {
     console.error('Delete failed:', err)
+  } finally {
+    deleting.value = false
+  }
+}
+
+async function confirmBulkDelete() {
+  const count = libraryStore.selectedIds.size
+  if (count === 0) return
+  const message = `Are you sure you want to delete ${count} audiobook${count !== 1 ? 's' : ''}? This action cannot be undone.`
+  const ok = await showConfirm(message, 'Confirm Deletion', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  if (!ok) return
+
+  deleting.value = true
+  try {
+    const idsToDelete = Array.from(libraryStore.selectedIds)
+    await libraryStore.bulkRemoveFromLibrary(idsToDelete)
+  } catch (err) {
+    console.error('Bulk delete failed:', err)
   } finally {
     deleting.value = false
   }
@@ -838,6 +1135,47 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 .toolbar-btn:focus-visible {
   outline: 3px solid rgba(33,150,243,0.18);
   outline-offset: 2px;
+}
+
+.toolbar-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+}
+.toolbar-search {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  color: #e6eef8;
+  padding: 6px 8px;
+  border-radius: 6px;
+  min-width: 180px;
+}
+.toolbar-select {
+  background-color: #2a2a2a; /* match CustomSelect trigger */
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #e6eef8;
+  padding: 8px 10px;
+  border-radius: 8px;
+  min-height: 36px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.12) 50%), linear-gradient(135deg, rgba(255,255,255,0.12) 50%, transparent 50%);
+  background-position: calc(100% - 14px) calc(1em + 2px), calc(100% - 10px) calc(1em + 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
+.toolbar-custom-select {
+  width: auto;
+  min-width: 140px;
+  max-width: 240px;
+  display: inline-block;
+}
+.toolbar-select option {
+  background: #2a2a2a;
+  color: #e6eef8;
 }
 
 .count-badge {

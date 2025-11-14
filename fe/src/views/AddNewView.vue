@@ -304,6 +304,8 @@
       @close="closeAddLibraryModal"
       @added="handleLibraryAdded"
     />
+    
+    <!-- Confirm dialog removed: using centralized showConfirm service mounted in App.vue -->
   </div>
 </template>
 
@@ -320,6 +322,7 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
+import { showConfirm } from '@/composables/useConfirm'
 import { useToast } from '@/services/toastService'
 import { safeText } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
@@ -445,6 +448,8 @@ const showDetailsModal = ref(false)
 const selectedBook = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
 const showAddLibraryModal = ref(false)
 const selectedBookForLibrary = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
+
+
 
 // Computed properties
 const hasResults = computed(() => {
@@ -953,7 +958,8 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
 const addToLibrary = async (book: AudibleBookMetadata) => {
   // Check if root folder is configured
   if (!configStore.applicationSettings?.outputPath) {
-    if (confirm('Root folder is not configured. Would you like to configure it now in Settings?')) {
+    const ok = await showConfirm('Root folder is not configured. Would you like to configure it now in Settings?', 'Configure Root Folder')
+    if (ok) {
       router.push('/settings')
     }
     return

@@ -119,40 +119,45 @@ export const useLibraryStore = defineStore('library', () => {
     audiobooks.value[bookIndex] = updated
   }
 
-  // Register a SignalR subscription once when the store is created so we can keep local state in sync
-  // We intentionally do not unsubscribe because the store's lifetime matches the app lifetime.
-  try {
-    signalRService.onFilesRemoved((payload) => {
-      try {
-        applyFilesRemoved(payload as { audiobookId: number; removed?: Array<{ id?: number; path?: string }> })
-      } catch (e) {
-        // Defensive: don't allow signal handler errors to break the app
-        console.error('Error applying FilesRemoved to library store', e)
-      }
-    })
-
-    signalRService.onAudiobookUpdate((updatedAudiobook) => {
-      try {
-        const index = audiobooks.value.findIndex(b => b.id === updatedAudiobook.id)
-        if (index !== -1) {
-          // Update the audiobook in the store, preserving reactivity
-          audiobooks.value = audiobooks.value.slice()
-          const prev = audiobooks.value[index]
-          if (!prev) return
-          const merged = { ...prev, ...updatedAudiobook }
-          // Preserve basePath if server payload omits or clears it
-          if ((!('basePath' in updatedAudiobook) || !updatedAudiobook.basePath) && prev.basePath) {
-            merged.basePath = prev.basePath
-          }
-          audiobooks.value[index] = merged
+  // Register SignalR subscriptions, but skip during unit tests to avoid noisy logs
+  // and test-time side effects. Vitest exposes markers on import.meta or globalThis.
+  const isVitest = !!((import.meta as unknown as { vitest?: unknown }).vitest || (globalThis as unknown as { __vitest?: unknown }).__vitest)
+  if (!isVitest) {
+    try {
+      // Register a SignalR subscription once when the store is created so we can keep local state in sync
+      // We intentionally do not unsubscribe because the store's lifetime matches the app lifetime.
+      signalRService.onFilesRemoved((payload) => {
+        try {
+          applyFilesRemoved(payload as { audiobookId: number; removed?: Array<{ id?: number; path?: string }> })
+        } catch (e) {
+          // Defensive: don't allow signal handler errors to break the app
+          console.error('Error applying FilesRemoved to library store', e)
         }
-      } catch (e) {
-        // Defensive: don't allow signal handler errors to break the app
-        console.error('Error applying AudiobookUpdate to library store', e)
-      }
-    })
-  } catch {
-    // If signalRService isn't ready at module import time, this will be a no-op; we'll still sync on next fetchLibrary
+      })
+
+      signalRService.onAudiobookUpdate((updatedAudiobook) => {
+        try {
+          const index = audiobooks.value.findIndex(b => b.id === updatedAudiobook.id)
+          if (index !== -1) {
+            // Update the audiobook in the store, preserving reactivity
+            audiobooks.value = audiobooks.value.slice()
+            const prev = audiobooks.value[index]
+            if (!prev) return
+            const merged = { ...prev, ...updatedAudiobook }
+            // Preserve basePath if server payload omits or clears it
+            if ((!('basePath' in updatedAudiobook) || !updatedAudiobook.basePath) && prev.basePath) {
+              merged.basePath = prev.basePath
+            }
+            audiobooks.value[index] = merged
+          }
+        } catch (e) {
+          // Defensive: don't allow signal handler errors to break the app
+          console.error('Error applying AudiobookUpdate to library store', e)
+        }
+      })
+    } catch {
+      // If signalRService isn't ready at module import time, this will be a no-op; we'll still sync on next fetchLibrary
+    }
   }
 
   function toggleSelection(id: number) {

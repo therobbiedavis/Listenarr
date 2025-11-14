@@ -180,6 +180,16 @@
     </div>
 
     <!-- Global Notification Modal -->
+    <!-- Global Confirm Dialog (centralized) -->
+    <ConfirmDialog
+      v-model="confirmVisible"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirmText="confirmConfirmText"
+      :cancelText="confirmCancelText"
+      :danger="confirmDanger"
+      @confirm="confirm.confirm"
+    />
     <NotificationModal
       :visible="notification.visible"
       :message="notification.message"
@@ -203,6 +213,8 @@ import { preloadRoute } from '@/router'
 // SignalR indicator moved to System view; session token handled where needed
 import { useRoute, useRouter } from 'vue-router'
 import NotificationModal from '@/components/NotificationModal.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { useConfirmService } from '@/composables/confirmService'
 import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useAuthStore } from '@/stores/auth'
@@ -221,6 +233,22 @@ const authEnabled = ref(false)
 
 // Version from API
 const version = ref('')
+
+// Global confirm service (app-level modal)
+const confirm = useConfirmService()
+// Template-safe computed wrappers (unpack refs so Vue/TS typechecks correctly)
+const confirmVisible = computed<boolean>({
+  get: () => confirm.visible.value,
+  set: (v: boolean) => {
+    // when consumer sets visible=false via v-model, treat as cancel
+    if (!v) confirm.cancel()
+  }
+})
+const confirmTitle = computed(() => confirm.title.value)
+const confirmMessage = computed(() => confirm.message.value)
+const confirmConfirmText = computed(() => confirm.confirmText.value)
+const confirmCancelText = computed(() => confirm.cancelText.value)
+const confirmDanger = computed(() => confirm.danger.value)
 
 // Preload helper for route components on user intent (hover/focus/touch)
 function preload(name: string) {
