@@ -1243,6 +1243,79 @@ function formatDate(dateString?: string): string {
   gap: 8px;
 }
 
+/* Desktop alignment tweaks: ensure primary and secondary actions line up and align to the right */
+@media (min-width: 769px) {
+  .nav-actions {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+  }
+
+  .primary-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .secondary-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  /* small spacing between primary and secondary groups */
+  .primary-actions + .secondary-actions {
+    margin-left: 8px;
+  }
+
+  .more-wrapper {
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* Desktop: tighter, consistent sizing and ordering for nav buttons */
+@media (min-width: 769px) {
+  .top-nav {
+    padding: 12px 28px; /* a touch more right padding so actions don't touch edge */
+  }
+
+  /* Keep the back button at the left and force actions to the right */
+  .top-nav > .nav-btn:first-of-type {
+    margin-right: 12px;
+  }
+
+  /* Ensure nav-actions stays on the right and items don't wrap */
+  .nav-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  /* Make each button a uniform height and inline-flex for better baseline alignment */
+  .nav-actions .nav-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 8px 12px;
+    white-space: nowrap;
+  }
+
+  /* Keep primary and secondary groups visually separated but inline */
+  .primary-actions { margin-right: 6px }
+  .secondary-actions { margin-left: 6px }
+
+  /* Make delete button always appear last and slightly emphasized */
+  .secondary-actions .delete-btn {
+    order: 99;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
 .nav-btn {
   display: flex;
   align-items: center;

@@ -101,9 +101,11 @@ public class ManualImportController : ControllerBase
             else if (request.Mode == "interactive" && request.Items != null && request.Items.Any())
             {
                 var results = new List<ManualImportResult>();
+                // Track destination paths used within this batch so we avoid collisions between items
+                var usedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var item in request.Items)
                 {
-                    var result = await ImportFileAsync(item, request.InputMode ?? "copy");
+                    var result = await ImportFileAsync(item, request.InputMode ?? "copy", usedDestinations);
                     results.Add(result);
                 }
                 
@@ -124,7 +126,7 @@ public class ManualImportController : ControllerBase
         }
     }
 
-    private async Task<ManualImportResult> ImportFileAsync(ManualImportItem item, string inputMode)
+    private async Task<ManualImportResult> ImportFileAsync(ManualImportItem item, string inputMode, HashSet<string>? usedDestinations = null)
     {
         try
         {
@@ -204,17 +206,37 @@ public class ManualImportController : ControllerBase
                 Directory.CreateDirectory(destinationDir);
             }
 
-            // Move or copy the file
-            if (inputMode == "move")
-            {
-                System.IO.File.Move(item.FullPath, destinationPath);
-                _logger.LogInformation("Moved file {Source} to {Destination}", item.FullPath, destinationPath);
-            }
-            else
-            {
-                System.IO.File.Copy(item.FullPath, destinationPath);
-                _logger.LogInformation("Copied file {Source} to {Destination}", item.FullPath, destinationPath);
-            }
+                // If destination file exists, create a unique filename (append " (1)", " (2)", ...)
+                try
+                {
+                    _logger.LogDebug("Resolving unique destination for manual import: {Dest}", destinationPath);
+                    destinationPath = FileUtils.GetUniqueDestinationPath(destinationPath, System.IO.File.Exists, usedDestinations);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to generate unique destination filename for manual import: {Destination}", destinationPath);
+                }
+
+                // Move or copy the file
+                if (inputMode == "move")
+                {
+                    System.IO.File.Move(item.FullPath, destinationPath);
+                    _logger.LogInformation("Moved file {Source} to {Destination}", item.FullPath, destinationPath);
+                }
+                else
+                {
+                    System.IO.File.Copy(item.FullPath, destinationPath);
+                    _logger.LogInformation("Copied file {Source} to {Destination}", item.FullPath, destinationPath);
+                }
+                // Record the destination to avoid collisions with subsequent items in this batch
+                try
+                {
+                    if (usedDestinations != null)
+                    {
+                        usedDestinations.Add(destinationPath);
+                    }
+                }
+                catch { }
             // After a successful move/copy, enqueue a focused scan for the matched audiobook
             try
             {

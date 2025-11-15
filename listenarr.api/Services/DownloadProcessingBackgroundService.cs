@@ -71,6 +71,8 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Download Processing Background Service stopped");
         }
 
+        // Use FileUtils.GetUniqueDestinationPath instead of a local implementation
+
         private async Task ProcessQueueAsync(CancellationToken cancellationToken)
         {
             using var scope = _serviceScopeFactory.CreateScope();
@@ -566,17 +568,21 @@ namespace Listenarr.Api.Services
 
                         try
                         {
+                            // Ensure unique destination to avoid overwriting
+                            _logger.LogDebug("Resolving unique destination for background job: {Dest}", destinationPath);
+                            var uniqueDest = FileUtils.GetUniqueDestinationPath(destinationPath);
                             if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
                             {
-                                File.Copy(sourcePath, destinationPath, true);
-                                job.AddLogEntry($"Copied file: {sourcePath} -> {destinationPath}");
+                                File.Copy(sourcePath, uniqueDest, true);
+                                job.AddLogEntry($"Copied file: {sourcePath} -> {uniqueDest}");
                             }
                             else
                             {
                                 // Default to Move
-                                File.Move(sourcePath, destinationPath, true);
-                                job.AddLogEntry($"Moved file: {sourcePath} -> {destinationPath}");
+                                File.Move(sourcePath, uniqueDest, true);
+                                job.AddLogEntry($"Moved file: {sourcePath} -> {uniqueDest}");
                             }
+                            destinationPath = uniqueDest;
 
                             // Verification: ensure destination exists and (if sourceSize available) sizes match
                             if (!File.Exists(destinationPath))

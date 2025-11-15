@@ -304,11 +304,13 @@
       @close="closeAddLibraryModal"
       @added="handleLibraryAdded"
     />
+    
+    <!-- Confirm dialog removed: using centralized showConfirm service mounted in App.vue -->
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre } from '@/types'
@@ -410,6 +412,20 @@ const markExistingResults = () => {
 
 // Unified Search
 const searchQuery = ref('')
+
+// Local storage key for persisting search query
+const SEARCH_QUERY_KEY = 'listenarr.addNewSearchQuery'
+
+// Initialize search query from localStorage
+try {
+  const stored = localStorage.getItem(SEARCH_QUERY_KEY)
+  if (stored !== null) searchQuery.value = stored
+} catch {}
+
+// Watch search query changes and persist to localStorage
+watch(searchQuery, (v) => {
+  try { localStorage.setItem(SEARCH_QUERY_KEY, v) } catch {}
+})
 const searchType = ref<'asin' | 'title' | 'isbn' | null>(null)
 const isSearching = ref(false)
 const searchError = ref('')
@@ -445,6 +461,74 @@ const showDetailsModal = ref(false)
 const selectedBook = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
 const showAddLibraryModal = ref(false)
 const selectedBookForLibrary = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
+
+// Local storage keys for persisting search results
+const RESULTS_KEY = 'listenarr.addNewResults'
+const SEARCH_TYPE_KEY = 'listenarr.addNewSearchType'
+const TITLE_RESULTS_COUNT_KEY = 'listenarr.addNewTitleResultsCount'
+const ASIN_FILTERING_KEY = 'listenarr.addNewAsinFiltering'
+const RESOLVED_ASINS_KEY = 'listenarr.addNewResolvedAsins'
+const ADDED_ASINS_KEY = 'listenarr.addNewAddedAsins'
+
+// Initialize search results from localStorage
+try {
+  const storedResults = localStorage.getItem(RESULTS_KEY)
+  if (storedResults) {
+    const parsed = JSON.parse(storedResults)
+    if (parsed.audibleResult) audibleResult.value = parsed.audibleResult
+    if (parsed.titleResults) titleResults.value = parsed.titleResults
+    if (parsed.isbnResult) isbnResult.value = parsed.isbnResult
+  }
+  
+  const storedSearchType = localStorage.getItem(SEARCH_TYPE_KEY)
+  if (storedSearchType) searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
+  
+  const storedCount = localStorage.getItem(TITLE_RESULTS_COUNT_KEY)
+  if (storedCount) titleResultsCount.value = parseInt(storedCount, 10)
+  
+  const storedFiltering = localStorage.getItem(ASIN_FILTERING_KEY)
+  if (storedFiltering) asinFilteringApplied.value = storedFiltering === 'true'
+  
+  const storedResolved = localStorage.getItem(RESOLVED_ASINS_KEY)
+  if (storedResolved) resolvedAsins.value = JSON.parse(storedResolved)
+  
+  const storedAdded = localStorage.getItem(ADDED_ASINS_KEY)
+  if (storedAdded) addedAsins.value = new Set(JSON.parse(storedAdded))
+} catch {}
+
+// Watch search results changes and persist to localStorage
+watch([audibleResult, titleResults, isbnResult], () => {
+  try {
+    const results = {
+      audibleResult: audibleResult.value,
+      titleResults: titleResults.value,
+      isbnResult: isbnResult.value
+    }
+    localStorage.setItem(RESULTS_KEY, JSON.stringify(results))
+  } catch {}
+})
+
+watch(searchType, (v) => {
+  try { localStorage.setItem(SEARCH_TYPE_KEY, v || '') } catch {}
+})
+
+watch(titleResultsCount, (v) => {
+  try { localStorage.setItem(TITLE_RESULTS_COUNT_KEY, v.toString()) } catch {}
+})
+
+watch(asinFilteringApplied, (v) => {
+  try { localStorage.setItem(ASIN_FILTERING_KEY, v.toString()) } catch {}
+})
+
+watch(resolvedAsins, (v) => {
+  try { localStorage.setItem(RESOLVED_ASINS_KEY, JSON.stringify(v)) } catch {}
+}, { deep: true })
+
+watch(addedAsins, (v) => {
+  try { localStorage.setItem(ADDED_ASINS_KEY, JSON.stringify(Array.from(v))) } catch {}
+}, { deep: true })
+
+
 
 // Computed properties
 const hasResults = computed(() => {
@@ -953,9 +1037,8 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
 const addToLibrary = async (book: AudibleBookMetadata) => {
   // Check if root folder is configured
   if (!configStore.applicationSettings?.outputPath) {
-    if (confirm('Root folder is not configured. Would you like to configure it now in Settings?')) {
-      router.push('/settings')
-    }
+    toast.warning('Root folder not configured', 'Please configure the root folder in Settings before adding audiobooks.')
+    router.push('/settings')
     return
   }
 

@@ -85,7 +85,7 @@ import { apiService } from '@/services/api'
 import { PhFolderOpen, PhCheckCircle, PhWarningCircle, PhArrowLeft, PhFolder, PhSpinner, PhArrowUp } from '@phosphor-icons/vue'
 
 interface Props {
-  modelValue: string
+  modelValue?: string
   placeholder?: string
   inputDataCy?: string
 }
@@ -102,6 +102,7 @@ interface BrowserProps extends Props {
 }
 
 const props = withDefaults(defineProps<BrowserProps>(), {
+  modelValue: '',
   placeholder: 'Select a folder...',
   inline: false,
   inputDataCy: ''

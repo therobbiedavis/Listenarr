@@ -170,12 +170,15 @@
         </div>
       </div>
     </div>
+    
+    <!-- Confirm dialog removed: using centralized showConfirm service mounted in App.vue -->
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import RemotePathMappingForm from './RemotePathMappingForm.vue'
+import { showConfirm } from '@/composables/useConfirm'
 import type { RemotePathMapping, TranslatePathResponse } from '@/types'
 import {
   getRemotePathMappingsByClient,
@@ -265,12 +268,12 @@ const handleCancelForm = () => {
 }
 
 const handleDelete = async (mapping: RemotePathMapping) => {
-  const confirmed = confirm(
+  const ok = await showConfirm(
     `Are you sure you want to delete the path mapping "${mapping.name || mapping.remotePath}"?\n\n` +
-    `This will stop translating paths for this download client.`
+    `This will stop translating paths for this download client.`,
+    'Delete Path Mapping'
   )
-  
-  if (!confirmed) return
+  if (!ok) return
   
   loading.value = true
   error.value = null
@@ -289,6 +292,8 @@ const handleDelete = async (mapping: RemotePathMapping) => {
     loading.value = false
   }
 }
+
+
 
 const handleTestPath = async () => {
   if (!testPath.value.trim()) return

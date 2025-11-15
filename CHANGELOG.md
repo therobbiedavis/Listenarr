@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.32] - 2025-11-15
+
+### Added
+
+- **Persistent State Management**: AudiobooksView and AddNewView now persist search queries, results, and UI state in localStorage for improved user experience across sessions
+- **Item Details Toggle**: Added toolbar button to toggle extra item details in both grid and list views of the audiobooks library
+- **Centralized Confirm Dialog**: New global confirm dialog service and component that replaces all individual confirm dialogs throughout the application
+- **Custom Filter System**: Advanced filtering capabilities with custom filter modal, dropdown, and rule-based evaluator supporting complex boolean logic
+- **Status Badges**: Clickable status badges in list view with keyboard navigation support for quick access to audiobook details
+- **Expanded Sorting Options**: Added first name and last name sorting for authors and narrators in addition to existing options
+
+### Changed
+
+- **Mobile & Responsive UX Improvements**:
+  - Toolbar buttons hide text and show only icons on screens 1024px and below for cleaner mobile interface
+  - CustomSelect component uses PhArrowsDownUp icon and hides text/icons in trigger on mobile screens
+  - List view badges stack vertically on screens 768px and below instead of being hidden
+  - Improved mobile search and action controls with stacked, full-width CTAs
+  - Enhanced responsive design across AudiobooksView, AddNewView, and other components
+
+- **Audiobooks List View Enhancements**:
+  - Persistent view mode (grid/list) using localStorage
+  - Improved accessibility with better keyboard navigation and focus management
+  - Enhanced visual feedback for row selection and hover states
+  - Status badges with click/keyboard navigation to audiobook details
+  - Better checkbox and row click handling for intuitive selection
+
+- **Component Architecture**:
+  - Refactored confirm dialogs to use centralized modal system
+  - Added custom filter evaluation utility with support for grouping and parentheses
+  - Improved component reusability and consistency across the application
+
+### Fixed
+
+- **Toggle Functionality**: Fixed additional details toggle that stopped working when switching between grid and list views by removing problematic v-memo directive
+- **Mobile Responsiveness**: Resolved layout issues and improved touch ergonomics on mobile devices
+- **State Persistence**: Ensured search queries and UI preferences are properly saved and restored across sessions
+
 ## [0.2.31] - 2025-11-10
 
 ### Added

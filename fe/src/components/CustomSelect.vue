@@ -5,7 +5,7 @@
         <component :is="selectedOption?.icon" v-if="selectedOption?.icon" class="option-icon" />
         <span class="option-text">{{ selectedOption?.label || placeholder }}</span>
       </div>
-      <PhCaretDown class="dropdown-arrow" :class="{ rotated: isOpen }" />
+      <PhArrowsDownUp class="dropdown-arrow" :class="{ rotated: isOpen }" />
     </div>
 
     <div v-if="isOpen" class="select-dropdown" ref="dropdown">
@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { PhCaretDown } from '@phosphor-icons/vue'
+import { PhArrowsDownUp } from '@phosphor-icons/vue'
 import type { Component } from 'vue'
 
 interface SelectOption {
@@ -146,7 +146,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 6px 8px;
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -154,6 +154,7 @@ defineExpose({
   cursor: pointer;
   transition: all 0.2s ease;
   min-height: 20px;
+  font-size: 12px;
 }
 
 .select-trigger:focus {
@@ -217,16 +218,19 @@ defineExpose({
   max-height: 200px;
   overflow-y: auto;
   margin-top: 4px;
+  min-width: 145px;
+  width: fit-content;
 }
 
 .select-option {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1rem;
+  padding: 6px 8px;
   cursor: pointer;
   transition: background-color 0.2s ease;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 12px;
 }
 
 .select-option:last-child {
@@ -256,12 +260,29 @@ defineExpose({
 
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
+
+}
+
+/* Mobile-friendly: hide text and icons in trigger on screens 1024px and below */
+@media (max-width: 1024px) {
+  .select-trigger .option-text {
+    display: none;
+  }
+
   .select-trigger {
-    padding: 0.75rem 1rem;
+    padding: 8px 8px;
   }
 
   .select-option {
-    padding: 0.75rem 1rem;
+    padding: 8px 8px;
+  }
+
+  .select-trigger .option-icon {
+    display: none;
+  }
+
+  .select-trigger {
+    width: fit-content;
   }
 }
 </style>
