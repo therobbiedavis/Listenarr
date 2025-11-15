@@ -140,9 +140,8 @@
       <div class="audiobooks-scroll-spacer" :style="{ height: `${totalHeight}px` }">
         <div v-if="viewMode === 'grid'" class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
 <div 
-  v-for="audiobook in visibleAudiobooks" 
+  v-for="audiobook in visibleAudiobooks"
   :key="audiobook.id"
-  v-memo="[audiobook.id, audiobook.monitored, libraryStore.isSelected(audiobook.id), getAudiobookStatus(audiobook), showItemDetails]"
   class="audiobook-wrapper"
 >
   <div 
@@ -2121,10 +2120,14 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   justify-self: start;
 }
 
-/* Make sure badges don't push actions out of view on narrow screens */
-@media (max-width: 480px) {
+/* Stack badges vertically on screens 768px and below */
+@media (max-width: 978px) {
   .list-badges {
-    display: none;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+    margin-left: 0;
+    margin-top: 8px;
   }
 }
 
