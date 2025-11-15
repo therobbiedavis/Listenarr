@@ -7,6 +7,15 @@
           <PhGridFour v-if="viewMode === 'list'" />
           <PhList v-else />
         </button>
+        <button
+          class="toolbar-btn"
+          :class="{ 'active': showItemDetails }"
+          @click="toggleItemDetails"
+          :aria-pressed="showItemDetails"
+          title="Toggle item details"
+        >
+          <PhInfo />
+        </button>
         <span v-if="audiobooks.length > 0" class="count-badge">
           {{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}
         </span>
@@ -66,7 +75,6 @@
             class="toolbar-filter-dropdown"
           />
           <CustomSelect v-model="sortKeyProxy" :options="sortOptions" class="toolbar-custom-select" aria-label="Sort by" />
-
         </div>
       </div>
     </div>
@@ -131,67 +139,81 @@
   <div v-else ref="scrollContainer" :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]" @scroll="updateVisibleRange">
       <div class="audiobooks-scroll-spacer" :style="{ height: `${totalHeight}px` }">
         <div v-if="viewMode === 'grid'" class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
-          <div 
-            v-for="audiobook in visibleAudiobooks" 
-            :key="audiobook.id"
-            tabindex="0"
-            @keydown.enter="navigateToDetail(audiobook.id)"
-            v-memo="[audiobook.id, audiobook.monitored, libraryStore.isSelected(audiobook.id), getAudiobookStatus(audiobook)]"
-            class="audiobook-item"
-            :class="{ 
-              selected: libraryStore.isSelected(audiobook.id),
-              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
-              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
-              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
-            }"
-            @click="navigateToDetail(audiobook.id)"
-          >
-            <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
-            <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
-              <input
-                type="checkbox"
-                :checked="libraryStore.isSelected(audiobook.id)"
-                @change="onCheckboxChange(audiobook, $event)"
-                @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
-              />
-            </div>
-            <div class="audiobook-poster-container">
-              <img 
-                :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
-                :alt="audiobook.title" 
-                class="audiobook-poster"
-                loading="lazy"
-              />
-              <div class="status-overlay">
-                <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
-                <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
-                <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-                  <PhStar />
-                  {{ getQualityProfileName(audiobook.qualityProfileId) }}
-                </div>
-                <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-                  <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
-                  {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
-                </div>
-              </div>
-              <div class="action-buttons">
-                <button 
-                  class="action-btn edit-btn-small" 
-                  @click.stop="openEditModal(audiobook)"
-                  title="Edit"
-                >
-                  <PhPencil />
-                </button>
-                <button 
-                  class="action-btn delete-btn-small" 
-                  @click.stop="confirmDelete(audiobook)"
-                  title="Delete"
-                >
-                  <PhTrash />
-                </button>
-              </div>
-            </div>
-          </div>
+<div 
+  v-for="audiobook in visibleAudiobooks" 
+  :key="audiobook.id"
+  v-memo="[audiobook.id, audiobook.monitored, libraryStore.isSelected(audiobook.id), getAudiobookStatus(audiobook), showItemDetails]"
+  class="audiobook-wrapper"
+>
+  <div 
+    tabindex="0"
+    @keydown.enter="navigateToDetail(audiobook.id)"
+    class="audiobook-item"
+    :class="{ 
+      selected: libraryStore.isSelected(audiobook.id),
+      'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+      'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
+      'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+      'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
+    }"
+    @click="navigateToDetail(audiobook.id)"
+  >
+    <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
+    <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
+      <input
+        type="checkbox"
+        :checked="libraryStore.isSelected(audiobook.id)"
+        @change="onCheckboxChange(audiobook, $event)"
+        @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
+      />
+    </div>
+      <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
+      <img 
+        :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
+        :alt="audiobook.title" 
+        class="audiobook-poster"
+        loading="lazy"
+      />
+        <div class="status-overlay">
+        <div v-if="!showItemDetails" class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+        <div v-if="!showItemDetails" class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
+        <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+          <PhStar />
+          {{ getQualityProfileName(audiobook.qualityProfileId) }}
+        </div>
+        <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+          <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+          {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+        </div>
+      </div>
+      <div class="action-buttons">
+        <button 
+          class="action-btn edit-btn-small" 
+          @click.stop="openEditModal(audiobook)"
+          title="Edit"
+        >
+          <PhPencil />
+        </button>
+        <button 
+          class="action-btn delete-btn-small" 
+          @click.stop="confirmDelete(audiobook)"
+          title="Delete"
+        >
+          <PhTrash />
+        </button>
+      </div>
+    </div>
+    <!-- Extra details shown physically under poster when toggle is enabled -->
+    <div v-if="showItemDetails" class="grid-bottom-details">
+      <div class="detail-line title">{{ safeText(audiobook.title) }}</div>
+      <div class="detail-line small">{{ (audiobook.authors || []).slice(0,2).map(a => safeText(a)).join(', ') || 'Unknown Author' }}
+        <div v-if="(audiobook.narrators || []).length">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') }}</div>
+      </div>
+      <div class="detail-line small">{{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span></div>
+      <div class="detail-line small">{{ statusText(getAudiobookStatus(audiobook)) }}</div>
+    </div>
+  </div>
+</div>
         </div>
         <div v-else class="audiobooks-list" :style="{ transform: `translateY(${topPadding}px)` }">
           <div v-if="audiobooks.length > 0" class="list-header">
@@ -234,6 +256,12 @@
               <div class="list-details">
                 <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
                 <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
+                <div v-if="showItemDetails" class="list-extra-details">
+                  <div class="detail-line small">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') || '' }}
+                    <span v-if="audiobook.narrators && audiobook.narrators.length && (audiobook.publisher || audiobook.publishYear)"> • </span>
+                    {{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span>
+                  </div>
+                </div>
               </div>
               <div class="list-badges">
                 <div
@@ -306,7 +334,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhCaretUp, PhCaretDown } from '@phosphor-icons/vue'
+import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -323,6 +351,36 @@ import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { safeText } from '@/utils/textUtils'
 
+function getAuthorSortKey(author: string): string {
+  const parts = author.trim().split(/\s+/)
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return (parts[0] || '').toLowerCase()
+  const lastName = parts[parts.length - 1] || ''
+  const firstName = parts[0] || ''
+  return (lastName + ' ' + firstName).toLowerCase()
+}
+
+function getAuthorFirstNameSortKey(author: string): string {
+  const parts = author.trim().split(/\s+/)
+  if (parts.length === 0) return ''
+  return (parts[0] || '').toLowerCase()
+}
+
+function getNarratorSortKey(narrator: string): string {
+  const parts = narrator.trim().split(/\s+/)
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return (parts[0] || '').toLowerCase()
+  const lastName = parts[parts.length - 1] || ''
+  const firstName = parts[0] || ''
+  return (lastName + ' ' + firstName).toLowerCase()
+}
+
+function getNarratorFirstNameSortKey(narrator: string): string {
+  const parts = narrator.trim().split(/\s+/)
+  if (parts.length === 0) return ''
+  return (parts[0] || '').toLowerCase()
+}
+
 const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
@@ -330,6 +388,20 @@ const downloadsStore = useDownloadsStore()
 
 // Computed list after applying search, filters and sorting
 const searchQuery = ref('')
+
+// Local storage key for persisting search query
+const SEARCH_QUERY_KEY = 'listenarr.searchQuery'
+
+// Initialize search query from localStorage
+try {
+  const stored = localStorage.getItem(SEARCH_QUERY_KEY)
+  if (stored !== null) searchQuery.value = stored
+} catch {}
+
+// Watch search query changes and persist to localStorage
+watch(searchQuery, (v) => {
+  try { localStorage.setItem(SEARCH_QUERY_KEY, v) } catch {}
+})
 // use string here because CustomSelect emits strings
 const sortKey = ref<string>('title')
 const sortOrder = ref<'asc' | 'desc'>('asc')
@@ -514,13 +586,29 @@ const filteredAndSortedAudiobooks = computed(() => {
         av = (a.title || '').toString().toLowerCase()
         bv = (b.title || '').toString().toLowerCase()
         break
-      case 'author':
-        av = (a.authors && a.authors[0]) ? (a.authors[0] || '').toString().toLowerCase() : ''
-        bv = (b.authors && b.authors[0]) ? (b.authors[0] || '').toString().toLowerCase() : ''
+      case 'author-last':
+        const aAuthorLast = (a.authors && a.authors[0]) ? a.authors[0] : ''
+        const bAuthorLast = (b.authors && b.authors[0]) ? b.authors[0] : ''
+        av = getAuthorSortKey(aAuthorLast)
+        bv = getAuthorSortKey(bAuthorLast)
         break
-      case 'narrator':
-        av = (a.narrators && a.narrators[0]) ? (a.narrators[0] || '').toString().toLowerCase() : ''
-        bv = (b.narrators && b.narrators[0]) ? (b.narrators[0] || '').toString().toLowerCase() : ''
+      case 'author-first':
+        const aAuthorFirst = (a.authors && a.authors[0]) ? a.authors[0] : ''
+        const bAuthorFirst = (b.authors && b.authors[0]) ? b.authors[0] : ''
+        av = getAuthorFirstNameSortKey(aAuthorFirst)
+        bv = getAuthorFirstNameSortKey(bAuthorFirst)
+        break
+      case 'narrator-last':
+        const aNarratorLast = (a.narrators && a.narrators[0]) ? a.narrators[0] : ''
+        const bNarratorLast = (b.narrators && b.narrators[0]) ? b.narrators[0] : ''
+        av = getNarratorSortKey(aNarratorLast)
+        bv = getNarratorSortKey(bNarratorLast)
+        break
+      case 'narrator-first':
+        const aNarratorFirst = (a.narrators && a.narrators[0]) ? a.narrators[0] : ''
+        const bNarratorFirst = (b.narrators && b.narrators[0]) ? b.narrators[0] : ''
+        av = getNarratorFirstNameSortKey(aNarratorFirst)
+        bv = getNarratorFirstNameSortKey(bNarratorFirst)
         break
       case 'publisher':
         av = (a.publisher || '').toString().toLowerCase()
@@ -563,8 +651,10 @@ const audiobooks = computed(() => filteredAndSortedAudiobooks.value)
 const sortOptions = computed(() => {
   const opts = [
     { value: 'title', label: 'Title' },
-    { value: 'author', label: 'Author' },
-    { value: 'narrator', label: 'Narrator' },
+    { value: 'author-last', label: 'Author Last Name' },
+    { value: 'author-first', label: 'Author First Name' },
+    { value: 'narrator-last', label: 'Narrator Last Name' },
+    { value: 'narrator-first', label: 'Narrator First Name' },
     { value: 'publisher', label: 'Publisher' },
     { value: 'year', label: 'Release Year' },
     { value: 'monitored', label: 'Monitored' },
@@ -598,7 +688,6 @@ const sortKeyProxy = computed<string>({
 const rawAudiobooksLength = computed(() => (libraryStore.audiobooks || []).length)
 
 function clearFilters() {
-  searchQuery.value = ''
   sortKey.value = 'title'
   sortOrder.value = 'asc'
   filterMonitored.value = 'all'
@@ -619,7 +708,8 @@ const hasRootFolderConfigured = computed(() => {
 const scrollContainer = ref<HTMLElement | null>(null)
 const ITEMS_PER_ROW = ref(4) // Will be recalculated for grid; list uses 1
 const LIST_ROW_HEIGHT = 80
-const GRID_ROW_HEIGHT = 320 // item height + gap for grid
+const GRID_ROW_HEIGHT = 320 // base item height + gap for grid
+const GRID_DETAILS_EXTRA_HEIGHT = 64 // extra height for showing details under poster
 const BUFFER_ROWS = 2 // Extra rows to render above and below viewport
 
 // Local storage key for persisting view mode
@@ -633,8 +723,28 @@ const visibleAudiobooks = computed(() => {
   return audiobooks.value.slice(visibleRange.value.start, visibleRange.value.end)
 })
 
+// Option: show extra details under each audiobook poster in grid view
+const SHOW_ITEM_DETAILS_KEY = 'listenarr.showItemDetails'
+const showItemDetails = ref<boolean>(false)
+
+try {
+  const stored = localStorage.getItem(SHOW_ITEM_DETAILS_KEY)
+  if (stored !== null) showItemDetails.value = stored === 'true'
+} catch {}
+
+watch(showItemDetails, (v) => {
+  try { localStorage.setItem(SHOW_ITEM_DETAILS_KEY, v ? 'true' : 'false') } catch {}
+})
+
+function toggleItemDetails() {
+  showItemDetails.value = !showItemDetails.value
+}
+
 function getRowHeight() {
-  return viewMode.value === 'grid' ? GRID_ROW_HEIGHT : LIST_ROW_HEIGHT
+  if (viewMode.value === 'grid') {
+    return GRID_ROW_HEIGHT + (showItemDetails.value ? GRID_DETAILS_EXTRA_HEIGHT : 0)
+  }
+  return LIST_ROW_HEIGHT
 }
 
 // Update visible range based on scroll position
@@ -696,7 +806,7 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   }
 
   // If there are no files at all, treat as no-file
-  if (!audiobook.files || audiobook.files.length === 0) {
+  if (!audiobook.files || !Array.isArray(audiobook.files) || audiobook.files.length === 0) {
     return 'no-file'
   }
 
@@ -1261,6 +1371,24 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   border-bottom: 3px solid #2ecc71;
 }
 
+/* List view status borders */
+.audiobook-list-item.status-no-file .list-thumb {
+  border-bottom: 3px solid #e74c3c;
+}
+
+.audiobook-list-item.status-downloading .list-thumb {
+  border-bottom: 3px solid #3498db;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.audiobook-list-item.status-quality-mismatch .list-thumb {
+  border-bottom: 3px solid #f39c12;
+}
+
+.audiobook-list-item.status-quality-match .list-thumb {
+  border-bottom: 3px solid #2ecc71;
+}
+
 
 .selection-checkbox {
   /* default used in grid; overridden in list below */
@@ -1456,6 +1584,65 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 
 .audiobook-poster-container:hover .status-overlay {
   padding: 80px 8px 8px;
+}
+
+/* When 'show-details' class is present, render overlay expanded */
+.audiobook-poster-container.show-details .status-overlay {
+  padding: 80px 8px 8px;
+}
+
+.audiobook-poster-container .audiobook-title,
+.audiobook-poster-container .audiobook-author {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.audiobook-poster-container.show-details .audiobook-title,
+.audiobook-poster-container.show-details .audiobook-author {
+  opacity: 1;
+}
+
+.audiobook-extra-details {
+  margin-top: 8px;
+  color: #e6eef8;
+}
+.audiobook-extra-details .detail-line {
+  font-size: 12px;
+  line-height: 1.2;
+  margin: 2px 0;
+  color: #cfd8e3;
+}
+.audiobook-extra-details .detail-line.title {
+  font-weight: 600;
+  color: #fff;
+}
+.audiobook-extra-details .detail-line.small {
+  font-size: 11px;
+  color: #bfcad6;
+}
+.list-extra-details {
+  margin-top: 6px;
+  color: #e6eef8;
+}
+.list-extra-details .detail-line {
+  font-size: 12px;
+  color: #bfcad6;
+}
+.grid-bottom-details {
+  margin-top: 8px;
+  color: #e6eef8;
+  padding: 0 4px;
+  width: 100%;
+}
+.grid-bottom-details .detail-line {
+  font-size: 12px;
+  color: #bfcad6;
+  text-align: center;
+}
+.grid-bottom-details .detail-line.title {
+  color: #fff;
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
 .audiobook-title {
@@ -1823,7 +2010,6 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
-  height: 80px; /* match LIST_ROW_HEIGHT */
   background-color: transparent;
   border-radius: 6px;
   transition: background-color 0.12s, transform 0.12s;
@@ -1916,5 +2102,10 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   opacity: 1;
   transition: none;
   color: inherit;
+}
+
+.audiobook-wrapper {
+  display: flex;
+  flex-direction: column;
 }
 </style>
