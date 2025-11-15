@@ -25,6 +25,22 @@
         </button>
         <button 
           v-if="selectedCount > 0" 
+          class="toolbar-btn"
+          @click="libraryStore.clearSelection()"
+        >
+          <PhX />
+          Clear Selection
+        </button>
+        <button 
+          v-if="audiobooks.length > 0 && selectedCount === 0" 
+          class="toolbar-btn"
+          @click="libraryStore.selectAll()"
+        >
+          <PhCheckSquare />
+          Select All
+        </button>
+        <button 
+          v-if="selectedCount > 0" 
           class="toolbar-btn edit-btn"
           @click="showBulkEdit"
         >
@@ -39,33 +55,10 @@
           <PhTrash />
           Delete Selected ({{ selectedCount }})
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn"
-          @click="libraryStore.clearSelection()"
-        >
-          Clear Selection
-        </button>
-        <button 
-          v-if="audiobooks.length > 0 && selectedCount === 0" 
-          class="toolbar-btn"
-          @click="libraryStore.selectAll()"
-        >
-          <PhCheckSquare />
-          Select All
-        </button>
-
       </div>
       <div class="toolbar-right">
         <!-- Sort / Filter controls -->
         <div class="toolbar-filters">
-          <input
-            type="search"
-            v-model="searchQuery"
-            class="toolbar-search"
-            placeholder="Search title or author"
-            aria-label="Search audiobooks"
-          />
           <FiltersDropdown
             :customFilters="customFilters"
             v-model="selectedFilterId"
@@ -75,6 +68,13 @@
             class="toolbar-filter-dropdown"
           />
           <CustomSelect v-model="sortKeyProxy" :options="sortOptions" class="toolbar-custom-select" aria-label="Sort by" />
+          <input
+            type="search"
+            v-model="searchQuery"
+            class="toolbar-search"
+            placeholder="Search title or author"
+            aria-label="Search audiobooks"
+          />
         </div>
       </div>
     </div>
@@ -334,7 +334,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown } from '@phosphor-icons/vue'
+import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -1247,6 +1247,40 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   outline-offset: 2px;
 }
 
+/* Mobile-friendly toolbar: hide text, show only icons on screens 1024px and below */
+@media (max-width: 1024px) {
+  .toolbar-btn {
+    padding: 8px;
+    min-width: 36px;
+    justify-content: center;
+    font-size: 0;
+    gap: unset;
+  }
+  
+  .toolbar-btn svg {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+  }
+  
+  .count-badge {
+    display: none;
+  }
+  
+  .toolbar-search {
+    min-width: 120px;
+  }
+
+  .select-trigger {
+    width: fit-content;
+  }
+
+  .select-dropdown {
+    min-width: 120px;
+    max-width: 160px;
+  }
+}
+
 .toolbar-filters {
   display: inline-flex;
   align-items: center;
@@ -1257,7 +1291,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.04);
   color: #e6eef8;
-  padding: 6px 8px;
+  padding: 8px 8px;
   border-radius: 6px;
   min-width: 180px;
 }
@@ -1279,8 +1313,6 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 
 .toolbar-custom-select {
   width: auto;
-  min-width: 140px;
-  max-width: 240px;
   display: inline-block;
 }
 .toolbar-select option {

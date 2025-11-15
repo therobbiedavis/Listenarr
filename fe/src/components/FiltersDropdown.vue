@@ -1,7 +1,7 @@
 <template>
   <div class="filters-dropdown" ref="root">
     <div class="trigger" @click.stop="toggle" tabindex="0" @keydown.enter.prevent="toggle">
-      <slot name="trigger"><PhFunnel /> Filters</slot>
+      <slot name="trigger"><PhFunnel /> <span>Filters</span></slot>
     </div>
 
     <div v-if="open" class="dropdown">
@@ -176,4 +176,18 @@ onUnmounted(() => document.removeEventListener('click', handleClickOutside))
 .icon-btn { background: transparent; border: 1px solid rgba(255,255,255,0.04); color:#ddd; padding:4px 6px; border-radius:6px; cursor:pointer }
 .icon-btn.delete { background: rgba(231,76,60,0.9); border-color: rgba(192,57,43,0.5); }
 .icon-btn.delete:hover { background: rgba(192,57,43,1) }
+
+/* Mobile-friendly toolbar: hide text, show only icons on screens 1024px and below */
+@media (max-width: 1024px) {
+
+  .trigger {
+    padding: 10px 6px;
+    min-width: 36px;
+    justify-content: center;
+    gap: unset;
+  }
+  .trigger span {
+    display: none;
+  }
+}
 </style>

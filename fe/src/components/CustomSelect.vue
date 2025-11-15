@@ -5,7 +5,7 @@
         <component :is="selectedOption?.icon" v-if="selectedOption?.icon" class="option-icon" />
         <span class="option-text">{{ selectedOption?.label || placeholder }}</span>
       </div>
-      <PhCaretDown class="dropdown-arrow" :class="{ rotated: isOpen }" />
+      <PhArrowsDownUp class="dropdown-arrow" :class="{ rotated: isOpen }" />
     </div>
 
     <div v-if="isOpen" class="select-dropdown" ref="dropdown">
@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { PhCaretDown } from '@phosphor-icons/vue'
+import { PhArrowsDownUp } from '@phosphor-icons/vue'
 import type { Component } from 'vue'
 
 interface SelectOption {
@@ -218,6 +218,8 @@ defineExpose({
   max-height: 200px;
   overflow-y: auto;
   margin-top: 4px;
+  min-width: 145px;
+  width: fit-content;
 }
 
 .select-option {
@@ -258,12 +260,29 @@ defineExpose({
 
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
+
+}
+
+/* Mobile-friendly: hide text and icons in trigger on screens 1024px and below */
+@media (max-width: 1024px) {
+  .select-trigger .option-text {
+    display: none;
+  }
+
   .select-trigger {
-    padding: 6px 8px;
+    padding: 8px 8px;
   }
 
   .select-option {
-    padding: 6px 8px;
+    padding: 8px 8px;
+  }
+
+  .select-trigger .option-icon {
+    display: none;
+  }
+
+  .select-trigger {
+    width: fit-content;
   }
 }
 </style>
