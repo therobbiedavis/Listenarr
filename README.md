@@ -29,12 +29,12 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 - [x] **First-class responsive web interface** that works great on any device (phone, tablet, desktop)
 - [x] **Rich metadata support** with automatic enrichment from Audible and Amazon
 - [x] **External API integration** for searching across multiple torrent and NZB indexers simultaneously
-- [ ] **Ways to organize your library**: Collections, Reading Lists, Want to Read
 - [x] **Download management** with support for popular clients (qBittorrent, Transmission, SABnzbd, NZBGet)
-- [ ] **Flexible configuration** with role-based access control
 - [x] **Real-time monitoring** of download progress and status
 - [x] **Intelligent file organization** with customizable naming patterns
-- [ ] **Full localization support**
+- [ ] **Full localization support** Soon™️
+
+To see what's coming up, check out our [Roadmap](#roadmap)! If you have a suggestion or feature request, please submit them in [Discussions](https://github.com/therobbiedavis/Listenarr/discussions)
 
 ## Support
 
@@ -432,9 +432,10 @@ Bumped versions are persisted via PR to maintain branch protection.
 
 - [x] User authentication and authorization
 - [x] Real-time WebSocket updates for downloads
-- [ ] Advanced search filters and smart collections
-- [ ] Notification system (email, webhooks, Discord)
-- [ ] Mobile apps (iOS/Android)
+- [x] Advanced search filters
+- [x] Notification system (email, webhooks, Discord)
+- [ ] Smart Collections and Reading Lists
+- [ ] Progress Scrobbling and Syncing
 - [ ] Audiobookshelf integration
 - [ ] Multi-language support
 - [ ] Backup and restore functionality
