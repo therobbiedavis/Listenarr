@@ -17,6 +17,12 @@
 
 Listenarr is a fast, feature-rich, cross-platform audiobook management server. Built with a focus on being a complete solution for all your audiobook downloading needs. Set up your own server and get ready to streamline your audiobook listening!
 
+<p align="center">
+  <a href="https://github.com/therobbiedavis/Listenarr/tree/canary/preview-images">
+    <img src="preview-images/audiobooks.png" alt="Homepage" width="600">
+  </a>
+</p>
+
 ## What Listenarr Provides
 
 - [x] **Serve up Audiobooks** from multiple sources (torrents, NZBs) with support for various formats (MP3, M4A, M4B, FLAC, AAC, OGG, OPUS)
