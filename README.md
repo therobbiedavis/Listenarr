@@ -54,14 +54,14 @@ docker run -d \
   -p 5000:5000 \
   -e LISTENARR_PUBLIC_URL=https://your-domain.com \
   -v listenarr_data:/app/config \
-  therobbiedavis/listenarr:latest
+  therobbiedavis/listenarr:canary
 ```
 
 **Service will be available at:**
 - Web App: http://localhost:5000
 
 **Available Tags:**
-- `latest` / `stable` - Latest stable release
+- ~~`latest` / `stable`~~ - Latest stable release (available soon)
 - `canary` - Latest canary build (pre-release)
 - `canary-X.Y.Z` - Specific canary version
 - `nightly-X.Y.Z` - Specific nightly version
@@ -72,7 +72,7 @@ docker run -d \
 version: '3.8'
 services:
   listenarr:
-    image: therobbiedavis/listenarr:latest
+    image: therobbiedavis/listenarr:canary
     ports:
       - "5000:5000"
     environment:
