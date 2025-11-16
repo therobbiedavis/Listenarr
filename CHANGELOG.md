@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.35] - 2025-11-16
+
+### Added
+
+- Authoritative EF Core migration to add missing `ApplicationSettings` columns (e.g. `EnabledNotificationTriggers`, `WebhookUrl`, US proxy fields, and related settings). This ensures fresh installs and upgrades receive the required schema changes via migrations.
+
+### Changed
+
+- Removed the emergency runtime ALTER/PRAGMA schema patch from `Program.cs`; schema changes are now managed exclusively through EF Core migrations.
+- Consolidated and cleaned up iterative/no-op migration artifacts introduced during debugging; created a single authoritative migration and backed up removed migration files for safety.
+
+### Fixed
+
+- Resolved runtime error "SQLite Error 1: 'no such column: a.EnabledNotificationTriggers'" by recording and applying the missing schema changes.
+- Eliminated duplicate-migration compile errors caused by conflicting migration classes.
+
+
 ## [0.2.32] - 2025-11-15
 
 ### Added
@@ -82,7 +99,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Discord helper bot startup race: the Node helper resolved `LISTENARR_URL` asynchronously at module load time which allowed the initial network calls to default to `http://localhost:5000`, causing authentication failures (SignalR negotiation and settings fetch returned 401) in containerized production. The startup routine now awaits `resolveListenarrUrl()` before performing any outbound requests so the environment-provided `LISTENARR_URL` (or `.env`) is used immediately.
-
 
 ## [0.2.29] - 2025-11-09
 
