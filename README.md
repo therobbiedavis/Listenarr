@@ -19,7 +19,7 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 
 <p align="center">
   <a href="https://github.com/therobbiedavis/Listenarr/tree/canary/preview-images">
-    <img src="preview-images/audiobooks.png" alt="Homepage" width="600">
+    <img src="preview-images/audiobooks.png" alt="Homepage">
   </a>
 </p>
 
