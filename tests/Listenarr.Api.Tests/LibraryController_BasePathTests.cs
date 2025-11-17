@@ -48,10 +48,12 @@ namespace Listenarr.Api.Tests
                 .Setup(x => x.ApplyNamingPattern(It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), false))
                 .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
                 {
-                    // For non-series book, the method now uses fixed pattern "{Author}/{Title} ({Year})"
-                    if (pattern == "{Author}/{Title} ({Year})")
+                    // For non-series book, the method derives pattern from fileNamingPattern by removing file-specific tokens
+                    // Input: "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"
+                    // Output after processing: "{Author}/{Title}" (Series removed since empty)
+                    if (pattern == "{Author}/{Title}")
                     {
-                        return "Stephen Graham Jones/The Buffalo Hunter Hunter (2025)";
+                        return "Stephen Graham Jones/The Buffalo Hunter Hunter";
                     }
                     return pattern;
                 });
@@ -76,7 +78,7 @@ namespace Listenarr.Api.Tests
             var result = (string)method.Invoke(controller, new object[] { audiobook, rootPath, fileNamingPattern });
 
             // Assert
-            var expected = Path.Combine("/server/mnt/drive/Audiobooks", "Stephen Graham Jones/The Buffalo Hunter Hunter (2025)");
+            var expected = Path.Combine("/server/mnt/drive/Audiobooks", "Stephen Graham Jones/The Buffalo Hunter Hunter");
             Assert.Equal(expected, result);
         }
 
@@ -112,10 +114,12 @@ namespace Listenarr.Api.Tests
                 .Setup(x => x.ApplyNamingPattern(It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), false))
                 .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
                 {
-                    // For series book, the method now uses fixed pattern "{Author}/{Series}/{Title} ({Year})"
-                    if (pattern == "{Author}/{Series}/{Title} ({Year})")
+                    // For series book, the method derives pattern from fileNamingPattern by removing file-specific tokens
+                    // Input: "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"
+                    // Output after processing: "{Author}/{Series}/{Title}" (DiskNumber and ChapterNumber removed)
+                    if (pattern == "{Author}/{Series}/{Title}")
                     {
-                        return "Stephen King/The Dark Tower/The Gunslinger (1982)";
+                        return "Stephen King/The Dark Tower/The Gunslinger";
                     }
                     return pattern;
                 });
@@ -140,7 +144,7 @@ namespace Listenarr.Api.Tests
             var result = (string)method.Invoke(controller, new object[] { audiobook, rootPath, fileNamingPattern });
 
             // Assert
-            var expected = Path.Combine("/server/mnt/drive/Audiobooks", "Stephen King/The Dark Tower/The Gunslinger (1982)");
+            var expected = Path.Combine("/server/mnt/drive/Audiobooks", "Stephen King/The Dark Tower/The Gunslinger");
             Assert.Equal(expected, result);
         }
     }
