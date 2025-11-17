@@ -52,6 +52,7 @@ The easiest way to get started is to use Docker (recommended for production), pr
 docker run -d \
   --name listenarr \
   -p 5000:5000 \
+  ##OPTIONAL: Used by Discord Bot
   -e LISTENARR_PUBLIC_URL=https://your-domain.com \
   -v listenarr_data:/app/config \
   therobbiedavis/listenarr:canary
@@ -76,7 +77,7 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - LISTENARR_PUBLIC_URL=https://your-domain.com
+      - LISTENARR_PUBLIC_URL=https://your-domain.com ##OPTIONAL: Used by Discord Bot
     volumes:
       - listenarr_data:/app/config
     restart: unless-stopped
