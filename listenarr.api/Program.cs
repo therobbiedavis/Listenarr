@@ -382,6 +382,10 @@ builder.Services.AddSwaggerGen(options =>
     { 
         Console.WriteLine($"[WARNING] Failed to include XML comments in Swagger: {ex.Message}");
     }
+    // Use full type names for schema Ids (replace '+' from nested types with '.') to
+    // avoid collisions between nested controller DTOs and top-level DTOs that share
+    // the same simple type name (e.g. TranslatePathRequest).
+    options.CustomSchemaIds(type => (type.FullName ?? type.Name).Replace('+', '.'));
 });
 
 // Authentication: Session-based (default)
