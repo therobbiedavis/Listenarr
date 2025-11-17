@@ -383,6 +383,15 @@ const markExistingResults = () => {
   
   logger.debug('Library ASINs:', Array.from(libraryAsins))
   
+  // Clean up addedAsins: remove ASINs that are no longer in the library
+  const currentAddedAsins = Array.from(addedAsins.value)
+  for (const asin of currentAddedAsins) {
+    if (!libraryAsins.has(asin)) {
+      logger.debug('Removing ASIN from addedAsins (no longer in library):', asin)
+      addedAsins.value.delete(asin)
+    }
+  }
+  
   // Check ASIN search result
   if (audibleResult.value?.asin) {
     logger.debug('Checking ASIN result:', audibleResult.value.asin)
@@ -407,7 +416,7 @@ const markExistingResults = () => {
     })
   }
   
-  logger.debug('Added ASINs:', Array.from(addedAsins.value))
+  logger.debug('Added ASINs after cleanup and marking:', Array.from(addedAsins.value))
 }
 
 // Unified Search
@@ -481,20 +490,32 @@ try {
   }
   
   const storedSearchType = localStorage.getItem(SEARCH_TYPE_KEY)
-  if (storedSearchType) searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
+  if (storedSearchType) {
+    searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
+  }
   
   const storedCount = localStorage.getItem(TITLE_RESULTS_COUNT_KEY)
-  if (storedCount) titleResultsCount.value = parseInt(storedCount, 10)
+  if (storedCount) {
+    titleResultsCount.value = parseInt(storedCount, 10)
+  }
   
   const storedFiltering = localStorage.getItem(ASIN_FILTERING_KEY)
-  if (storedFiltering) asinFilteringApplied.value = storedFiltering === 'true'
+  if (storedFiltering) {
+    asinFilteringApplied.value = storedFiltering === 'true'
+  }
   
   const storedResolved = localStorage.getItem(RESOLVED_ASINS_KEY)
-  if (storedResolved) resolvedAsins.value = JSON.parse(storedResolved)
+  if (storedResolved) {
+    resolvedAsins.value = JSON.parse(storedResolved)
+  }
   
   const storedAdded = localStorage.getItem(ADDED_ASINS_KEY)
-  if (storedAdded) addedAsins.value = new Set(JSON.parse(storedAdded))
-} catch {}
+  if (storedAdded) {
+    addedAsins.value = new Set(JSON.parse(storedAdded))
+  }
+} catch (error) {
+  console.warn('Failed to restore persisted state:', error)
+}
 
 // Watch search results changes and persist to localStorage
 watch([audibleResult, titleResults, isbnResult], () => {
@@ -1155,6 +1176,10 @@ const searchByISBNChain = async (isbn: string) => {
 onMounted(async () => {
   await configStore.loadApplicationSettings()
   await configStore.loadApiConfigurations()
+  
+  // Initialize added status on mount
+  await checkExistingInLibrary()
+  
   // Subscribe to server-side search progress updates
   const unsub = signalRService.onSearchProgress((payload) => {
     if (payload && payload.message) {
@@ -1164,6 +1189,24 @@ onMounted(async () => {
   // When component is unmounted, unsubscribe
   onUnmounted(() => {
     try { unsub() } catch {}
+  })
+
+  // Watch for library changes to update added status
+  const stopWatchingLibrary = watch(
+    () => libraryStore.audiobooks,
+    async (newAudiobooks, oldAudiobooks) => {
+      // Only update if the library actually changed (not just on initial load)
+      if (oldAudiobooks && oldAudiobooks.length !== newAudiobooks.length) {
+        logger.debug('Library changed, updating added status...')
+        await checkExistingInLibrary()
+      }
+    },
+    { deep: false } // We don't need deep watching since we're just checking length
+  )
+
+  // Cleanup watcher on unmount
+  onUnmounted(() => {
+    stopWatchingLibrary()
   })
 })
 </script>

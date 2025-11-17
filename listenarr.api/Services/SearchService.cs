@@ -331,23 +331,29 @@ namespace Listenarr.Api.Services
                 var digitsOnly = new string((query ?? string.Empty).Where(char.IsDigit).ToArray());
                 var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13;
 
-                List<AmazonSearchResult> amazonResults;
-                List<AudibleSearchResult> audibleResults;
+                List<AmazonSearchResult> amazonResults = new();
+                List<AudibleSearchResult> audibleResults = new();
 
                 if (isIsbnQuery)
                 {
                     _logger.LogInformation("IntelligentSearch detected ISBN-only query; skipping Audible search for: {Query}", query);
-                    var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
-                    amazonResults = await amazonTask;
+                    if (!string.IsNullOrEmpty(query))
+                    {
+                        var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
+                        amazonResults = await amazonTask;
+                    }
                     audibleResults = new List<AudibleSearchResult>();
                     _logger.LogInformation("Collected {AmazonCount} Amazon raw results and skipped Audible for ISBN query", amazonResults.Count);
                 }
                 else
                 {
-                    var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
-                    var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
-                    amazonResults = await amazonTask;
-                    audibleResults = await audibleTask;
+                    if (!string.IsNullOrEmpty(query))
+                    {
+                        var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
+                        var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
+                        amazonResults = await amazonTask;
+                        audibleResults = await audibleTask;
+                    }
                     _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
                 }
 
@@ -582,57 +588,60 @@ namespace Listenarr.Api.Services
                 if (!results.Any())
                 {
                     _logger.LogInformation("No Amazon or Audible results found, trying OpenLibrary for title variations");
-                    var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
-                    
-                    foreach (var book in books.Docs.Take(3))
+                    if (!string.IsNullOrEmpty(query))
                     {
-                        if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
+                        var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
+                        
+                        foreach (var book in books.Docs.Take(3))
                         {
-                            _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
-                            var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title);
-                            
-                            foreach (var altResult in altResults.Take(2))
+                            if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
                             {
-                                if (!string.IsNullOrEmpty(altResult.Asin))
+                                _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
+                                var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title);
+                                
+                                foreach (var altResult in altResults.Take(2))
                                 {
-                                    try
+                                    if (!string.IsNullOrEmpty(altResult.Asin))
                                     {
-                                        await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
-                                        
-                                        // Try audimeta first
-                                        var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
-                                        AudibleBookMetadata? metadata = null;
-                                        
-                                        if (audimetaData != null)
+                                        try
                                         {
-                                            metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
-                                        }
-                                        else
-                                        {
-                                            // Fallback to scraping
-                                            metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
-                                            if (metadata != null)
+                                            await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
+                                            
+                                            // Try audimeta first
+                                            var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
+                                            AudibleBookMetadata? metadata = null;
+                                            
+                                            if (audimetaData != null)
                                             {
-                                                metadata.Source = "Amazon";
+                                                metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
+                                            }
+                                            else
+                                            {
+                                                // Fallback to scraping
+                                                metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
+                                                if (metadata != null)
+                                                {
+                                                    metadata.Source = "Amazon";
+                                                }
+                                            }
+                                            
+                                            if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
+                                            {
+                                                var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
+                                                searchResult.IsEnriched = true;
+                                                results.Add(searchResult);
                                             }
                                         }
-                                        
-                                        if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
+                                        catch (Exception ex)
                                         {
-                                            var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
-                                            searchResult.IsEnriched = true;
-                                            results.Add(searchResult);
+                                            _logger.LogWarning(ex, "Failed to get metadata for alternative ASIN: {Asin}", altResult.Asin);
                                         }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Failed to get metadata for alternative ASIN: {Asin}", altResult.Asin);
                                     }
                                 }
                             }
+                            
+                            if (results.Any()) break; // Stop if we found results
                         }
-                        
-                        if (results.Any()) break; // Stop if we found results
                     }
                 }
 
