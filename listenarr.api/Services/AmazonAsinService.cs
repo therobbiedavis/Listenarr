@@ -30,14 +30,30 @@ namespace Listenarr.Api.Services
 
             try
             {
-                // Ordered set of search URL attempts (broadening & hinting audible context)
-                var searchVariants = new List<string>
+                // Ordered set of search URL attempts.
+                // IMPORTANT: If the input is an ISBN (10 or 13) do NOT query the Audible index
+                // because Audible listings typically do not contain ISBN metadata.
+                List<string> searchVariants;
+                if (cleaned.Length == 13)
                 {
-                    $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned)}&i=audible",                // audible index direct
-                    $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned + " audible")}&i=audible",   // audible index + keyword
-                    $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned + " audiobook")}",          // general + audiobook hint
-                    $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned)}"                           // general raw
-                };
+                    // Prefer the books index exact-ISBN filter for ISBN-13 inputs
+                    searchVariants = new List<string>
+                    {
+                        $"https://www.amazon.com/s?i=stripbooks&rh=p_66%3A{WebUtility.UrlEncode(cleaned)}",
+                        // Fallbacks: general stripbooks search, then generic search — no audible variants
+                        $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned)}&i=stripbooks",
+                        $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned)}"
+                    };
+                }
+                else
+                {
+                    // ISBN-10: avoid the Audible index; try stripbooks and generic searches
+                    searchVariants = new List<string>
+                    {
+                        $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned)}&i=stripbooks",
+                        $"https://www.amazon.com/s?k={WebUtility.UrlEncode(cleaned)}"
+                    };
+                }
 
                 foreach (var url in searchVariants)
                 {
@@ -54,8 +70,16 @@ namespace Listenarr.Api.Services
                     if (!string.IsNullOrEmpty(asin))
                     {
                         var verify = await TryVerifyAsinAsync(asin, cleaned, ct);
-                        if (verify.Success)
+                        // Require that the product page actually contains the ISBN before accepting the ASIN.
+                        if (verify.Success && verify.MatchesIsbn)
+                        {
                             return (true, asin, null);
+                        }
+
+                        if (verify.Success && !verify.MatchesIsbn)
+                        {
+                            _logger.LogDebug("ASIN {Asin} was found but product page did not contain ISBN {Isbn}; continuing search", asin, isbn);
+                        }
                     }
                 }
 
@@ -217,12 +241,74 @@ namespace Listenarr.Api.Services
                 if (productHtml.Contains(isbn, StringComparison.OrdinalIgnoreCase))
                     return (true, true);
 
-                // At least we loaded a product page, consider it a partial success
+                // Robust check: strip non-digits from page and look for the ISBN digits sequence
+                try
+                {
+                    var digitsOnlyPage = Regex.Replace(productHtml ?? string.Empty, "\\D", "");
+                    var cleanedIsbn = Regex.Replace(isbn ?? string.Empty, "\\D", "");
+                    if (!string.IsNullOrEmpty(cleanedIsbn) && digitsOnlyPage.Contains(cleanedIsbn))
+                        return (true, true);
+
+                    // If ISBN is 13 and starts with 978, try converting to ISBN-10 and check that too
+                    if (cleanedIsbn.Length == 13 && cleanedIsbn.StartsWith("978"))
+                    {
+                        var isbn10 = ConvertIsbn13ToIsbn10(cleanedIsbn);
+                        if (!string.IsNullOrEmpty(isbn10) && digitsOnlyPage.Contains(isbn10))
+                            return (true, true);
+                    }
+                }
+                catch
+                {
+                    // ignore parsing errors and fall through to partial success
+                }
+
+                // At least we loaded a product page, consider it a partial success (but not matching ISBN)
                 return (true, false);
             }
             catch
             {
                 return (false, false);
+            }
+        }
+
+        // Convert ISBN-13 (starting with 978) to ISBN-10. Returns digits-only ISBN-10 string or null on failure.
+        private static string? ConvertIsbn13ToIsbn10(string isbn13)
+        {
+            if (string.IsNullOrWhiteSpace(isbn13)) return null;
+            var digits = Regex.Replace(isbn13, "\\D", "");
+            if (digits.Length != 13) return null;
+            if (!digits.StartsWith("978")) return null;
+
+            var core = digits.Substring(3, 9); // 9 digits
+            int sum = 0;
+            for (int i = 0; i < core.Length; i++)
+            {
+                if (!char.IsDigit(core[i])) return null;
+                sum += (10 - i) * (core[i] - '0');
+            }
+            int mod = 11 - (sum % 11);
+            string checkDigit;
+            if (mod == 11) checkDigit = "0";
+            else if (mod == 10) checkDigit = "X";
+            else checkDigit = mod.ToString();
+
+            return core + checkDigit;
+        }
+
+        /// <summary>
+        /// Public wrapper used by other services to verify whether a product page for an ASIN contains the given ISBN.
+        /// </summary>
+        public async Task<(bool Success, bool MatchesIsbn, string? Error)> VerifyAsinContainsIsbnAsync(string asin, string isbn, CancellationToken ct = default)
+        {
+            try
+            {
+                var verified = await TryVerifyAsinAsync(asin, isbn, ct);
+                return (verified.Success, verified.MatchesIsbn, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "VerifyAsinContainsIsbnAsync failed for {Asin}", asin);
+                return (false, false, ex.Message);
             }
         }
     }

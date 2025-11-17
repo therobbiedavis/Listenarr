@@ -50,7 +50,7 @@
         <span v-if="searchType === 'asin'">Searching by ASIN</span>
         <span v-else-if="searchType === 'title'">Searching by title/author</span>
         <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
-        <span v-else>Type an ASIN, ISBN, or book title to search</span>
+        <span v-else>Type an ASIN or book title to search</span>
       </div>
       
       <div v-if="searchError" class="error-message">
@@ -1106,12 +1106,14 @@ const capitalizeLanguage = (language: string | undefined): string => {
   return language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
 }
 
-// Search by ISBN: fetch basic metadata, then search by title instead of ISBN-to-ASIN conversion
+// Search by ISBN: prefer ISBN->ASIN lookup (strip dashes) and fetch metadata directly.
+// Fall back to title-based search only if ASIN resolution fails.
 const searchByISBNChain = async (isbn: string) => {
   if (!isbnService.validateISBN(isbn)) {
     searchError.value = 'Invalid ISBN format. Please enter a valid ISBN-10 or ISBN-13'
     return
   }
+
   isSearching.value = true
   searchError.value = ''
   audibleResult.value = null
@@ -1121,34 +1123,20 @@ const searchByISBNChain = async (isbn: string) => {
   isbnLookupWarning.value = false
   errorMessage.value = ''
 
-  try {
-    // Fetch metadata from ISBN to get title and author for search
-  searchStatus.value = 'Looking up book details from ISBN...'
-    let searchQuery = isbn // fallback to ISBN if metadata lookup fails
-    
-    try {
-      const meta = await isbnService.searchByISBN(isbn)
-      if (meta.found && meta.book) {
-        isbnResult.value = meta.book
-        // Use title and author for Amazon/Audible search
-        const title = meta.book.title || ''
-        const author = meta.book.authors?.join(', ') || ''
-        searchQuery = author ? `${title} by ${author}` : title
-        searchStatus.value = `Found book details: ${title}${author ? ` by ${author}` : ''}. Searching for audiobook...`
-      } else {
-        searchStatus.value = 'No ISBN metadata found, searching with ISBN as fallback...'
-      }
-    } catch (error) {
-      console.warn('ISBN metadata lookup failed, will search by ISBN directly:', error)
-    }
+  // Normalize ISBN (remove dashes/spaces)
+  const cleanedIsbn = isbn.replace(/[-\s]/g, '')
 
-  searchStatus.value = 'Scraping Amazon...'
-    
-    // Search Amazon/Audible using title/author or ISBN
-  await searchByTitle(searchQuery)
-  searchType.value = 'title' // Update search type since we're now doing title search
-  searchStatus.value = 'ISBN search completed'
-    
+  try {
+    // Per requirements: do not convert ISBN to ASIN. Search directly using the ISBN digits.
+    searchStatus.value = `Searching Amazon/Audible for ISBN ${cleanedIsbn}...`
+    const searchQuery = cleanedIsbn
+
+    // Use the existing title search pipeline but pass the ISBN as the query so
+    // backend will attempt to match ISBNs via stripbooks or general search.
+    await searchByTitle(searchQuery)
+    searchType.value = 'title'
+    searchStatus.value = 'ISBN search completed'
+
     if (titleResults.value.length === 0) {
       isbnLookupWarning.value = true
       isbnLookupMessage.value = 'No audiobooks found for this ISBN. The book may not be available as an audiobook.'

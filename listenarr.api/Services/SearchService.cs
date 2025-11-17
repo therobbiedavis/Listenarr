@@ -326,11 +326,30 @@ namespace Listenarr.Api.Services
                 // Step 1: Parallel search Amazon & Audible
                 _logger.LogInformation("Searching for: {Query}", query);
                 await BroadcastSearchProgressAsync($"Searching for {query}", null);
-                var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
-                var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
-                var amazonResults = await amazonTask;
-                var audibleResults = await audibleTask;
-                _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
+
+                // Detect if the query is an ISBN (digits only after cleaning). If so, skip Audible
+                var digitsOnly = new string((query ?? string.Empty).Where(char.IsDigit).ToArray());
+                var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13;
+
+                List<AmazonSearchResult> amazonResults;
+                List<AudibleSearchResult> audibleResults;
+
+                if (isIsbnQuery)
+                {
+                    _logger.LogInformation("IntelligentSearch detected ISBN-only query; skipping Audible search for: {Query}", query);
+                    var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
+                    amazonResults = await amazonTask;
+                    audibleResults = new List<AudibleSearchResult>();
+                    _logger.LogInformation("Collected {AmazonCount} Amazon raw results and skipped Audible for ISBN query", amazonResults.Count);
+                }
+                else
+                {
+                    var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
+                    var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
+                    amazonResults = await amazonTask;
+                    audibleResults = await audibleTask;
+                    _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
+                }
 
                 // Step 2: Build a unified ASIN candidate set (Amazon priority, then Audible)
                 // Also create a lookup map for fallback titles and full search result objects
