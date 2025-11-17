@@ -412,22 +412,17 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                // Parse credentials from AdditionalSettings
-                string username = string.Empty;
-                string password = string.Empty;
+                // Parse mam_id from AdditionalSettings
+                string mamId = string.Empty;
                 
                 if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
                 {
                     try
                     {
                         using var doc = JsonDocument.Parse(indexer.AdditionalSettings);
-                        if (doc.RootElement.TryGetProperty("username", out var usernameProperty))
+                        if (doc.RootElement.TryGetProperty("mam_id", out var mamIdProperty))
                         {
-                            username = usernameProperty.GetString() ?? string.Empty;
-                        }
-                        if (doc.RootElement.TryGetProperty("password", out var passwordProperty))
-                        {
-                            password = passwordProperty.GetString() ?? string.Empty;
+                            mamId = mamIdProperty.GetString() ?? string.Empty;
                         }
                     }
                     catch (JsonException ex)
@@ -436,25 +431,80 @@ namespace Listenarr.Api.Controllers
                     }
                 }
 
-                if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+                if (string.IsNullOrEmpty(mamId))
                 {
-                    throw new Exception("Username and password are required for MyAnonamouse");
+                    throw new Exception("MAM ID is required for MyAnonamouse");
                 }
 
-                // Build test URL
-                var testUrl = "https://www.myanonamouse.net/tor/js/loadSearchJSONbasic.php";
+                // Build test URL (mam_id is sent as a cookie)
+                var testUrl = $"https://www.myanonamouse.net/tor/js/loadSearchJSONbasic.php";
 
-                _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' for user '{Username}'", 
-                    indexer.Name, username);
+                _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' with MAM ID '{MamId}'", 
+                    indexer.Name, mamId);
 
-                // Create request with Basic Auth
+                // Create request with mam_id as cookie
                 var request = new HttpRequestMessage(HttpMethod.Post, testUrl);
-                var authBytes = System.Text.Encoding.UTF8.GetBytes($"{username}:{password}");
-                var authHeader = Convert.ToBase64String(authBytes);
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                
+                // Add browser-like headers to avoid "invalid request" errors
+                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
+                
+                // Create form data (without mam_id since it's now in the cookie)
+                var formData = new Dictionary<string, string>
+                {
+                    ["tor[text]"] = "test",
+                    ["tor[srchIn][]"] = "title",
+                    ["tor[searchType]"] = "all",
+                    ["tor[searchIn]"] = "torrents",
+                    ["tor[cat][]"] = "0",
+                    ["tor[browseFlagsHideVsShow]"] = "0",
+                    ["tor[startDate]"] = "",
+                    ["tor[endDate]"] = "",
+                    ["tor[hash]"] = "",
+                    ["tor[sortType]"] = "default",
+                    ["tor[startNumber]"] = "0",
+                    ["perpage"] = "1",
+                    ["thumbnail"] = "false",
+                    ["dlLink"] = "",
+                    ["description"] = ""
+                };
+
+                var formContent = new FormUrlEncodedContent(formData);
+                request.Content = formContent;
+
+                // Add mam_id as a cookie for authentication (bind cookie to the indexer's base host)
+                var cookieContainer = new System.Net.CookieContainer();
+                var baseUrl = indexer.Url.TrimEnd('/');
+                var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
+                cookieContainer.Add(baseUri, new System.Net.Cookie("mam_id", mamId));
+                try
+                {
+                    var host = baseUri.Host;
+                    if (!host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var wwwUri = new Uri($"{baseUri.Scheme}://www.{host}");
+                        cookieContainer.Add(wwwUri, new System.Net.Cookie("mam_id", mamId));
+                    }
+                }
+                catch { }
+                
+                // Create HttpClientHandler with cookies
+                var handler = new HttpClientHandler
+                {
+                    CookieContainer = cookieContainer,
+                    UseCookies = true
+                };
+                
+                using var cookieClient = new HttpClient(handler);
+                cookieClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                cookieClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                cookieClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                cookieClient.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
 
                 // Make HTTP request
-                var response = await _httpClient.SendAsync(request);
+                var response = await cookieClient.SendAsync(request);
                 response.EnsureSuccessStatusCode();
 
                 // Parse JSON response
@@ -473,13 +523,13 @@ namespace Listenarr.Api.Controllers
                 indexer.LastTestError = null;
                 await _dbContext.SaveChangesAsync();
 
-                _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded for user '{Username}'", 
-                    indexer.Name, username);
+                _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'", 
+                    indexer.Name, mamId);
 
                 return Ok(new { 
                     success = true, 
-                    message = $"MyAnonamouse authentication successful for user '{username}'",
-                    username = username,
+                    message = $"MyAnonamouse authentication successful with MAM ID '{mamId}'",
+                    mam_id = mamId,
                     indexer 
                 });
             }
@@ -498,6 +548,124 @@ namespace Listenarr.Api.Controllers
                     error = ex.Message,
                     indexer 
                 });
+            }
+        }
+
+        /// <summary>
+        /// Debug search against a MyAnonamouse indexer: returns raw response plus parsed results
+        /// </summary>
+        [HttpPost("{id}/debug-search")]
+        public async Task<IActionResult> DebugMyAnonamouseSearch(int id, [FromBody] JsonElement body)
+        {
+            var indexer = await _dbContext.Indexers.FindAsync(id);
+            if (indexer == null) return NotFound(new { message = "Indexer not found" });
+
+            try
+            {
+                string query = "test";
+                if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("query", out var q))
+                {
+                    query = q.GetString() ?? "test";
+                }
+
+                // Parse mam_id from AdditionalSettings
+                string mamId = string.Empty;
+                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(indexer.AdditionalSettings);
+                        if (doc.RootElement.TryGetProperty("mam_id", out var mamIdProperty))
+                            mamId = mamIdProperty.GetString() ?? string.Empty;
+                    }
+                    catch { }
+                }
+
+                if (string.IsNullOrEmpty(mamId))
+                    return BadRequest(new { success = false, message = "MAM ID missing in indexer settings" });
+
+                var testUrl = $"{indexer.Url.TrimEnd('/')}/tor/js/loadSearchJSONbasic.php";
+
+                var formData = new Dictionary<string, string>
+                {
+                    ["tor[text]"] = query,
+                    ["tor[srchIn][]"] = "title",
+                    ["tor[searchType]"] = "all",
+                    ["tor[searchIn]"] = "torrents",
+                    ["tor[cat][]"] = "0",
+                    ["tor[browseFlagsHideVsShow]"] = "0",
+                    ["tor[startDate]"] = "",
+                    ["tor[endDate]"] = "",
+                    ["tor[hash]"] = "",
+                    ["tor[sortType]"] = "default",
+                    ["tor[startNumber]"] = "0",
+                    ["perpage"] = "100",
+                    ["thumbnail"] = "false",
+                    ["dlLink"] = "",
+                    ["description"] = ""
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Post, testUrl)
+                {
+                    Content = new FormUrlEncodedContent(formData)
+                };
+
+                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
+
+                var cookieContainer = new System.Net.CookieContainer();
+                var baseUrl = indexer.Url.TrimEnd('/');
+                var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
+                cookieContainer.Add(baseUri, new System.Net.Cookie("mam_id", mamId));
+                try
+                {
+                    var host = baseUri.Host;
+                    if (!host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var wwwUri = new Uri($"{baseUri.Scheme}://www.{host}");
+                        cookieContainer.Add(wwwUri, new System.Net.Cookie("mam_id", mamId));
+                    }
+                }
+                catch { }
+
+                var handler = new HttpClientHandler { CookieContainer = cookieContainer, UseCookies = true };
+                using var client = new HttpClient(handler);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                client.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
+
+                var response = await client.SendAsync(request);
+                var raw = await response.Content.ReadAsStringAsync();
+
+                // Get parsed results via the Search API on this host
+                var parsed = new List<SearchResult>();
+                try
+                {
+                    var scheme = Request.Scheme;
+                    var hostVal = Request.Host.Value;
+                    var localSearchUrl = $"{scheme}://{hostVal}/api/search/{id}?query={Uri.EscapeDataString(query)}";
+                    var localResp = await _httpClient.GetAsync(localSearchUrl);
+                    if (localResp.IsSuccessStatusCode)
+                    {
+                        var json = await localResp.Content.ReadAsStringAsync();
+                        var options = new System.Text.Json.JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        };
+                        parsed = System.Text.Json.JsonSerializer.Deserialize<List<SearchResult>>(json, options) ?? new List<SearchResult>();
+                    }
+                }
+                catch { }
+
+                return Ok(new { success = true, status = (int)response.StatusCode, raw, parsedCount = parsed.Count, parsed });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MyAnonamouse debug search failed for indexer {Id}", id);
+                return BadRequest(new { success = false, error = ex.Message });
             }
         }
 

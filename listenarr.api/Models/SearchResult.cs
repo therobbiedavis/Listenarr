@@ -48,6 +48,8 @@ namespace Listenarr.Api.Models
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
         public string? ProductUrl { get; set; } // Direct link to Amazon/Audible product page
+        // Link to the indexer page for this result (e.g., Internet Archive details page, indexer item page)
+        public string? ResultUrl { get; set; }
         // Indicates this result had a successful full metadata enrichment pass (Audible product scrape)
         public bool IsEnriched { get; set; }
         public int Score { get; set; }
