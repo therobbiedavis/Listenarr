@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.36] - 2025-11-17
+
+### Added
+
+- Debug endpoint for indexer troubleshooting: `GET /api/indexers/{id}/debug-search` returns raw remote payload and parsed results for developer inspection.
+
+### Changed
+
+- MyAnonamouse indexer: switched authentication to use the `mam_id` cookie (from indexer settings) and hardened request handling to tolerate multiple JSON/HTML-wrapped response shapes.
+- Search result canonical links: added `ResultUrl` to `SearchResult` and populated it for MyAnonamouse (canonical `https://myanonamouse.net/t/{id}`), Internet Archive (`https://archive.org/details/{identifier}`), and Torznab/Newznab (use `<link>` when present). Frontend now prefers `result.resultUrl` for title links.
+- Frontend: updated `ManualSearchModal.vue`, `SearchView.vue` and related components to make result titles link to the indexer item page (fallbacks: `productUrl`, `torrentUrl`, `nzbUrl`, `magnetLink`) and added `resultUrl` to TypeScript types.
+
+### Fixed
+
+- Robust parsing fixes for multiple indexer response shapes and case-insensitive deserialization in debug flows; ensures `SearchResult` fields (Title, Size, Seeders, TorrentUrl, Source) are populated for MyAnonamouse results.
+- Backend: ensured `SearchResult.Source` is consistently set (fallbacks: indexer name, implementation, host) so UI displays indexer names reliably.
+
 ## [0.2.35] - 2025-11-16
 
 ### Added
