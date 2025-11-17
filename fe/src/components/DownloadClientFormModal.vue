@@ -139,7 +139,7 @@
                 id="category" 
                 v-model="formData.category" 
                 type="text" 
-                :placeholder="isUsenet ? 'tv' : 'tv-sonarr'"
+                :placeholder="isUsenet ? 'e.g., audiobooks' : 'e.g., audiobooks'"
               />
               <small>{{ getCategoryHelp() }}</small>
             </div>
@@ -370,9 +370,9 @@ const getPortPlaceholder = () => {
 
 const getCategoryHelp = () => {
   if (isUsenet.value) {
-    return 'Adding a category specific to Sonarr avoids conflicts with unrelated non-Sonarr downloads. Using a category is optional, but strongly recommended.'
+    return 'Adding a category specific to Listenarr avoids conflicts with unrelated non-Listenarr downloads. Using a category is optional, but strongly recommended.'
   }
-  return 'Adding a category specific to Sonarr avoids conflicts with unrelated downloads.'
+  return 'Adding a category specific to Listenarr avoids conflicts with unrelated downloads.'
 }
 
 const onTypeChange = () => {

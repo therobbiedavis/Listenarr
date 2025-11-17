@@ -41,13 +41,13 @@ namespace Listenarr.Api.Models
         public string? Name { get; set; }
 
         /// <summary>
-        /// The path as seen by the download client (e.g., "/downloads/sonarr/")
+        /// The path as seen by the download client (e.g., "/downloads/listenarr/")
         /// </summary>
         [Required]
         public string RemotePath { get; set; } = string.Empty;
 
         /// <summary>
-        /// The path as seen by Listenarr (e.g., "/server/downloads/complete/sonarr/")
+        /// The path as seen by Listenarr (e.g., "/server/downloads/complete/listenarr/")
         /// </summary>
         [Required]
         public string LocalPath { get; set; } = string.Empty;
