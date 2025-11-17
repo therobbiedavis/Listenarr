@@ -25,6 +25,8 @@ RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build
 
 FROM build AS publish
 RUN dotnet publish "Listenarr.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
+# Pre-install Playwright browsers to avoid runtime download delays
+RUN cd /app/publish && bash playwright.sh install
 
 FROM base AS final
 WORKDIR /app

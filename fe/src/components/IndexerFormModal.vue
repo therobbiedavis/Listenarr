@@ -76,28 +76,18 @@
             <div v-if="formData.implementation === 'MyAnonamouse'" class="form-section">
               <h4>Authentication</h4>
               <div class="form-group">
-                <label for="mam-username">Username *</label>
+                <label for="mam-id">MAM ID *</label>
                 <input 
-                  id="mam-username" 
-                  v-model="mamUsername" 
+                  id="mam-id" 
+                  v-model="mamId" 
                   type="text" 
                   :required="formData.implementation === 'MyAnonamouse'"
-                  placeholder="Your MyAnonamouse username"
-                />
-              </div>
-              <div class="form-group">
-                <label for="mam-password">Password *</label>
-                <input 
-                  id="mam-password" 
-                  v-model="mamPassword" 
-                  type="password" 
-                  :required="formData.implementation === 'MyAnonamouse'"
-                  placeholder="Your MyAnonamouse password"
+                  placeholder="Your MyAnonamouse MAM ID"
                 />
               </div>
               <small class="info-text">
                 <i class="ph ph-info"></i>
-                MyAnonamouse requires your username and password for authentication. These are stored securely and only used to search the indexer.
+                MyAnonamouse requires your MAM ID for authentication. This is a unique identifier for your account. These are stored securely and only used to search the indexer.
               </small>
             </div>
 
@@ -276,9 +266,8 @@ const toast = useToast()
 const saving = ref(false)
 const testing = ref(false)
 
-// MyAnonamouse authentication fields
-const mamUsername = ref('')
-const mamPassword = ref('')
+// MyAnonamouse authentication field
+const mamId = ref('')
 
 // Internet Archive collection field
 const iaCollection = ref('librivoxaudio')
@@ -330,12 +319,10 @@ watch(() => props.editingIndexer, (newIndexer) => {
     if (newIndexer.implementation === 'MyAnonamouse' && newIndexer.additionalSettings) {
       try {
         const settings = JSON.parse(newIndexer.additionalSettings)
-        mamUsername.value = settings.username || ''
-        mamPassword.value = settings.password || ''
+        mamId.value = settings.mam_id || ''
       } catch (e) {
         console.error('Failed to parse MyAnonamouse settings:', e)
-        mamUsername.value = ''
-        mamPassword.value = ''
+        mamId.value = ''
       }
     }
 
@@ -351,8 +338,7 @@ watch(() => props.editingIndexer, (newIndexer) => {
     }
   } else {
     formData.value = { ...defaultFormData }
-    mamUsername.value = ''
-    mamPassword.value = ''
+    mamId.value = ''
     iaCollection.value = 'librivoxaudio'
   }
 }, { immediate: true })
@@ -411,8 +397,7 @@ const handleSubmit = async () => {
     const submitData = { ...formData.value }
     if (submitData.implementation === 'MyAnonamouse') {
       submitData.additionalSettings = JSON.stringify({
-        username: mamUsername.value,
-        password: mamPassword.value
+        mam_id: mamId.value
       })
       // Clear API key field for MyAnonamouse
       submitData.apiKey = ''

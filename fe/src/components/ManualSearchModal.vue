@@ -140,7 +140,19 @@
                   <td class="col-age">{{ formatAge(result.publishedDate) }}</td>
                   <td class="col-title">
                     <div class="title-cell">
-                      <span class="title-text">{{ safeText(result.title) }}</span>
+                      <template v-if="getResultLink(result)">
+                        <a
+                          :href="getResultLink(result)"
+                          class="title-text"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {{ safeText(result.title) }}
+                        </a>
+                      </template>
+                      <template v-else>
+                        <span class="title-text">{{ safeText(result.title) }}</span>
+                      </template>
                     </div>
                   </td>
                   <td class="col-indexer">
@@ -589,6 +601,17 @@ function formatSize(bytes: number): string {
 
 function getResultScore(resultId: string): QualityScore | undefined {
   return qualityScores.value.get(resultId)
+}
+
+// Return the best available external link for a search result
+function getResultLink(result: SearchResult): string | undefined {
+  if (!result) return undefined
+  if ((result as any).resultUrl) return (result as any).resultUrl
+  if (result.productUrl) return result.productUrl
+  if (result.torrentUrl) return result.torrentUrl
+  if (result.nzbUrl) return result.nzbUrl
+  if (result.magnetLink) return result.magnetLink
+  return undefined
 }
 
 function getScoreClass(score: number): string {

@@ -26,6 +26,7 @@ export interface SearchResult {
   series?: string
   seriesNumber?: string
   productUrl?: string // Direct link to Amazon/Audible product page
+  resultUrl?: string // Canonical indexer page for the result (e.g., archive.org details, myanonamouse item page)
   isEnriched?: boolean
   score?: number
   metadataSource?: string // Which metadata API enriched this result (e.g., "Audimeta", "Audnexus")

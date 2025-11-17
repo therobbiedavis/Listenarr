@@ -1566,18 +1566,47 @@ namespace Listenarr.Api.Controllers
 
         private string ComputeAudiobookBaseDirectoryFromPattern(Audiobook audiobook, string rootPath, string fileNamingPattern)
         {
-            // Create a directory pattern that includes Author, Series (if present), Title, and Year
-            // This provides a consistent folder structure for audiobooks
+            // Derive directory pattern from the user's file naming pattern
+            // Remove file-specific tokens like DiskNumber and ChapterNumber to create a directory structure
             string directoryPattern;
-            if (!string.IsNullOrWhiteSpace(audiobook.Series))
+            if (!string.IsNullOrWhiteSpace(fileNamingPattern))
             {
-                // Series book: {Author}/{Series}/{Title} ({Year})
-                directoryPattern = "{Author}/{Series}/{Title} ({Year})";
+                // Remove file-specific patterns and create a directory pattern
+                directoryPattern = fileNamingPattern;
+                
+                // Remove file-specific tokens that don't make sense for directories
+                directoryPattern = Regex.Replace(directoryPattern, @"\{DiskNumber[^}]*\}", "", RegexOptions.IgnoreCase);
+                directoryPattern = Regex.Replace(directoryPattern, @"\{ChapterNumber[^}]*\}", "", RegexOptions.IgnoreCase);
+                
+                // Clean up any resulting double separators or empty parts
+                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
+                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
+                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
+                
+                // If the pattern is now empty or doesn't contain directory separators, use a fallback
+                if (string.IsNullOrWhiteSpace(directoryPattern) || !directoryPattern.Contains("/"))
+                {
+                    directoryPattern = "{Author}/{Title}";
+                }
             }
             else
             {
-                // Non-series book: {Author}/{Title} ({Year})
-                directoryPattern = "{Author}/{Title} ({Year})";
+                // Fallback to default directory pattern
+                directoryPattern = "{Author}/{Title}";
+            }
+
+            // For series books, ensure we include the series in the directory structure
+            if (!string.IsNullOrWhiteSpace(audiobook.Series) && !directoryPattern.Contains("{Series}"))
+            {
+                // Insert series between author and title if not already present
+                if (directoryPattern.Contains("{Author}/{Title}"))
+                {
+                    directoryPattern = directoryPattern.Replace("{Author}/{Title}", "{Author}/{Series}/{Title}");
+                }
+                else if (directoryPattern.Contains("{Author}/"))
+                {
+                    directoryPattern = directoryPattern.Replace("{Author}/", "{Author}/{Series}/");
+                }
             }
 
             // Build variables for naming pattern using audiobook-level metadata

@@ -50,7 +50,7 @@
         <span v-if="searchType === 'asin'">Searching by ASIN</span>
         <span v-else-if="searchType === 'title'">Searching by title/author</span>
         <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
-        <span v-else>Type an ASIN, ISBN, or book title to search</span>
+        <span v-else>Type an ASIN or book title to search</span>
       </div>
       
       <div v-if="searchError" class="error-message">
@@ -383,6 +383,15 @@ const markExistingResults = () => {
   
   logger.debug('Library ASINs:', Array.from(libraryAsins))
   
+  // Clean up addedAsins: remove ASINs that are no longer in the library
+  const currentAddedAsins = Array.from(addedAsins.value)
+  for (const asin of currentAddedAsins) {
+    if (!libraryAsins.has(asin)) {
+      logger.debug('Removing ASIN from addedAsins (no longer in library):', asin)
+      addedAsins.value.delete(asin)
+    }
+  }
+  
   // Check ASIN search result
   if (audibleResult.value?.asin) {
     logger.debug('Checking ASIN result:', audibleResult.value.asin)
@@ -407,7 +416,7 @@ const markExistingResults = () => {
     })
   }
   
-  logger.debug('Added ASINs:', Array.from(addedAsins.value))
+  logger.debug('Added ASINs after cleanup and marking:', Array.from(addedAsins.value))
 }
 
 // Unified Search
@@ -481,20 +490,32 @@ try {
   }
   
   const storedSearchType = localStorage.getItem(SEARCH_TYPE_KEY)
-  if (storedSearchType) searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
+  if (storedSearchType) {
+    searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
+  }
   
   const storedCount = localStorage.getItem(TITLE_RESULTS_COUNT_KEY)
-  if (storedCount) titleResultsCount.value = parseInt(storedCount, 10)
+  if (storedCount) {
+    titleResultsCount.value = parseInt(storedCount, 10)
+  }
   
   const storedFiltering = localStorage.getItem(ASIN_FILTERING_KEY)
-  if (storedFiltering) asinFilteringApplied.value = storedFiltering === 'true'
+  if (storedFiltering) {
+    asinFilteringApplied.value = storedFiltering === 'true'
+  }
   
   const storedResolved = localStorage.getItem(RESOLVED_ASINS_KEY)
-  if (storedResolved) resolvedAsins.value = JSON.parse(storedResolved)
+  if (storedResolved) {
+    resolvedAsins.value = JSON.parse(storedResolved)
+  }
   
   const storedAdded = localStorage.getItem(ADDED_ASINS_KEY)
-  if (storedAdded) addedAsins.value = new Set(JSON.parse(storedAdded))
-} catch {}
+  if (storedAdded) {
+    addedAsins.value = new Set(JSON.parse(storedAdded))
+  }
+} catch (error) {
+  console.warn('Failed to restore persisted state:', error)
+}
 
 // Watch search results changes and persist to localStorage
 watch([audibleResult, titleResults, isbnResult], () => {
@@ -1106,12 +1127,14 @@ const capitalizeLanguage = (language: string | undefined): string => {
   return language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
 }
 
-// Search by ISBN: fetch basic metadata, then search by title instead of ISBN-to-ASIN conversion
+// Search by ISBN: prefer ISBN->ASIN lookup (strip dashes) and fetch metadata directly.
+// Fall back to title-based search only if ASIN resolution fails.
 const searchByISBNChain = async (isbn: string) => {
   if (!isbnService.validateISBN(isbn)) {
     searchError.value = 'Invalid ISBN format. Please enter a valid ISBN-10 or ISBN-13'
     return
   }
+
   isSearching.value = true
   searchError.value = ''
   audibleResult.value = null
@@ -1121,34 +1144,20 @@ const searchByISBNChain = async (isbn: string) => {
   isbnLookupWarning.value = false
   errorMessage.value = ''
 
-  try {
-    // Fetch metadata from ISBN to get title and author for search
-  searchStatus.value = 'Looking up book details from ISBN...'
-    let searchQuery = isbn // fallback to ISBN if metadata lookup fails
-    
-    try {
-      const meta = await isbnService.searchByISBN(isbn)
-      if (meta.found && meta.book) {
-        isbnResult.value = meta.book
-        // Use title and author for Amazon/Audible search
-        const title = meta.book.title || ''
-        const author = meta.book.authors?.join(', ') || ''
-        searchQuery = author ? `${title} by ${author}` : title
-        searchStatus.value = `Found book details: ${title}${author ? ` by ${author}` : ''}. Searching for audiobook...`
-      } else {
-        searchStatus.value = 'No ISBN metadata found, searching with ISBN as fallback...'
-      }
-    } catch (error) {
-      console.warn('ISBN metadata lookup failed, will search by ISBN directly:', error)
-    }
+  // Normalize ISBN (remove dashes/spaces)
+  const cleanedIsbn = isbn.replace(/[-\s]/g, '')
 
-  searchStatus.value = 'Scraping Amazon...'
-    
-    // Search Amazon/Audible using title/author or ISBN
-  await searchByTitle(searchQuery)
-  searchType.value = 'title' // Update search type since we're now doing title search
-  searchStatus.value = 'ISBN search completed'
-    
+  try {
+    // Per requirements: do not convert ISBN to ASIN. Search directly using the ISBN digits.
+    searchStatus.value = `Searching Amazon/Audible for ISBN ${cleanedIsbn}...`
+    const searchQuery = cleanedIsbn
+
+    // Use the existing title search pipeline but pass the ISBN as the query so
+    // backend will attempt to match ISBNs via stripbooks or general search.
+    await searchByTitle(searchQuery)
+    searchType.value = 'title'
+    searchStatus.value = 'ISBN search completed'
+
     if (titleResults.value.length === 0) {
       isbnLookupWarning.value = true
       isbnLookupMessage.value = 'No audiobooks found for this ISBN. The book may not be available as an audiobook.'
@@ -1167,6 +1176,10 @@ const searchByISBNChain = async (isbn: string) => {
 onMounted(async () => {
   await configStore.loadApplicationSettings()
   await configStore.loadApiConfigurations()
+  
+  // Initialize added status on mount
+  await checkExistingInLibrary()
+  
   // Subscribe to server-side search progress updates
   const unsub = signalRService.onSearchProgress((payload) => {
     if (payload && payload.message) {
@@ -1176,6 +1189,24 @@ onMounted(async () => {
   // When component is unmounted, unsubscribe
   onUnmounted(() => {
     try { unsub() } catch {}
+  })
+
+  // Watch for library changes to update added status
+  const stopWatchingLibrary = watch(
+    () => libraryStore.audiobooks,
+    async (newAudiobooks, oldAudiobooks) => {
+      // Only update if the library actually changed (not just on initial load)
+      if (oldAudiobooks && oldAudiobooks.length !== newAudiobooks.length) {
+        logger.debug('Library changed, updating added status...')
+        await checkExistingInLibrary()
+      }
+    },
+    { deep: false } // We don't need deep watching since we're just checking length
+  )
+
+  // Cleanup watcher on unmount
+  onUnmounted(() => {
+    stopWatchingLibrary()
   })
 })
 </script>

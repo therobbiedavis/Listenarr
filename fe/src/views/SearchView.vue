@@ -47,7 +47,17 @@
           class="result-card"
         >
           <div class="result-info">
-            <h4>{{ safeText(result.title) }}</h4>
+            <h4>
+              <a
+                v-if="getResultLink(result)"
+                :href="getResultLink(result)"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ safeText(result.title) }}
+              </a>
+              <span v-else>{{ safeText(result.title) }}</span>
+            </h4>
             <p class="result-artist">{{ safeText(result.artist) }}</p>
             <p class="result-album">{{ safeText(result.album) }}</p>
             
@@ -317,6 +327,17 @@ const formatRuntime = (minutes: number): string => {
 
 const getResultScore = (resultId: string): QualityScore | undefined => {
   return qualityScores.value.get(resultId)
+}
+
+// Return the best available external link for a search result
+const getResultLink = (result: SearchResult): string | undefined => {
+  if (!result) return undefined
+  if ((result as any).resultUrl) return (result as any).resultUrl
+  if (result.productUrl) return result.productUrl
+  if (result.torrentUrl) return result.torrentUrl
+  if (result.nzbUrl) return result.nzbUrl
+  if (result.magnetLink) return result.magnetLink
+  return undefined
 }
 
 const getScoreClass = (score: number): string => {

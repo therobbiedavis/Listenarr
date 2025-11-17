@@ -477,6 +477,24 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
+                // Detect common Playwright missing-browser error and provide a clear, actionable log message
+                try
+                {
+                    var msg = ex.Message ?? string.Empty;
+                    if (msg.IndexOf("Executable doesn't exist", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        msg.IndexOf("Looks like Playwright was just installed or updated", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        // Keep a short warning for operators and a debug log with full exception
+                        _logger.LogWarning("Playwright rendering skipped for {Url} because browser executables are missing. To fix run the Playwright install script in the build output or run 'npx playwright install' in the project root. See logs for details.", url);
+                        _logger.LogDebug(ex, "Playwright missing-executable detail");
+                        return (null, 0);
+                    }
+                }
+                catch
+                {
+                    // ignore any inspection errors and fall through to standard logging
+                }
+
                 _logger.LogWarning(ex, "Playwright rendering failed for {Url}", url);
                 return (null, 0);
             }

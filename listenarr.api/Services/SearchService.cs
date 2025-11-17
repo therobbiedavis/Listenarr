@@ -284,7 +284,7 @@ namespace Listenarr.Api.Services
                 return GenerateMockIndexerResults(query);
             }
 
-            // Search all enabled indexers in parallel
+                // Search all enabled indexers in parallel
             var searchTasks = indexers.Select(async indexer =>
             {
                 try
@@ -326,11 +326,36 @@ namespace Listenarr.Api.Services
                 // Step 1: Parallel search Amazon & Audible
                 _logger.LogInformation("Searching for: {Query}", query);
                 await BroadcastSearchProgressAsync($"Searching for {query}", null);
-                var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
-                var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
-                var amazonResults = await amazonTask;
-                var audibleResults = await audibleTask;
-                _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
+
+                // Detect if the query is an ISBN (digits only after cleaning). If so, skip Audible
+                var digitsOnly = new string((query ?? string.Empty).Where(char.IsDigit).ToArray());
+                var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13;
+
+                List<AmazonSearchResult> amazonResults = new();
+                List<AudibleSearchResult> audibleResults = new();
+
+                if (isIsbnQuery)
+                {
+                    _logger.LogInformation("IntelligentSearch detected ISBN-only query; skipping Audible search for: {Query}", query);
+                    if (!string.IsNullOrEmpty(query))
+                    {
+                        var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
+                        amazonResults = await amazonTask;
+                    }
+                    audibleResults = new List<AudibleSearchResult>();
+                    _logger.LogInformation("Collected {AmazonCount} Amazon raw results and skipped Audible for ISBN query", amazonResults.Count);
+                }
+                else
+                {
+                    if (!string.IsNullOrEmpty(query))
+                    {
+                        var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
+                        var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query!);
+                        amazonResults = await amazonTask;
+                        audibleResults = await audibleTask;
+                    }
+                    _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
+                }
 
                 // Step 2: Build a unified ASIN candidate set (Amazon priority, then Audible)
                 // Also create a lookup map for fallback titles and full search result objects
@@ -563,57 +588,60 @@ namespace Listenarr.Api.Services
                 if (!results.Any())
                 {
                     _logger.LogInformation("No Amazon or Audible results found, trying OpenLibrary for title variations");
-                    var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
-                    
-                    foreach (var book in books.Docs.Take(3))
+                    if (!string.IsNullOrEmpty(query))
                     {
-                        if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
+                        var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
+                        
+                        foreach (var book in books.Docs.Take(3))
                         {
-                            _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
-                            var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title);
-                            
-                            foreach (var altResult in altResults.Take(2))
+                            if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
                             {
-                                if (!string.IsNullOrEmpty(altResult.Asin))
+                                _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
+                                var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
+                                
+                                foreach (var altResult in altResults.Take(2))
                                 {
-                                    try
+                                    if (!string.IsNullOrEmpty(altResult.Asin))
                                     {
-                                        await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
-                                        
-                                        // Try audimeta first
-                                        var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
-                                        AudibleBookMetadata? metadata = null;
-                                        
-                                        if (audimetaData != null)
+                                        try
                                         {
-                                            metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
-                                        }
-                                        else
-                                        {
-                                            // Fallback to scraping
-                                            metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
-                                            if (metadata != null)
+                                            await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
+                                            
+                                            // Try audimeta first
+                                            var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
+                                            AudibleBookMetadata? metadata = null;
+                                            
+                                            if (audimetaData != null)
                                             {
-                                                metadata.Source = "Amazon";
+                                                metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
+                                            }
+                                            else
+                                            {
+                                                // Fallback to scraping
+                                                metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
+                                                if (metadata != null)
+                                                {
+                                                    metadata.Source = "Amazon";
+                                                }
+                                            }
+                                            
+                                            if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
+                                            {
+                                                var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
+                                                searchResult.IsEnriched = true;
+                                                results.Add(searchResult);
                                             }
                                         }
-                                        
-                                        if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
+                                        catch (Exception ex)
                                         {
-                                            var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
-                                            searchResult.IsEnriched = true;
-                                            results.Add(searchResult);
+                                            _logger.LogWarning(ex, "Failed to get metadata for alternative ASIN: {Asin}", altResult.Asin);
                                         }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Failed to get metadata for alternative ASIN: {Asin}", altResult.Asin);
                                     }
                                 }
                             }
+                            
+                            if (results.Any()) break; // Stop if we found results
                         }
-                        
-                        if (results.Any()) break; // Stop if we found results
                     }
                 }
 
@@ -1196,17 +1224,58 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
                 // Route to appropriate search method based on implementation
-                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
+
+                // Compute a single fallback name to use when indexer.Name is empty
+                string fallbackName;
+                if (!string.IsNullOrWhiteSpace(indexer.Name))
                 {
-                    return await SearchInternetArchiveAsync(indexer, query, category);
+                    fallbackName = indexer.Name;
                 }
-                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                else if (!string.IsNullOrWhiteSpace(indexer.Implementation))
                 {
-                    return await SearchMyAnonamouseAsync(indexer, query, category);
+                    fallbackName = indexer.Implementation;
                 }
                 else
                 {
-                    return await SearchTorznabNewznabAsync(indexer, query, category);
+                    try
+                    {
+                        var baseUrl = indexer.Url?.TrimEnd('/') ?? string.Empty;
+                        var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
+                        fallbackName = baseUri.Host;
+                    }
+                    catch
+                    {
+                        fallbackName = "Indexer";
+                    }
+                }
+
+                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
+                {
+                    var iaResults = await SearchInternetArchiveAsync(indexer, query, category);
+                    // Ensure Source is set for all results
+                    foreach (var r in iaResults)
+                    {
+                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
+                    }
+                    return iaResults;
+                }
+                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                {
+                    var mamResults = await SearchMyAnonamouseAsync(indexer, query, category);
+                    foreach (var r in mamResults)
+                    {
+                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
+                    }
+                    return mamResults;
+                }
+                else
+                {
+                    var tnResults = await SearchTorznabNewznabAsync(indexer, query, category);
+                    foreach (var r in tnResults)
+                    {
+                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
+                    }
+                    return tnResults;
                 }
             }
             catch (Exception ex)
@@ -1253,19 +1322,15 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Searching MyAnonamouse for: {Query}", query);
 
-                // Parse username and password from AdditionalSettings
-                var username = "";
-                var password = "";
-                
+                // Parse mam_id from AdditionalSettings (robust: case-insensitive and nested)
+                var mamId = "";
+
                 if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
                 {
                     try
                     {
-                        var settings = JsonDocument.Parse(indexer.AdditionalSettings);
-                        if (settings.RootElement.TryGetProperty("username", out var userElem))
-                            username = userElem.GetString() ?? "";
-                        if (settings.RootElement.TryGetProperty("password", out var passElem))
-                            password = passElem.GetString() ?? "";
+                        using var settings = JsonDocument.Parse(indexer.AdditionalSettings);
+                        mamId = FindMamIdInJson(settings.RootElement) ?? string.Empty;
                     }
                     catch (Exception ex)
                     {
@@ -1274,61 +1339,94 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+                if (string.IsNullOrEmpty(mamId))
                 {
-                    _logger.LogWarning("MyAnonamouse indexer {Name} missing username or password", indexer.Name);
+                    _logger.LogWarning("MyAnonamouse indexer {Name} missing mam_id", indexer.Name);
                     return new List<SearchResult>();
                 }
 
-                // Build MyAnonamouse API request
+                // Build MyAnonamouse API request (mam_id is sent as a cookie)
                 var url = $"{indexer.Url.TrimEnd('/')}/tor/js/loadSearchJSONbasic.php";
                 
-                var requestBody = new
+                // Create form data
+                var formData = new Dictionary<string, string>
                 {
-                    tor = new
-                    {
-                        text = query,
-                        srchIn = new[] { "title", "author", "narrator", "series" },
-                        searchType = "all",
-                        searchIn = "torrents",
-                        cat = new[] { "0" }, // 0 = all categories
-                        main_cat = new[] { "13" }, // 13 = AudioBooks
-                        browseFlagsHideVsShow = "0",
-                        startDate = "",
-                        endDate = "",
-                        hash = "",
-                        sortType = "default",
-                        startNumber = "0",
-                        perpage = 100
-                    }
+                    ["tor[text]"] = query,
+                    ["tor[srchIn][]"] = "title",
+                    ["tor[srchIn][]"] = "author",
+                    ["tor[srchIn][]"] = "narrator",
+                    ["tor[srchIn][]"] = "series",
+                    ["tor[searchType]"] = "all",
+                    ["tor[searchIn]"] = "torrents",
+                    ["tor[cat][]"] = "0",
+                    ["tor[browseFlagsHideVsShow]"] = "0",
+                    ["tor[startDate]"] = "",
+                    ["tor[endDate]"] = "",
+                    ["tor[hash]"] = "",
+                    ["tor[sortType]"] = "default",
+                    ["tor[startNumber]"] = "0",
+                    ["perpage"] = "100",
+                    ["thumbnail"] = "true",
+                    ["dlLink"] = "",
+                    ["description"] = ""
                 };
 
-                var jsonContent = new StringContent(
-                    JsonSerializer.Serialize(requestBody),
-                    System.Text.Encoding.UTF8,
-                    "application/json"
-                );
+                var formContent = new FormUrlEncodedContent(formData);
 
-                // Create request with basic auth
+                // Create POST request with form data
                 var request = new HttpRequestMessage(HttpMethod.Post, url)
                 {
-                    Content = jsonContent
+                    Content = formContent
                 };
 
-                var authBytes = System.Text.Encoding.UTF8.GetBytes($"{username}:{password}");
-                var authHeader = Convert.ToBase64String(authBytes);
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+                // Add browser-like headers to avoid "invalid request" errors
+                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
+                
+                // Add mam_id as a cookie for authentication (bind cookie to the indexer's base host)
+                var cookieContainer = new System.Net.CookieContainer();
+                var baseUrl = indexer.Url.TrimEnd('/');
+                var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
+                cookieContainer.Add(baseUri, new System.Net.Cookie("mam_id", mamId));
+                try
+                {
+                    var host = baseUri.Host;
+                    if (!host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var wwwUri = new Uri($"{baseUri.Scheme}://www.{host}");
+                        cookieContainer.Add(wwwUri, new System.Net.Cookie("mam_id", mamId));
+                    }
+                }
+                catch { }
+                
+                // Create HttpClientHandler with cookies
+                var handler = new HttpClientHandler
+                {
+                    CookieContainer = cookieContainer,
+                    UseCookies = true
+                };
+                
+                using var cookieClient = new HttpClient(handler);
+                cookieClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                cookieClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                cookieClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                cookieClient.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
 
                 _logger.LogDebug("MyAnonamouse API URL: {Url}", url);
 
-                var response = await _httpClient.SendAsync(request);
+                var response = await cookieClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("MyAnonamouse error response: {Content}", errorContent);
                     return new List<SearchResult>();
                 }
 
                 var jsonResponse = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
                 var results = ParseMyAnonamouseResponse(jsonResponse, indexer);
                 
                 _logger.LogInformation("MyAnonamouse returned {Count} results", results.Count);
@@ -1347,19 +1445,134 @@ namespace Listenarr.Api.Services
 
             try
             {
-                var doc = JsonDocument.Parse(jsonResponse);
-                
-                if (!doc.RootElement.TryGetProperty("data", out var dataArray))
+                _logger.LogDebug("Parsing MyAnonamouse response, length: {Length}", jsonResponse.Length);
+
+                JsonDocument? doc = null;
+                JsonElement dataArrayElement = default;
+
+                // Try to parse JSON directly. If that fails, try to extract the first JSON array substring.
+                try
                 {
+                    doc = JsonDocument.Parse(jsonResponse);
+                }
+                catch (Exception)
+                {
+                    // Attempt to extract a JSON array from an HTML-wrapped response or stray text
+                    var start = jsonResponse.IndexOf('[');
+                    var end = jsonResponse.LastIndexOf(']');
+                    if (start >= 0 && end > start)
+                    {
+                        var sub = jsonResponse.Substring(start, end - start + 1);
+                        try
+                        {
+                            doc = JsonDocument.Parse(sub);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to parse extracted JSON array from MyAnonamouse response");
+                            return results;
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Unable to locate JSON array in MyAnonamouse response");
+                        return results;
+                    }
+                }
+
+                var root = doc!.RootElement;
+
+                // Support multiple response shapes:
+                // 1) Root is an array of items
+                // 2) Root is an object with property "data" containing array
+                // 3) Root is an object with property "parsed" or "results" or "items"
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    dataArrayElement = root;
+                }
+                else if (root.ValueKind == JsonValueKind.Object)
+                {
+                    if (root.TryGetProperty("data", out var tmp) && tmp.ValueKind == JsonValueKind.Array)
+                    {
+                        dataArrayElement = tmp;
+                    }
+                    else if (root.TryGetProperty("parsed", out tmp) && tmp.ValueKind == JsonValueKind.Array)
+                    {
+                        dataArrayElement = tmp;
+                    }
+                    else if (root.TryGetProperty("results", out tmp) && tmp.ValueKind == JsonValueKind.Array)
+                    {
+                        dataArrayElement = tmp;
+                    }
+                    else if (root.TryGetProperty("items", out tmp) && tmp.ValueKind == JsonValueKind.Array)
+                    {
+                        dataArrayElement = tmp;
+                    }
+                    else
+                    {
+                        // As a last resort, try to find the first array value anywhere in the object
+                        foreach (var prop in root.EnumerateObject())
+                        {
+                            if (prop.Value.ValueKind == JsonValueKind.Array)
+                            {
+                                dataArrayElement = prop.Value;
+                                break;
+                            }
+                        }
+
+                        if (dataArrayElement.ValueKind == JsonValueKind.Undefined)
+                        {
+                            _logger.LogWarning("MyAnonamouse response did not contain an expected array property. Response preview: {Preview}", jsonResponse.Length > 500 ? jsonResponse.Substring(0, 500) + "..." : jsonResponse);
+                            return results;
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Unexpected MyAnonamouse root JSON kind: {Kind}", root.ValueKind);
                     return results;
                 }
 
-                foreach (var item in dataArray.EnumerateArray())
+                _logger.LogDebug("Found {Count} MyAnonamouse results", dataArrayElement.GetArrayLength());
+                try
+                {
+                    if (dataArrayElement.GetArrayLength() > 0)
+                    {
+                        var firstRaw = dataArrayElement[0].ToString();
+                        var preview = firstRaw.Length > 400 ? firstRaw.Substring(0, 400) + "..." : firstRaw;
+                        _logger.LogDebug("First MyAnonamouse item preview: {Preview}", preview);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to produce preview of first MyAnonamouse item");
+                }
+
+                int _mamDebugIndex = 0;
+                foreach (var item in dataArrayElement.EnumerateArray())
                 {
                     try
                     {
-                        var id = item.TryGetProperty("id", out var idElem) ? idElem.GetString() : "";
-                        var title = item.TryGetProperty("title", out var titleElem) ? titleElem.GetString() : "";
+                        string id;
+                        if (item.TryGetProperty("id", out var idElem))
+                        {
+                            id = idElem.ValueKind == JsonValueKind.String ? idElem.GetString() ?? "" : idElem.ToString();
+                        }
+                        else
+                        {
+                            id = Guid.NewGuid().ToString();
+                        }
+
+                        // MyAnonamouse uses "title" in responses; fall back to "name" if needed
+                        var title = "";
+                        if (item.TryGetProperty("title", out var titleElem))
+                        {
+                            title = titleElem.GetString() ?? "";
+                        }
+                        else if (item.TryGetProperty("name", out titleElem))
+                        {
+                            title = titleElem.GetString() ?? "";
+                        }
                         var sizeStr = "";
                         if (item.TryGetProperty("size", out var sizeElem))
                         {
@@ -1385,6 +1598,8 @@ namespace Listenarr.Api.Services
 
                         if (string.IsNullOrEmpty(title))
                             continue;
+
+                        // (debug log moved later after we build the result so all fields exist)
 
                         // Parse size - handle various formats
                         long size = 0;
@@ -1481,6 +1696,8 @@ namespace Listenarr.Api.Services
                             Quality = quality,
                             Format = format,
                             TorrentUrl = downloadUrl,
+                            // Use MyAnonamouse public item page pattern: https://myanonamouse.net/t/{id}
+                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : indexer.Url,
                             MagnetLink = "",
                             NzbUrl = ""
                         };
@@ -1491,6 +1708,21 @@ namespace Listenarr.Api.Services
                         {
                             result.Language = detectedLang;
                         }
+
+                        try
+                        {
+                            if (_mamDebugIndex < 5)
+                            {
+                                _logger.LogDebug("ParseMyAnonamouse: constructed SearchResult #{Index} -> Id='{Id}', Title='{Title}', Size={Size}, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Artist='{Artist}', Album='{Album}', Category='{Category}', Source='{Source}'",
+                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to write debug log for constructed MyAnonamouse SearchResult");
+                        }
+
+                        _mamDebugIndex++;
 
                         results.Add(result);
                     }
@@ -1506,6 +1738,46 @@ namespace Listenarr.Api.Services
             }
 
             return results;
+        }
+
+        // Recursively search a JsonElement for a mam_id-like property (case-insensitive)
+        private string? FindMamIdInJson(JsonElement element)
+        {
+            // Keys to look for
+            var keys = new[] { "mam_id", "mamid", "mamId", "mamID", "mam" };
+
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in element.EnumerateObject())
+                {
+                    try
+                    {
+                        if (keys.Any(k => string.Equals(prop.Name, k, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            if (prop.Value.ValueKind == JsonValueKind.String)
+                                return prop.Value.GetString();
+                        }
+
+                        // Recurse into objects and arrays
+                        if (prop.Value.ValueKind == JsonValueKind.Object || prop.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            var found = FindMamIdInJson(prop.Value);
+                            if (!string.IsNullOrEmpty(found)) return found;
+                        }
+                    }
+                    catch { /* ignore malformed inner values */ }
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray())
+                {
+                    var found = FindMamIdInJson(item);
+                    if (!string.IsNullOrEmpty(found)) return found;
+                }
+            }
+
+            return null;
         }
 
         private string BuildTorznabUrl(Indexer indexer, string query, string? category)
@@ -1544,6 +1816,24 @@ namespace Listenarr.Api.Services
             queryParams.Add("limit=100");
 
             return $"{url}{apiPath}?{string.Join("&", queryParams)}";
+        }
+
+        // Try to extract host from a URL; fallback to the raw url or a generic label
+        private string TryGetHostFromUrl(string? rawUrl)
+        {
+            if (string.IsNullOrWhiteSpace(rawUrl)) return "Indexer";
+            try
+            {
+                var url = rawUrl.Trim();
+                if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    url = "https://" + url;
+                var u = new Uri(url);
+                return u.Host;
+            }
+            catch
+            {
+                return rawUrl ?? "Indexer";
+            }
         }
 
         private async Task<List<SearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
@@ -1691,11 +1981,19 @@ namespace Listenarr.Api.Services
                             Seeders = 0, // N/A for direct downloads
                             Leechers = 0, // N/A for direct downloads
                             TorrentUrl = downloadUrl, // Using TorrentUrl field for direct download URL
+                            // Internet Archive item page
+                            ResultUrl = !string.IsNullOrEmpty(identifier) ? $"https://archive.org/details/{identifier}" : null,
                             DownloadType = "DDL", // Direct Download Link
                             Format = audioFile.Format,
                             Quality = DetectQualityFromFormat(audioFile.Format),
                             Source = $"{indexer.Name} (Internet Archive)"
                         };
+
+                        // Ensure ResultUrl is present (fallback to item page or archive details)
+                        if (string.IsNullOrEmpty(iaResult.ResultUrl) && !string.IsNullOrEmpty(identifier))
+                        {
+                            iaResult.ResultUrl = $"https://archive.org/details/{identifier}";
+                        }
 
                         try
                         {
@@ -1921,16 +2219,30 @@ namespace Listenarr.Api.Services
                         }
 
                         // If no magnet link found in attributes, check link element
-                        if (string.IsNullOrEmpty(result.MagnetLink) && !isUsenet)
+                        var linkElem = item.Element("link")?.Value;
+                        if (!string.IsNullOrEmpty(linkElem))
                         {
-                            var link = item.Element("link")?.Value;
-                            if (!string.IsNullOrEmpty(link) && link.StartsWith("magnet:"))
+                            if (linkElem.StartsWith("magnet:") && string.IsNullOrEmpty(result.MagnetLink) && !isUsenet)
                             {
-                                result.MagnetLink = link;
+                                result.MagnetLink = linkElem;
                             }
-                            else if (!string.IsNullOrEmpty(link) && string.IsNullOrEmpty(result.TorrentUrl))
+                            else
                             {
-                                result.TorrentUrl = link;
+                                // Use the link element as the canonical indexer page when possible
+                                if (Uri.IsWellFormedUriString(linkElem, UriKind.Absolute))
+                                {
+                                    result.ResultUrl = linkElem;
+                                }
+
+                                // If torrentUrl is empty, prefer the link
+                                if (string.IsNullOrEmpty(result.TorrentUrl) && !linkElem.StartsWith("magnet:") && !isUsenet)
+                                {
+                                    result.TorrentUrl = linkElem;
+                                }
+                                else if (string.IsNullOrEmpty(result.NzbUrl) && isUsenet && !linkElem.StartsWith("magnet:"))
+                                {
+                                    result.NzbUrl = linkElem;
+                                }
                             }
                         }
 
