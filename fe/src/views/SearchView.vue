@@ -330,14 +330,14 @@ const getResultScore = (resultId: string): QualityScore | undefined => {
 }
 
 // Return the best available external link for a search result
-const getResultLink = (result: SearchResult): string | null => {
-  if (!result) return null
+const getResultLink = (result: SearchResult): string | undefined => {
+  if (!result) return undefined
   if ((result as any).resultUrl) return (result as any).resultUrl
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
   if (result.magnetLink) return result.magnetLink
-  return null
+  return undefined
 }
 
 const getScoreClass = (score: number): string => {
