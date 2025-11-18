@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   listenarr:
-    image: docker.io/therobbiedavis/listenarr:latest  # Or use :stable for releases, :nightly for pre-releases
+    image: ghcr.io/therobbiedavis/listenarr:latest  # preferred image; change to docker.io/therobbiedavis/listenarr if you must use Docker Hub instead. Or use :stable for releases, :nightly for pre-releases
     container_name: listenarr
     ports:
       - "5000:5000"  # Map host port 5000 to container port 5000 (standard ASP.NET Core port)
