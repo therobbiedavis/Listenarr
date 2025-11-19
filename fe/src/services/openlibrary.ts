@@ -8,6 +8,8 @@ export interface OpenLibraryBook {
   author_key?: string[];
   first_publish_year?: number;
   isbn?: string[];
+  edition_key?: string[];
+  cover_edition_key?: string;
   publisher?: string[];
   cover_i?: number;
   edition_count?: number;
@@ -35,38 +37,37 @@ export interface BookSearchQuery {
 
 export class OpenLibraryService {
   private readonly baseUrl = 'https://openlibrary.org';
-
   /**
    * Search for books using various criteria
    */
   async searchBooks(query: BookSearchQuery, limit = 10, offset = 0): Promise<OpenLibrarySearchResponse> {
     const searchParams = new URLSearchParams();
-    
+
     if (query.title) {
       searchParams.append('title', query.title);
     }
-    
+
     if (query.author) {
       searchParams.append('author', query.author);
     }
-    
+
     if (query.isbn) {
       searchParams.append('isbn', query.isbn);
     }
-    
+
     if (query.general) {
       searchParams.append('q', query.general);
     }
-    
-    // If no specific fields, use title and author as general search
+
+    // If no specific fields, throw so caller can decide how to handle
     if (!query.title && !query.author && !query.isbn && !query.general) {
       throw new Error('At least one search parameter is required');
     }
-    
+
     // Add pagination
     searchParams.append('limit', limit.toString());
     searchParams.append('offset', offset.toString());
-    
+
     // Request specific fields to optimize response
     const fields = [
       'key',
@@ -85,16 +86,16 @@ export class OpenLibraryService {
       'public_scan_b'
     ];
     searchParams.append('fields', fields.join(','));
-    
+
     const url = `${this.baseUrl}/search.json?${searchParams.toString()}`;
-    
+
     try {
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         throw new Error(`Open Library API error: ${response.status} ${response.statusText}`);
       }
-      
+
       const data: OpenLibrarySearchResponse = await response.json();
       return data;
     } catch (error) {
@@ -137,7 +138,117 @@ export class OpenLibraryService {
    * Get book URL on Open Library
    */
   getBookUrl(key: string): string {
-    return `${this.baseUrl}${key}`;
+    if (!key) return this.baseUrl + '/';
+    const path = key.startsWith('/') ? key : `/${key}`;
+    return `${this.baseUrl}${path}`;
+  }
+
+  /**
+   * Build a search URL for Open Library (useful when a canonical work key is missing)
+   */
+  getSearchUrl(query: string): string {
+    const q = encodeURIComponent(query || '');
+    return `${this.baseUrl}/search?q=${q}`;
+  }
+
+  /**
+   * Build a book JSON URL for an OpenLibrary edition ID (OLID)
+   * Example: https://openlibrary.org/books/OL123M.json
+   */
+  getBookJsonUrlFromKey(key: string): string | null {
+    if (!key) return null
+    // If key is already a /books/ path, extract the id
+    if (key.startsWith('/books/')) {
+      const id = key.split('/').pop()
+      return id ? `${this.baseUrl}/books/${id}.json` : null
+    }
+    // If key looks like an OLID (e.g., OL123M), use it directly
+    const match = key.match(/^(OL\w+)$/i)
+    if (match) return `${this.baseUrl}/books/${match[1]}.json`
+    return null
+  }
+
+  /**
+   * Build a book page URL for an OpenLibrary edition ID (OLID)
+   * Example: https://openlibrary.org/books/OL123M
+   */
+  getBookPageUrlFromKey(key: string): string | null {
+    if (!key) return null
+    if (key.startsWith('/books/')) {
+      const id = key.split('/').pop()
+      return id ? `${this.baseUrl}/books/${id}` : null
+    }
+    const match = key.match(/^(OL\w+)$/i)
+    if (match) return `${this.baseUrl}/books/${match[1]}`
+    return null
+  }
+
+  /**
+   * Try to derive a book JSON URL from an OpenLibraryBook record
+   */
+  getBookJsonUrlFromBook(book: OpenLibraryBook): string | null {
+    // Prefer explicit edition keys
+    if (book.cover_edition_key) return `${this.baseUrl}/books/${book.cover_edition_key}.json`
+    if (book.edition_key && book.edition_key.length > 0) return `${this.baseUrl}/books/${book.edition_key[0]}.json`
+    // Fallback to key if it's a /books/ path or plain OLID
+    if (book.key) {
+      const fromKey = this.getBookJsonUrlFromKey(book.key)
+      if (fromKey) return fromKey
+    }
+    return null
+  }
+
+  /**
+   * Try to derive a book page URL from an OpenLibraryBook record
+   */
+  getBookPageUrlFromBook(book: OpenLibraryBook): string | null {
+    if (book.cover_edition_key) return `${this.baseUrl}/books/${book.cover_edition_key}`
+    if (book.edition_key && book.edition_key.length > 0) return `${this.baseUrl}/books/${book.edition_key[0]}`
+    if (book.key) {
+      const fromKey = this.getBookPageUrlFromKey(book.key)
+      if (fromKey) return fromKey
+    }
+    return null
+  }
+
+  /**
+   * Build a work JSON URL from a work key (e.g., '/works/OL82548W')
+   * Example: https://openlibrary.org/works/OL82548W.json
+   */
+  getWorkJsonUrlFromKey(key: string): string | null {
+    if (!key) return null
+    const path = key.startsWith('/') ? key : `/${key}`
+    if (!path.startsWith('/works/')) return null
+    const id = path.split('/').pop()
+    return id ? `${this.baseUrl}/works/${id}.json` : null
+  }
+
+  /**
+   * Build a work page URL from a work key (e.g., '/works/OL82548W')
+   * Example: https://openlibrary.org/works/OL82548W
+   */
+  getWorkPageUrlFromKey(key: string): string | null {
+    if (!key) return null
+    const path = key.startsWith('/') ? key : `/${key}`
+    if (!path.startsWith('/works/')) return null
+    const id = path.split('/').pop()
+    return id ? `${this.baseUrl}/works/${id}` : null
+  }
+
+  /**
+   * Try to derive a work JSON URL from an OpenLibraryBook record (if the key is a work)
+   */
+  getWorkJsonUrlFromBook(book: OpenLibraryBook): string | null {
+    if (!book || !book.key) return null
+    return this.getWorkJsonUrlFromKey(book.key)
+  }
+
+  /**
+   * Try to derive a work page URL from an OpenLibraryBook record (if the key is a work)
+   */
+  getWorkPageUrlFromBook(book: OpenLibraryBook): string | null {
+    if (!book || !book.key) return null
+    return this.getWorkPageUrlFromKey(book.key)
   }
 
   /**

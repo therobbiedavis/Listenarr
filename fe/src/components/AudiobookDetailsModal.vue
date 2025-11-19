@@ -435,7 +435,6 @@ const capitalizeFirst = (str: string): string => {
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
   font-size: 0.95rem;
 }
 

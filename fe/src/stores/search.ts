@@ -1,16 +1,29 @@
 import { defineStore } from 'pinia'
-import { ref, computed, shallowRef, triggerRef } from 'vue'
+import { ref, computed } from 'vue'
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 
 export const useSearchStore = defineStore('search', () => {
-  const searchResults = shallowRef<SearchResult[]>([])
+  const searchResults = ref<SearchResult[]>([])
   const isSearching = ref(false)
   const searchQuery = ref('')
   const selectedCategory = ref<string>('')
   const selectedApiIds = ref<string[]>([])
   
   const hasResults = computed(() => searchResults.value.length > 0)
+
+  // Expose store refs for debugging in browser DevTools
+  try {
+    ;(window as any).pinia_search = {
+      searchResults,
+      isSearching,
+      searchQuery,
+      selectedCategory,
+      selectedApiIds,
+      hasResults,
+      // debug functions omitted to avoid forward reference issues
+    }
+  } catch {}
   
   const search = async (query: string, category?: string, apiIds?: string[]) => {
     isSearching.value = true
@@ -24,11 +37,9 @@ export const useSearchStore = defineStore('search', () => {
       console.log('Search results received:', results)
       console.log('First result:', results[0])
       searchResults.value = results
-      triggerRef(searchResults)
     } catch (error) {
       console.error('Search failed:', error)
       searchResults.value = []
-      triggerRef(searchResults)
     } finally {
       isSearching.value = false
     }
@@ -36,7 +47,6 @@ export const useSearchStore = defineStore('search', () => {
   
   const clearResults = () => {
     searchResults.value = []
-    triggerRef(searchResults)
     searchQuery.value = ''
     selectedCategory.value = ''
     selectedApiIds.value = []

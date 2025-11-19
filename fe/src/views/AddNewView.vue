@@ -4,6 +4,8 @@
   <h1><PhPlusCircle /> Add New Audiobook</h1>
     </div>
 
+    <!-- Debug button removed -->
+
     <!-- Unified Search -->
     <div class="search-section">
       <div class="search-method">
@@ -58,6 +60,9 @@
         {{ searchError }}
       </div>
     </div>
+    <!-- Loading State -->
+
+    <!-- Debug block removed -->
 
     <!-- Loading State -->
     <div v-if="isSearching && !hasResults" class="loading-results">
@@ -154,7 +159,7 @@
 
       <!-- Title Search Results -->
       <div v-if="searchType === 'title' && titleResults.length > 0">
-        <h2>Found {{ titleResultsCount }} Book{{ titleResultsCount === 1 ? '' : 's' }}</h2>
+        <h2>Found {{ totalTitleResultsCount }} Book{{ totalTitleResultsCount === 1 ? '' : 's' }}</h2>
         <div class="title-results">
           <div v-for="book in titleResults" :key="book.key" class="title-result-card">
               <div class="result-poster">
@@ -207,12 +212,13 @@
                 <span v-else-if="book.metadataSource" class="metadata-source-badge" :data-source="book.metadataSource">
                   Metadata: {{ book.metadataSource }}
                 </span>
-                <a v-if="book.searchResult?.productUrl && book.searchResult?.source" 
-                   :href="book.searchResult.productUrl" 
+
+                <a v-if="getSourceUrl(book)" 
+                   :href="getSourceUrl(book)!" 
                    target="_blank" 
                    rel="noopener noreferrer"
                    class="source-link">
-                  Source: {{ book.searchResult.source }}
+                  Source: {{ book.searchResult?.source || book.metadataSource || 'OpenLibrary' }}
                 </a>
                 <span v-else-if="book.searchResult?.source">Source: {{ book.searchResult.source }}</span>
               </div>
@@ -316,6 +322,14 @@ import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre } from '@/types'
 import { apiService } from '@/services/api'
 import type { OpenLibraryBook } from '@/services/openlibrary'
+import { openLibraryService } from '@/services/openlibrary'
+
+// Extend Window interface for debug helper used during development
+declare global {
+  interface Window {
+    addnew_rawDebugResults?: unknown
+  }
+}
 import { isbnService, type ISBNBook } from '@/services/isbn'
 import { signalRService } from '@/services/signalr'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -451,10 +465,11 @@ const asinFilteringApplied = ref(false)
 const isbnResult = ref<ISBNBook | null>(null) // retained for potential enrichment but not directly rendered
 const isbnLookupMessage = ref('')
 const isbnLookupWarning = ref(false)
-const titleResultsCount = ref(0)
+const totalTitleResultsCount = ref<number>(0)
 const isLoadingMore = ref(false)
 const currentPage = ref(0)
 // const resultsPerPage = 10
+const rawDebugResults = ref<unknown[] | null>(null)
 
 // Parsed search query components (for error messages)
 const asinQuery = ref('')
@@ -463,6 +478,8 @@ const authorQuery = ref('')
 
 // Library tracking
 const addedAsins = ref(new Set<string>())
+// Cache for best cover selection per book key
+const coverSelection = ref<Record<string, string>>({})
 
 // General state
 const errorMessage = ref('')
@@ -498,7 +515,7 @@ try {
   
   const storedCount = localStorage.getItem(TITLE_RESULTS_COUNT_KEY)
   if (storedCount) {
-    titleResultsCount.value = parseInt(storedCount, 10)
+    totalTitleResultsCount.value = parseInt(storedCount, 10)
   }
   
   const storedFiltering = localStorage.getItem(ASIN_FILTERING_KEY)
@@ -535,7 +552,7 @@ watch(searchType, (v) => {
   try { localStorage.setItem(SEARCH_TYPE_KEY, v || '') } catch {}
 })
 
-watch(titleResultsCount, (v) => {
+watch(totalTitleResultsCount, (v) => {
   try { localStorage.setItem(TITLE_RESULTS_COUNT_KEY, v.toString()) } catch {}
 })
 
@@ -565,7 +582,7 @@ const hasError = computed(() => {
 })
 
 const canLoadMore = computed(() => {
-  return titleResults.value.length < titleResultsCount.value
+  return titleResults.value.length < totalTitleResultsCount.value
 })
 
 const searchPlaceholder = computed(() => {
@@ -734,7 +751,7 @@ const searchByTitle = async (query: string) => {
   audibleResult.value = null
   titleResults.value = []
   isbnResult.value = null
-  titleResultsCount.value = 0
+  totalTitleResultsCount.value = 0
   currentPage.value = 0
   errorMessage.value = ''
   resolvedAsins.value = {}
@@ -749,6 +766,9 @@ const searchByTitle = async (query: string) => {
   try {
     // Use intelligent search API that searches Audible/Amazon, gets ASINs, and enriches with metadata
     const results = await apiService.searchByTitle(query)
+    // expose raw results for debugging on the Add New page
+    rawDebugResults.value = results
+    try { window.addnew_rawDebugResults = results } catch {}
     logger.debug('Intelligent search returned:', results)
     logger.debug('Number of results:', results?.length)
     
@@ -757,33 +777,51 @@ const searchByTitle = async (query: string) => {
     // Convert enriched SearchResult to display format
     titleResults.value = []
     const processedAsins = new Set<string>()
-    
+
     for (const result of results) {
-      const asin = result.asin
-      
-      if (asin && !processedAsins.has(asin) && result.isEnriched) {
+      // Only consider enriched results for display
+      if (!result.isEnriched) continue
+
+      const asin = (result.asin || '').toString().trim()
+
+      // If we have an ASIN, ensure we dedupe per-asin
+      if (asin) {
+        if (processedAsins.has(asin)) continue
         processedAsins.add(asin)
         resolvedAsins.value[`search-${asin}`] = asin
-        
-        // Create a book object with metadata from the enriched SearchResult
-        const displayBook: TitleSearchResult = {
-          key: `search-${asin}`,
-          title: result.title || 'Unknown Title',
-          author_name: result.artist ? [result.artist] : [],
-          isbn: [],
-          first_publish_year: result.publishedDate ? 
-            parseInt(result.publishedDate.match(/\d{4}/)?.[0] || '0', 10) || undefined : undefined,
-          publisher: result.publisher ? [result.publisher] : undefined,
-          metadataSource: result.metadataSource, // Which metadata source enriched it (Audimeta, Audnexus, etc.)
-          imageUrl: result.imageUrl,
-          searchResult: result // Store the full enriched SearchResult
-        }
-        titleResults.value.push(displayBook)
       }
+
+      // Use stable key: prefer ASIN when available, otherwise use the provider result id
+      const key = asin ? `search-${asin}` : (result.id ? `search-${result.id}` : `search-unknown-${Math.random().toString(36).slice(2,8)}`)
+
+      // Create a book object with metadata from the enriched SearchResult
+      const displayBook: TitleSearchResult = {
+        key,
+        title: result.title || 'Unknown Title',
+        author_name: result.artist ? [result.artist] : [],
+        isbn: [],
+        first_publish_year: result.publishedDate ? 
+          parseInt(result.publishedDate.match(/\d{4}/)?.[0] || '0', 10) || undefined : undefined,
+        publisher: result.publisher ? [result.publisher] : undefined,
+        metadataSource: result.metadataSource, // Which metadata source enriched it (Audimeta, Audnexus, etc.)
+        imageUrl: result.imageUrl,
+        searchResult: result // Store the full enriched SearchResult
+      }
+      titleResults.value.push(displayBook)
     }
     
     asinFilteringApplied.value = true
-    titleResultsCount.value = titleResults.value.length
+    totalTitleResultsCount.value = (titleResults.value.length as unknown) as number
+
+    // After populating titleResults, attempt to resolve missing ASINs from ISBNs (OpenLibrary)
+    // Run in background; updates resolvedAsins and searchResult.asin when found.
+    (async () => {
+      try {
+        await attemptResolveAsinsForTitleResults()
+      } catch (e) {
+        logger.debug('Attempt to resolve ASINs failed', e)
+      }
+    })()
     
     if (titleResults.value.length === 0) {
       errorMessage.value = 'No audiobooks found. Try refining your search terms.'
@@ -802,6 +840,8 @@ const searchByTitle = async (query: string) => {
     setTimeout(() => { searchStatus.value = '' }, 1000)
   }
 }
+
+// Lightweight raw fetch helper removed (debug helper)
 
 const parseSearchQuery = (query: string): { title: string; author?: string } => {
   // Try to parse "title by author" format
@@ -839,13 +879,108 @@ const loadMoreTitleResults = async () => {
 
 // Helper methods for Open Library results
 const getCoverUrl = (book: TitleSearchResult): string => {
-  // Check for audimeta result image URL first
-  if (book.imageUrl) {
-    return apiService.getImageUrl(book.imageUrl)
-  }
-  // Fall back to search result image URL
+  const key = book.key || JSON.stringify(book.title || '')
+  // If we've already selected a best cover, return it (proxied)
+  if (coverSelection.value[key]) return apiService.getImageUrl(coverSelection.value[key])
+
+  // Start background evaluation of best cover (non-blocking)
+  pickBestCoverForBook(book).catch((e) => logger.debug('pickBestCoverForBook error', e))
+
+  // Immediate fallback: prefer explicit imageUrl, then searchResult image
+  if (book.imageUrl) return apiService.getImageUrl(book.imageUrl)
   const imageUrl = book.searchResult?.imageUrl || ''
   return apiService.getImageUrl(imageUrl)
+}
+
+// Try to pick the image whose aspect ratio is closest to 1:1 from available candidates
+const pickBestCoverForBook = async (book: TitleSearchResult): Promise<void> => {
+  try {
+    const key = book.key || JSON.stringify(book.title || '')
+    // Do not repeat work if we already have a selection
+    if (coverSelection.value[key]) return
+
+    const candidates: string[] = []
+    if (book.imageUrl) candidates.push(book.imageUrl)
+    if (book.searchResult?.imageUrl) candidates.push(book.searchResult.imageUrl)
+
+    // If OpenLibrary book has a cover id, include sizes (L, M, S)
+    try {
+      const olBook = book as OpenLibraryBook
+      const coverId = (olBook as unknown as { cover_i?: number }).cover_i
+      if (coverId && coverId > 0) {
+        const uL = openLibraryService.getCoverUrl(coverId, 'L')
+        const uM = openLibraryService.getCoverUrl(coverId, 'M')
+        const uS = openLibraryService.getCoverUrl(coverId, 'S')
+        if (uL) candidates.push(uL)
+        if (uM) candidates.push(uM)
+        if (uS) candidates.push(uS)
+      }
+    } catch {
+      logger.debug('cover id extraction failed')
+    }
+
+    // Normalize and dedupe
+    const uniq = Array.from(new Set(candidates.filter(u => !!u))) as string[]
+    if (!uniq.length) return
+
+    // Load images and measure aspect ratios with timeout
+    const results: Array<{ url: string; score: number }> = []
+    for (const url of uniq) {
+      try {
+        const ratio = await measureImageAspectRatio(apiService.getImageUrl(url), 3000)
+        if (ratio && ratio > 0) {
+          const score = Math.abs(ratio - 1)
+          results.push({ url, score })
+        }
+      } catch (e) {
+        logger.debug('Failed to load image for ratio check', url, e)
+      }
+    }
+
+    if (results.length === 0) return
+    // Choose minimum score (closest to 1:1)
+    results.sort((a, b) => a.score - b.score)
+    if (results[0] && results[0].url) coverSelection.value[key] = results[0].url
+  } catch (e) {
+    logger.debug('pickBestCoverForBook overall failure', e)
+  }
+}
+
+const measureImageAspectRatio = (url: string, timeoutMs = 3000): Promise<number | null> => {
+  return new Promise((resolve) => {
+    const img = new Image()
+    let settled = false
+    const t = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        img.src = ''
+        resolve(null)
+      }
+    }, timeoutMs)
+
+    img.onload = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      try {
+        const w = img.naturalWidth || img.width
+        const h = img.naturalHeight || img.height
+        if (!w || !h) return resolve(null)
+        resolve(w / h)
+      } catch (e) {
+        resolve(null)
+      }
+    }
+
+    img.onerror = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      resolve(null)
+    }
+
+    img.src = url
+  })
 }
 
 const formatAuthors = (book: TitleSearchResult): string => {
@@ -857,13 +992,56 @@ const getAsin = (book: TitleSearchResult): string | null => {
 }
 
 const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
-  const asin = getAsin(book)
-  if (!asin) return null
-  
   const source = book.metadataSource
   if (!source) return null
-  
-  // Map metadata source to URL
+
+  // OpenLibrary metadata does not require an ASIN; prefer resultUrl (JSON) then productUrl or OL work URL
+  if (source.toLowerCase().includes('openlibrary')) {
+    // Prefer the canonical metadata/result URL (e.g., OpenLibrary .json) if provided
+    if (book.searchResult?.resultUrl) return book.searchResult.resultUrl
+    // Fall back to productUrl (human-facing page) if resultUrl is not available
+    if (book.searchResult?.productUrl) return book.searchResult.productUrl
+    const olBook = book as OpenLibraryBook
+    // Avoid using our local generated keys (they start with 'search-') — prefer real OL identifiers
+    const candidateKey = (olBook.key || '').toString()
+    const looksLikeLocalKey = candidateKey.startsWith('search-') || candidateKey.startsWith('search-unknown-')
+    if (!looksLikeLocalKey) {
+      // If the key is a work (e.g., '/works/OL82548W'), prefer work JSON/page URLs
+      if (candidateKey.startsWith('/works')) {
+        const workJson = openLibraryService.getWorkJsonUrlFromBook(olBook)
+        if (workJson) return workJson
+        const workPage = openLibraryService.getWorkPageUrlFromBook(olBook)
+        if (workPage) return workPage
+      }
+
+      // Prefer a book (edition) JSON metadata link (OLID) for metadata badge
+      const jsonUrl = openLibraryService.getBookJsonUrlFromBook(olBook)
+      if (jsonUrl) return jsonUrl
+
+      // Fall back to a book page URL if JSON isn't available
+      const pageUrl = openLibraryService.getBookPageUrlFromBook(olBook)
+      if (pageUrl) return pageUrl
+
+      // If key is a work but we couldn't derive an edition, fallback to work search by title
+      if (candidateKey.startsWith('/works') && book.title) {
+        const q = `${book.title}${book.author_name && book.author_name.length ? ' ' + book.author_name[0] : ''}`
+        return openLibraryService.getSearchUrl(q)
+      }
+
+      // If it's a plain OLID like 'OL123M' or a canonical /books path, return the generic book URL
+      if (candidateKey.startsWith('/books') || /^OL\w+/i.test(candidateKey)) {
+        return openLibraryService.getBookUrl(candidateKey)
+      }
+    }
+    // No key: fall back to search by title
+    if (book.title) return openLibraryService.getSearchUrl(book.title)
+    return null
+  }
+
+  const asin = getAsin(book)
+  if (!asin) return null
+
+  // Map metadata source to URL for ASIN-based providers
   if (source.toLowerCase().includes('audimeta')) {
     return `https://audimeta.de/book/${asin}`
   } else if (source.toLowerCase().includes('audnex')) {
@@ -874,8 +1052,96 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
   } else if (source === 'Audible') {
     return `https://www.audible.com/pd/${asin}`
   }
-  
+
   return null
+}
+
+// Get a sensible 'source' URL for the book (indexer/product or OpenLibrary work page)
+const getSourceUrl = (book: TitleSearchResult): string | null => {
+  // Prefer explicit productUrl from the enriched SearchResult
+  if (book.searchResult?.productUrl) return book.searchResult.productUrl
+
+  // If provider/source is OpenLibrary or we have an OL key, link to the OL work page
+  if (book.searchResult?.source?.toLowerCase().includes('openlibrary') || book.metadataSource?.toLowerCase().includes('openlibrary')) {
+    const olBook = book as OpenLibraryBook
+    const candidateKey = (olBook.key || '').toString()
+    const looksLikeLocalKey = candidateKey.startsWith('search-') || candidateKey.startsWith('search-unknown-')
+    if (!looksLikeLocalKey) {
+      // Prefer the human-facing book page URL (edition if available)
+      const pageUrl = openLibraryService.getBookPageUrlFromBook(olBook)
+      if (pageUrl) return pageUrl
+      if (candidateKey.startsWith('/books') || /^OL\w+/i.test(candidateKey)) return openLibraryService.getBookUrl(candidateKey)
+    }
+    // Fallback to searching by title when we don't have a usable OL identifier
+    if (book.title) return openLibraryService.getSearchUrl(book.title)
+  }
+
+  return null
+}
+
+// Extract ISBN candidates from an OpenLibrary-derived TitleSearchResult
+const extractIsbnCandidates = (book: TitleSearchResult): string[] => {
+  try {
+    // Prefer OpenLibrary service helpers when available
+    const isbns: string[] = openLibraryService.getISBNs(book as OpenLibraryBook)
+    if (!isbns || isbns.length === 0) return []
+    // Normalize and dedupe
+    const cleaned = Array.from(new Set(isbns.map(i => i.replace(/[-\s]/g, ''))))
+    return cleaned
+  } catch (e) {
+    logger.debug('extractIsbnCandidates error', e)
+    return []
+  }
+}
+
+// Resolve a single book's ASIN by trying its ISBN candidates via backend lookup
+const resolveAsinForBook = async (book: TitleSearchResult): Promise<string | null> => {
+  if (!book) return null
+  // If already present on the enriched search result, return it
+  if (book.searchResult && book.searchResult.asin) return book.searchResult.asin
+
+  const candidates = extractIsbnCandidates(book)
+  if (!candidates || candidates.length === 0) return null
+
+  for (const isbn of candidates.slice(0, 3)) { // try up to 3 candidates
+    if (!isbnService.validateISBN(isbn)) continue
+    try {
+      const resp = await apiService.getAsinFromIsbn(isbn)
+      if (resp && resp.success && resp.asin) {
+        // update resolved map and the underlying searchResult if present
+        resolvedAsins.value[book.key] = resp.asin
+        if (book.searchResult) {
+          book.searchResult.asin = resp.asin
+        }
+        logger.debug('Resolved ASIN from ISBN', { isbn, asin: resp.asin, bookKey: book.key })
+        return resp.asin
+      }
+    } catch (e) {
+      logger.debug('resolveAsinForBook API error for ISBN', isbn, e)
+    }
+    // small delay to avoid hammering backend
+    await new Promise(r => setTimeout(r, 150))
+  }
+  return null
+}
+
+// Iterate over titleResults and attempt to resolve missing ASINs in background
+const attemptResolveAsinsForTitleResults = async (): Promise<void> => {
+  if (!titleResults.value || titleResults.value.length === 0) return
+
+  for (const book of titleResults.value) {
+    try {
+      // Skip if already have an ASIN
+      if ((book.searchResult && book.searchResult.asin) || resolvedAsins.value[book.key]) continue
+      const asin = await resolveAsinForBook(book)
+      if (asin) {
+        // Trigger library re-check so UI updates added status and buttons
+        await checkExistingInLibrary()
+      }
+    } catch (e) {
+      logger.debug('attemptResolveAsinsForTitleResults error for book', book.key, e)
+    }
+  }
 }
 
 // Removed manual ASIN helper methods (createAsinSearchHint, openAmazonSearch, useBookForAsinSearch)
@@ -979,80 +1245,105 @@ const selectTitleResult = async (book: TitleSearchResult) => {
 
 const viewTitleResultDetails = async (book: TitleSearchResult) => {
   const asin = resolvedAsins.value[book.key] || book.searchResult?.asin
-  if (asin) {
-    try {
-      // If we have enriched search result, use it directly
-      if (book.searchResult && book.searchResult.isEnriched) {
-        const result = book.searchResult
-        logger.debug('Using enriched metadata from intelligent search:', result)
-        
-        // Extract publish year from date string if available
-        let publishYear: string | undefined
-        if (result.publishedDate) {
-          const yearMatch = result.publishedDate.match(/\d{4}/)
-          publishYear = yearMatch ? yearMatch[0] : undefined
-        }
-        
-        selectedBook.value = {
-          asin: result.asin || asin,
-          title: result.title || 'Unknown Title',
-          subtitle: undefined,
-          authors: result.artist ? [result.artist] : [],
-          narrators: result.narrator ? [result.narrator] : [],
-          publisher: result.publisher,
-          publishYear: publishYear,
-          description: result.description,
-          imageUrl: result.imageUrl,
-          runtime: result.runtime,
-          language: result.language,
-          genres: [],
-          series: result.series,
-          seriesNumber: result.seriesNumber,
-          abridged: false,
-          isbn: undefined,
-          source: book.metadataSource || result.source
-        }
-      } else {
-        // Fallback: fetch metadata if not already enriched
-        const response = await apiService.getMetadata(asin, 'us', true)
-        const audimetaData = response.metadata
-        book.metadataSource = response.source
-        
-        // Convert to AudibleBookMetadata format
-        let publishYear: string | undefined
-        if (audimetaData.publishDate || audimetaData.releaseDate) {
-          const dateStr = audimetaData.publishDate || audimetaData.releaseDate
-          const yearMatch = dateStr?.match(/\d{4}/)
-          publishYear = yearMatch ? yearMatch[0] : undefined
-        }
-        
-        selectedBook.value = {
-          asin: audimetaData.asin || asin,
-          title: audimetaData.title || 'Unknown Title',
-          subtitle: audimetaData.subtitle,
-          authors: audimetaData.authors?.map((a: AudimetaAuthor) => a.name).filter((n: string | undefined) => n) as string[] || [],
-          narrators: audimetaData.narrators?.map((n: AudimetaNarrator) => n.name).filter((n: string | undefined) => n) as string[] || [],
-          publisher: audimetaData.publisher,
-          publishYear: publishYear,
-          description: audimetaData.description,
-          imageUrl: audimetaData.imageUrl,
-          runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes * 60 : undefined,
-          language: audimetaData.language,
-          genres: audimetaData.genres?.map((g: AudimetaGenre) => g.name).filter((n: string | undefined) => n) as string[] || [],
-          series: audimetaData.series?.[0]?.name,
-          seriesNumber: audimetaData.series?.[0]?.position,
-          abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
-          isbn: audimetaData.isbn,
-          source: response.source
-        }
+
+  try {
+    // If we have an enriched search result, use it directly even if no ASIN is present
+    if (book.searchResult && book.searchResult.isEnriched) {
+      const result = book.searchResult
+      logger.debug('Using enriched metadata from intelligent search for details view:', result)
+
+      // Extract publish year from date string if available
+      let publishYear: string | undefined
+      if (result.publishedDate) {
+        const yearMatch = result.publishedDate.match(/\d{4}/)
+        publishYear = yearMatch ? yearMatch[0] : undefined
       }
+
+      // If metadata source is OpenLibrary or a resultUrl points to OL JSON, try to fetch description from the canonical JSON
+      let olDescription: string | undefined = undefined
+      try {
+        const jsonUrl = result.resultUrl || openLibraryService.getBookJsonUrlFromBook(book as OpenLibraryBook) || openLibraryService.getWorkJsonUrlFromBook(book as OpenLibraryBook)
+        if (jsonUrl) {
+          const resp = await fetch(jsonUrl)
+          if (resp && resp.ok) {
+            const j = await resp.json()
+            if (j) {
+              if (typeof j.description === 'string') olDescription = j.description
+              else if (j.description && typeof j.description.value === 'string') olDescription = j.description.value
+            }
+          }
+        }
+      } catch (e) {
+        logger.debug('Failed to fetch OpenLibrary JSON for description:', e)
+      }
+
+      selectedBook.value = {
+        asin: result.asin || asin || '',
+        title: result.title || 'Unknown Title',
+        subtitle: undefined,
+        authors: result.artist ? [result.artist] : [],
+        narrators: result.narrator ? [result.narrator] : [],
+        publisher: result.publisher,
+        publishYear: publishYear,
+        description: result.description || olDescription,
+        imageUrl: result.imageUrl,
+        runtime: result.runtime,
+        language: result.language,
+        genres: [],
+        series: result.series,
+        seriesNumber: result.seriesNumber,
+        abridged: false,
+        isbn: undefined,
+        source: book.metadataSource || result.source
+      }
+
       showDetailsModal.value = true
-  } catch (error) {
-  logger.error('Failed to fetch detailed metadata:', error)
-  toast.error('Fetch failed', 'Failed to fetch audiobook details. Please try again.')
+      return
     }
-  } else {
-    logger.error('No ASIN available for selected book')
+
+    // If we don't have an enriched result but an ASIN exists, fetch metadata from configured sources
+    if (asin) {
+      const response = await apiService.getMetadata(asin, 'us', true)
+      const audimetaData = response.metadata
+      book.metadataSource = response.source
+
+      let publishYear: string | undefined
+      if (audimetaData.publishDate || audimetaData.releaseDate) {
+        const dateStr = audimetaData.publishDate || audimetaData.releaseDate
+        const yearMatch = dateStr?.match(/\d{4}/)
+        publishYear = yearMatch ? yearMatch[0] : undefined
+      }
+
+      selectedBook.value = {
+        asin: audimetaData.asin || asin || '',
+        title: audimetaData.title || 'Unknown Title',
+        subtitle: audimetaData.subtitle,
+        authors: audimetaData.authors?.map((a: AudimetaAuthor) => a.name).filter((n: string | undefined) => n) as string[] || [],
+        narrators: audimetaData.narrators?.map((n: AudimetaNarrator) => n.name).filter((n: string | undefined) => n) as string[] || [],
+        publisher: audimetaData.publisher,
+        publishYear: publishYear,
+        description: audimetaData.description,
+        imageUrl: audimetaData.imageUrl,
+        runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes * 60 : undefined,
+        language: audimetaData.language,
+        genres: audimetaData.genres?.map((g: AudimetaGenre) => g.name).filter((n: string | undefined) => n) as string[] || [],
+        series: audimetaData.series?.[0]?.name,
+        seriesNumber: audimetaData.series?.[0]?.position,
+        abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
+        isbn: audimetaData.isbn,
+        source: response.source
+      }
+
+      showDetailsModal.value = true
+      return
+    }
+
+    // If neither enriched metadata nor ASIN is available, show an informative message
+    logger.error('No ASIN or enriched metadata available for selected book')
+    toast.warning('No details', 'No ASIN or metadata available to show details for this book')
+  } catch (error) {
+    logger.error('Failed to fetch detailed metadata:', error)
+    toast.error('Fetch failed', 'Failed to fetch audiobook details. Please try again.')
   }
 }
 
@@ -1491,11 +1782,14 @@ onMounted(async () => {
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
   min-width: 100px;
   justify-content: center;
   transition: all 0.2s ease;
   font-size: 0.9rem;
+}
+
+.btn:has(svg) {
+  gap: 0.5rem;
 }
 
 .btn:disabled {
@@ -1684,6 +1978,7 @@ onMounted(async () => {
   font-weight: 600;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1695,6 +1990,7 @@ onMounted(async () => {
   font-size: 0.95rem;
   display: -webkit-box;
   -webkit-line-clamp: 1;
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1706,6 +2002,7 @@ onMounted(async () => {
   font-size: 0.9rem;
   display: -webkit-box;
   -webkit-line-clamp: 1;
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

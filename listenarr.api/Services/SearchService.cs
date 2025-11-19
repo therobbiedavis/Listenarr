@@ -20,6 +20,7 @@ using Listenarr.Api.Models;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using System.Text.Json;
+using System.Drawing;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
@@ -334,28 +335,36 @@ namespace Listenarr.Api.Services
                 List<AmazonSearchResult> amazonResults = new();
                 List<AudibleSearchResult> audibleResults = new();
 
-                if (isIsbnQuery)
+                // Temporary flags to disable/enable providers for focused testing
+                var skipAmazon = true; // set true to disable Amazon calls
+                var skipAudible = true; // set true to disable Audible calls (temporarily)
+
+                // Always attempt Audible; Amazon is conditional on skipAmazon
+                if (!string.IsNullOrEmpty(query))
                 {
-                    _logger.LogInformation("IntelligentSearch detected ISBN-only query; skipping Audible search for: {Query}", query);
-                    if (!string.IsNullOrEmpty(query))
+                    Task<List<AmazonSearchResult>>? amazonTask = null;
+                    if (!skipAmazon)
                     {
-                        var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
+                        amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
+                    }
+
+                    Task<List<AudibleSearchResult>>? audibleTask = null;
+                    if (!skipAudible)
+                    {
+                        audibleTask = _audibleSearchService.SearchAudiobooksAsync(query!);
+                    }
+
+                    if (amazonTask != null)
+                    {
                         amazonResults = await amazonTask;
                     }
-                    audibleResults = new List<AudibleSearchResult>();
-                    _logger.LogInformation("Collected {AmazonCount} Amazon raw results and skipped Audible for ISBN query", amazonResults.Count);
-                }
-                else
-                {
-                    if (!string.IsNullOrEmpty(query))
+
+                    if (audibleTask != null)
                     {
-                        var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
-                        var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query!);
-                        amazonResults = await amazonTask;
                         audibleResults = await audibleTask;
                     }
-                    _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
                 }
+                _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
 
                 // Step 2: Build a unified ASIN candidate set (Amazon priority, then Audible)
                 // Also create a lookup map for fallback titles and full search result objects
@@ -364,9 +373,16 @@ namespace Listenarr.Api.Services
                 var asinToAudibleResult = new Dictionary<string, AudibleSearchResult>(StringComparer.OrdinalIgnoreCase);
                 var asinToSource = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 var asinToOpenLibrary = new Dictionary<string, OpenLibraryBook>(StringComparer.OrdinalIgnoreCase);
+                // OpenLibrary-derived SearchResult placeholders (converted directly from OL docs)
+                var openLibraryDerivedResults = new List<SearchResult>();
                 
+                // Per-provider candidate caps (limit how many candidates we take from each source)
+                // These are per-provider caps; we intentionally do NOT cap the unified candidate set.
+                int amazonProviderCap = 50; // max ASINs to take from Amazon results
+                int audibleProviderCap = 50; // max ASINs to take from Audible results
+
                 // Populate ASIN candidates from Amazon results with detailed logging
-                foreach (var a in amazonResults)
+                foreach (var a in amazonResults.Take(amazonProviderCap))
                 {
                     if (string.IsNullOrEmpty(a.Asin))
                     {
@@ -380,14 +396,28 @@ namespace Listenarr.Api.Services
                         continue;
                     }
 
+                    // Filter obvious non-audiobook product results early
+                    if (IsProductLikeTitle(a.Title) || IsSellerArtist(a.Author))
+                    {
+                        _logger.LogInformation("Skipping Amazon ASIN {Asin} because title/author looks like a product or seller: Title='{Title}', Author='{Author}'", a.Asin, a.Title, a.Author);
+                        continue;
+                    }
+
                     asinCandidates.Add(a.Asin!);
                     asinToRawResult[a.Asin!] = (a.Title, a.Author, a.ImageUrl);
                     asinToSource[a.Asin!] = "Amazon";
                     _logger.LogInformation("Added Amazon ASIN candidate {Asin} Title='{Title}' Author='{Author}' ImageUrl='{ImageUrl}'", a.Asin, a.Title, a.Author, a.ImageUrl);
                 }
                 
-                foreach (var a in audibleResults.Where(a => !string.IsNullOrEmpty(a.Asin) && IsValidAsin(a.Asin!)))
+                foreach (var a in audibleResults.Where(a => !string.IsNullOrEmpty(a.Asin) && IsValidAsin(a.Asin!)).Take(audibleProviderCap))
                 {
+                    // Filter obvious non-audiobook results even from Audible (defensive)
+                    if (IsProductLikeTitle(a.Title) || IsSellerArtist(a.Author))
+                    {
+                        _logger.LogInformation("Skipping Audible ASIN {Asin} because title/author looks like a product or seller: Title='{Title}', Author='{Author}'", a.Asin, a.Title, a.Author);
+                        continue;
+                    }
+
                     if (asinToRawResult.TryAdd(a.Asin!, (a.Title, a.Author, a.ImageUrl)))
                     {
                         asinCandidates.Add(a.Asin!);
@@ -397,9 +427,8 @@ namespace Listenarr.Api.Services
                 }
                 
                 // Augment ASIN candidates with OpenLibrary suggestions (run after Amazon/Audible but before trimming)
-                // Temporarily disable OpenLibrary augmentation for intelligent searches.
-                // To re-enable, set skipOpenLibrary = false or remove this conditional.
-                var skipOpenLibrary = true; // TEMP: disable OpenLibrary
+                // Temporarily enable OpenLibrary augmentation for testing purposes.
+                var skipOpenLibrary = false; // TEMP: enable OpenLibrary
 
                 if (!skipOpenLibrary)
                 {
@@ -413,29 +442,76 @@ namespace Listenarr.Api.Services
                                 if (!string.IsNullOrEmpty(book.Title) && !string.Equals(book.Title, query, StringComparison.OrdinalIgnoreCase))
                                 {
                                     _logger.LogInformation("OpenLibrary suggested title: {Title}", book.Title);
-                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
-                                    foreach (var alt in altResults.Take(3))
+
+                                    // Convert OpenLibrary work/edition into minimal AudibleBookMetadata and SearchResult
+                                    try
                                     {
-                                        if (!string.IsNullOrEmpty(alt.Asin) && IsValidAsin(alt.Asin!))
+                                        string? coverUrl = null;
+                                        if (book.CoverId.HasValue && book.CoverId.Value > 0)
                                         {
-                                            if (!asinCandidates.Contains(alt.Asin!, StringComparer.OrdinalIgnoreCase))
+                                            coverUrl = $"https://covers.openlibrary.org/b/id/{book.CoverId}-L.jpg";
+                                        }
+
+                                        var metadata = new AudibleBookMetadata
+                                        {
+                                            Asin = null,
+                                            Source = "OpenLibrary",
+                                            Title = book.Title,
+                                            Authors = book.AuthorName != null ? book.AuthorName.Where(a => !string.IsNullOrWhiteSpace(a)).ToList() : null,
+                                            Publisher = (book.Publisher != null && book.Publisher.Count > 1) ? "Multiple" : (book.Publisher != null && book.Publisher.Any() ? book.Publisher.FirstOrDefault() : null),
+                                            PublishYear = book.FirstPublishYear?.ToString(),
+                                            Description = null,
+                                            ImageUrl = coverUrl
+                                        };
+
+                                        var searchResult = await ConvertMetadataToSearchResultAsync(metadata, string.Empty);
+                                        searchResult.IsEnriched = true;
+                                        searchResult.MetadataSource = "OpenLibrary";
+
+                                        // If OpenLibrary provides a canonical key (work or edition), expose it as product/result URLs
+                                        try
+                                        {
+                                            if (!string.IsNullOrWhiteSpace(book.Key))
                                             {
-                                                asinCandidates.Add(alt.Asin!);
-                                                // Prefer OpenLibrary cover if available
-                                                string? coverUrl = null;
-                                                if (book.CoverId.HasValue && book.CoverId.Value > 0)
+                                                // Prefer work page/JSON when key is a /works/... value
+                                                if (book.Key.StartsWith("/works", StringComparison.OrdinalIgnoreCase))
                                                 {
-                                                    coverUrl = $"https://covers.openlibrary.org/b/id/{book.CoverId}-L.jpg";
+                                                    searchResult.ProductUrl = $"https://openlibrary.org{book.Key}"; // human-facing page
+                                                    // also expose a .json metadata link if desired via ResultUrl
+                                                    searchResult.ResultUrl = $"https://openlibrary.org{book.Key}.json";
                                                 }
-                                                if (!asinToRawResult.ContainsKey(alt.Asin!))
+                                                else if (book.Key.StartsWith("/books", StringComparison.OrdinalIgnoreCase))
                                                 {
-                                                    asinToRawResult[alt.Asin!] = (alt.Title, alt.Author, coverUrl ?? alt.ImageUrl);
+                                                    searchResult.ProductUrl = $"https://openlibrary.org{book.Key}";
+                                                    searchResult.ResultUrl = $"https://openlibrary.org{book.Key}.json";
                                                 }
-                                                // store OpenLibrary book for this ASIN so we can use OL metadata later
-                                                try { asinToOpenLibrary[alt.Asin!] = book; } catch { }
-                                                _logger.LogInformation("Added alternative ASIN {Asin} from OpenLibrary title {Title}", alt.Asin, book.Title);
+                                                else
+                                                {
+                                                    // If key is a plain OLID like 'OL82548W', build book/work URLs conservatively
+                                                    if (Regex.IsMatch(book.Key, "^OL\\w+W$", RegexOptions.IgnoreCase))
+                                                    {
+                                                        searchResult.ProductUrl = $"https://openlibrary.org/works/{book.Key}";
+                                                        searchResult.ResultUrl = $"https://openlibrary.org/works/{book.Key}.json";
+                                                    }
+                                                    else if (Regex.IsMatch(book.Key, "^OL\\w+M$", RegexOptions.IgnoreCase))
+                                                    {
+                                                        searchResult.ProductUrl = $"https://openlibrary.org/books/{book.Key}";
+                                                        searchResult.ResultUrl = $"https://openlibrary.org/books/{book.Key}.json";
+                                                    }
+                                                }
                                             }
                                         }
+                                        catch (Exception exUrl)
+                                        {
+                                            _logger.LogDebug(exUrl, "Failed to build OpenLibrary URL for book key {Key}", book.Key);
+                                        }
+
+                                        openLibraryDerivedResults.Add(searchResult);
+                                        _logger.LogInformation("Added OpenLibrary-derived candidate: {Title}", book.Title);
+                                    }
+                                    catch (Exception exBook)
+                                    {
+                                        _logger.LogWarning(exBook, "Failed to convert OpenLibrary book {Title} to search result", book.Title);
                                     }
                                 }
                             }
@@ -446,30 +522,155 @@ namespace Listenarr.Api.Services
                         _logger.LogWarning(ex, "OpenLibrary augmentation failed, continuing without alternate titles");
                     }
                 }
+                
+                // Server-side: enrich OpenLibrary-derived candidates by fetching their canonical .json
+                // Populate Description and ImageUrl where available to avoid client-side on-click fetches
+                if (openLibraryDerivedResults != null && openLibraryDerivedResults.Any())
+                {
+                    _logger.LogInformation("Enriching {Count} OpenLibrary-derived candidate(s) with canonical JSON", openLibraryDerivedResults.Count);
+                    foreach (var olr in openLibraryDerivedResults)
+                    {
+                        try
+                        {
+                            // Prefer ResultUrl if provided (expected to be the .json endpoint)
+                            var jsonUrl = olr.ResultUrl;
+                            if (string.IsNullOrWhiteSpace(jsonUrl) && !string.IsNullOrWhiteSpace(olr.ProductUrl))
+                            {
+                                // If only a human-facing page exists, try to derive the .json endpoint conservatively
+                                if (olr.ProductUrl.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                                    jsonUrl = olr.ProductUrl;
+                                else
+                                    jsonUrl = olr.ProductUrl.TrimEnd('/') + ".json";
+                            }
 
-                asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).Take(candidateLimit).ToList();
-                _logger.LogInformation("Unified ASIN candidate list size: {Count} (candidateLimit={CandidateLimit})", asinCandidates.Count, candidateLimit);
+                            if (string.IsNullOrWhiteSpace(jsonUrl))
+                                continue;
+
+                            var resp = await _httpClient.GetAsync(jsonUrl);
+                            if (!resp.IsSuccessStatusCode)
+                            {
+                                _logger.LogDebug("OpenLibrary JSON fetch returned {Status} for {Url}", resp.StatusCode, jsonUrl);
+                                continue;
+                            }
+
+                            var json = await resp.Content.ReadAsStringAsync();
+                            using var doc = JsonDocument.Parse(json);
+                            var root = doc.RootElement;
+
+                            // Description can be a string or an object with a 'value' property
+                            try
+                            {
+                                if (root.TryGetProperty("description", out var descProp))
+                                {
+                                    if (descProp.ValueKind == JsonValueKind.String)
+                                    {
+                                        olr.Description = descProp.GetString();
+                                    }
+                                    else if (descProp.ValueKind == JsonValueKind.Object && descProp.TryGetProperty("value", out var v))
+                                    {
+                                        olr.Description = v.GetString();
+                                    }
+                                }
+                            }
+                            catch (Exception exDesc)
+                            {
+                                _logger.LogDebug(exDesc, "Failed to parse OpenLibrary description for {Url}", jsonUrl);
+                            }
+
+                            // Covers: works/edition JSON commonly expose an array 'covers' of ints
+                                        try
+                                        {
+                                            // Collect possible cover ids/urls
+                                            List<int> coverIds = new List<int>();
+                                            string? coverLargeUrl = null;
+                                            string? coverMediumUrl = null;
+
+                                            if (root.TryGetProperty("covers", out var coversProp) && coversProp.ValueKind == JsonValueKind.Array && coversProp.GetArrayLength() > 0)
+                                            {
+                                                foreach (var cp in coversProp.EnumerateArray())
+                                                {
+                                                    if (cp.ValueKind == JsonValueKind.Number && cp.TryGetInt32(out var cid))
+                                                    {
+                                                        coverIds.Add(cid);
+                                                    }
+                                                }
+                                            }
+                                            else if (root.TryGetProperty("cover", out var coverObj) && coverObj.ValueKind == JsonValueKind.Object)
+                                            {
+                                                if (coverObj.TryGetProperty("large", out var largeProp) && largeProp.ValueKind == JsonValueKind.String)
+                                                {
+                                                    coverLargeUrl = largeProp.GetString();
+                                                }
+                                                if (coverObj.TryGetProperty("medium", out var medProp) && medProp.ValueKind == JsonValueKind.String)
+                                                {
+                                                    coverMediumUrl = medProp.GetString();
+                                                }
+                                            }
+
+                                            // If we have explicit cover ids, attempt to pick the best by measuring aspect ratio
+                                            if (coverIds.Any())
+                                            {
+                                                try
+                                                {
+                                                    var best = await PickBestCoverUrlAsync(coverIds);
+                                                    if (!string.IsNullOrWhiteSpace(best))
+                                                    {
+                                                        olr.ImageUrl = best;
+                                                    }
+                                                    else
+                                                    {
+                                                        // fallback to first cover id
+                                                        olr.ImageUrl = $"https://covers.openlibrary.org/b/id/{coverIds.First()}-L.jpg";
+                                                    }
+                                                }
+                                                catch (Exception exPick)
+                                                {
+                                                    _logger.LogDebug(exPick, "Failed to pick best OpenLibrary cover by measurement for {Url}", jsonUrl);
+                                                    olr.ImageUrl = $"https://covers.openlibrary.org/b/id/{coverIds.First()}-L.jpg";
+                                                }
+                                            }
+                                            else if (!string.IsNullOrWhiteSpace(coverLargeUrl))
+                                            {
+                                                olr.ImageUrl = coverLargeUrl;
+                                            }
+                                            else if (!string.IsNullOrWhiteSpace(coverMediumUrl))
+                                            {
+                                                olr.ImageUrl = coverMediumUrl;
+                                            }
+                                        }
+                                        catch (Exception exCover)
+                                        {
+                                            _logger.LogDebug(exCover, "Failed to parse OpenLibrary covers for {Url}", jsonUrl);
+                                        }
+
+                            // If we found a description or image, ensure metadata source is set
+                            if (!string.IsNullOrWhiteSpace(olr.Description) || !string.IsNullOrWhiteSpace(olr.ImageUrl))
+                            {
+                                olr.MetadataSource = string.IsNullOrWhiteSpace(olr.MetadataSource) ? "OpenLibrary" : olr.MetadataSource;
+                                olr.IsEnriched = true;
+                                _logger.LogInformation("OpenLibrary enriched candidate {Title} with description/image from {Url}", olr.Title, jsonUrl);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "OpenLibrary enrichment failed for candidate {Title}", olr.Title);
+                            continue;
+                        }
+                    }
+                }
+
+                // Deduplicate unified candidate list; do not impose an overall cap so each
+                // provider's cap is respected independently.
+                asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                _logger.LogInformation("Unified ASIN candidate list size: {Count} (amazonCap={AmazonCap}, audibleCap={AudibleCap})", asinCandidates.Count, amazonProviderCap, audibleProviderCap);
                 await BroadcastSearchProgressAsync($"Found {asinCandidates.Count} ASIN candidates", null);
 
-                // If we don't have any ASIN candidates, fall back to returning raw search results
-                // (converted) so the API still returns usable items instead of an empty list.
+                // If we don't have any ASIN candidates, do not return early. Instead allow
+                // OpenLibrary-derived candidates (if any) to be merged and processed later
+                // so they are combined with ASIN-derived enriched results at the end.
                 if (!asinCandidates.Any())
                 {
-                    _logger.LogInformation("No ASIN candidates found; returning raw Amazon/Audible search results as fallback");
-                    var fallback = new List<SearchResult>();
-                    foreach (var a in amazonResults.Take(12))
-                    {
-                        var r = ConvertAmazonSearchToResult(a);
-                        r.IsEnriched = false;
-                        fallback.Add(r);
-                    }
-                    foreach (var a in audibleResults.Take(12))
-                    {
-                        var r = ConvertAudibleSearchToResult(a);
-                        r.IsEnriched = false;
-                        fallback.Add(r);
-                    }
-                    return fallback.OrderByDescending(r => r.Seeders).ThenBy(r => r.Size).ToList();
+                    _logger.LogInformation("No ASIN candidates found; will rely on OpenLibrary augmentation and later fallback processing if available");
                 }
 
                 // Step 3: Get enabled metadata sources ONCE before concurrent enrichment to avoid DbContext threading issues
@@ -482,6 +683,8 @@ namespace Listenarr.Api.Services
                 var enrichmentTasks = new List<Task>();
                 var enriched = new ConcurrentBag<SearchResult>();
                 var asinsNeedingFallback = new ConcurrentBag<string>();
+                // Diagnostic: track per-ASIN disposition / drop reason for easier debugging
+                var candidateDropReasons = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var asin in asinCandidates)
                 {
@@ -655,6 +858,8 @@ namespace Listenarr.Api.Services
                             if (metadata == null)
                             {
                                 asinsNeedingFallback.Add(asin);
+                                // Note that this ASIN has no metadata yet
+                                try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; } catch { }
                             }
 
                             
@@ -686,10 +891,12 @@ namespace Listenarr.Api.Services
                                 }
                                 
                                 enriched.Add(enrichedResult);
+                                try { candidateDropReasons[asin] = "enriched_from_metadata"; } catch { }
                             }
                             else
                             {
                                 _logger.LogWarning("✗ No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
+                                try { candidateDropReasons[asin] = "no_metadata_after_sources"; } catch { }
                             }
                         }
                         catch (Exception ex)
@@ -709,6 +916,41 @@ namespace Listenarr.Api.Services
                 // Only return enriched items (metadata success); skip basic fallbacks entirely
                 var enrichedList = enriched.ToList();
                 await BroadcastSearchProgressAsync($"Enrichment complete. Found {enrichedList.Count} enriched results", null);
+
+                // Merge OpenLibrary-derived results (created earlier) into the enriched list so
+                // OpenLibrary-only augmentation produces visible, scoreable items without calling Amazon.
+                try
+                {
+                    if (openLibraryDerivedResults != null && openLibraryDerivedResults.Any())
+                    {
+                        _logger.LogInformation("Merging {Count} OpenLibrary-derived candidate(s) into enriched results", openLibraryDerivedResults.Count);
+
+                        foreach (var ol in openLibraryDerivedResults)
+                        {
+                            // Basic dedupe: avoid adding items with same Title+Artist
+                            var duplicate = enrichedList.Any(e => 
+                                string.Equals(e.Title ?? string.Empty, ol.Title ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                                && string.Equals(e.Artist ?? string.Empty, ol.Artist ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+
+                            if (!duplicate)
+                            {
+                                enrichedList.Add(ol);
+                                try { candidateDropReasons[(!string.IsNullOrWhiteSpace(ol.Asin) ? ol.Asin : ol.Id)] = "enriched_from_openlibrary"; } catch { }
+                                _logger.LogInformation("Added OpenLibrary-derived enriched result: Title='{Title}', Artist='{Artist}'", ol.Title, ol.Artist);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Skipping duplicate OpenLibrary candidate: Title='{Title}', Artist='{Artist}'", ol.Title, ol.Artist);
+                            }
+                        }
+
+                        await BroadcastSearchProgressAsync($"OpenLibrary augmentation added {openLibraryDerivedResults.Count} candidate(s)", null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to merge OpenLibrary-derived results into enriched list");
+                }
 
                 // Last-ditch fallback: scrape product detail pages for ASINs that failed all metadata sources
                 try
@@ -741,6 +983,10 @@ namespace Listenarr.Api.Services
                                         if (IsTitleNoise(scraped.Title) || IsPromotionalTitle(scraped.Title))
                                         {
                                             _logger.LogInformation("Skipping scraped ASIN {Asin} because title appears promotional/noise: {Title}", fa, scraped.Title);
+                                            if (!string.IsNullOrWhiteSpace(fa))
+                                            {
+                                                try { candidateDropReasons[fa] = "scrape_filtered_promotional_or_noise"; } catch { }
+                                            }
                                             return;
                                         }
                                         // Convert scraped data into AudibleBookMetadata-like object for conversion
@@ -766,16 +1012,28 @@ namespace Listenarr.Api.Services
                                         var enrichedResult = await ConvertMetadataToSearchResultAsync(metadata, fa!, null, null, scraped.ImageUrl);
                                         enrichedResult.IsEnriched = true;
                                         enriched.Add(enrichedResult);
+                                        if (!string.IsNullOrWhiteSpace(fa))
+                                        {
+                                            try { candidateDropReasons[fa] = "scrape_enriched"; } catch { }
+                                        }
                                         _logger.LogInformation("Product-page scraping enriched ASIN {Asin} with title={Title}", fa, scraped.Title);
                                     }
                                     else
                                     {
                                         _logger.LogInformation("Product-page scraping returned no useful data for ASIN {Asin}", fa);
+                                        if (!string.IsNullOrWhiteSpace(fa))
+                                        {
+                                            try { candidateDropReasons[fa] = "scrape_no_data"; } catch { }
+                                        }
                                     }
                                 }
                                 catch (Exception ex)
                                 {
                                     _logger.LogWarning(ex, "Product-page scraping failed for ASIN {Asin}", fa);
+                                    if (!string.IsNullOrWhiteSpace(fa))
+                                    {
+                                        try { candidateDropReasons[fa] = "scrape_exception"; } catch { }
+                                    }
                                 }
                                 finally
                                 {
@@ -1062,8 +1320,8 @@ namespace Listenarr.Api.Services
                 results = results.Where(r =>
                     // Preserve OpenLibrary results regardless of title heuristics
                     (string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase))
-                    // For all other results apply the usual title checks
-                    || (!string.IsNullOrWhiteSpace(r.Title) && !IsTitleNoise(r.Title) && r.Title.Length >= 3)
+                    // For all other results apply the usual title checks AND ensure it looks like an audiobook
+                    || (!string.IsNullOrWhiteSpace(r.Title) && !IsTitleNoise(r.Title) && r.Title.Length >= 3 && IsLikelyAudiobook(r))
                 ).ToList();
 
                 // Additional filter: if the result does not contain the original search query
@@ -1103,6 +1361,99 @@ namespace Listenarr.Api.Services
                         return 1;
                     })
                     .ToList();
+
+                // Ensure every unified ASIN candidate has a final disposition reason for diagnostics.
+                try
+                {
+                    var finalAsinEntries = new List<string>();
+
+                    foreach (var asin in asinCandidates)
+                    {
+                        if (string.IsNullOrWhiteSpace(asin)) continue;
+
+                        // If already accepted in the final results, mark as accepted
+                        if (results.Any(r => string.Equals(r.Asin, asin, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            try { candidateDropReasons[asin] = "accepted"; } catch { }
+                            finalAsinEntries.Add($"{asin}:accepted");
+                            continue;
+                        }
+
+                        // If we have an enriched version but it didn't make the final list, try to compute a specific drop reason
+                        var enrichedCandidate = enrichedList.FirstOrDefault(e => string.Equals(e.Asin, asin, StringComparison.OrdinalIgnoreCase));
+                        if (enrichedCandidate != null)
+                        {
+                            // Author/publisher requirement
+                            if (requireAuthorAndPublisher && (string.IsNullOrWhiteSpace(enrichedCandidate.Artist) || string.IsNullOrWhiteSpace(enrichedCandidate.Publisher)))
+                            {
+                                try { candidateDropReasons[asin] = "author_publisher_missing"; } catch { }
+                                finalAsinEntries.Add($"{asin}:author_publisher_missing");
+                                continue;
+                            }
+
+                            // Title noise or unlikely audiobook
+                            if (IsTitleNoise(enrichedCandidate.Title) || !IsLikelyAudiobook(enrichedCandidate))
+                            {
+                                try { candidateDropReasons[asin] = "filtered_title_or_not_likely"; } catch { }
+                                finalAsinEntries.Add($"{asin}:filtered_title_or_not_likely");
+                                continue;
+                            }
+
+                            // Containment / fuzzy failure
+                            var containment = 0.0;
+                            var fuzzy = 0.0;
+                            try
+                            {
+                                containment = ComputeContainmentScore(enrichedCandidate, query ?? string.Empty);
+                                fuzzy = ComputeFuzzySimilarity((enrichedCandidate.Title ?? string.Empty) + " " + (enrichedCandidate.Artist ?? string.Empty), query ?? string.Empty);
+                            }
+                            catch { }
+
+                            if (string.Equals(containmentMode, "Strict", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // In strict mode we require direct containment
+                                var hay = string.Join(" ", new[] { enrichedCandidate.Title, enrichedCandidate.Artist, enrichedCandidate.Album, enrichedCandidate.Description, enrichedCandidate.Publisher, enrichedCandidate.Narrator, enrichedCandidate.Language, enrichedCandidate.Series }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
+                                if (string.IsNullOrEmpty(hay) || hay.IndexOf(query ?? string.Empty, StringComparison.OrdinalIgnoreCase) < 0)
+                                {
+                                    try { candidateDropReasons[asin] = "containment_failed_strict"; } catch { }
+                                    finalAsinEntries.Add($"{asin}:containment_failed_strict");
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                if (containment < 0.4 && fuzzy < fuzzyThreshold)
+                                {
+                                    try { candidateDropReasons[asin] = "containment_failed_relaxed"; } catch { }
+                                    finalAsinEntries.Add($"{asin}:containment_failed_relaxed");
+                                    continue;
+                                }
+                            }
+
+                            // If none of the above matched, mark as filtered by post-scoring rules
+                            try { candidateDropReasons[asin] = "filtered_post_scoring"; } catch { }
+                            finalAsinEntries.Add($"{asin}:filtered_post_scoring");
+                            continue;
+                        }
+
+                        // If we reached here, the ASIN never got enriched nor scraped successfully
+                        if (!candidateDropReasons.ContainsKey(asin))
+                        {
+                            try { candidateDropReasons[asin] = "no_metadata_and_no_scrape"; } catch { }
+                        }
+                        finalAsinEntries.Add($"{asin}:{candidateDropReasons.GetValueOrDefault(asin)}");
+                    }
+
+                    // Emit a consolidated diagnostic log with per-ASIN dispositions
+                    if (finalAsinEntries.Any())
+                    {
+                        _logger.LogInformation("Final ASIN dispositions for query '{Query}': {Entries}", query, string.Join(", ", finalAsinEntries));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to compute final ASIN dispositions for query: {Query}", query);
+                }
 
                 _logger.LogInformation("Intelligent search complete. Returning {Count} filtered and sorted results for query: {Query}", results.Count, query);
                 return results;
@@ -1185,6 +1536,85 @@ namespace Listenarr.Api.Services
             if (a.Equals("By:", StringComparison.OrdinalIgnoreCase)) return true;
             if (a.StartsWith("Sort by", StringComparison.OrdinalIgnoreCase)) return true;
             if (a.Contains("English - USD", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        // Heuristic: detect product-like titles that are unlikely to be audiobooks
+        private static bool IsProductLikeTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return false;
+            var t = title.Trim();
+            var lower = t.ToLowerInvariant();
+
+            // Quick rejects for extremely long descriptive product titles
+            if (t.Length > 200) return true;
+
+            // Common product keywords that rarely appear in audiobook titles
+            string[] productKeywords = new[]
+            {
+                "led","lamp","light","charger","battery","watt","volt","usb","hdmi","case","cover","shirt",
+                "socks","decor","decoration","decorations","gift","necklace","bracelet","ring","halloween",
+                "christmas","remote","plug","adapter","holder","stand","tool","kit","pack of","set of","piece",
+                "cm","mm","inch","inches","oz","ml","capacity","dimensions","material","fabric","men's","women's"
+            };
+
+            if (productKeywords.Any(k => lower.Contains(k))) return true;
+
+            // Model / pack patterns: 'Pack of 2', 'Set of 3', 'x cm', numeric dimension patterns
+            if (Regex.IsMatch(lower, "\\b(pack of|set of|set x|\bx\b|\bpcs?\b|\\bqty\\b|\\bpiece\\b)", RegexOptions.IgnoreCase)) return true;
+            if (Regex.IsMatch(t, "\\b\\d{1,4}\\s?(cm|mm|in|inches|oz|ml)\\b", RegexOptions.IgnoreCase)) return true;
+
+            // Titles that contain 'store' in a way that suggests a vendor name are product-like
+            if (lower.Contains("store") || lower.Contains("official store") || lower.Contains("visit the")) return true;
+
+            // If title contains many commas and descriptive clauses it's more likely a product listing
+            if (t.Count(c => c == ',') >= 3) return true;
+
+            return false;
+        }
+
+        // Heuristic: detect if the artist field refers to a store/seller rather than an author
+        private static bool IsSellerArtist(string? artist)
+        {
+            if (string.IsNullOrWhiteSpace(artist)) return false;
+            var a = artist.Trim().ToLowerInvariant();
+            if (a.Contains("store") || a.Contains("seller") || a.Contains("official store") || a.Contains("shop")) return true;
+            if (a.StartsWith("visit the ") && a.EndsWith(" store")) return true;
+            return false;
+        }
+
+        // Conservative heuristic: determine whether a SearchResult looks like a genuine audiobook
+        private static bool IsLikelyAudiobook(SearchResult r)
+        {
+            if (r == null) return false;
+
+            // If a proper metadata provider enriched it, trust it
+            if (!string.IsNullOrWhiteSpace(r.MetadataSource))
+            {
+                var md = r.MetadataSource.ToLowerInvariant();
+                if (md.Contains("audimeta") || md.Contains("audnex") || md.Contains("audnexus") || md.Contains("audible"))
+                    return true;
+            }
+
+            // If we have runtime in minutes and it's a reasonable audiobook length (>5 minutes)
+            if (r.Runtime.HasValue && r.Runtime.Value > 5) return true;
+
+            // Narrator or publisher presence strongly indicates audiobook metadata
+            if (!string.IsNullOrWhiteSpace(r.Narrator)) return true;
+            if (!string.IsNullOrWhiteSpace(r.Publisher)) return true;
+
+            // Title tokens that explicitly mention audiobook cues
+            var title = r.Title ?? string.Empty;
+            var lower = title.ToLowerInvariant();
+            string[] audioKeywords = new[] { "audiobook", "narrated by", "read by", "full-cast", "full cast", "unabridged", "abridged" };
+            if (audioKeywords.Any(k => lower.Contains(k))) return true;
+
+            // Reject if title looks product-like or artist looks like a seller
+            if (IsProductLikeTitle(title) || IsSellerArtist(r.Artist)) return false;
+
+            // Fallback: if title is short and contains no product keywords, treat as possible audiobook
+            if (!string.IsNullOrWhiteSpace(title) && title.Length < 120 && !IsProductLikeTitle(title)) return true;
+
             return false;
         }
 
@@ -1312,6 +1742,54 @@ namespace Listenarr.Api.Services
         private static bool isOpenLibraryResult(SearchResult r)
         {
             return string.Equals(r?.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Try to pick the best cover URL from a list of OpenLibrary cover IDs by measuring image aspect ratios.
+        // Returns a full covers.openlibrary.org URL or null on failure.
+        private async Task<string?> PickBestCoverUrlAsync(List<int> coverIds)
+        {
+            if (coverIds == null || !coverIds.Any()) return null;
+
+            double bestDelta = double.MaxValue;
+            string? bestUrl = null;
+
+            foreach (var cid in coverIds)
+            {
+                try
+                {
+                    var url = $"https://covers.openlibrary.org/b/id/{cid}-L.jpg";
+                    using var resp = await _httpClient.GetAsync(url);
+                    if (!resp.IsSuccessStatusCode) continue;
+                    using var ms = new System.IO.MemoryStream(await resp.Content.ReadAsByteArrayAsync());
+                    try
+                    {
+                        using var img = System.Drawing.Image.FromStream(ms, true, false);
+                        if (img.Height == 0) continue;
+                        var ratio = (double)img.Width / img.Height;
+                        var delta = Math.Abs(ratio - 1.0);
+                        if (delta < bestDelta)
+                        {
+                            bestDelta = delta;
+                            bestUrl = url;
+                        }
+                        // If exactly 1:1, short-circuit
+                        if (Math.Abs(delta) < 0.01)
+                            break;
+                    }
+                    catch (Exception imgEx)
+                    {
+                        _logger.LogDebug(imgEx, "Failed to measure image dimensions for cover {Url}", url);
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to fetch cover image for id {Id}", cid);
+                    continue;
+                }
+            }
+
+            return bestUrl;
         }
 
         /// <summary>
