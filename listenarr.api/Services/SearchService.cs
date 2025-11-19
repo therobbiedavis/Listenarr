@@ -31,9 +31,9 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SearchService> _logger;
-    private readonly IAudibleMetadataService _audibleMetadataService;
+        private readonly IAudibleMetadataService _audibleMetadataService;
         private readonly IOpenLibraryService _openLibraryService;
-    private readonly IHubContext<DownloadHub> _hubContext;
+        private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAmazonSearchService _amazonSearchService;
         private readonly IAudibleSearchService _audibleSearchService;
         private readonly IImageCacheService _imageCacheService;
@@ -315,7 +315,7 @@ namespace Listenarr.Api.Services
             return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-    public async Task<List<SearchResult>> IntelligentSearchAsync(string query)
+    public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7)
         {
             var results = new List<SearchResult>();
 
@@ -363,12 +363,27 @@ namespace Listenarr.Api.Services
                 var asinToRawResult = new Dictionary<string, (string? Title, string? Author, string? ImageUrl)>(StringComparer.OrdinalIgnoreCase);
                 var asinToAudibleResult = new Dictionary<string, AudibleSearchResult>(StringComparer.OrdinalIgnoreCase);
                 var asinToSource = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var asinToOpenLibrary = new Dictionary<string, OpenLibraryBook>(StringComparer.OrdinalIgnoreCase);
                 
-                foreach (var a in amazonResults.Where(a => !string.IsNullOrEmpty(a.Asin) && IsValidAsin(a.Asin!)))
+                // Populate ASIN candidates from Amazon results with detailed logging
+                foreach (var a in amazonResults)
                 {
+                    if (string.IsNullOrEmpty(a.Asin))
+                    {
+                        _logger.LogInformation("Amazon search result missing ASIN. Title='{Title}', Author='{Author}'", a.Title, a.Author);
+                        continue;
+                    }
+
+                    if (!IsValidAsin(a.Asin!))
+                    {
+                        _logger.LogInformation("Amazon search result had invalid ASIN '{Asin}'. Title='{Title}', Author='{Author}'", a.Asin, a.Title, a.Author);
+                        continue;
+                    }
+
                     asinCandidates.Add(a.Asin!);
                     asinToRawResult[a.Asin!] = (a.Title, a.Author, a.ImageUrl);
                     asinToSource[a.Asin!] = "Amazon";
+                    _logger.LogInformation("Added Amazon ASIN candidate {Asin} Title='{Title}' Author='{Author}' ImageUrl='{ImageUrl}'", a.Asin, a.Title, a.Author, a.ImageUrl);
                 }
                 
                 foreach (var a in audibleResults.Where(a => !string.IsNullOrEmpty(a.Asin) && IsValidAsin(a.Asin!)))
@@ -381,8 +396,59 @@ namespace Listenarr.Api.Services
                     }
                 }
                 
-                asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList();
-                _logger.LogInformation("Unified ASIN candidate list size: {Count}", asinCandidates.Count);
+                // Augment ASIN candidates with OpenLibrary suggestions (run after Amazon/Audible but before trimming)
+                // Temporarily disable OpenLibrary augmentation for intelligent searches.
+                // To re-enable, set skipOpenLibrary = false or remove this conditional.
+                var skipOpenLibrary = true; // TEMP: disable OpenLibrary
+
+                if (!skipOpenLibrary)
+                {
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(query))
+                        {
+                            var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
+                            foreach (var book in books.Docs.Take(3))
+                            {
+                                if (!string.IsNullOrEmpty(book.Title) && !string.Equals(book.Title, query, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _logger.LogInformation("OpenLibrary suggested title: {Title}", book.Title);
+                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
+                                    foreach (var alt in altResults.Take(3))
+                                    {
+                                        if (!string.IsNullOrEmpty(alt.Asin) && IsValidAsin(alt.Asin!))
+                                        {
+                                            if (!asinCandidates.Contains(alt.Asin!, StringComparer.OrdinalIgnoreCase))
+                                            {
+                                                asinCandidates.Add(alt.Asin!);
+                                                // Prefer OpenLibrary cover if available
+                                                string? coverUrl = null;
+                                                if (book.CoverId.HasValue && book.CoverId.Value > 0)
+                                                {
+                                                    coverUrl = $"https://covers.openlibrary.org/b/id/{book.CoverId}-L.jpg";
+                                                }
+                                                if (!asinToRawResult.ContainsKey(alt.Asin!))
+                                                {
+                                                    asinToRawResult[alt.Asin!] = (alt.Title, alt.Author, coverUrl ?? alt.ImageUrl);
+                                                }
+                                                // store OpenLibrary book for this ASIN so we can use OL metadata later
+                                                try { asinToOpenLibrary[alt.Asin!] = book; } catch { }
+                                                _logger.LogInformation("Added alternative ASIN {Asin} from OpenLibrary title {Title}", alt.Asin, book.Title);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "OpenLibrary augmentation failed, continuing without alternate titles");
+                    }
+                }
+
+                asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).Take(candidateLimit).ToList();
+                _logger.LogInformation("Unified ASIN candidate list size: {Count} (candidateLimit={CandidateLimit})", asinCandidates.Count, candidateLimit);
                 await BroadcastSearchProgressAsync($"Found {asinCandidates.Count} ASIN candidates", null);
 
                 // If we don't have any ASIN candidates, fall back to returning raw search results
@@ -415,6 +481,7 @@ namespace Listenarr.Api.Services
                 var semaphore = new SemaphoreSlim(3); // throttle external fetches
                 var enrichmentTasks = new List<Task>();
                 var enriched = new ConcurrentBag<SearchResult>();
+                var asinsNeedingFallback = new ConcurrentBag<string>();
 
                 foreach (var asin in asinCandidates)
                 {
@@ -425,22 +492,86 @@ namespace Listenarr.Api.Services
                         {
                             _logger.LogDebug("Enriching ASIN {Asin}", asin);
                             await BroadcastSearchProgressAsync($"Enriching ASIN: {asin}", asin);
-                            
+
                             // Get the original search results
                             asinToRawResult.TryGetValue(asin, out var rawResult);
                             asinToAudibleResult.TryGetValue(asin, out var audibleResult);
                             asinToSource.TryGetValue(asin, out var originalSource);
-                            
+
                             AudibleBookMetadata? metadata = null;
                             string? metadataSourceName = null;
-                            
+
+                            // If this ASIN was added from OpenLibrary augmentation, prefer OpenLibrary metadata
+                            if (asinToOpenLibrary.TryGetValue(asin, out var olBook))
+                            {
+                                try
+                                {
+                                    _logger.LogInformation("ASIN {Asin} has OpenLibrary augmentation. Considering OL metadata.", asin);
+
+                                    // Build a simple haystack from OL fields and check if the original query
+                                    // appears anywhere in those fields. Only show OL-derived results when
+                                    // the search value appears in OL metadata (title/author/publisher/subject).
+                                    var hayOl = string.Join(" ", new[] {
+                                        olBook.Title ?? string.Empty,
+                                        olBook.AuthorName != null ? string.Join(" ", olBook.AuthorName) : string.Empty,
+                                        olBook.Publisher != null ? string.Join(" ", olBook.Publisher) : string.Empty,
+                                        olBook.Subject != null ? string.Join(" ", olBook.Subject) : string.Empty
+                                    }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+                                    var queryMatchesOl = false;
+                                    if (!string.IsNullOrWhiteSpace(hayOl) && !string.IsNullOrWhiteSpace(query))
+                                    {
+                                        queryMatchesOl = hayOl.IndexOf(query ?? string.Empty, StringComparison.OrdinalIgnoreCase) >= 0;
+                                    }
+
+                                    if (queryMatchesOl)
+                                    {
+                                        // Convert OpenLibrary book to AudibleBookMetadata-like object
+                                        metadata = new AudibleBookMetadata
+                                        {
+                                            Asin = asin,
+                                            Source = "OpenLibrary",
+                                            Title = olBook.Title,
+                                            Authors = olBook.AuthorName?.Where(a => !string.IsNullOrWhiteSpace(a)).ToList(),
+                                            Publisher = olBook.Publisher != null && olBook.Publisher.Any() ? olBook.Publisher.FirstOrDefault() : null,
+                                            PublishYear = olBook.FirstPublishYear?.ToString(),
+                                            Description = null,
+                                            ImageUrl = olBook.CoverId.HasValue ? $"https://covers.openlibrary.org/b/id/{olBook.CoverId}-L.jpg" : null
+                                        };
+                                        metadataSourceName = "OpenLibrary";
+                                        _logger.LogInformation("Using OpenLibrary metadata for ASIN {Asin} (title: {Title})", asin, olBook.Title);
+                                    }
+                                    else
+                                    {
+                                        // OL exists for this ASIN but does not contain the query -> queue for fallback
+                                        _logger.LogInformation("OpenLibrary has entry for ASIN {Asin} but OL metadata did not contain the query; queuing for fallback", asin);
+                                        asinsNeedingFallback.Add(asin);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to convert OpenLibrary metadata for ASIN {Asin}", asin);
+                                }
+
+                                // Skip calling Audimeta/Audnexus for OpenLibrary-augmented ASINs
+                                if (metadata != null)
+                                {
+                                    // proceed to convert metadata below without trying other metadata sources
+                                }
+                                else
+                                {
+                                    // move on to next ASIN; no remote metadata calls for OL-derived ASINs
+                                    return;
+                                }
+                            }
+
                             // Use the pre-fetched metadata sources (avoid DbContext concurrency issues)
-                            if (metadataSources.Count > 0)
+                            if (metadata == null && metadataSources.Count > 0)
                             {
                                 _logger.LogInformation("Attempting to fetch metadata for ASIN {Asin} from {Count} configured source(s): {Sources}", 
                                     asin, metadataSources.Count, string.Join(", ", metadataSources.Select(s => s.Name)));
                             }
-                            
+
                             // Try each metadata source in priority order until one succeeds
                             foreach (var source in metadataSources)
                             {
@@ -465,6 +596,29 @@ namespace Listenarr.Api.Services
                                         else
                                         {
                                             _logger.LogWarning("✗ Audimeta returned null for ASIN {Asin}", asin);
+
+                                            // Retry once without cache (force audimeta to refresh) when cache lookup fails
+                                            try
+                                            {
+                                                _logger.LogInformation("Audimeta returned null for ASIN {Asin} (cache=true); retrying without cache", asin);
+                                                var audimetaRetry = await _audimetaService.GetBookMetadataAsync(asin, "us", false);
+                                                if (audimetaRetry != null)
+                                                {
+                                                    _logger.LogInformation("✓ Audimeta returned data for ASIN {Asin} on retry (no-cache). Title: {Title}", asin, audimetaRetry.Title ?? "null");
+                                                    metadata = ConvertAudimetaToMetadata(audimetaRetry, asin, originalSource ?? "Audible");
+                                                    metadataSourceName = source.Name;
+                                                    _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName} (no-cache)", asin, source.Name);
+                                                    break;
+                                                }
+                                                else
+                                                {
+                                                    _logger.LogWarning("✗ Audimeta returned null on retry for ASIN {Asin}", asin);
+                                                }
+                                            }
+                                            catch (Exception exRetry)
+                                            {
+                                                _logger.LogWarning(exRetry, "Audimeta retry without cache failed for ASIN {Asin}", asin);
+                                            }
                                         }
                                     }
                                     else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase))
@@ -497,42 +651,12 @@ namespace Listenarr.Api.Services
                                 }
                             }
                             
-                            // If all metadata sources failed, fall back to scraping
+                            // If all metadata sources failed, queue ASIN for last-ditch fallback (OpenLibrary then scraping)
                             if (metadata == null)
                             {
-                                if (metadataSources.Count == 0)
-                                {
-                                    _logger.LogInformation("⚠ No metadata sources configured for ASIN {Asin}, falling back to scraping", asin);
-                                    await BroadcastSearchProgressAsync($"No metadata sources configured, scraping for ASIN: {asin}", asin);
-                                }
-                                else
-                                {
-                                    _logger.LogWarning("⚠ All {Count} metadata sources failed for ASIN {Asin} (tried: {Sources}), falling back to scraping", 
-                                        metadataSources.Count, asin, string.Join(", ", metadataSources.Select(s => s.Name)));
-                                    await BroadcastSearchProgressAsync($"Metadata sources failed, scraping for ASIN: {asin}", asin);
-                                }
-                                
-                                _logger.LogInformation("Attempting to scrape metadata for ASIN {Asin}", asin);
-                                metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
-                                
-                                if (metadata != null)
-                                {
-                                    _logger.LogInformation("✓ Successfully scraped metadata for ASIN {Asin}. Title: {Title}, Source: {Source}", 
-                                        asin, metadata.Title ?? "null", metadata.Source ?? "null");
-                                    
-                                    // Keep the original source for the product link (Amazon/Audible where ASIN was found)
-                                    var scrapedFrom = metadata.Source; // This is set by the scraper based on which site worked
-                                    metadata.Source = originalSource ?? "Audible";
-                                    
-                                    // Set metadata source to the site that was scraped (without "(Scraped)" suffix)
-                                    metadataSourceName = scrapedFrom;
-                                    _logger.LogInformation("Scraped metadata from {ScrapedFrom}, setting MetadataSource badge to: {MetadataSource}", scrapedFrom, metadataSourceName);
-                                }
-                                else
-                                {
-                                    _logger.LogWarning("✗ Failed to scrape metadata for ASIN {Asin}", asin);
-                                }
+                                asinsNeedingFallback.Add(asin);
                             }
+
                             
                             // If we have an Audible search result, populate/merge that data first
                             if (audibleResult != null && metadata != null)
@@ -580,96 +704,405 @@ namespace Listenarr.Api.Services
                 }
                 await Task.WhenAll(enrichmentTasks);
 
+                await Task.WhenAll(enrichmentTasks);
+
                 // Only return enriched items (metadata success); skip basic fallbacks entirely
-                results.AddRange(enriched);
-                await BroadcastSearchProgressAsync($"Enrichment complete. Returning {results.Count} results", null);
+                var enrichedList = enriched.ToList();
+                await BroadcastSearchProgressAsync($"Enrichment complete. Found {enrichedList.Count} enriched results", null);
+
+                // Last-ditch fallback: scrape product detail pages for ASINs that failed all metadata sources
+                try
+                {
+                    var fallbackAsins = asinsNeedingFallback.Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Where(a => !string.IsNullOrWhiteSpace(a))
+                        .Except(enrichedList.Select(e => e.Asin), StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    if (fallbackAsins.Any())
+                    {
+                        _logger.LogInformation("Attempting product-page scraping fallback for {Count} ASIN(s)", fallbackAsins.Count);
+                        await BroadcastSearchProgressAsync($"Scraping product pages for {fallbackAsins.Count} ASINs", null);
+
+                        var scrapeSemaphore = new SemaphoreSlim(3);
+                        var scrapeTasks = new List<Task>();
+
+                        foreach (var fa in fallbackAsins)
+                        {
+                            scrapeTasks.Add(Task.Run(async () =>
+                            {
+                                await scrapeSemaphore.WaitAsync();
+                                try
+                                {
+                                    _logger.LogInformation("Scraping product page for ASIN {Asin}", fa);
+                                    var scraped = await _amazonSearchService.ScrapeProductPageAsync(fa!);
+                                    if (scraped != null)
+                                    {
+                                        // Skip scraped titles that are clearly promotional or noise (e.g., "Unlock 15% savings")
+                                        if (IsTitleNoise(scraped.Title) || IsPromotionalTitle(scraped.Title))
+                                        {
+                                            _logger.LogInformation("Skipping scraped ASIN {Asin} because title appears promotional/noise: {Title}", fa, scraped.Title);
+                                            return;
+                                        }
+                                        // Convert scraped data into AudibleBookMetadata-like object for conversion
+                                        var metadata = new AudibleBookMetadata
+                                        {
+                                            Asin = scraped.Asin,
+                                            Source = "Amazon",
+                                            Title = scraped.Title,
+                                            Subtitle = null,
+                                            Authors = !string.IsNullOrWhiteSpace(scraped.Author) ? new List<string> { scraped.Author } : null,
+                                            Author = scraped.Author,
+                                            ImageUrl = scraped.ImageUrl,
+                                            PublishYear = scraped.PublishYear,
+                                            Publisher = scraped.Publisher,
+                                            Version = scraped.Version,
+                                            Language = scraped.Language,
+                                            Series = scraped.Series,
+                                            SeriesNumber = scraped.SeriesNumber,
+                                            Runtime = scraped.RuntimeMinutes,
+                                            Narrators = !string.IsNullOrWhiteSpace(scraped.Narrator) ? scraped.Narrator.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(n => n.Trim()).ToList() : null
+                                        };
+
+                                        var enrichedResult = await ConvertMetadataToSearchResultAsync(metadata, fa!, null, null, scraped.ImageUrl);
+                                        enrichedResult.IsEnriched = true;
+                                        enriched.Add(enrichedResult);
+                                        _logger.LogInformation("Product-page scraping enriched ASIN {Asin} with title={Title}", fa, scraped.Title);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation("Product-page scraping returned no useful data for ASIN {Asin}", fa);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Product-page scraping failed for ASIN {Asin}", fa);
+                                }
+                                finally
+                                {
+                                    scrapeSemaphore.Release();
+                                }
+                            }));
+                        }
+
+                        await Task.WhenAll(scrapeTasks);
+
+                        // Refresh enrichedList after scraping attempts
+                        enrichedList = enriched.ToList();
+                        await BroadcastSearchProgressAsync($"Scraping fallback complete. Total enriched results now: {enrichedList.Count}", null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Product-page scraping fallback encountered an error");
+                }
+
+                // Compute scores and apply deferred filtering (containment, author/publisher, fuzzy)
+                var scored = new List<(SearchResult Result, double Score, double ContainmentScore, double FuzzyScore, string DropReason)>();
+
+                foreach (var r in enrichedList)
+                {
+                    double containmentScore = 0.0;
+                    double fuzzyScore = 0.0;
+
+                    // Always preserve OpenLibrary-sourced items
+                    var isOpenLibrary = string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase);
+
+                    // Compute containment and fuzzy similarity based on title/author/description
+                    try
+                    {
+                        containmentScore = ComputeContainmentScore(r, query ?? string.Empty);
+                        fuzzyScore = ComputeFuzzySimilarity((r.Title ?? string.Empty) + " " + (r.Artist ?? string.Empty), query ?? string.Empty);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to compute containment/fuzzy scores for ASIN {Asin}", r.Asin);
+                    }
+
+                    // Compute completeness: fraction of important fields present
+                    int fieldsPresent = 0;
+                    if (!string.IsNullOrWhiteSpace(r.Title)) fieldsPresent++;
+                    if (!string.IsNullOrWhiteSpace(r.Artist)) fieldsPresent++;
+                    if (!string.IsNullOrWhiteSpace(r.Publisher)) fieldsPresent++;
+                    if (!string.IsNullOrWhiteSpace(r.ImageUrl)) fieldsPresent++;
+                    double completenessScore = fieldsPresent / 4.0;
+
+                    // Source priority: proper metadata sources get higher base multiplier
+                    int sourcePriority = 0;
+                    if (!string.IsNullOrEmpty(r.MetadataSource))
+                    {
+                        var md = r.MetadataSource.ToLowerInvariant();
+                        if (md.Contains("audimeta") || md.Contains("audnex") || md.Contains("audnexus") || md.Contains("openlibrary")) sourcePriority = 2;
+                        else if (md == "amazon" || md == "audible") sourcePriority = 1;
+                        else sourcePriority = 1;
+                    }
+
+                    // More granular relevance scoring
+                    // Features considered:
+                    // - Title containment (token containment of query in result fields)
+                    // - Title fuzzy similarity (levenshtein-based)
+                    // - Exact author match (query tokens appear in artist)
+                    // - ASIN exact match (query equals asin)
+                    // - Series match (query tokens match series)
+                    // - Metadata completeness
+                    // - Source priority (proper metadata sources preferred)
+                    // - Promotional/noise penalty
+
+                    // Title containment remains the primary signal
+                    double titleContainment = containmentScore; // 0.0 - 1.0
+
+                    // Title fuzzy similarity gives a smaller boost for near-miss spellings
+                    double titleFuzzy = fuzzyScore; // 0.0 - 1.0
+
+                    // Author match: proportion of query tokens that appear in artist
+                    double authorMatch = 0.0;
+                    try
+                    {
+                        var artist = (r.Artist ?? string.Empty);
+                        var queryTokens = TokenizeAndNormalize(query ?? string.Empty);
+                        if (!string.IsNullOrWhiteSpace(artist) && queryTokens.Any())
+                        {
+                            var artistTokens = new HashSet<string>(TokenizeAndNormalize(artist), StringComparer.OrdinalIgnoreCase);
+                            int matchedAuthor = queryTokens.Count(qt => artistTokens.Contains(qt));
+                            authorMatch = Math.Min(1.0, (double)matchedAuthor / queryTokens.Count);
+                        }
+                    }
+                    catch { authorMatch = 0.0; }
+
+                    // ASIN exact match: if the query is exactly an ASIN, strong boost
+                    double asinMatch = 0.0;
+                    if (!string.IsNullOrWhiteSpace(r.Asin) && !string.IsNullOrWhiteSpace(query) && string.Equals(r.Asin, query.Trim(), StringComparison.OrdinalIgnoreCase))
+                        asinMatch = 1.0;
+
+                    // Series match: give small boost if series tokens found
+                    double seriesMatch = 0.0;
+                    if (!string.IsNullOrWhiteSpace(r.Series) && !string.IsNullOrWhiteSpace(query))
+                    {
+                        var seriesTokens = new HashSet<string>(TokenizeAndNormalize(r.Series));
+                        var qtoks = TokenizeAndNormalize(query);
+                        if (qtoks.Any())
+                        {
+                            var matched = qtoks.Count(qt => seriesTokens.Contains(qt));
+                            seriesMatch = Math.Min(1.0, (double)matched / qtoks.Count);
+                        }
+                    }
+
+                    // Source priority normalized to 0..1 (0 = scraped/low, 1 = proper metadata)
+                    double sourcePriorityNormalized = (sourcePriority >= 2) ? 1.0 : (sourcePriority == 1 ? 0.5 : 0.0);
+
+                    // Promotional penalty
+                    double promoPenalty = IsPromotionalTitle(r.Title) ? 0.25 : 0.0;
+
+                    // Weights: tuned to prefer title containment and author match, then fuzzy and completeness
+                    const double W_TitleContainment = 0.45;
+                    const double W_AuthorMatch = 0.18;
+                    const double W_TitleFuzzy = 0.12;
+                    const double W_Completeness = 0.10;
+                    const double W_Source = 0.06;
+                    const double W_AsinExact = 0.05;
+                    const double W_Series = 0.04;
+
+                    double rawScore =
+                        (titleContainment * W_TitleContainment) +
+                        (authorMatch * W_AuthorMatch) +
+                        (titleFuzzy * W_TitleFuzzy) +
+                        (completenessScore * W_Completeness) +
+                        (sourcePriorityNormalized * W_Source) +
+                        (asinMatch * W_AsinExact) +
+                        (seriesMatch * W_Series);
+
+                    // Apply promo penalty (subtract) and clamp to 0..1
+                    rawScore = Math.Max(0.0, Math.Min(1.0, rawScore - promoPenalty));
+
+                    // Small extra boost if title fuzzy is very high but containment low
+                    if (titleContainment < 0.4 && titleFuzzy > 0.85)
+                    {
+                        rawScore = Math.Min(1.0, rawScore + (titleFuzzy * 0.1));
+                    }
+
+                    double score = rawScore;
+
+                    // Attach computed score to the SearchResult so callers / UI can inspect it
+                    try { r.Score = (int)Math.Round(score * 100.0); } catch { }
+
+                    // Default keep reason is empty; we'll set DropReason if filtered out
+                    scored.Add((r, score, containmentScore, fuzzyScore, string.Empty));
+                }
+
+                var finalList = new List<SearchResult>();
+
+                // Now apply filtering rules
+                foreach (var s in scored.OrderByDescending(s => s.Score))
+                {
+                    var r = s.Result;
+
+                    // OpenLibrary items preserved unless explicitly rejected by requireAuthorAndPublisher
+                    if (isOpenLibraryResult(r) && !requireAuthorAndPublisher)
+                    {
+                        finalList.Add(r);
+                        continue;
+                    }
+
+                    // Author/publisher requirement
+                    if (requireAuthorAndPublisher)
+                    {
+                        if (string.IsNullOrWhiteSpace(r.Artist) || string.IsNullOrWhiteSpace(r.Publisher))
+                        {
+                            _logger.LogInformation("Dropping ASIN {Asin} because missing author or publisher", r.Asin);
+                            continue;
+                        }
+                    }
+
+                    // Containment modes
+                    var keep = true;
+                    if (!string.Equals(containmentMode, "Off", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.Equals(containmentMode, "Strict", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Require direct containment (substring) in key fields
+                            var hay = string.Join(" ", new[] { r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
+                            if (string.IsNullOrEmpty(hay) || hay.IndexOf(query ?? string.Empty, StringComparison.OrdinalIgnoreCase) < 0)
+                            {
+                                keep = false;
+                                _logger.LogInformation("Dropping ASIN {Asin} (Strict containment failed). containmentScore={Score}, fuzzy={Fuzzy}", r.Asin, s.ContainmentScore, s.FuzzyScore);
+                            }
+                        }
+                        else // Relaxed
+                        {
+                            // Accept if containmentScore >= 0.4 OR fuzzySimilarity >= fuzzyThreshold
+                            if (s.ContainmentScore >= 0.4 || s.FuzzyScore >= fuzzyThreshold)
+                            {
+                                keep = true;
+                            }
+                            else
+                            {
+                                keep = false;
+                                _logger.LogInformation("Dropping ASIN {Asin} (Relaxed containment failed). containmentScore={Score}, fuzzy={Fuzzy}", r.Asin, s.ContainmentScore, s.FuzzyScore);
+                            }
+                        }
+                    }
+
+                    if (keep)
+                    {
+                        finalList.Add(r);
+                    }
+
+                    if (finalList.Count >= returnLimit)
+                        break;
+                }
+
+                results.AddRange(finalList);
+                await BroadcastSearchProgressAsync($"Returning {results.Count} final results", null);
 
                 // If still no enriched results, try OpenLibrary derived titles to attempt enrichment again
                 if (!results.Any())
                 {
-                    _logger.LogInformation("No Amazon or Audible results found, trying OpenLibrary for title variations");
-                    if (!string.IsNullOrEmpty(query))
+                    if (!skipOpenLibrary)
                     {
-                        var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
-                        
-                        foreach (var book in books.Docs.Take(3))
+                        _logger.LogInformation("No Amazon or Audible results found, trying OpenLibrary for title variations");
+                        if (!string.IsNullOrEmpty(query))
                         {
-                            if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
+                            var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
+                            
+                            foreach (var book in books.Docs.Take(3))
                             {
-                                _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
-                                var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
-                                
-                                foreach (var altResult in altResults.Take(2))
+                                if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
                                 {
-                                    if (!string.IsNullOrEmpty(altResult.Asin))
+                                    _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
+                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
+                                    
+                                    foreach (var altResult in altResults.Take(2))
                                     {
-                                        try
+                                        if (!string.IsNullOrEmpty(altResult.Asin))
                                         {
-                                            await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
-                                            
-                                            // Try audimeta first
-                                            var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
-                                            AudibleBookMetadata? metadata = null;
-                                            
-                                            if (audimetaData != null)
+                                            try
                                             {
-                                                metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
-                                            }
-                                            else
-                                            {
-                                                // Fallback to scraping
-                                                metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
-                                                if (metadata != null)
+                                                await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
+                                                
+                                                // Try audimeta first
+                                                var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
+                                                AudibleBookMetadata? metadata = null;
+                                                
+                                                if (audimetaData != null)
                                                 {
-                                                    metadata.Source = "Amazon";
+                                                    metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
+                                                }
+                                                else
+                                                {
+                                                    // Fallback to scraping
+                                                    metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(altResult.Asin);
+                                                    if (metadata != null)
+                                                    {
+                                                        metadata.Source = "Amazon";
+                                                    }
+                                                }
+                                                
+                                                if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
+                                                {
+                                                    var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
+                                                    searchResult.IsEnriched = true;
+                                                    results.Add(searchResult);
                                                 }
                                             }
-                                            
-                                            if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
+                                            catch (Exception ex)
                                             {
-                                                var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
-                                                searchResult.IsEnriched = true;
-                                                results.Add(searchResult);
+                                                _logger.LogWarning(ex, "Failed to get metadata for alternative ASIN: {Asin}", altResult.Asin);
                                             }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _logger.LogWarning(ex, "Failed to get metadata for alternative ASIN: {Asin}", altResult.Asin);
                                         }
                                     }
                                 }
+                                
+                                if (results.Any()) break; // Stop if we found results
                             }
-                            
-                            if (results.Any()) break; // Stop if we found results
                         }
                     }
                 }
 
-                // Final filter: Remove any results with problematic titles
-                results = results.Where(r => 
-                    !string.IsNullOrWhiteSpace(r.Title) && 
-                    !IsTitleNoise(r.Title) &&
-                    r.Title.Length >= 3
+                // Final filter: Keep OpenLibrary-sourced results even if they look noisy;
+                // otherwise remove results with problematic titles
+                results = results.Where(r =>
+                    // Preserve OpenLibrary results regardless of title heuristics
+                    (string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase))
+                    // For all other results apply the usual title checks
+                    || (!string.IsNullOrWhiteSpace(r.Title) && !IsTitleNoise(r.Title) && r.Title.Length >= 3)
                 ).ToList();
 
-                // Sort results: Prioritize proper metadata sources over scraped sources
-                // Proper metadata sources (Audimeta, Audnexus, etc.) should be at the top
-                // Scraped sources (Amazon, Audible) should be at the bottom
-                results = results.OrderByDescending(r =>
+                // Additional filter: if the result does not contain the original search query
+                // anywhere in its key fields, drop it. Exempt proper metadata sources
+                // (e.g. Audimeta/Audnexus) and OpenLibrary (preserve these).
+                if (!string.IsNullOrWhiteSpace(query))
                 {
-                    // Check if this result has a proper metadata source (not scraped)
-                    if (string.IsNullOrEmpty(r.MetadataSource))
-                        return 0; // No metadata source = lowest priority
-                    
-                    var metadataSource = r.MetadataSource.ToLowerInvariant();
-                    
-                    // Scraped sources get lower priority
-                    if (metadataSource == "amazon" || metadataSource == "audible")
-                        return 1; // Scraped = medium priority
-                    
-                    // Proper metadata sources get highest priority
-                    return 2; // Audimeta, Audnexus, etc. = highest priority
-                }).ToList();
+                    var q = query.Trim();
+                    results = results.Where(r =>
+                    {
+                        // Always keep OpenLibrary-sourced items
+                        if (string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase))
+                            return true;
+
+                        // For all other results (including Audimeta/Audnexus), require the
+                        // original search query to appear somewhere in the result's own
+                        // fields (title/author/description/etc). This prevents external
+                        // metadata from bypassing the containment check.
+                        var hay = string.Join(" ", new[] {
+                            r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series, r.Quality, r.ProductUrl, r.ImageUrl, r.Asin, r.Source
+                        }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
+
+                        return hay.IndexOf(q.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase) >= 0;
+                    }).ToList();
+                }
+
+                // Sort results primarily by computed relevance score, then by metadata source priority
+                results = results
+                    .OrderByDescending(r => r.Score)
+                    .ThenByDescending(r =>
+                    {
+                        if (string.IsNullOrEmpty(r.MetadataSource)) return 0;
+                        var md = r.MetadataSource.ToLowerInvariant();
+                        if (md.Contains("audimeta") || md.Contains("audnex") || md.Contains("audnexus")) return 3;
+                        if (md == "amazon" || md == "audible") return 1;
+                        if (string.Equals(md, "openlibrary", StringComparison.OrdinalIgnoreCase)) return 2;
+                        return 1;
+                    })
+                    .ToList();
 
                 _logger.LogInformation("Intelligent search complete. Returning {Count} filtered and sorted results for query: {Query}", results.Count, query);
                 return results;
@@ -721,6 +1154,27 @@ namespace Listenarr.Api.Services
             return false;
         }
 
+        private static bool IsPromotionalTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return false;
+            var t = title.Trim();
+            var lower = t.ToLowerInvariant();
+
+            // Percent discounts like '15%'
+            if (Regex.IsMatch(t, @"\b\d+%")) return true;
+
+            // Phrases like 'Unlock 15% savings', 'Unlock X%'
+            if (lower.Contains("unlock") && (lower.Contains("save") || lower.Contains("savings") || Regex.IsMatch(lower, "\\d+%"))) return true;
+
+            // 'Visit the <brand> Store' promotional links
+            if (Regex.IsMatch(lower, "visit the .*store")) return true;
+
+            // Short promo starts
+            if (lower.StartsWith("unlock ") || lower.StartsWith("save ") || lower.StartsWith("visit the ")) return true;
+
+            return false;
+        }
+
         private static bool IsAuthorNoise(string? author)
         {
             if (string.IsNullOrWhiteSpace(author)) return true;
@@ -732,6 +1186,132 @@ namespace Listenarr.Api.Services
             if (a.StartsWith("Sort by", StringComparison.OrdinalIgnoreCase)) return true;
             if (a.Contains("English - USD", StringComparison.OrdinalIgnoreCase)) return true;
             return false;
+        }
+
+        // Tokenize and normalize a string for containment and fuzzy matching.
+        // Preserves hyphenated tokens (e.g. "sg-1") as requested.
+        private static List<string> TokenizeAndNormalize(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return new List<string>();
+            // Lowercase
+            var s = input.ToLowerInvariant();
+            // Replace punctuation except hyphen with spaces
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (var c in s)
+            {
+                if (char.IsLetterOrDigit(c) || c == '-' || char.IsWhiteSpace(c))
+                    sb.Append(c);
+                else
+                    sb.Append(' ');
+            }
+
+            // Split on whitespace and remove empty tokens
+            var tokens = sb.ToString().Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(t => t.Length > 0)
+                .ToList();
+
+            return tokens;
+        }
+
+        // Compute a containment score between 0.0 - 1.0 representing how much the query
+        // tokens are present in the result's combined fields. 1.0 = all tokens present.
+        private static double ComputeContainmentScore(SearchResult result, string query)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(query)) return 0.0;
+
+            var hay = string.Join(" ", new[] { result.Title, result.Artist, result.Album, result.Description, result.Publisher, result.Narrator, result.Language, result.Series }
+                .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+            var hayTokens = TokenizeAndNormalize(hay);
+            var queryTokens = TokenizeAndNormalize(query);
+
+            if (!queryTokens.Any()) return 0.0;
+
+            int matched = 0;
+            var haySet = new HashSet<string>(hayTokens, StringComparer.OrdinalIgnoreCase);
+            foreach (var qt in queryTokens)
+            {
+                if (haySet.Contains(qt)) matched++;
+            }
+
+            // Partial credit for hyphen-insensitive matches (e.g., sg-1 vs sg)
+            // Also check for substring matches of query tokens in hay tokens.
+            for (int i = 0; i < queryTokens.Count; i++)
+            {
+                var qt = queryTokens[i];
+                if (haySet.Contains(qt)) continue;
+                foreach (var ht in haySet)
+                {
+                    if (ht.Contains(qt) || qt.Contains(ht))
+                    {
+                        matched += 1; // give partial match same weight as token match
+                        break;
+                    }
+                }
+            }
+
+            var score = Math.Min(1.0, (double)matched / Math.Max(1, queryTokens.Count));
+            return score;
+        }
+
+        // Compute fuzzy similarity (0.0 - 1.0) based on normalized Levenshtein distance
+        private static double ComputeFuzzySimilarity(string a, string b)
+        {
+            if (string.IsNullOrWhiteSpace(a) && string.IsNullOrWhiteSpace(b)) return 1.0;
+            if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return 0.0;
+
+            var sa = NormalizeForFuzzy(a);
+            var sb = NormalizeForFuzzy(b);
+            var dist = LevenshteinDistance(sa, sb);
+            var max = Math.Max(sa.Length, sb.Length);
+            if (max == 0) return 1.0;
+            var similarity = 1.0 - ((double)dist / max);
+            return Math.Max(0.0, Math.Min(1.0, similarity));
+        }
+
+        private static string NormalizeForFuzzy(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            var lowered = s.ToLowerInvariant();
+            // Remove punctuation except hyphen
+            var sb = new System.Text.StringBuilder(lowered.Length);
+            foreach (var c in lowered)
+            {
+                if (char.IsLetterOrDigit(c) || c == '-') sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        // Standard Levenshtein distance implementation
+        private static int LevenshteinDistance(string s, string t)
+        {
+            if (s == t) return 0;
+            if (string.IsNullOrEmpty(s)) return t.Length;
+            if (string.IsNullOrEmpty(t)) return s.Length;
+
+            var n = s.Length;
+            var m = t.Length;
+            var d = new int[n + 1, m + 1];
+
+            for (int i = 0; i <= n; d[i, 0] = i++) { }
+            for (int j = 0; j <= m; d[0, j] = j++) { }
+
+            for (int i = 1; i <= n; i++)
+            {
+                for (int j = 1; j <= m; j++)
+                {
+                    int cost = (t[j - 1] == s[i - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(
+                        Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                        d[i - 1, j - 1] + cost);
+                }
+            }
+            return d[n, m];
+        }
+
+        private static bool isOpenLibraryResult(SearchResult r)
+        {
+            return string.Equals(r?.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -2672,6 +3252,8 @@ namespace Listenarr.Api.Services
             _logger.LogWarning("Unable to parse size string: '{SizeStr}'", sizeStr);
             return 0;
         }
+
+        // (Helper methods for containment and fuzzy scoring are implemented above.)
 
         public async Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync()
         {

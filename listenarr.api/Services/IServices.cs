@@ -23,8 +23,13 @@ namespace Listenarr.Api.Services
         /// Performs intelligent search with Amazon and Audible metadata enrichment
         /// </summary>
         /// <param name="query">Search query string</param>
+        /// <param name="candidateLimit">Maximum number of ASIN candidates to collect (default 50)</param>
+        /// <param name="returnLimit">Maximum number of results to return (default 10)</param>
+        /// <param name="containmentMode">Containment mode: Strict|Relaxed|Off</param>
+        /// <param name="requireAuthorAndPublisher">Whether both author and publisher are required</param>
+        /// <param name="fuzzyThreshold">Similarity threshold used for fuzzy matching (0.0 - 1.0)</param>
         /// <returns>Search results enriched with metadata from Amazon and Audible</returns>
-        Task<List<SearchResult>> IntelligentSearchAsync(string query);
+        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7);
         
         /// <summary>
         /// Searches a specific API/indexer by ID

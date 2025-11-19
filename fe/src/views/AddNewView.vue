@@ -339,10 +339,12 @@ const libraryStore = useLibraryStore()
 const toast = useToast()
 
 // Get enabled metadata sources
+// Note: temporarily exclude OpenLibrary from the Add New search UI.
+// This filters out any API configuration whose name is 'OpenLibrary' (case-insensitive).
 const enabledMetadataSources = computed(() => {
-  return configStore.apiConfigurations.filter(api => 
-    api.isEnabled && api.type === 'metadata'
-  ).sort((a, b) => a.priority - b.priority) // Sort by priority (lower = higher priority)
+  return configStore.apiConfigurations
+    .filter(api => api.isEnabled && api.type === 'metadata' && api.name.toLowerCase() !== 'openlibrary')
+    .sort((a, b) => a.priority - b.priority) // Sort by priority (lower = higher priority)
 })
 
 // Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
@@ -580,21 +582,20 @@ const searchPlaceholder = computed(() => {
 // Unified Search Methods
 const detectSearchType = (query: string): 'asin' | 'title' | 'isbn' => {
   const trimmed = query.trim().toUpperCase()
-  
+
   // ISBN detection first (more specific)
   if (isbnService.detectISBN(trimmed)) {
     return 'isbn'
   }
-  
-  // ASIN detection: 10 alphanumeric characters, usually starting with B
-  if (/^[A-Z0-9]{10}$/.test(trimmed) && trimmed.startsWith('B')) {
+
+  // ASIN / ISBN-10 pattern (ASINs often start with 'B' followed by 9 alphanumerics).
+  // Use a strict regex to avoid misclassifying short title-like strings as ASINs.
+  // Pattern covers: 'B' + 9 alnum (typical ASIN) OR 10-digit ISBN-10 (ending with digit or 'X').
+  const asinOrIsbn10 = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/
+  if (asinOrIsbn10.test(trimmed)) {
     return 'asin'
   }
-  // If it looks like an ASIN but doesn't match perfectly, still try ASIN first
-  if (/^[A-Z0-9]{8,12}$/.test(trimmed)) {
-    return 'asin'
-  }
-  
+
   return 'title'
 }
 
@@ -646,8 +647,9 @@ const performSearch = async () => {
 const searchByAsin = async (asin: string) => {
   logger.debug('searchByAsin called with:', asin)
   
-  if (!/^[A-Z0-9]{10}$/.test(asin)) {
-    searchError.value = 'Invalid ASIN format. Must be 10 alphanumeric characters (e.g., B08G9PRS1K)'
+  // Validate ASIN using the same strict pattern as detection.
+  if (!/^(B[0-9A-Z]{9})$/.test(asin.toUpperCase())) {
+    searchError.value = 'Invalid ASIN format. Expected an Amazon ASIN like B08G9PRS1K'
     return
   }
   isSearching.value = true

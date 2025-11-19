@@ -76,7 +76,12 @@ namespace Listenarr.Api.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<ActionResult<List<SearchResult>>> IntelligentSearch(
             [FromQuery] string query,
-            [FromQuery] string? category = null)
+            [FromQuery] string? category = null,
+            [FromQuery] int candidateLimit = 50,
+            [FromQuery] int returnLimit = 50,
+            [FromQuery] string containmentMode = "Relaxed",
+            [FromQuery] bool requireAuthorAndPublisher = false,
+            [FromQuery] double fuzzyThreshold = 0.7)
         {
             try
             {
@@ -86,7 +91,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 _logger.LogInformation("IntelligentSearch called for query: {Query}", query);
-                var results = await _searchService.IntelligentSearchAsync(query);
+                var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold);
                 _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results.Count, query);
                 return Ok(results);
             }
@@ -155,6 +160,12 @@ namespace Listenarr.Api.Controllers
         //         }
 
         //         var results = await _searchService.SearchIndexersAsync(query, category);
+                // Optional tuning parameters exposed to callers
+                //var candidateLimit = int.TryParse(Request.Query["candidateLimit"], out var cl) ? Math.Clamp(cl, 5, 200) : 50;
+                //var returnLimit = int.TryParse(Request.Query["returnLimit"], out var rl) ? Math.Clamp(rl, 1, 100) : 10;
+                //var containmentMode = Request.Query.ContainsKey("containmentMode") ? Request.Query["containmentMode"].ToString() ?? "Relaxed" : "Relaxed";
+                //var requireAuthorAndPublisher = bool.TryParse(Request.Query["requireAuthorAndPublisher"], out var rap) ? rap : false;
+                //var fuzzyThreshold = double.TryParse(Request.Query["fuzzyThreshold"], out var ft) ? Math.Clamp(ft, 0.0, 1.0) : 0.7;
         //         return Ok(results);
         //     }
         //     catch (Exception ex)

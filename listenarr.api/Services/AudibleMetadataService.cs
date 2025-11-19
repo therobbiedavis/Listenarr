@@ -670,6 +670,29 @@ namespace Listenarr.Api.Services
                         {
                             root = root[0];
                         }
+
+                        // Basic validation: prefer JSON-LD objects that represent Books/Audiobooks/CreativeWork
+                        string? type = null;
+                        if (root.TryGetProperty("@type", out var t)) type = t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                        else if (root.TryGetProperty("type", out var t2)) type = t2.ValueKind == JsonValueKind.String ? t2.GetString() : null;
+
+                        var allowedTypes = new[] { "Book", "Audiobook", "CreativeWork", "Product" };
+                        var hasAuthorOrIsbn = root.TryGetProperty("author", out _) || root.TryGetProperty("isbn", out _);
+
+                        if (!string.IsNullOrWhiteSpace(type))
+                        {
+                            if (!allowedTypes.Any(a => string.Equals(a, type, System.StringComparison.OrdinalIgnoreCase)) && !hasAuthorOrIsbn)
+                            {
+                                // Skip unrelated JSON-LD (e.g., person profile blocks like "About the Author")
+                                continue;
+                            }
+                        }
+                        else if (!hasAuthorOrIsbn)
+                        {
+                            // If no type and no author/isbn, probably not book metadata
+                            continue;
+                        }
+
                         string? title = null, desc = null, img = null, year = null, lang = null, pub = null;
                         List<string>? authors = null;
                         if (root.TryGetProperty("name", out var p)) title = p.GetString();
@@ -693,7 +716,7 @@ namespace Listenarr.Api.Services
                             else if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("name", out var an)) authors.Add(an.GetString() ?? "");
                             else if (p.ValueKind == JsonValueKind.String) authors.Add(p.GetString() ?? "");
                         }
-                        
+
                         // Check for narrator/readBy in JSON-LD
                         List<string>? narrators = null;
                         if (root.TryGetProperty("readBy", out p) || root.TryGetProperty("narrator", out p))
@@ -710,7 +733,18 @@ namespace Listenarr.Api.Services
                             else if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("name", out var nn)) narrators.Add(nn.GetString() ?? "");
                             else if (p.ValueKind == JsonValueKind.String) narrators.Add(p.GetString() ?? "");
                         }
-                        
+
+                        // Ignore obviously wrong titles
+                        if (!string.IsNullOrWhiteSpace(title))
+                        {
+                            var tnorm = title.Trim();
+                            if (string.Equals(tnorm, "About the Author", System.StringComparison.OrdinalIgnoreCase) || tnorm.Length < 5)
+                            {
+                                // Skip using this JSON-LD block as primary metadata
+                                continue;
+                            }
+                        }
+
                         return new JsonLdData(title, desc, img, year, lang, pub, authors, narrators);
                     }
                     catch (JsonException) { continue; }
@@ -1036,17 +1070,31 @@ namespace Listenarr.Api.Services
             var innerHtmlLength = productDetails.InnerHtml?.Length ?? 0;
             _logger.LogInformation("adbl-product-details found for ASIN {Asin}, inner HTML: {Length} chars", metadata.Asin, innerHtmlLength);
 
-            // Title - look for h1 within the component (OVERRIDE any previous extraction to avoid "Audible" site logo)
-            var titleNode = productDetails.SelectSingleNode(".//h1[@class='bc-heading']")
+            // Title - prefer adbl-title-lockup slot then component h1, then fallback to page-level selectors
+            var titleNode = productDetails.SelectSingleNode(".//adbl-title-lockup//h1[@slot='title']")
+                         ?? productDetails.SelectSingleNode(".//h1[@class='bc-heading']")
                          ?? productDetails.SelectSingleNode(".//h1")
-                         ?? doc.DocumentNode.SelectSingleNode("//h1[contains(@class,'bc-heading')]");
+                         ?? doc.DocumentNode.SelectSingleNode("//h1[contains(@class,'bc-heading')]")
+                         ?? doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']");
+
             if (titleNode != null)
             {
-                var title = titleNode.InnerText?.Trim();
-                if (!string.IsNullOrWhiteSpace(title) && title != "Audible")
+                var title = titleNode.GetAttributeValue("content", null) ?? titleNode.InnerText?.Trim();
+                if (!string.IsNullOrWhiteSpace(title))
                 {
-                    metadata.Title = System.Text.RegularExpressions.Regex.Replace(title, @"\s+", " ").Trim();
-                    _logger.LogInformation("Extracted title from component: {Title}", metadata.Title);
+                    // Ignore UI-like titles
+                    var tnorm = System.Text.RegularExpressions.Regex.Replace(title, "\\s+", " ").Trim();
+                    if (!string.Equals(tnorm, "Audible", System.StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(tnorm, "About the Author", System.StringComparison.OrdinalIgnoreCase) &&
+                        tnorm.Length > 4)
+                    {
+                        metadata.Title = tnorm;
+                        _logger.LogInformation("Extracted title from component: {Title}", metadata.Title);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Ignored UI-like title from component: {Title}", tnorm);
+                    }
                 }
             }
 
@@ -1076,30 +1124,30 @@ namespace Listenarr.Api.Services
                 _logger.LogWarning("No image element found in component or page");
             }
 
-            // Authors - Extract from FULL PAGE after Playwright rendering, targeting product details area
-            // Look for links to /author/ pages - the FIRST one is always the book's actual author
-            var pageAuthorNodes = doc.DocumentNode.SelectNodes("//a[contains(@href,'/author/')]");
+            // Authors - Extract from productDetails area after Playwright rendering
+            // Prefer links within the component to avoid recommendations elsewhere on the page
+            var pageAuthorNodes = productDetails.SelectNodes(".//a[contains(@href,'/author/')]");
             if (pageAuthorNodes != null)
             {
                 var authors = pageAuthorNodes
                     .Select(n => NormalizeNameString(n.InnerText))
                     .Where(s => !string.IsNullOrWhiteSpace(s) && !IsAuthorNoise(s))
                     .Distinct()
-                    .Take(1) // Take only the first author - it's always the book's author, rest are recommendations
+                    .Take(1)
                     .ToList();
                 if (authors.Any())
                 {
                     metadata.Authors = authors!;
-                    _logger.LogInformation("Extracted {Count} author(s) from Playwright-rendered page: {Authors}", authors.Count, string.Join(", ", authors));
+                    _logger.LogInformation("Extracted {Count} author(s) from Playwright-rendered productDetails: {Authors}", authors.Count, string.Join(", ", authors));
                 }
                 else
                 {
-                    _logger.LogWarning("Found {Count} author links but all filtered out as noise", pageAuthorNodes.Count);
+                    _logger.LogWarning("Found {Count} author links in productDetails but all filtered out as noise", pageAuthorNodes.Count);
                 }
             }
             else
             {
-                _logger.LogWarning("No author links (href='/author/') found in Playwright-rendered page");
+                _logger.LogWarning("No author links (href='/author/') found inside productDetails");
             }
 
             // Summary (description) - Extract BEFORE narrators so we can parse narrator from description if needed
@@ -1142,7 +1190,7 @@ namespace Listenarr.Api.Services
                 }
             }
 
-            // Narrators - Extract from FULL PAGE after Playwright rendering (AFTER description extraction)
+            // Narrators - Extract from productDetails after Playwright rendering (AFTER description extraction)
             // AGGRESSIVE HTML LOGGING: Search for narrator-related content
             _logger.LogInformation("=== NARRATOR HTML STRUCTURE ANALYSIS START ===");
             
@@ -1208,8 +1256,8 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("=== NARRATOR HTML STRUCTURE ANALYSIS END ===");
             
             // First try to find narrator information using the bc-action-sheet-item structure
-            // These are <li> elements that appear in action sheets/modals
-            var allActionSheetItems = doc.DocumentNode.SelectNodes("//li[contains(@class,'bc-action-sheet-item') and contains(@class,'mosaic-action-sheet-item')]");
+            // These are <li> elements that appear in action sheets/modals inside the component
+            var allActionSheetItems = productDetails.SelectNodes(".//li[contains(@class,'bc-action-sheet-item') and contains(@class,'mosaic-action-sheet-item')]");
             
             if (allActionSheetItems != null && allActionSheetItems.Count > 0)
             {
@@ -1272,74 +1320,60 @@ namespace Listenarr.Api.Services
                 }
             }
             
-            // If not found in component, try full page
+            // If not found in component, try full page fallbacks (less preferred)
             if (metadata.Narrators == null || !metadata.Narrators.Any())
             {
-                // First try the bc-action-sheet-item structure (most reliable based on logs)
-                var fullPageNarratorList = doc.DocumentNode.SelectNodes("//li[contains(@class,'mosaic-action-sheet-label') and contains(text(),'Narrated by:')]/following-sibling::li[contains(@class,'bc-action-sheet-item')]");
-                
+                // First try component-scoped label-following structure
+                var fullPageNarratorList = productDetails.SelectNodes(".//li[contains(@class,'mosaic-action-sheet-label') and contains(normalize-space(.),'Narrated by')]/following-sibling::li[contains(@class,'bc-action-sheet-item')]");
+
                 if (fullPageNarratorList != null && fullPageNarratorList.Count > 0)
                 {
                     var narratorsFromFullPage = fullPageNarratorList
                         .Select(n => n.InnerText?.Trim())
-                        .Where(s => !string.IsNullOrWhiteSpace(s) && 
-                                   s.Length > 2 && 
-                                   !s.Contains("By:", StringComparison.OrdinalIgnoreCase) &&
-                                   !s.Contains("Narrated by:", StringComparison.OrdinalIgnoreCase))
+                        .Where(s => !string.IsNullOrWhiteSpace(s) && s.Length > 2 && !s.Contains("By:", System.StringComparison.OrdinalIgnoreCase))
                         .Distinct()
                         .ToList();
-                        
+
                     if (narratorsFromFullPage.Any())
                     {
                         metadata.Narrators = narratorsFromFullPage.Where(n => n != null).Select(n => n!).ToList();
-                        _logger.LogInformation("Extracted {Count} narrator(s) from full page action sheet: {Narrators}", 
-                            narratorsFromFullPage.Count, string.Join(", ", narratorsFromFullPage));
+                        _logger.LogInformation("Extracted {Count} narrator(s) from component action sheet: {Narrators}", narratorsFromFullPage.Count, string.Join(", ", narratorsFromFullPage));
                     }
                 }
-                
-                // If still not found, try link-based patterns
+
+                // Link-based patterns inside the component
                 if (metadata.Narrators == null || !metadata.Narrators.Any())
                 {
-                    var pageNarratorNodes = doc.DocumentNode.SelectNodes(
-                        "//a[contains(@href,'/narrator/')] | " +
-                        "//span[contains(@class,'narratorLabel')]/following-sibling::span//a | " +
-                        "//li[contains(text(),'Narrated by')]//a | " +
-                        "//span[contains(text(),'Narrated by')]/following-sibling::a | " +
-                        "//span[contains(@class,'narrator')]//a | " +
-                        "//a[contains(@class,'narrator')] | " +
-                        "//span[contains(text(),'Narrator')]/following-sibling::*//a"
+                    var pageNarratorNodes = productDetails.SelectNodes(
+                        ".//a[contains(@href,'/narrator/')] | .//span[contains(@class,'narratorLabel')]/following-sibling::span//a | .//li[contains(text(),'Narrated by')]//a | .//span[contains(text(),'Narrated by')]/following-sibling::a"
                     );
-                    
-                    _logger.LogInformation("Narrator node search found {Count} potential nodes in full page", pageNarratorNodes?.Count ?? 0);
-                    
+
+                    _logger.LogInformation("Narrator node search found {Count} potential nodes in component", pageNarratorNodes?.Count ?? 0);
+
                     if (pageNarratorNodes != null && pageNarratorNodes.Count > 0)
                     {
                         var narrators = pageNarratorNodes
                             .Select(n => n.InnerText?.Trim())
-                            .Where(s => !string.IsNullOrWhiteSpace(s) && 
-                                       !s.Contains("Narrated by", StringComparison.OrdinalIgnoreCase) &&
-                                       !s.Contains("View", StringComparison.OrdinalIgnoreCase) &&
-                                       s.Length > 2)
+                            .Where(s => !string.IsNullOrWhiteSpace(s) && !s.Contains("Narrated by", System.StringComparison.OrdinalIgnoreCase) && s.Length > 2)
                             .Distinct()
-                            .Take(5) // Limit to first 5 narrators from product details area
+                            .Take(5)
                             .ToList();
-                            
-                        _logger.LogInformation("After filtering, extracted {Count} narrators: {Narrators}", 
-                            narrators.Count, string.Join(", ", narrators));
-                            
+
+                        _logger.LogInformation("After filtering, extracted {Count} narrators: {Narrators}", narrators.Count, string.Join(", ", narrators));
+
                         if (narrators.Any())
                         {
                             metadata.Narrators = narrators!;
-                            _logger.LogInformation("Successfully extracted {Count} narrator(s) from page links", narrators.Count);
+                            _logger.LogInformation("Successfully extracted {Count} narrator(s) from component links", narrators.Count);
                         }
                         else
                         {
-                            _logger.LogWarning("Found {Count} narrator links but all filtered out", pageNarratorNodes.Count);
+                            _logger.LogWarning("Found {Count} narrator links in component but all filtered out", pageNarratorNodes.Count);
                         }
                     }
                     else
                     {
-                        _logger.LogWarning("No narrator link elements found in rendered HTML");
+                        _logger.LogWarning("No narrator link elements found inside productDetails");
                     }
                 }
             }

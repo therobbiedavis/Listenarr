@@ -107,5 +107,10 @@ namespace Listenarr.Api.Tests
             // Return empty list to avoid interference with Audible-only test
             return Task.FromResult(new List<AmazonSearchResult>());
         }
+        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin)
+        {
+            // Tests don't need product page scraping; return null
+            return Task.FromResult<AmazonSearchResult?>(null);
+        }
     }
 }
