@@ -3,7 +3,6 @@ name: Release — build executables, Docker images, and create GitHub Release
 permissions:
   contents: write
   pull-requests: write
-  packages: write
 
 on:
   push:
@@ -304,19 +303,10 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Set image name
         id: set-tags
         run: |
-          # Use repository owner as namespace (avoids embedding secrets into names)
           echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
-          echo "GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
           TAG=${GITHUB_REF/refs/tags/}
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
@@ -343,10 +333,6 @@ jobs:
           tags: |
             ${{ steps.set-tags.outputs.API_IMAGE }}:stable
             ${{ steps.set-tags.outputs.API_IMAGE }}:latest
-            ${{ steps.set-tags.outputs.API_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
-            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:stable
-            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:latest
-            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
 
       - name: Notify Discord
         uses: rjstone/discord-webhook-notify@v2.2.1
