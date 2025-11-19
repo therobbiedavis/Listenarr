@@ -27,7 +27,7 @@ namespace Listenarr.Api.Services
     public interface IImageCacheService
     {
         Task<string?> DownloadAndCacheImageAsync(string imageUrl, string identifier);
-        Task<string?> MoveToLibraryStorageAsync(string identifier);
+        Task<string?> MoveToLibraryStorageAsync(string identifier, string? imageUrl = null);
         Task<string?> GetCachedImagePathAsync(string identifier);
         Task ClearTempCacheAsync();
     }
@@ -111,12 +111,12 @@ namespace Listenarr.Api.Services
         /// <summary>
         /// Moves an image from temp cache to permanent library storage
         /// </summary>
-        public Task<string?> MoveToLibraryStorageAsync(string identifier)
+        public async Task<string?> MoveToLibraryStorageAsync(string identifier, string? imageUrl = null)
         {
             if (string.IsNullOrWhiteSpace(identifier))
             {
                 _logger.LogWarning("Cannot move image: identifier is empty");
-                return Task.FromResult<string?>(null);
+                return null;
             }
 
             try
@@ -126,7 +126,7 @@ namespace Listenarr.Api.Services
                 if (File.Exists(libraryPath))
                 {
                     _logger.LogInformation("Image already in library storage: {Identifier}", identifier);
-                    return Task.FromResult<string?>(GetRelativePath(libraryPath));
+                    return GetRelativePath(libraryPath);
                 }
 
                 // Find the temp cached file
@@ -134,7 +134,29 @@ namespace Listenarr.Api.Services
                 if (!File.Exists(tempPath))
                 {
                     _logger.LogWarning("Temp cached image not found for {Identifier}", identifier);
-                    return Task.FromResult<string?>(null);
+                    // If imageUrl provided, attempt to download to temp cache using the identifier
+                    if (!string.IsNullOrWhiteSpace(imageUrl))
+                    {
+                        _logger.LogInformation("Attempting to download image for {Identifier} from provided URL", identifier);
+                        var cached = await DownloadAndCacheImageAsync(imageUrl, identifier);
+                        if (string.IsNullOrWhiteSpace(cached))
+                        {
+                            _logger.LogWarning("Download to temp cache failed for {Identifier}", identifier);
+                            return null;
+                        }
+
+                        // Recompute tempPath after download
+                        tempPath = GetImagePath(identifier, _tempCachePath);
+                        if (!File.Exists(tempPath))
+                        {
+                            _logger.LogWarning("Downloaded file not found in temp cache for {Identifier}", identifier);
+                            return null;
+                        }
+                    }
+                    else
+                    {
+                        return null;
+                    }
                 }
 
                 // Move to library storage
@@ -142,12 +164,12 @@ namespace Listenarr.Api.Services
                 File.Move(tempPath, libraryPath, overwrite: true);
                 
                 _logger.LogInformation("Image moved to library storage: {Identifier}", identifier);
-                return Task.FromResult<string?>(GetRelativePath(libraryPath));
+                return GetRelativePath(libraryPath);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to move image to library storage for {Identifier}", identifier);
-                return Task.FromResult<string?>(null);
+                return null;
             }
         }
 

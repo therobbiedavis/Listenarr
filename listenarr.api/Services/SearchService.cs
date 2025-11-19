@@ -20,7 +20,8 @@ using Listenarr.Api.Models;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using System.Text.Json;
-using System.Drawing;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
@@ -504,6 +505,32 @@ namespace Listenarr.Api.Services
                                         catch (Exception exUrl)
                                         {
                                             _logger.LogDebug(exUrl, "Failed to build OpenLibrary URL for book key {Key}", book.Key);
+                                        }
+
+                                        // If OpenLibrary provided a canonical key (e.g. '/works/OL82548W' or 'OL82548W'),
+                                        // populate SearchResult.Id with the OLID so callers can treat it like an identifier
+                                        try
+                                        {
+                                            if (!string.IsNullOrWhiteSpace(book.Key))
+                                            {
+                                                var raw = book.Key.Trim();
+                                                // If the key is a path like '/works/OL82548W', take the last segment
+                                                if (raw.StartsWith("/"))
+                                                {
+                                                    var parts = raw.Trim('/').Split('/');
+                                                    raw = parts.Length > 0 ? parts.Last() : raw;
+                                                }
+
+                                                // Ensure we have a sensible token and assign it
+                                                if (!string.IsNullOrWhiteSpace(raw))
+                                                {
+                                                    searchResult.Id = raw;
+                                                }
+                                            }
+                                        }
+                                        catch (Exception exId)
+                                        {
+                                            _logger.LogDebug(exId, "Failed to extract OpenLibrary ID for book key {Key}", book.Key);
                                         }
 
                                         openLibraryDerivedResults.Add(searchResult);
@@ -1763,10 +1790,11 @@ namespace Listenarr.Api.Services
                     using var ms = new System.IO.MemoryStream(await resp.Content.ReadAsByteArrayAsync());
                     try
                     {
-                        using var img = System.Drawing.Image.FromStream(ms, true, false);
-                        if (img.Height == 0) continue;
-                        var ratio = (double)img.Width / img.Height;
-                        var delta = Math.Abs(ratio - 1.0);
+                            // Use ImageSharp to measure image dimensions in a cross-platform way
+                            using var img = Image.Load(ms);
+                            if (img.Height == 0) continue;
+                            var ratio = (double)img.Width / img.Height;
+                            var delta = Math.Abs(ratio - 1.0);
                         if (delta < bestDelta)
                         {
                             bestDelta = delta;

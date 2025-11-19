@@ -228,6 +228,7 @@ export interface AudibleBookMetadata {
   explicit?: boolean
   abridged?: boolean
   source?: string
+  openLibraryId?: string
   // Optional local mapping to a quality profile ID when viewing in the UI
   qualityProfileId?: number
 }
@@ -246,6 +247,7 @@ export interface Audiobook {
   narrators?: string[]
   isbn?: string
   asin?: string
+  openLibraryId?: string
   publisher?: string
   language?: string
   runtime?: number

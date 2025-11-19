@@ -4,7 +4,7 @@
       <div class="modal-header">
         <h2>Audiobook Details</h2>
         <button class="close-btn" @click="closeModal">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
       
@@ -14,7 +14,7 @@
           <div class="book-image">
             <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" />
             <div v-else class="placeholder-cover">
-              <i class="ph ph-image"></i>
+              <PhImage />
               <span>No Cover</span>
             </div>
           </div>
@@ -83,6 +83,20 @@
                   <span class="label">ISBN:</span>
                   <span class="value">{{ book.isbn }}</span>
                 </div>
+                <div v-if="book.openLibraryId" class="detail-item">
+                  <span class="label">OpenLibrary ID:</span>
+                  <span class="value">
+                    <a
+                      v-if="book.source === 'OpenLibrary'"
+                      :href="`https://openlibrary.org/books/${book.openLibraryId}`"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {{ book.openLibraryId }}
+                    </a>
+                    <span v-else>{{ book.openLibraryId }}</span>
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -113,7 +127,7 @@
             </div>
 
             <div class="detail-section">
-              <h4><i class="ph ph-star"></i> Quality Profile</h4>
+              <h4><PhStar /> Quality Profile</h4>
               <div class="quality-profile-selector">
                 <select v-model="selectedQualityProfileId" class="profile-select">
                   <option :value="null">Use Default Profile</option>
@@ -134,16 +148,20 @@
         </div>
       </div>
       
-      <div class="modal-footer">
-        <button class="btn btn-secondary" @click="closeModal">
-          <i class="ph ph-x"></i>
-          Close
-        </button>
-        <button class="btn btn-primary" @click="addToLibrary">
-          <i class="ph ph-plus"></i>
-          Add to Library
-        </button>
-      </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" @click="closeModal">
+                <PhX />
+                Close
+              </button>
+              <button
+                :class="['btn', isAdded ? 'btn-success' : 'btn-primary']"
+                @click="addToLibrary"
+                :disabled="isAdded"
+              >
+                <component :is="isAdded ? PhCheck : PhPlus" />
+                {{ isAdded ? 'Added' : 'Add to Library' }}
+              </button>
+            </div>
     </div>
   </div>
 </template>
@@ -152,6 +170,8 @@
 import { ref, computed, watch } from 'vue'
 import type { AudibleBookMetadata, QualityProfile } from '@/types'
 import { getQualityProfiles, apiService } from '@/services/api'
+import { useLibraryStore } from '@/stores/library'
+import { PhX, PhImage, PhStar, PhCheck, PhPlus } from '@phosphor-icons/vue'
 
 interface Props {
   visible: boolean
@@ -168,6 +188,19 @@ const emit = defineEmits<Emits>()
 
 const qualityProfiles = ref<QualityProfile[]>([])
 const selectedQualityProfileId = ref<number | null>(null)
+const libraryStore = useLibraryStore()
+
+const isAdded = computed(() => {
+  try {
+    const asins = new Set(libraryStore.audiobooks.map(b => b.asin).filter((x): x is string => !!x))
+    const olids = new Set(libraryStore.audiobooks.map(b => b.openLibraryId).filter((x): x is string => !!x))
+    if (props.book?.asin && asins.has(props.book.asin)) return true
+    if (props.book?.openLibraryId && olids.has(props.book.openLibraryId)) return true
+    return false
+  } catch {
+    return false
+  }
+})
 
 const assignedProfileName = computed(() => {
   const id = props.book?.qualityProfileId
@@ -436,6 +469,7 @@ const capitalizeFirst = (str: string): string => {
   display: flex;
   align-items: center;
   font-size: 0.95rem;
+  gap: 0.5rem;
 }
 
 .btn:disabled {
@@ -459,6 +493,17 @@ const capitalizeFirst = (str: string): string => {
 
 .btn-secondary:hover:not(:disabled) {
   background-color: #666;
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(46, 204, 113, 0.3);
+}
+
+.btn-success:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 /* Responsive design */

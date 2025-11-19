@@ -131,12 +131,12 @@
             </div>
             <div class="result-actions">
               <button 
-                :class="['btn', addedAsins.has(audibleResult.asin) ? 'btn-success' : 'btn-primary']"
+                :class="['btn', (audibleResult && ((audibleResult.asin && addedAsins.has(audibleResult.asin)) || (audibleResult.openLibraryId && addedOpenLibraryIds.has(audibleResult.openLibraryId)))) ? 'btn-success' : 'btn-primary']"
                 @click="addToLibrary(audibleResult)"
-                :disabled="addedAsins.has(audibleResult.asin)"
+                :disabled="!!(audibleResult && ((audibleResult.asin && addedAsins.has(audibleResult.asin)) || (audibleResult.openLibraryId && addedOpenLibraryIds.has(audibleResult.openLibraryId))))"
               >
-                <component :is="addedAsins.has(audibleResult.asin) ? PhCheck : PhPlus" />
-                {{ addedAsins.has(audibleResult.asin) ? 'Added' : 'Add to Library' }}
+                <component :is="(audibleResult && ((audibleResult.asin && addedAsins.has(audibleResult.asin)) || (audibleResult.openLibraryId && addedOpenLibraryIds.has(audibleResult.openLibraryId)))) ? PhCheck : PhPlus" />
+                {{ !!(audibleResult && ((audibleResult.asin && addedAsins.has(audibleResult.asin)) || (audibleResult.openLibraryId && addedOpenLibraryIds.has(audibleResult.openLibraryId)))) ? 'Added' : 'Add to Library' }}
               </button>
               <button class="btn btn-secondary" @click="viewDetails(audibleResult)">
                 <PhEye />
@@ -199,7 +199,8 @@
                 Publisher: {{ safeText(book.publisher[0]) }}
               </p>
               <p v-if="getAsin(book)" class="result-asin">ASIN: {{ getAsin(book) }}</p>
-              
+              <p v-else-if="book.searchResult?.id && ((book.metadataSource && book.metadataSource.toLowerCase().includes('openlibrary')) || (book.searchResult?.metadataSource && book.searchResult.metadataSource.toLowerCase().includes('openlibrary')))" class="result-asin">OpenLibrary ID: {{ book.searchResult.id }}</p>
+
               <div class="result-meta">
                 <a v-if="book.metadataSource && getMetadataSourceUrl(book)" 
                    :href="getMetadataSourceUrl(book)!" 
@@ -213,7 +214,7 @@
                   Metadata: {{ book.metadataSource }}
                 </span>
 
-                <a v-if="getSourceUrl(book)" 
+                <a v-if="getSourceUrl(book)"
                    :href="getSourceUrl(book)!" 
                    target="_blank" 
                    rel="noopener noreferrer"
@@ -225,12 +226,12 @@
             </div>
             <div class="result-actions">
               <button 
-                :class="['btn', getAsin(book) && addedAsins.has(getAsin(book)!) ? 'btn-success' : 'btn-primary']"
+                :class="['btn', (!!(getAsin(book) && addedAsins.has(getAsin(book)!)) || (!!book.searchResult?.id && addedOpenLibraryIds.has(book.searchResult.id))) ? 'btn-success' : 'btn-primary']"
                 @click="selectTitleResult(book)"
-                :disabled="!!(getAsin(book) && addedAsins.has(getAsin(book)!))"
+                :disabled="!!(getAsin(book) && addedAsins.has(getAsin(book)!)) || (!!book.searchResult?.id && addedOpenLibraryIds.has(book.searchResult.id))"
               >
-                <component :is="getAsin(book) && addedAsins.has(getAsin(book)!) ? PhCheck : PhPlus" />
-                {{ getAsin(book) && addedAsins.has(getAsin(book)!) ? 'Added' : 'Add to Library' }}
+                <component :is="(!!(getAsin(book) && addedAsins.has(getAsin(book)!)) || (!!book.searchResult?.id && addedOpenLibraryIds.has(book.searchResult.id))) ? PhCheck : PhPlus" />
+                {{ (!!(getAsin(book) && addedAsins.has(getAsin(book)!)) || (!!book.searchResult?.id && addedOpenLibraryIds.has(book.searchResult.id))) ? 'Added' : 'Add to Library' }}
               </button>
               <button class="btn btn-secondary" @click="viewTitleResultDetails(book)">
                 <PhEye />
@@ -396,6 +397,12 @@ const markExistingResults = () => {
       .map(book => book.asin)
       .filter((asin): asin is string => !!asin)
   )
+  // Also collect stored OpenLibrary IDs from the library (if any)
+  const libraryOlIds = new Set(
+    libraryStore.audiobooks
+      .map(book => book.openLibraryId)
+      .filter((id: unknown): id is string => !!id)
+  )
   
   logger.debug('Library ASINs:', Array.from(libraryAsins))
   
@@ -407,6 +414,37 @@ const markExistingResults = () => {
       addedAsins.value.delete(asin)
     }
   }
+
+// Helpers to determine whether a result should be considered "Added"
+function isAudibleAdded(a?: AudibleBookMetadata | null): boolean {
+  if (!a) return false
+  if (a.asin && addedAsins.value.has(a.asin)) return true
+  if (a.openLibraryId && addedOpenLibraryIds.value.has(a.openLibraryId)) return true
+  return false
+}
+
+function isTitleResultAdded(book: TitleSearchResult): boolean {
+  const asin = getAsin(book)
+  const olid = book.searchResult?.id
+  if (asin && addedAsins.value.has(asin)) return true
+  if (!asin && olid && addedOpenLibraryIds.value.has(olid)) return true
+  return false
+}
+
+// Prevent TS/Vue tooling from reporting these helpers as unused (they're referenced from the template)
+if (false) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _ = (isAudibleAdded(null), isTitleResultAdded(titleResults.value[0] as TitleSearchResult))
+}
+
+  // Clean up OpenLibrary IDs previously marked as added
+  const currentAddedOl = Array.from(addedOpenLibraryIds.value)
+  for (const olid of currentAddedOl) {
+    if (!libraryOlIds.has(olid)) {
+      logger.debug('Removing OLID from addedOpenLibraryIds (no longer in library):', olid)
+      addedOpenLibraryIds.value.delete(olid)
+    }
+  }
   
   // Check ASIN search result
   if (audibleResult.value?.asin) {
@@ -416,17 +454,32 @@ const markExistingResults = () => {
       addedAsins.value.add(audibleResult.value.asin)
     }
   }
+  if (audibleResult.value?.openLibraryId) {
+    logger.debug('Checking OpenLibrary ID for audible result:', audibleResult.value.openLibraryId)
+    if (libraryOlIds.has(audibleResult.value.openLibraryId)) {
+      logger.debug('OpenLibrary ID result is in library - marking as added')
+      addedOpenLibraryIds.value.add(audibleResult.value.openLibraryId)
+    }
+  }
   
   // Check title search results
   if (titleResults.value.length > 0) {
     logger.debug('Checking', titleResults.value.length, 'title results')
     titleResults.value.forEach((book, index) => {
       const asin = getAsin(book)
+      const olid = book.searchResult?.id
       if (asin) {
         logger.debug(`Title result ${index}: ASIN=${asin}, inLibrary=${libraryAsins.has(asin)}`)
         if (libraryAsins.has(asin)) {
           logger.debug(`Marking title result ${index} as added`)
           addedAsins.value.add(asin)
+        }
+      }
+      if (!asin && olid) {
+        logger.debug(`Title result ${index}: OLID=${olid}, inLibrary=${libraryOlIds.has(olid)}`)
+        if (libraryOlIds.has(olid)) {
+          logger.debug(`Marking title result ${index} as added via OLID`)
+          addedOpenLibraryIds.value.add(olid)
         }
       }
     })
@@ -478,6 +531,7 @@ const authorQuery = ref('')
 
 // Library tracking
 const addedAsins = ref(new Set<string>())
+const addedOpenLibraryIds = ref(new Set<string>())
 // Cache for best cover selection per book key
 const coverSelection = ref<Record<string, string>>({})
 
@@ -497,6 +551,7 @@ const TITLE_RESULTS_COUNT_KEY = 'listenarr.addNewTitleResultsCount'
 const ASIN_FILTERING_KEY = 'listenarr.addNewAsinFiltering'
 const RESOLVED_ASINS_KEY = 'listenarr.addNewResolvedAsins'
 const ADDED_ASINS_KEY = 'listenarr.addNewAddedAsins'
+const ADDED_OLIDS_KEY = 'listenarr.addNewAddedOLIDs'
 
 // Initialize search results from localStorage
 try {
@@ -532,6 +587,10 @@ try {
   if (storedAdded) {
     addedAsins.value = new Set(JSON.parse(storedAdded))
   }
+  const storedAddedOl = localStorage.getItem(ADDED_OLIDS_KEY)
+  if (storedAddedOl) {
+    try { addedOpenLibraryIds.value = new Set(JSON.parse(storedAddedOl)) } catch {}
+  }
 } catch (error) {
   console.warn('Failed to restore persisted state:', error)
 }
@@ -566,6 +625,10 @@ watch(resolvedAsins, (v) => {
 
 watch(addedAsins, (v) => {
   try { localStorage.setItem(ADDED_ASINS_KEY, JSON.stringify(Array.from(v))) } catch {}
+}, { deep: true })
+
+watch(addedOpenLibraryIds, (v) => {
+  try { localStorage.setItem(ADDED_OLIDS_KEY, JSON.stringify(Array.from(v))) } catch {}
 }, { deep: true })
 
 
@@ -818,8 +881,8 @@ const searchByTitle = async (query: string) => {
     (async () => {
       try {
         await attemptResolveAsinsForTitleResults()
-      } catch (e) {
-        logger.debug('Attempt to resolve ASINs failed', e)
+      } catch {
+        logger.debug('Attempt to resolve ASINs failed')
       }
     })()
     
@@ -884,7 +947,7 @@ const getCoverUrl = (book: TitleSearchResult): string => {
   if (coverSelection.value[key]) return apiService.getImageUrl(coverSelection.value[key])
 
   // Start background evaluation of best cover (non-blocking)
-  pickBestCoverForBook(book).catch((e) => logger.debug('pickBestCoverForBook error', e))
+  pickBestCoverForBook(book).catch(() => logger.debug('pickBestCoverForBook error'))
 
   // Immediate fallback: prefer explicit imageUrl, then searchResult image
   if (book.imageUrl) return apiService.getImageUrl(book.imageUrl)
@@ -967,7 +1030,7 @@ const measureImageAspectRatio = (url: string, timeoutMs = 3000): Promise<number 
         const h = img.naturalHeight || img.height
         if (!w || !h) return resolve(null)
         resolve(w / h)
-      } catch (e) {
+      } catch {
         resolve(null)
       }
     }
@@ -1150,30 +1213,22 @@ const attemptResolveAsinsForTitleResults = async (): Promise<void> => {
 const selectTitleResult = async (book: TitleSearchResult) => {
   logger.debug('selectTitleResult called with book:', book)
   const asin = resolvedAsins.value[book.key] || book.searchResult?.asin
-  
-  if (!asin) {
-    logger.error('No ASIN available for selected book')
-    toast.warning('Cannot add', 'Cannot add to library: No ASIN available')
-    return
-  }
 
-  logger.debug('Adding audiobook with ASIN:', asin)
-  
   try {
-    // If we have enriched search result, use it directly
+    // If we have enriched search result, use it directly even if no ASIN is present
     if (book.searchResult && book.searchResult.isEnriched) {
       const result = book.searchResult
       logger.debug('Using enriched metadata from intelligent search:', result)
-      
+
       // Extract publish year from date string if available
       let publishYear: string | undefined
       if (result.publishedDate) {
         const yearMatch = result.publishedDate.match(/\d{4}/)
         publishYear = yearMatch ? yearMatch[0] : undefined
       }
-      
+
       const metadata: AudibleBookMetadata = {
-        asin: result.asin || asin,
+        asin: result.asin || '',
         title: result.title || 'Unknown Title',
         subtitle: undefined,
         authors: result.artist ? [result.artist] : [],
@@ -1190,22 +1245,26 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         abridged: false,
         isbn: undefined,
         source: book.metadataSource || result.source
+        ,openLibraryId: result.id || undefined
       }
-      
-      // Add to library directly
+
+      // Add to library directly using the enriched metadata
       await addToLibrary(metadata)
-    } else {
-      // Fallback: fetch metadata if not already enriched
+      return
+    }
+
+    // Fallback: if we have an ASIN, fetch metadata from configured sources
+    if (asin) {
       logger.debug('Fetching metadata for ASIN:', asin)
       toast.info('Fetching metadata', `Getting book details from configured sources...`)
       const response = await apiService.getMetadata(asin, 'us', true)
       const audimetaData = response.metadata
       logger.debug(`Metadata fetched from ${response.source}:`, audimetaData)
       toast.success('Metadata retrieved', `Book details fetched from ${response.source}`)
-      
+
       // Store the metadata source in the book object so it shows in the UI
       book.metadataSource = response.source
-      
+
       // Convert audimeta response to AudibleBookMetadata format
       let publishYear: string | undefined
       if (audimetaData.publishDate || audimetaData.releaseDate) {
@@ -1213,9 +1272,9 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         const yearMatch = dateStr?.match(/\d{4}/)
         publishYear = yearMatch ? yearMatch[0] : undefined
       }
-      
+
       const metadata: AudibleBookMetadata = {
-        asin: audimetaData.asin || asin,
+        asin: audimetaData.asin || asin || '',
         title: audimetaData.title || 'Unknown Title',
         subtitle: audimetaData.subtitle,
         authors: audimetaData.authors?.map((a: AudimetaAuthor) => a.name).filter((n: string | undefined) => n) as string[] || [],
@@ -1232,11 +1291,17 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
         isbn: audimetaData.isbn,
         source: response.source
+        ,openLibraryId: book.searchResult?.id || undefined
       }
-      
+
       // Add to library directly
       await addToLibrary(metadata)
+      return
     }
+
+    // If we reach here, we have neither enriched metadata nor an ASIN
+    logger.error('No ASIN or enriched metadata available for selected book')
+    toast.warning('Cannot add', 'Cannot add to library: No ASIN or metadata available')
   } catch (error) {
     logger.error('Failed to add audiobook:', error)
     toast.error('Add failed', 'Failed to add audiobook. Please try again.')
@@ -1295,6 +1360,7 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
         abridged: false,
         isbn: undefined,
         source: book.metadataSource || result.source
+        ,openLibraryId: result.id || undefined
       }
 
       showDetailsModal.value = true
@@ -1332,6 +1398,7 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
         abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
         isbn: audimetaData.isbn,
         source: response.source
+        ,openLibraryId: book.searchResult?.id || undefined
       }
 
       showDetailsModal.value = true
@@ -1383,6 +1450,11 @@ const handleLibraryAdded = (audiobook: Audiobook) => {
   if (audiobook.asin) {
     logger.debug('Marking ASIN as added:', audiobook.asin)
     addedAsins.value.add(audiobook.asin)
+  }
+  // Mark OpenLibrary ID as added when present
+  if (audiobook.openLibraryId) {
+    logger.debug('Marking OpenLibrary ID as added:', audiobook.openLibraryId)
+    addedOpenLibraryIds.value.add(audiobook.openLibraryId)
   }
   
   // Reset search if needed
