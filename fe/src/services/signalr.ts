@@ -49,7 +49,7 @@ class SignalRService {
   private audiobookUpdateCallbacks: Set<(a: Audiobook) => void> = new Set()
   private scanJobCallbacks: Set<ScanJobCallback> = new Set()
   private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
-  private searchProgressCallbacks: Set<(payload: { message: string; asin?: string | null }) => void> = new Set()
+  private searchProgressCallbacks: Map<(payload: { message: string; asin?: string | null; type?: string; audiobookId?: number }) => void, boolean> = new Map()
   private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
   private pingInterval: number | null = null
   private visibilityListener: (() => void) | null = null
@@ -239,8 +239,14 @@ class SignalRService {
         break
       case 'SearchProgress':
         if (args && args[0]) {
-          const payload = args[0] as { message: string; asin?: string | null }
-          this.searchProgressCallbacks.forEach(cb => cb(payload))
+          const payload = args[0] as { message: string; asin?: string | null; type?: string; audiobookId?: number }
+          // Deliver payload to callbacks that opted-in to automatic messages
+          for (const [cb, includeAutomatic] of Array.from(this.searchProgressCallbacks.entries())) {
+            try {
+              if (payload.type === 'automatic' && !includeAutomatic) continue
+              cb(payload)
+            } catch {}
+          }
         }
         break
       case 'ToastMessage':
@@ -389,8 +395,10 @@ class SignalRService {
   }
 
   // Subscribe to search progress messages (from server-side search operations)
-  onSearchProgress(callback: (payload: { message: string; asin?: string | null }) => void): () => void {
-    this.searchProgressCallbacks.add(callback)
+  // By default clients do NOT receive automatic background search messages. To receive them,
+  // pass `includeAutomatic=true`.
+  onSearchProgress(callback: (payload: { message: string; asin?: string | null; type?: string; audiobookId?: number }) => void, includeAutomatic = false): () => void {
+    this.searchProgressCallbacks.set(callback, includeAutomatic)
     return () => { this.searchProgressCallbacks.delete(callback) }
   }
 

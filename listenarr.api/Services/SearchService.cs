@@ -77,7 +77,8 @@ namespace Listenarr.Api.Services
             {
                 if (_hubContext != null)
                 {
-                    await _hubContext.Clients.All.SendAsync("SearchProgress", new { message, asin });
+                    // Structured payload: include a type so clients can distinguish interactive vs automatic
+                    await _hubContext.Clients.All.SendAsync("SearchProgress", new { message, asin, type = "interactive" });
                 }
             }
             catch (Exception ex)
@@ -119,25 +120,62 @@ namespace Listenarr.Api.Services
             else
             {
                 _logger.LogInformation("No valid Amazon/Audible results found for query: {Query}; falling back to raw search conversions", query);
-                // Return raw Amazon/Audible converted search results (IsEnriched = false)
-                // This is preferable to mock placeholder data.
-                var amazonResults = await _amazonSearchService.SearchAudiobooksAsync(query);
-                var audibleResults = await _audibleSearchService.SearchAudiobooksAsync(query);
-                var fallback = new List<SearchResult>();
-                foreach (var a in amazonResults.Take(12))
+
+                // Consult application settings to avoid calling providers that are disabled
+                try
                 {
-                    var r = ConvertAmazonSearchToResult(a);
-                    r.IsEnriched = false;
-                    fallback.Add(r);
+                    var appSettings = await _configurationService.GetApplicationSettingsAsync();
+
+                    var fallback = new List<SearchResult>();
+
+                    if (appSettings == null || appSettings.EnableAmazonSearch)
+                    {
+                        var amazonResults = await _amazonSearchService.SearchAudiobooksAsync(query);
+                        foreach (var a in amazonResults.Take(12))
+                        {
+                            var r = ConvertAmazonSearchToResult(a);
+                            r.IsEnriched = false;
+                            fallback.Add(r);
+                        }
+                    }
+
+                    if (appSettings == null || appSettings.EnableAudibleSearch)
+                    {
+                        var audibleResults = await _audibleSearchService.SearchAudiobooksAsync(query);
+                        foreach (var a in audibleResults.Take(12))
+                        {
+                            var r = ConvertAudibleSearchToResult(a);
+                            r.IsEnriched = false;
+                            fallback.Add(r);
+                        }
+                    }
+
+                    _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
+                    return ApplySorting(fallback, sortBy, sortDirection);
                 }
-                foreach (var a in audibleResults.Take(12))
+                catch (Exception exFallback)
                 {
-                    var r = ConvertAudibleSearchToResult(a);
-                    r.IsEnriched = false;
-                    fallback.Add(r);
+                    _logger.LogWarning(exFallback, "Failed to consult application settings during fallback; performing provider calls conservatively");
+
+                    // Conservative fallback: call both providers if settings couldn't be loaded
+                    var amazonResults = await _amazonSearchService.SearchAudiobooksAsync(query);
+                    var audibleResults = await _audibleSearchService.SearchAudiobooksAsync(query);
+                    var fallback = new List<SearchResult>();
+                    foreach (var a in amazonResults.Take(12))
+                    {
+                        var r = ConvertAmazonSearchToResult(a);
+                        r.IsEnriched = false;
+                        fallback.Add(r);
+                    }
+                    foreach (var a in audibleResults.Take(12))
+                    {
+                        var r = ConvertAudibleSearchToResult(a);
+                        r.IsEnriched = false;
+                        fallback.Add(r);
+                    }
+                    _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
+                    return ApplySorting(fallback, sortBy, sortDirection);
                 }
-                _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
-                return ApplySorting(fallback, sortBy, sortDirection);
             }
 
             // Also search configured indexers for additional results (including DDL downloads)
@@ -148,7 +186,24 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Added {Count} indexer results (including DDL downloads) for query: {Query}", indexerResults.Count, query);
             }
 
-            return ApplySorting(results, sortBy, sortDirection);
+            // Apply sorting first so trimming (if configured) keeps the most relevant/desired items
+            var sorted = ApplySorting(results, sortBy, sortDirection);
+
+            try
+            {
+                var appSettings = await _configurationService.GetApplicationSettingsAsync();
+                if (appSettings != null && appSettings.SearchResultCap > 0 && sorted.Count > appSettings.SearchResultCap)
+                {
+                    _logger.LogInformation("Trimming total combined search results from {Before} to SearchResultCap={Cap}", sorted.Count, appSettings.SearchResultCap);
+                    sorted = sorted.Take(appSettings.SearchResultCap).ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to load application settings when enforcing total SearchResultCap; returning full result set");
+            }
+
+            return sorted;
         }
 
         private List<SearchResult> ApplySorting(List<SearchResult> results, SearchSortBy sortBy, SearchSortDirection sortDirection)
@@ -317,7 +372,7 @@ namespace Listenarr.Api.Services
             return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-    public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7)
+    public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2)
         {
             var results = new List<SearchResult>();
 
@@ -336,11 +391,43 @@ namespace Listenarr.Api.Services
                 List<AmazonSearchResult> amazonResults = new();
                 List<AudibleSearchResult> audibleResults = new();
 
-                // Temporary flags to disable/enable providers for focused testing
-                var skipAmazon = true; // set true to disable Amazon calls
-                var skipAudible = true; // set true to disable Audible calls (temporarily)
+                // Flags controlling provider calls (enabled by default)
+                var skipAmazon = false; // set true to disable Amazon calls
+                var skipAudible = false; // set true to disable Audible calls
+                var skipOpenLibrary = false; // set true to disable OpenLibrary augmentation
 
-                // Always attempt Audible; Amazon is conditional on skipAmazon
+                // Apply application-level search settings (if configured)
+                try
+                {
+                    var appSettings = await _configurationService.GetApplicationSettingsAsync();
+                    if (appSettings != null)
+                    {
+                        // Provider toggles (invert to skip flags)
+                        skipAmazon = !appSettings.EnableAmazonSearch;
+                        skipAudible = !appSettings.EnableAudibleSearch;
+                        skipOpenLibrary = !appSettings.EnableOpenLibrarySearch;
+
+                        // Apply candidate/result caps and fuzzy threshold when provided
+                        if (appSettings.SearchCandidateCap > 0)
+                        {
+                            candidateLimit = appSettings.SearchCandidateCap;
+                        }
+                        if (appSettings.SearchResultCap > 0)
+                        {
+                            returnLimit = appSettings.SearchResultCap;
+                        }
+                        if (appSettings.SearchFuzzyThreshold >= 0.0 && appSettings.SearchFuzzyThreshold <= 1.0)
+                        {
+                            fuzzyThreshold = appSettings.SearchFuzzyThreshold;
+                        }
+                    }
+                }
+                catch (Exception exAppSettings)
+                {
+                    _logger.LogDebug(exAppSettings, "Failed to load application search settings, falling back to defaults");
+                }
+
+                    // Always attempt Audible; Amazon is conditional on skipAmazon
                 if (!string.IsNullOrEmpty(query))
                 {
                     Task<List<AmazonSearchResult>>? amazonTask = null;
@@ -428,9 +515,6 @@ namespace Listenarr.Api.Services
                 }
                 
                 // Augment ASIN candidates with OpenLibrary suggestions (run after Amazon/Audible but before trimming)
-                // Temporarily enable OpenLibrary augmentation for testing purposes.
-                var skipOpenLibrary = false; // TEMP: enable OpenLibrary
-
                 if (!skipOpenLibrary)
                 {
                     try
@@ -686,9 +770,14 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                // Deduplicate unified candidate list; do not impose an overall cap so each
-                // provider's cap is respected independently.
+                // Deduplicate unified candidate list
                 asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                // Enforce unified candidate cap (if specified) so we don't attempt enrichment on too many ASINs
+                if (candidateLimit > 0 && asinCandidates.Count > candidateLimit)
+                {
+                    _logger.LogInformation("Trimming unified ASIN candidate list from {Before} to candidateLimit={Limit}", asinCandidates.Count, candidateLimit);
+                    asinCandidates = asinCandidates.Take(candidateLimit).ToList();
+                }
                 _logger.LogInformation("Unified ASIN candidate list size: {Count} (amazonCap={AmazonCap}, audibleCap={AudibleCap})", asinCandidates.Count, amazonProviderCap, audibleProviderCap);
                 await BroadcastSearchProgressAsync($"Found {asinCandidates.Count} ASIN candidates", null);
 
@@ -955,9 +1044,14 @@ namespace Listenarr.Api.Services
                         foreach (var ol in openLibraryDerivedResults)
                         {
                             // Basic dedupe: avoid adding items with same Title+Artist
-                            var duplicate = enrichedList.Any(e => 
-                                string.Equals(e.Title ?? string.Empty, ol.Title ?? string.Empty, StringComparison.OrdinalIgnoreCase)
-                                && string.Equals(e.Artist ?? string.Empty, ol.Artist ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+                            var duplicate = enrichedList.Any(e =>
+                                // Prefer exact identifier matches (OpenLibrary ID or ASIN)
+                                (!string.IsNullOrWhiteSpace(e.Id) && !string.IsNullOrWhiteSpace(ol.Id) && string.Equals(e.Id, ol.Id, StringComparison.OrdinalIgnoreCase))
+                                || (!string.IsNullOrWhiteSpace(e.Asin) && !string.IsNullOrWhiteSpace(ol.Asin) && string.Equals(e.Asin, ol.Asin, StringComparison.OrdinalIgnoreCase))
+                                // Fallback: Title+Artist equality (defensive)
+                                || (string.Equals(e.Title ?? string.Empty, ol.Title ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                                    && string.Equals(e.Artist ?? string.Empty, ol.Artist ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                            );
 
                             if (!duplicate)
                             {
@@ -972,6 +1066,18 @@ namespace Listenarr.Api.Services
                         }
 
                         await BroadcastSearchProgressAsync($"OpenLibrary augmentation added {openLibraryDerivedResults.Count} candidate(s)", null);
+
+                        // Diagnostic: dump enrichedList immediately after merging OpenLibrary-derived candidates
+                        try
+                        {
+                            var enrichedDumpList = enrichedList.Select(e => string.Format("{0} :: {1} :: {2}", e.Title ?? "<no-title>", e.MetadataSource ?? "<no-md>", string.IsNullOrWhiteSpace(e.Id) ? (e.Asin ?? "<no-id>") : e.Id));
+                            var enrichedDump = string.Join(" | ", enrichedDumpList);
+                            _logger.LogInformation("Enriched list after OpenLibrary merge ({Count}): {Dump}", enrichedList.Count, enrichedDump);
+                        }
+                        catch (Exception exDump2)
+                        {
+                            _logger.LogDebug(exDump2, "Failed to create enrichedList dump after OpenLibrary merge");
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -1480,6 +1586,18 @@ namespace Listenarr.Api.Services
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to compute final ASIN dispositions for query: {Query}", query);
+                }
+
+                // Diagnostic: dump final results (title :: metadataSource :: id/asin) to help correlate
+                try
+                {
+                    var dumpList = results.Select(r => string.Format("{0} :: {1} :: {2}", r.Title ?? "<no-title>", r.MetadataSource ?? "<no-md>", string.IsNullOrWhiteSpace(r.Id) ? (r.Asin ?? "<no-id>") : r.Id));
+                    var dump = string.Join(" | ", dumpList);
+                    _logger.LogInformation("Final results dump for query {Query}: {Dump}", query, dump);
+                }
+                catch (Exception exDump)
+                {
+                    _logger.LogDebug(exDump, "Failed to create final results dump for query: {Query}", query);
                 }
 
                 _logger.LogInformation("Intelligent search complete. Returning {Count} filtered and sorted results for query: {Query}", results.Count, query);

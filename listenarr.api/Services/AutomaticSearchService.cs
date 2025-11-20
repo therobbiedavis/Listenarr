@@ -157,23 +157,24 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
-            try
-            {
-                // Build a concise summary of up to 10 raw results
-                var rawSummaries = searchResults.Take(10).Select(r => new {
-                    title = r.Title,
-                    asin = r.Asin,
-                    source = r.Source,
-                    sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
-                    seeders = r.Seeders,
-                    format = r.Format,
-                    downloadType = r.DownloadType
-                }).ToList();
+                try
+                {
+                    // Build a concise summary of up to 10 raw results
+                    var rawSummaries = searchResults.Take(10).Select(r => new {
+                        title = r.Title,
+                        asin = r.Asin,
+                        source = r.Source,
+                        sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
+                        seeders = r.Seeders,
+                        format = r.Format,
+                        downloadType = r.DownloadType
+                    }).ToList();
 
-                using var scope = _serviceScopeFactory.CreateScope();
-                var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
-                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries } } });
-            }
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                    // Send structured payload with type and audiobookId so the UI can ignore automatic messages by default
+                    await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "automatic", audiobookId = audiobook.Id } });
+                }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
@@ -208,7 +209,7 @@ namespace Listenarr.Api.Services
 
                 using var scope2 = _serviceScopeFactory.CreateScope();
                 var hub2 = scope2.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
-                await hub2.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Scored results for '{audiobook.Title}'", details = new { scoredCount = scoredResults.Count, scoredSamples = scoredSummaries } } });
+                await hub2.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Scored results for '{audiobook.Title}'", details = new { scoredCount = scoredResults.Count, scoredSamples = scoredSummaries }, type = "automatic", audiobookId = audiobook.Id } });
             }
             catch (Exception ex)
             {

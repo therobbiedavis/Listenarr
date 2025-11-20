@@ -190,5 +190,36 @@ namespace Listenarr.Api.Models
     /// Optional avatar URL for the Discord bot. If set, the bot will attempt to change its avatar.
     /// </summary>
     public string? DiscordBotAvatar { get; set; }
+
+    // Search settings
+    /// <summary>
+    /// Enable searching Amazon as part of intelligent searches.
+    /// </summary>
+    public bool EnableAmazonSearch { get; set; } = true;
+
+    /// <summary>
+    /// Enable searching Audible as part of intelligent searches.
+    /// </summary>
+    public bool EnableAudibleSearch { get; set; } = true;
+
+    /// <summary>
+    /// Enable using OpenLibrary augmentation during intelligent searches.
+    /// </summary>
+    public bool EnableOpenLibrarySearch { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of unified candidate ASINs to consider when performing intelligent search.
+    /// </summary>
+    public int SearchCandidateCap { get; set; } = 100;
+
+    /// <summary>
+    /// Maximum number of results to return from intelligent search.
+    /// </summary>
+    public int SearchResultCap { get; set; } = 100;
+
+    /// <summary>
+    /// Fuzzy similarity threshold used in relaxed containment mode (0.0 - 1.0).
+    /// </summary>
+    public double SearchFuzzyThreshold { get; set; } = 0.2;
     }
 }

@@ -842,8 +842,10 @@ const searchByTitle = async (query: string) => {
     const processedAsins = new Set<string>()
 
     for (const result of results) {
-      // Only consider enriched results for display
-      if (!result.isEnriched) continue
+      // Only consider enriched results for display, but allow OpenLibrary-derived candidates
+      // (OpenLibrary may provide metadata without the 'isEnriched' flag)
+      const isOpenLibrary = (result.metadataSource && result.metadataSource.toLowerCase().includes('openlibrary')) || (result.source && result.source.toLowerCase().includes('openlibrary')) || !!result.id
+      if (!result.isEnriched && !isOpenLibrary) continue
 
       const asin = (result.asin || '').toString().trim()
 
@@ -1545,11 +1547,48 @@ onMounted(async () => {
   // Initialize added status on mount
   await checkExistingInLibrary()
   
-  // Subscribe to server-side search progress updates
-  const unsub = signalRService.onSearchProgress((payload) => {
-    if (payload && payload.message) {
-      searchStatus.value = payload.message
+  // Subscribe to server-side search progress updates (ignore automatic background searches by default)
+  type ProgressPayload = {
+    message: string
+    asin?: string | null
+    type?: string
+    audiobookId?: number
+    details?: { rawCount?: number; scoredCount?: number; [key: string]: unknown }
+  }
+
+  const unsub = signalRService.onSearchProgress((payload: ProgressPayload) => {
+    if (!payload || !payload.message) return
+
+    // Prefer structured details when available, but do not use an on-screen progress bar
+    const details = payload.details
+    if (details) {
+      if (typeof details.rawCount === 'number') {
+        searchStatus.value = `Found ${details.rawCount} raw results`
+        return
+      }
+      if (typeof details.scoredCount === 'number') {
+        searchStatus.value = `Scored ${details.scoredCount} results`
+        return
+      }
     }
+
+    // Scraping fallback progress (message contains count)
+    if (/scrap/i.test(payload.message) && /\d+/.test(payload.message)) {
+      const m = payload.message.match(/(scrap(?:ing)?(?: product pages)? for )?(\d+)/i)
+      if (m && m[2]) {
+        searchStatus.value = `Scraping product pages for ${m[2]} ASINs...`
+        return
+      }
+    }
+
+    // If an ASIN is provided, show ASIN-level progress
+    if (payload.asin) {
+      searchStatus.value = `Processing ASIN ${payload.asin}...`
+      return
+    }
+
+    // Fallback to raw message
+    searchStatus.value = payload.message
   })
   // When component is unmounted, unsubscribe
   onUnmounted(() => {
@@ -2417,4 +2456,5 @@ onMounted(async () => {
     overflow-wrap: anywhere;
   }
 }
+
 </style>

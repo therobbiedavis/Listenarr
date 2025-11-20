@@ -1191,7 +1191,8 @@ namespace Listenarr.Api.Controllers
 
                 using var scope = _serviceProvider.CreateScope();
                 var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
-                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries } } });
+                // Include a structured payload so clients can distinguish manual vs automatic searches
+                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "interactive", audiobookId = audiobook.Id } });
             }
             catch (Exception ex)
             {
