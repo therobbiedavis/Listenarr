@@ -3,6 +3,7 @@ name: Release — build executables, Docker images, and create GitHub Release
 permissions:
   contents: write
   pull-requests: write
+  packages: write
 
 on:
   push:
@@ -135,11 +136,11 @@ jobs:
         run: |
           # For release workflow, we need to find the PR that was merged to main
           # which resulted in this tag being created, excluding version bump PRs
-          
+
           # First, get the tag information and find the commit it points to
           TAG_COMMIT=$(git rev-list -n 1 ${{ github.ref }})
           echo "Tag ${{ github.ref }} points to commit: $TAG_COMMIT"
-          
+
           # Find recent merged PRs to main, including labels for filtering
           PR_DATA=$(gh api graphql -f query='
             query($owner: String!, $repo: String!) {
@@ -165,7 +166,7 @@ jobs:
                 }
               }
             }' -f owner='${{ github.repository_owner }}' -f repo='${{ github.event.repository.name }}')
-          
+
           # Filter out version bump PRs and find the first non-version-bump PR
           FILTERED_PR=$(echo "$PR_DATA" | jq -r '
             [.data.repository.pullRequests.edges[] |
@@ -173,21 +174,21 @@ jobs:
               (.node.title | test("[Bb]ump version|[Vv]ersion bump|\\[skip ci\\]"; "i") | not) and
               (.node.labels.nodes | map(.name) | any(. == "version-bump" or . == "automated") | not)
             ) |
-            .node | 
+            .node |
             {number, title, body, baseRefName}][0] // null
           ')
-          
+
           # Debug: Show what PRs we found
           echo "Recent PRs found:"
           echo "$PR_DATA" | jq -r '.data.repository.pullRequests.edges[:5][] | "PR #\(.node.number): \(.node.title)"'
-          
+
           # Extract PR details from the filtered result
           if [ "$FILTERED_PR" != "" ] && [ "$FILTERED_PR" != "null" ]; then
             PR_NUMBER=$(echo "$FILTERED_PR" | jq -r '.number // ""')
             PR_TITLE=$(echo "$FILTERED_PR" | jq -r '.title // ""')
             PR_BODY_RAW=$(echo "$FILTERED_PR" | jq -r '.body // ""')
             PR_BASE_REF=$(echo "$FILTERED_PR" | jq -r '.baseRefName // ""')
-            
+
             echo "✅ Found non-version-bump PR #$PR_NUMBER: $PR_TITLE (merged to $PR_BASE_REF)"
           else
             echo "⚠️ No non-version-bump PR found, using fallback"
@@ -196,11 +197,11 @@ jobs:
             PR_BODY_RAW="Changes included in this release."
             PR_BASE_REF="main"
           fi
-          
+
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "PR_TITLE=$PR_TITLE" >> $GITHUB_OUTPUT
           echo "PR_BASE_REF=$PR_BASE_REF" >> $GITHUB_OUTPUT
-          
+
           # Store raw PR body for sanitization
           echo "PR_BODY_RAW<<EOF_PR_BODY" >> $GITHUB_OUTPUT
           echo "$PR_BODY_RAW" >> $GITHUB_OUTPUT
@@ -216,51 +217,51 @@ jobs:
           import os
           import re
           import html
-          
+
           # Get the raw PR body
           pr_body_raw = os.environ.get('PR_BODY_RAW', '')
-          
+
           # Basic sanitization
           # 1. HTML escape to prevent injection
           sanitized = html.escape(pr_body_raw)
-          
+
           # 2. Remove script tags and other potentially dangerous content
           sanitized = re.sub(r'<script[^>]*>.*?</script>', '', sanitized, flags=re.IGNORECASE | re.DOTALL)
           sanitized = re.sub(r'<iframe[^>]*>.*?</iframe>', '', sanitized, flags=re.IGNORECASE | re.DOTALL)
           sanitized = re.sub(r'javascript:', '', sanitized, flags=re.IGNORECASE)
-          
+
           # 3. Limit length to prevent overly long descriptions (max 2000 chars)
           if len(sanitized) > 2000:
               sanitized = sanitized[:1997] + '...'
-          
+
           # 4. Clean up excessive whitespace
           sanitized = re.sub(r'\n\s*\n\s*\n', '\n\n', sanitized)
           sanitized = sanitized.strip()
-          
+
           # If empty after sanitization, provide a default
           if not sanitized:
               sanitized = "No description provided."
-          
+
           print(f"Sanitized PR body (length: {len(sanitized)} chars)")
-          
+
           # Create the full body for the release
           version = os.environ.get('VERSION', 'unknown')
           tag = os.environ.get('GITHUB_REF', '').replace('refs/tags/', '')
           full_body = f"""{sanitized}
-          
+
           ---
-          
+
           **Release {tag}**
-          
+
           - Version: {version}
           - Commit: {os.environ.get('GITHUB_SHA', 'unknown')}
           - Original PR: #{os.environ.get('PR_NUMBER', 'unknown')}"""
-          
+
           # Output the sanitized content
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"SANITIZED_PR_BODY<<EOF_SANITIZED\n{sanitized}\nEOF_SANITIZED\n")
               f.write(f"FULL_RELEASE_BODY<<EOF_FULL\n{full_body}\nEOF_FULL\n")
-          
+
           PYTHON_SCRIPT
         env:
           PR_BODY_RAW: ${{ steps.find_triggering_pr.outputs.PR_BODY_RAW }}
@@ -303,10 +304,18 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set image name
         id: set-tags
         run: |
-          echo "API_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
+          echo "DOCKER_IMAGE=docker.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
+          echo "GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/listenarr" >> $GITHUB_OUTPUT
           TAG=${GITHUB_REF/refs/tags/}
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
@@ -331,8 +340,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ steps.set-tags.outputs.API_IMAGE }}:stable
-            ${{ steps.set-tags.outputs.API_IMAGE }}:latest
+            ${{ steps.set-tags.outputs.DOCKER_IMAGE }}:stable
+            ${{ steps.set-tags.outputs.DOCKER_IMAGE }}:latest
+            ${{ steps.set-tags.outputs.DOCKER_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
+            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:stable
+            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:latest
+            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
 
       - name: Notify Discord
         uses: rjstone/discord-webhook-notify@v2.2.1
