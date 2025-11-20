@@ -38,6 +38,8 @@ namespace Listenarr.Api.Models
         public List<string>? Narrators { get; set; }
         public string? Isbn { get; set; }
         public string? Asin { get; set; }
+            // OpenLibrary identifier (OLID) when the audiobook originates from OpenLibrary
+            public string? OpenLibraryId { get; set; }
         public string? Publisher { get; set; }
         public string? Language { get; set; }
         public int? Runtime { get; set; }

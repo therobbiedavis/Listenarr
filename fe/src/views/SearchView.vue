@@ -5,6 +5,23 @@
       <p>Search for audiobooks and media across your configured APIs</p>
     </div>
 
+    <!-- Quick raw-fetch debug control -->
+    <div style="margin-bottom:1rem;">
+      <button @click="fetchRawDebug(searchQuery || 'Harry')" class="search-button" style="background:#6c757d">Fetch Raw API Results (apiService)</button>
+      <button @click="fetchRawDebugWindow(searchQuery || 'Harry')" class="search-button" style="background:#495057;margin-left:0.5rem">Fetch Raw API Results (window.fetch)</button>
+    </div>
+
+    <!-- Debug: show raw search results (temporary) -->
+    <div v-if="!searchStore.isSearching" class="debug-results" style="background:#fff;border:1px solid #eee;padding:1rem;border-radius:6px;margin-top:1rem;">
+      <strong>Debug: raw searchStore.searchResults</strong>
+      <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(searchStore.searchResults, null, 2) }}</pre>
+      <div style="margin-top:0.5rem">
+        <strong>Raw debug fetch results (window.rawDebugResults):</strong>
+        <div>Count: {{ rawDebugResults ? rawDebugResults.length : 0 }}</div>
+        <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(rawDebugResults, null, 2) }}</pre>
+      </div>
+    </div>
+
     <div class="search-form">
       <div class="search-input-group">
         <input
@@ -157,6 +174,7 @@ const isAddingToLibrary = ref(false)
 const addedResults = ref(new Set<string>())
 const qualityScores = ref<Map<string, QualityScore>>(new Map())
 const defaultProfile = ref<QualityProfile | null>(null)
+const rawDebugResults = ref<any[] | null>(null)
 
 // Load default quality profile on mount
 onMounted(async () => {
@@ -165,7 +183,39 @@ onMounted(async () => {
   } catch (error) {
     console.warn('No default quality profile found:', error)
   }
+  // Expose the search store and search results for quick debugging in DevTools
+  try {
+    ;(window as any).searchStore = searchStore
+    ;(window as any).searchResults = searchStore.searchResults
+    console.debug('[SearchView] Exposed searchStore and searchResults on window for debugging')
+  } catch {}
 })
+
+const fetchRawDebug = async (q: string) => {
+  try {
+    const results = await apiService.intelligentSearch(q || 'Harry')
+    rawDebugResults.value = results
+    try { (window as any).rawDebugResults = results } catch {}
+    console.debug('[SearchView] Raw debug results fetched (apiService)', results)
+  } catch (e) {
+    console.error('[SearchView] Raw debug fetch failed (apiService)', e)
+    rawDebugResults.value = null
+  }
+}
+
+const fetchRawDebugWindow = async (q: string) => {
+  try {
+    const resp = await window.fetch(`/api/search/intelligent?query=${encodeURIComponent(q)}`, { credentials: 'include' })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const results = await resp.json()
+    rawDebugResults.value = results
+    try { (window as any).rawDebugResults = results } catch {}
+    console.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
+  } catch (e) {
+    console.error('[SearchView] Raw debug fetch failed (window.fetch)', e)
+    rawDebugResults.value = null
+  }
+}
 
 const performSearch = async () => {
   console.log('=== performSearch START ===')
@@ -187,6 +237,12 @@ const performSearch = async () => {
     selectedCategory.value || undefined
   )
   console.log('searchStore.search() completed')
+  // Ensure the store and results are available on window for debugging
+  try {
+    ;(window as any).searchStore = searchStore
+    ;(window as any).searchResults = searchStore.searchResults
+    console.debug('[SearchView] Bound searchStore/searchResults to window after search')
+  } catch {}
   console.log('Search results count:', searchStore.searchResults.length)
   
   // Wait for next tick to ensure searchResults are updated
@@ -259,7 +315,10 @@ const markExistingResults = () => {
 }
 
 // Watch for search results changes to mark existing audiobooks
-watch(() => searchStore.searchResults, () => {
+watch(() => searchStore.searchResults, (newVal) => {
+  // Keep a developer-friendly reference for debugging
+  try { (window as any).searchResults = newVal; (window as any).searchStore = searchStore } catch {}
+
   if (searchStore.searchResults.length > 0) {
     checkExistingInLibrary()
   }

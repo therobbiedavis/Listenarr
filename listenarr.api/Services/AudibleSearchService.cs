@@ -118,11 +118,39 @@ namespace Listenarr.Api.Services
 
                 if (resultNodes != null)
                 {
-                    foreach (var node in resultNodes.Take(20)) // Limit to first 20 results
+                    // Prefer nodes that actually contain product links (more likely to be real results)
+                    var nodesWithLinks = resultNodes.Where(n => n.SelectSingleNode(".//a[contains(@href,'/pd/')]") != null).ToList();
+                    _logger.LogInformation("Filtered {WithLinks} nodes containing product links from {Total} potential nodes", nodesWithLinks.Count, resultNodes.Count);
+
+                    var processed = 0;
+                    var foundAsin = 0;
+                    var duplicateAsinCount = 0;
+
+                    // Per-provider cap for unique ASINs (align with SearchService default)
+                    var providerUniqueCap = 50;
+                    var seenAsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    // Increase processing limit to capture more nodes but stop when we've collected enough unique ASINs
+                    foreach (var node in nodesWithLinks.Take(200))
                     {
+                        processed++;
                         var result = ExtractAudibleSearchResult(node);
                         if (result != null && !string.IsNullOrEmpty(result.Asin))
                         {
+                            // Deduplicate early by ASIN to avoid emitting the same ASIN multiple times
+                            if (seenAsins.Contains(result.Asin))
+                            {
+                                duplicateAsinCount++;
+                                _logger.LogDebug("Skipping duplicate ASIN {Asin} from node", result.Asin);
+                                // Stop early if we've already collected enough unique ASINs
+                                if (seenAsins.Count >= providerUniqueCap) break;
+                                continue;
+                            }
+
+                            // Mark seen and count as a found unique ASIN
+                            seenAsins.Add(result.Asin);
+                            foundAsin++;
+
                             // Clean noisy titles
                             if (IsHeaderNoise(result.Title))
                             {
@@ -134,8 +162,25 @@ namespace Listenarr.Api.Services
                                 results.Add(result);
                                 _logger.LogInformation("Extracted Audible result: {Title} (ASIN: {Asin})", result.Title, result.Asin);
                             }
+                            else
+                            {
+                                _logger.LogDebug("Skipped noisy title for ASIN {Asin}", result.Asin);
+                            }
+
+                            // Stop early if we've reached the provider unique cap
+                            if (seenAsins.Count >= providerUniqueCap)
+                            {
+                                _logger.LogInformation("Reached provider unique ASIN cap: {Cap}", providerUniqueCap);
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Node did not yield an ASIN or was unparsable (processed {Processed} of nodesWithLinks)", processed);
                         }
                     }
+
+                    _logger.LogInformation("Processed {Processed} product-linked nodes, found {FoundAsin} unique ASINs, skipped {DuplicateCount} duplicates", processed, foundAsin, duplicateAsinCount);
                 }
 
                 // If no results with first selector, try broader search
@@ -146,11 +191,29 @@ namespace Listenarr.Api.Services
                     
                     if (allLinks != null)
                     {
-                        foreach (var link in allLinks.Take(10))
+                        _logger.LogInformation("Found {Count} direct product links on page, trying a broader extraction", allLinks.Count);
+
+                        var seenFallback = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        var fallbackDuplicates = 0;
+                        var fallbackFound = 0;
+                        var fallbackCap = 50;
+
+                        foreach (var link in allLinks.Take(50))
                         {
                             var result = ExtractFromProductLink(link);
                             if (result != null && !string.IsNullOrEmpty(result.Asin))
                             {
+                                if (seenFallback.Contains(result.Asin))
+                                {
+                                    fallbackDuplicates++;
+                                    _logger.LogDebug("Skipping duplicate ASIN in fallback extraction: {Asin}", result.Asin);
+                                    if (seenFallback.Count >= fallbackCap) break;
+                                    continue;
+                                }
+
+                                seenFallback.Add(result.Asin);
+                                fallbackFound++;
+
                                 if (IsHeaderNoise(result.Title))
                                 {
                                     var fetched = await TryFetchProductTitle(result.ProductUrl, result.Asin!);
@@ -161,8 +224,20 @@ namespace Listenarr.Api.Services
                                     results.Add(result);
                                     _logger.LogInformation("Extracted from link: {Title} (ASIN: {Asin})", result.Title, result.Asin);
                                 }
+                                else
+                                {
+                                    _logger.LogDebug("Skipped noisy title from direct link for ASIN {Asin}", result.Asin);
+                                }
+
+                                if (seenFallback.Count >= fallbackCap)
+                                {
+                                    _logger.LogInformation("Reached fallback unique ASIN cap: {Cap}", fallbackCap);
+                                    break;
+                                }
                             }
                         }
+
+                        _logger.LogInformation("Fallback extraction processed {Links} links, found {Found} unique ASINs, skipped {Dup}", allLinks.Count, fallbackFound, fallbackDuplicates);
                     }
                 }
 

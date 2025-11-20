@@ -185,6 +185,20 @@ export interface ApplicationSettings {
   // Optional bot appearance customization
   discordBotUsername?: string
   discordBotAvatar?: string
+  
+    // Search behavior settings
+    // Toggle whether to include Amazon/Audible provider searches when performing intelligent search
+    enableAmazonSearch?: boolean
+    enableAudibleSearch?: boolean
+    // Enable OpenLibrary augmentation/search
+    enableOpenLibrarySearch?: boolean
+    // Limits and scoring thresholds used during search
+    // Maximum number of candidate ASINs to consider (candidateLimit)
+    searchCandidateCap?: number
+    // Maximum number of results to return to the UI (returnLimit)
+    searchResultCap?: number
+    // Fuzzy matching threshold used when comparing titles/authors (0.0 - 1.0)
+    searchFuzzyThreshold?: number
 }
 
 export interface StartupConfig {
@@ -228,6 +242,7 @@ export interface AudibleBookMetadata {
   explicit?: boolean
   abridged?: boolean
   source?: string
+  openLibraryId?: string
   // Optional local mapping to a quality profile ID when viewing in the UI
   qualityProfileId?: number
 }
@@ -246,6 +261,7 @@ export interface Audiobook {
   narrators?: string[]
   isbn?: string
   asin?: string
+  openLibraryId?: string
   publisher?: string
   language?: string
   runtime?: number

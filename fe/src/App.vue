@@ -3,7 +3,7 @@
     <!-- Top Navigation Bar -->
     <header v-if="!hideLayout" class="top-nav">
       <div class="nav-brand">
-        <img src="/icon.png" alt="Listenarr" class="brand-logo" />
+        <img src="/logo.svg" alt="Listenarr" class="brand-logo" />
         <h1>Listenarr</h1>
         <span v-if="version && version.length > 0" class="version">v{{ version }}</span>
       </div>
@@ -875,6 +875,7 @@ const hideLayout = computed(() => {
   width: 40px;
   height: 40px;
   transition: transform 0.2s;
+  filter: brightness(0) saturate(100%) invert(51%) sepia(56%) saturate(3237%) hue-rotate(184deg) brightness(97%) contrast(97%);
 }
 
 .brand-logo:hover {

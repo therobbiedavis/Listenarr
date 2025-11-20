@@ -719,6 +719,60 @@
           </div>
 
           <div class="form-section">
+            <h4><PhMagnifyingGlass /> Search Settings</h4>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.enableAmazonSearch" type="checkbox" />
+                <span>
+                  <strong>Enable Amazon Searching</strong>
+                  <small>Include Amazon-based search providers when performing intelligent searches.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.enableAudibleSearch" type="checkbox" />
+                <span>
+                  <strong>Enable Audible Searching</strong>
+                  <small>Include Audible provider lookups when performing intelligent searches.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-group checkbox-group">
+              <label>
+                <input v-model="settings.enableOpenLibrarySearch" type="checkbox" />
+                <span>
+                  <strong>Enable OpenLibrary Searching</strong>
+                  <small>Include OpenLibrary title augmentation and lookups when performing intelligent searches.</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Candidate Cap (max candidates)</label>
+                <input v-model.number="settings.searchCandidateCap" type="number" min="1" max="200" />
+                <span class="form-help">Maximum number of candidate ASINs/entries to consider when searching (candidateLimit).</span>
+              </div>
+
+              <div class="form-group">
+                <label>Result Cap (max results)</label>
+                <input v-model.number="settings.searchResultCap" type="number" min="1" max="200" />
+                <span class="form-help">Maximum number of results returned to the UI (returnLimit).</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Fuzzy Threshold</label>
+              <input v-model.number="settings.searchFuzzyThreshold" type="number" step="0.01" min="0" max="1" />
+              <span class="form-help">Fuzzy matching threshold used when comparing titles/authors (0.0-1.0). Higher values require closer matches.</span>
+            </div>
+          </div>
+
+          <div class="form-section">
             <h4><PhUserCircle /> Authentication</h4>
             
             <div class="form-group">
@@ -1574,7 +1628,7 @@ import FolderBrowser from '@/components/FolderBrowser.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
 import {
   // Settings & Navigation
-  PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus,
+  PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhMagnifyingGlass,
   PhArrowUp, PhDownloadSimple, PhCloudSlash, PhGlobe, PhInfo,
   // Form Controls & Actions
   PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink,
@@ -2352,6 +2406,8 @@ const saveSettings = async () => {
       delete settingsToSave.usProxyPassword
     }
 
+    // No PascalCase keys are produced anymore; we only send camelCase properties.
+
   // Resolve the configuration store at call-time to ensure tests that set up Pinia
   // before mounting (or that replace the store) receive the correct instance.
   const runtimeConfigStore = useConfigurationStore()
@@ -3057,11 +3113,67 @@ async function loadTabContents(tab: string) {
         if (!loaded.general) {
           // General needs application settings, admin users and remote path mappings
           await configStore.loadApplicationSettings()
-          settings.value = configStore.applicationSettings
           // Ensure sensible default
           if (settings.value && !settings.value.completedFileAction) settings.value.completedFileAction = 'Move'
           // Initialize notification triggers array if not present
           if (settings.value && !settings.value.enabledNotificationTriggers) settings.value.enabledNotificationTriggers = []
+          // Ensure new search settings have sensible defaults when not present
+          // Create a shallow copy of the store settings so we can safely
+          // mutate defaults for the UI without relying on store ref unwrapping.
+          const raw = configStore.applicationSettings ? { ...configStore.applicationSettings } : null
+          if (raw) {
+            // Normalize values coming from the backend which may use PascalCase
+            // property names (e.g., EnableAmazonSearch) instead of camelCase.
+            const normalized: Record<string, unknown> = { ...raw }
+
+            // Helper to prefer camelCase, then PascalCase, then fallback
+            const pickBool = (camel: string, pascal: string, fallback: boolean) => {
+              const c = (raw as any)[camel]
+              const p = (raw as any)[pascal]
+              if (c !== undefined && c !== null) return Boolean(c)
+              if (p !== undefined && p !== null) return Boolean(p)
+              return fallback
+            }
+
+            const pickNumber = (camel: string, pascal: string, fallback: number) => {
+              const c = (raw as any)[camel]
+              const p = (raw as any)[pascal]
+              const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
+              // Treat zero as missing and use fallback
+              if (!val || Number.isNaN(val)) return fallback
+              return val
+            }
+
+            const amazon = pickBool('enableAmazonSearch', 'EnableAmazonSearch', true)
+            const audible = pickBool('enableAudibleSearch', 'EnableAudibleSearch', true)
+            const openlib = pickBool('enableOpenLibrarySearch', 'EnableOpenLibrarySearch', true)
+
+            const candidateCap = pickNumber('searchCandidateCap', 'SearchCandidateCap', 100)
+            const resultCap = pickNumber('searchResultCap', 'SearchResultCap', 100)
+            const fuzzy = pickNumber('searchFuzzyThreshold', 'SearchFuzzyThreshold', 0.2)
+
+            // Assign normalized camelCase properties for the UI binding
+            normalized.enableAmazonSearch = amazon
+            normalized.enableAudibleSearch = audible
+            normalized.enableOpenLibrarySearch = openlib
+            normalized.searchCandidateCap = candidateCap
+            normalized.searchResultCap = resultCap
+            normalized.searchFuzzyThreshold = fuzzy
+
+            // Set camelCase properties for the UI binding and saving
+            settings.value = normalized as any
+
+            // Sync normalized object back to the store so other consumers use it
+            // `applicationSettings` is a ref in the store; set its `.value` instead
+            if (typeof (configStore.applicationSettings as any) === 'object' && 'value' in (configStore.applicationSettings as any)) {
+              ;(configStore.applicationSettings as any).value = settings.value
+            } else {
+              // Fallback for legacy test setups: assign directly
+              configStore.applicationSettings = settings.value
+            }
+          } else {
+            settings.value = null
+          }
 
           try {
             remotePathMappings.value = await getRemotePathMappings()
@@ -3085,10 +3197,42 @@ async function loadTabContents(tab: string) {
         }
         break
       case 'requests':
-        if (!loaded.requests) {
+          if (!loaded.requests) {
           // Requests tab needs application settings and quality profiles
           await configStore.loadApplicationSettings()
-          settings.value = configStore.applicationSettings
+          // Reuse the same normalization logic for requests tab load
+          const rawReq = configStore.applicationSettings ? { ...configStore.applicationSettings } : null
+          if (rawReq) {
+            const normalizedReq: Record<string, unknown> = { ...rawReq }
+            const pickBoolReq = (camel: string, pascal: string, fallback: boolean) => {
+              const c = (rawReq as any)[camel]
+              const p = (rawReq as any)[pascal]
+              if (c !== undefined && c !== null) return Boolean(c)
+              if (p !== undefined && p !== null) return Boolean(p)
+              return fallback
+            }
+            const pickNumberReq = (camel: string, pascal: string, fallback: number) => {
+              const c = (rawReq as any)[camel]
+              const p = (rawReq as any)[pascal]
+              const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
+              if (!val || Number.isNaN(val)) return fallback
+              return val
+            }
+            normalizedReq.enableAmazonSearch = pickBoolReq('enableAmazonSearch', 'EnableAmazonSearch', true)
+            normalizedReq.enableAudibleSearch = pickBoolReq('enableAudibleSearch', 'EnableAudibleSearch', true)
+            normalizedReq.enableOpenLibrarySearch = pickBoolReq('enableOpenLibrarySearch', 'EnableOpenLibrarySearch', true)
+            normalizedReq.searchCandidateCap = pickNumberReq('searchCandidateCap', 'SearchCandidateCap', 100)
+            normalizedReq.searchResultCap = pickNumberReq('searchResultCap', 'SearchResultCap', 100)
+            normalizedReq.searchFuzzyThreshold = pickNumberReq('searchFuzzyThreshold', 'SearchFuzzyThreshold', 0.2)
+            settings.value = normalizedReq as any
+            if (typeof (configStore.applicationSettings as any) === 'object' && 'value' in (configStore.applicationSettings as any)) {
+              ;(configStore.applicationSettings as any).value = settings.value
+            } else {
+              configStore.applicationSettings = settings.value
+            }
+          } else {
+            settings.value = null
+          }
           try {
             await loadQualityProfiles()
           } catch (e) {

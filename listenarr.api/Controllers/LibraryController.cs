@@ -29,6 +29,8 @@ using System.Text.Json;
 using System.Reflection;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Listenarr.Api.Controllers
 {
@@ -147,6 +149,29 @@ namespace Listenarr.Api.Controllers
                     // Continue with original image URL if move fails
                 }
             }
+            else if (!string.IsNullOrEmpty(metadata.ImageUrl))
+            {
+                // No ASIN available; attempt to move/download the image using a derived key
+                try
+                {
+                    var rawKey = request.SearchResult?.Id ?? request.SearchResult?.ResultUrl ?? request.SearchResult?.ProductUrl ?? metadata.ImageUrl;
+                    var derivedKey = "img-" + ComputeShortHash(rawKey);
+                    var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(derivedKey, metadata.ImageUrl);
+                    if (libraryImagePath != null)
+                    {
+                        imageUrl = $"/{libraryImagePath}";
+                        _logger.LogInformation("Moved image for derived key {Key} to permanent library storage", derivedKey);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to move image for derived key {Key}, image may not be reachable", derivedKey);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error moving image for derived key when ASIN is missing");
+                }
+            }
             
             // Convert metadata to Audiobook entity and save to database
             var audiobook = new Audiobook
@@ -155,6 +180,8 @@ namespace Listenarr.Api.Controllers
                 Subtitle = metadata.Subtitle,
                 Authors = metadata.Authors,
                 ImageUrl = imageUrl,
+                // Persist OpenLibrary ID when present (enables OL-only matching in the UI)
+                OpenLibraryId = metadata.OpenLibraryId ?? request.SearchResult?.Id,
                 PublishYear = metadata.PublishYear,
                 Series = metadata.Series,
                 SeriesNumber = metadata.SeriesNumber,
@@ -322,6 +349,7 @@ namespace Listenarr.Api.Controllers
                 narrators = a.Narrators,
                 isbn = a.Isbn,
                 asin = a.Asin,
+                openLibraryId = a.OpenLibraryId,
                 publisher = a.Publisher,
                 language = a.Language,
                 runtime = a.Runtime,
@@ -392,6 +420,7 @@ namespace Listenarr.Api.Controllers
                 title = updated.Title,
                 authors = updated.Authors,
                 description = updated.Description,
+                openLibraryId = updated.OpenLibraryId,
                 imageUrl = updated.ImageUrl,
                 filePath = updated.FilePath,
                 fileSize = updated.FileSize,
@@ -419,6 +448,8 @@ namespace Listenarr.Api.Controllers
 
             return Ok(audiobookDto);
         }
+
+        // NOTE: Do not perform ad-hoc schema changes at runtime. Use EF Core migrations to modify the database schema.
 
         // DEBUG: Return raw AudiobookFile rows for an audiobook. Not intended for production use.
         [HttpGet("{id}/files-debug")]
@@ -451,6 +482,7 @@ namespace Listenarr.Api.Controllers
             if (updatedAudiobook.Narrators != null) existingAudiobook.Narrators = updatedAudiobook.Narrators;
             if (updatedAudiobook.Isbn != null) existingAudiobook.Isbn = updatedAudiobook.Isbn;
             if (updatedAudiobook.Asin != null) existingAudiobook.Asin = updatedAudiobook.Asin;
+            if (updatedAudiobook.OpenLibraryId != null) existingAudiobook.OpenLibraryId = updatedAudiobook.OpenLibraryId;
             if (updatedAudiobook.Publisher != null) existingAudiobook.Publisher = updatedAudiobook.Publisher;
             if (updatedAudiobook.Language != null) existingAudiobook.Language = updatedAudiobook.Language;
             if (updatedAudiobook.Runtime != null) existingAudiobook.Runtime = updatedAudiobook.Runtime;
@@ -1159,7 +1191,8 @@ namespace Listenarr.Api.Controllers
 
                 using var scope = _serviceProvider.CreateScope();
                 var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
-                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries } } });
+                // Include a structured payload so clients can distinguish manual vs automatic searches
+                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Manual search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "interactive", audiobookId = audiobook.Id } });
             }
             catch (Exception ex)
             {
@@ -1741,6 +1774,18 @@ namespace Listenarr.Api.Controllers
             
             // Trim whitespace and return
             return name.Trim();
+        }
+
+        private static string ComputeShortHash(string? input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return Guid.NewGuid().ToString("N").Substring(0, 12);
+
+            using var sha1 = SHA1.Create();
+            var bytes = Encoding.UTF8.GetBytes(input);
+            var hash = sha1.ComputeHash(bytes);
+            // Return first 16 hex characters for a compact identifier
+            return BitConverter.ToString(hash).Replace("-", "").Substring(0, 16).ToLowerInvariant();
         }
 
     public class BulkDeleteRequest

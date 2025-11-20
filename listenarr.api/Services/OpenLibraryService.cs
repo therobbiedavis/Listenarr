@@ -98,20 +98,37 @@ namespace Listenarr.Api.Services
         {
             try
             {
+                // Build a normalized 'q' query for OpenLibrary to improve matching.
+                // Normalize title and author into tokens (preserve alphanumerics and hyphens like 'sg-1').
+                var qParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    var nt = NormalizeForOpenLibrary(title);
+                    if (!string.IsNullOrEmpty(nt)) qParts.Add(nt);
+                }
+                if (!string.IsNullOrWhiteSpace(author))
+                {
+                    var na = NormalizeForOpenLibrary(author);
+                    if (!string.IsNullOrEmpty(na)) qParts.Add(na);
+                }
+
                 var searchParams = new List<string>();
-                
-                if (!string.IsNullOrEmpty(title))
+                var q = qParts.Any() ? string.Join("+", qParts) : string.Empty;
+                if (!string.IsNullOrEmpty(q))
                 {
-                    searchParams.Add($"title={Uri.EscapeDataString(title)}");
+                    searchParams.Add($"q={Uri.EscapeDataString(q)}");
                 }
-                
-                if (!string.IsNullOrEmpty(author))
+                else
                 {
-                    searchParams.Add($"author={Uri.EscapeDataString(author)}");
+                    // Fallback to title param if normalization yields nothing
+                    if (!string.IsNullOrEmpty(title))
+                        searchParams.Add($"title={Uri.EscapeDataString(title)}");
+                    if (!string.IsNullOrEmpty(author))
+                        searchParams.Add($"author={Uri.EscapeDataString(author)}");
                 }
-                
+
                 searchParams.Add($"limit={limit}");
-                
+
                 // Request specific fields to optimize response
                 var fields = new[]
                 {
@@ -119,7 +136,7 @@ namespace Listenarr.Api.Services
                     "isbn", "publisher", "cover_i", "edition_count", "language", "subject"
                 };
                 searchParams.Add($"fields={string.Join(",", fields)}");
-                
+
                 var queryString = string.Join("&", searchParams);
                 var url = $"{BaseUrl}/search.json?{queryString}";
                 
@@ -138,6 +155,23 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Error searching OpenLibrary for title: {Title}, author: {Author}", title, author);
                 return new OpenLibrarySearchResponse();
             }
+        }
+
+        // Normalize a title/author for OpenLibrary 'q' parameter by extracting tokens that
+        // are alphanumeric or contain hyphens (e.g. 'sg-1'), then join with '+'
+        private static string NormalizeForOpenLibrary(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+            var lower = input.ToLowerInvariant();
+            // Extract tokens: letters, digits, and hyphens
+            var matches = System.Text.RegularExpressions.Regex.Matches(lower, @"[a-z0-9\-]+");
+            var tokens = new List<string>();
+            foreach (System.Text.RegularExpressions.Match m in matches)
+            {
+                var v = m.Value.Trim('-');
+                if (!string.IsNullOrEmpty(v)) tokens.Add(v);
+            }
+            return string.Join("+", tokens);
         }
     }
 }

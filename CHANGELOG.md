@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.37] - 2025-11-19
+
+### Added
+
+- Search Settings: new section in General Settings with toggles to enable/disable provider searches and controls to tune search behavior:
+  - `enableAmazonSearch`, `enableAudibleSearch`, `enableOpenLibrarySearch` (all enabled by default)
+  - `searchCandidateCap` (default: 100) — limit of unified ASIN candidates prior to metadata enrichment
+  - `searchResultCap` (default: 100) — overall result cap returned to the UI
+  - `searchFuzzyThreshold` (default: 0.20) — fuzzy-matching threshold used by the intelligent search
+
+### Changed
+
+- Backend: `ApplicationSettings` extended with search configuration fields and an EF Core migration added so these values are persisted in the database.
+- Search pipeline: `SearchService` now reads application-level search settings and applies provider skip flags, candidate limits and fuzzy threshold. Unified candidate lists are trimmed prior to metadata enrichment and the combined result set is capped after merging indexer results.
+- Frontend: `SettingsView` and types updated to expose the new controls. Normalization logic now prefers camelCase and preserves a single canonical payload shape when saving.
+
+### Fixed
+
+- Fixed settings persistence and save behavior: removed duplicated/Conflicting PascalCase keys in the frontend payload and corrected Pinia ref handling so settings save/load remain reactive and consistent.
+- Fixed an issue where previously-applied migrations left existing databases with zero/default values for the new search fields; migrations and DB updates were added to ensure sensible defaults are present for existing installs.
+- Tests: updated intelligent-search integration tests to reflect the new search settings and behavior.
+
+
 ## [0.2.36] - 2025-11-17
 
 ### Added

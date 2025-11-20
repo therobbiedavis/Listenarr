@@ -21,7 +21,7 @@ namespace Listenarr.Api.Tests
             {
                 new SearchResult { Id = "1", Title = "Sample", Asin = "B000000000" }
             };
-            mockService.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>())).ReturnsAsync(sample);
+            mockService.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>())).ReturnsAsync(sample);
 
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudimetaService = new Mock<AudimetaService>(new System.Net.Http.HttpClient(), Mock.Of<ILogger<AudimetaService>>());

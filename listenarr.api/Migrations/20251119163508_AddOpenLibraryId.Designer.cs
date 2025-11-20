@@ -3,6 +3,7 @@ using System;
 using Listenarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Api.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    partial class ListenArrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251119163508_AddOpenLibraryId")]
+    partial class AddOpenLibraryId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
@@ -111,12 +114,6 @@ namespace Listenarr.Api.Migrations
                     b.Property<string>("DiscordGuildId")
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("EnableAmazonSearch")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("EnableAudibleSearch")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("EnableCoverArtDownload")
                         .HasColumnType("INTEGER");
 
@@ -124,9 +121,6 @@ namespace Listenarr.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("EnableNotifications")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("EnableOpenLibrarySearch")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("EnabledNotificationTriggers")
@@ -148,15 +142,6 @@ namespace Listenarr.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("PreferUsDomain")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("SearchCandidateCap")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<double>("SearchFuzzyThreshold")
-                        .HasColumnType("REAL");
-
-                    b.Property<int>("SearchResultCap")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ShowCompletedExternalDownloads")
