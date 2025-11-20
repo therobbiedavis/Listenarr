@@ -342,8 +342,10 @@ jobs:
           tags: |
             ${{ steps.set-tags.outputs.DOCKER_IMAGE }}:stable
             ${{ steps.set-tags.outputs.DOCKER_IMAGE }}:latest
+            ${{ steps.set-tags.outputs.DOCKER_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
             ${{ steps.set-tags.outputs.GHCR_IMAGE }}:stable
             ${{ steps.set-tags.outputs.GHCR_IMAGE }}:latest
+            ${{ steps.set-tags.outputs.GHCR_IMAGE }}:${{ steps.resolve-version.outputs.VERSION }}
 
       - name: Notify Discord
         uses: rjstone/discord-webhook-notify@v2.2.1
