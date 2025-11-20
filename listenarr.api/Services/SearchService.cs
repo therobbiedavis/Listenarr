@@ -2425,6 +2425,8 @@ namespace Listenarr.Api.Services
         {
             try
             {
+                // Sanitize the query for indexer searches to remove illegal characters
+                query = SanitizeIndexerQuery(query);
                 _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
                 // Route to appropriate search method based on implementation
@@ -2550,37 +2552,95 @@ namespace Listenarr.Api.Services
                 }
 
                 // Build MyAnonamouse API request (mam_id is sent as a cookie)
+                // Use the JSON form endpoint with application/x-www-form-urlencoded payload
                 var url = $"{indexer.Url.TrimEnd('/')}/tor/js/loadSearchJSONbasic.php";
                 
-                // Create form data
-                var formData = new Dictionary<string, string>
+                // Try to parse title/author from the query to give MyAnonamouse more targeted fields
+                var (parsedTitle, parsedAuthor) = ParseTitleAuthorFromQuery(query);
+
+                // Decide searchType: prefer a targeted search when we only have title or only author
+                var searchType = "all";
+                if (!string.IsNullOrWhiteSpace(parsedTitle) && string.IsNullOrWhiteSpace(parsedAuthor)) searchType = "title";
+                if (string.IsNullOrWhiteSpace(parsedTitle) && !string.IsNullOrWhiteSpace(parsedAuthor)) searchType = "author";
+
+                // Build JSON payload according to new MyAnonamouse structure
+                // Build tor object to mirror the browse.php parameter shapes (tor[text], tor[srchIn][field]=true, tor[cat][]=...)
+                var torObject = new Dictionary<string, object>
                 {
-                    ["tor[text]"] = query,
-                    ["tor[srchIn][]"] = "title",
-                    ["tor[srchIn][]"] = "author",
-                    ["tor[srchIn][]"] = "narrator",
-                    ["tor[srchIn][]"] = "series",
-                    ["tor[searchType]"] = "all",
-                    ["tor[searchIn]"] = "torrents",
-                    ["tor[cat][]"] = "0",
-                    ["tor[browseFlagsHideVsShow]"] = "0",
-                    ["tor[startDate]"] = "",
-                    ["tor[endDate]"] = "",
-                    ["tor[hash]"] = "",
-                    ["tor[sortType]"] = "default",
-                    ["tor[startNumber]"] = "0",
-                    ["perpage"] = "100",
-                    ["thumbnail"] = "true",
-                    ["dlLink"] = "",
-                    ["description"] = ""
+                    ["text"] = query,
+                    // Use field->true mapping like browse.php (e.g. tor[srchIn][title]=true)
+                    ["srchIn"] = new Dictionary<string, bool>
+                    {
+                        ["title"] = true,
+                        ["author"] = true,
+                        ["narrator"] = true,
+                        ["series"] = true,
+                        ["description"] = true,
+                        ["filetype"] = true
+                    },
+                    ["searchType"] = searchType,
+                    ["searchIn"] = "torrents",
+                    // Keep explicit cat[] list copied from the browse URL
+                    ["cat"] = new[] { "39", "49", "50", "83", "51", "97", "40", "41", "106", "42", "52", "98", "54", "55", "43", "99", "84", "44", "56", "45", "57", "85", "87", "119", "88", "58", "59", "46", "47", "53", "89", "100", "108", "48", "111", "0" },
+                    // Keep main_cat for explicit audiobook focus (some handlers honor it)
+                    ["main_cat"] = new[] { "13" },
+                    // Additional browse.php parameters observed in the URL
+                    ["browse_lang"] = new[] { "1" },
+                    ["browseFlagsHideVsShow"] = "0",
+                    ["unit"] = "1",
+                    ["startDate"] = string.Empty,
+                    ["endDate"] = string.Empty,
+                    ["hash"] = string.Empty,
+                    ["sortType"] = "default",
+                    ["startNumber"] = "0",
+                    ["perpage"] = "100"
                 };
 
-                var formContent = new FormUrlEncodedContent(formData);
+                if (!string.IsNullOrWhiteSpace(parsedTitle))
+                {
+                    torObject["title"] = parsedTitle;
+                }
 
-                // Create POST request with form data
+                if (!string.IsNullOrWhiteSpace(parsedAuthor))
+                {
+                    torObject["author"] = parsedAuthor;
+                }
+
+                // Build form-encoded content following the example for loadSearchJSONbasic.php
+                // Example: tor[cat][]=0&tor[sortType]=default&tor[browseStart]=true&tor[startNumber]=0&bannerLink&bookmarks&dlLink&description&tor[text]=mp3%20m4a
+                var formPairs = new List<KeyValuePair<string, string>>();
+                // Minimal/required fields per example
+                formPairs.Add(new KeyValuePair<string, string>("tor[cat][]", "0"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[sortType]", "default"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[browseStart]", "true"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[startNumber]", "0"));
+
+                // Keys present without explicit values in the example; represent them with empty string
+                formPairs.Add(new KeyValuePair<string, string>("bannerLink", string.Empty));
+                formPairs.Add(new KeyValuePair<string, string>("bookmarks", string.Empty));
+                formPairs.Add(new KeyValuePair<string, string>("dlLink", string.Empty));
+                formPairs.Add(new KeyValuePair<string, string>("description", string.Empty));
+
+                // tor[text] is the search query (example uses 'mp3 m4a')
+                formPairs.Add(new KeyValuePair<string, string>("tor[text]", query ?? string.Empty));
+
+                // Preserve audiobook filtering if available: include main_cat
+                formPairs.Add(new KeyValuePair<string, string>("tor[main_cat][]", "13"));
+
+                // Add searchIn and srchIn fields so we request torrents and relevant fields
+                formPairs.Add(new KeyValuePair<string, string>("tor[searchIn]", "torrents"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][title]", "true"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][author]", "true"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][narrator]", "true"));
+                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][series]", "true"));
+
+                var content = new FormUrlEncodedContent(formPairs);
+                var formString = await content.ReadAsStringAsync();
+                _logger.LogInformation("MyAnonamouse outgoing form (loadSearchJSONbasic): {Form}", formString);
+
                 var request = new HttpRequestMessage(HttpMethod.Post, url)
                 {
-                    Content = formContent
+                    Content = content
                 };
 
                 // Add browser-like headers to avoid "invalid request" errors
@@ -2905,6 +2965,82 @@ namespace Listenarr.Api.Services
                             MagnetLink = "",
                             NzbUrl = ""
                         };
+                        // Robust link detection: prefer magnet/hash/torrent indicators, only treat as NZB when explicit NZB fields exist
+                        try
+                        {
+                            string magnetLink = "";
+                            // Common magnet field names
+                            if (item.TryGetProperty("magnet", out var magnetElem) && magnetElem.ValueKind == JsonValueKind.String)
+                                magnetLink = magnetElem.GetString() ?? "";
+                            else if (item.TryGetProperty("magnetLink", out magnetElem) && magnetElem.ValueKind == JsonValueKind.String)
+                                magnetLink = magnetElem.GetString() ?? "";
+                            else if (item.TryGetProperty("magnetlink", out magnetElem) && magnetElem.ValueKind == JsonValueKind.String)
+                                magnetLink = magnetElem.GetString() ?? "";
+
+                            // If we have a torrent hash, construct a magnet link
+                            if (string.IsNullOrEmpty(magnetLink) && item.TryGetProperty("hash", out var hashElem) && hashElem.ValueKind == JsonValueKind.String)
+                            {
+                                var h = hashElem.GetString();
+                                if (!string.IsNullOrWhiteSpace(h))
+                                {
+                                    magnetLink = $"magnet:?xt=urn:btih:{h}&dn={Uri.EscapeDataString(title ?? string.Empty)}";
+                                }
+                            }
+
+                            // Detect torrent download URL from other common fields
+                            var torrentUrlDetected = result.TorrentUrl ?? string.Empty;
+                            string[] torrentFields = new[] { "download", "dlLink", "downloadlink", "download_url", "torrent", "torrent_url", "torrentUrl", "torrentlink" };
+                            foreach (var tf in torrentFields)
+                            {
+                                if (string.IsNullOrEmpty(torrentUrlDetected) && item.TryGetProperty(tf, out var tfElem) && tfElem.ValueKind == JsonValueKind.String)
+                                {
+                                    torrentUrlDetected = tfElem.GetString() ?? string.Empty;
+                                }
+                            }
+
+                            // If any URL looks like a .torrent file, prefer it as torrent URL
+                            if (string.IsNullOrEmpty(torrentUrlDetected))
+                            {
+                                foreach (var prop in item.EnumerateObject())
+                                {
+                                    if (prop.Value.ValueKind == JsonValueKind.String)
+                                    {
+                                        var v = prop.Value.GetString();
+                                        if (!string.IsNullOrEmpty(v) && v.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            torrentUrlDetected = v;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Detect NZB fields (only treat as NZB when explicit)
+                            string nzbUrlDetected = string.Empty;
+                            if (item.TryGetProperty("nzb", out var nzbElem) && nzbElem.ValueKind == JsonValueKind.String)
+                                nzbUrlDetected = nzbElem.GetString() ?? string.Empty;
+                            else if (item.TryGetProperty("nzbLink", out nzbElem) && nzbElem.ValueKind == JsonValueKind.String)
+                                nzbUrlDetected = nzbElem.GetString() ?? string.Empty;
+                            else if (item.TryGetProperty("nzburl", out nzbElem) && nzbElem.ValueKind == JsonValueKind.String)
+                                nzbUrlDetected = nzbElem.GetString() ?? string.Empty;
+
+                            // Apply discovered links to the result
+                            if (!string.IsNullOrEmpty(magnetLink)) result.MagnetLink = magnetLink;
+                            if (!string.IsNullOrEmpty(torrentUrlDetected)) result.TorrentUrl = torrentUrlDetected;
+                            if (!string.IsNullOrEmpty(nzbUrlDetected)) result.NzbUrl = nzbUrlDetected;
+
+                            // Prefer marking as Torrent when either magnet or torrent URL exists
+                            if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
+                                result.Format = "Torrent";
+                            else if (!string.IsNullOrEmpty(result.NzbUrl))
+                                result.Format = "NZB";
+
+                            _logger.LogDebug("MyAnonamouse parsed item #{Index} link-disposition: magnet={MagnetPresent}, torrent={TorrentPresent}, nzb={NzbPresent}", _mamDebugIndex, !string.IsNullOrEmpty(result.MagnetLink), !string.IsNullOrEmpty(result.TorrentUrl), !string.IsNullOrEmpty(result.NzbUrl));
+                        }
+                        catch (Exception exLink)
+                        {
+                            _logger.LogDebug(exLink, "Failed to detect links for MyAnonamouse item {Id}", id);
+                        }
 
                         // Attempt to parse language codes from title or tags (e.g. [ENG / M4B])
                         var detectedLang = ParseLanguageFromText(title + " " + (tags ?? ""));
@@ -2984,6 +3120,44 @@ namespace Listenarr.Api.Services
             return null;
         }
 
+        // Try to heuristically split a user query into (title, author).
+        // Supports patterns like: "Title by Author", "Title - Author", or "Author, Title".
+        private static (string? title, string? author) ParseTitleAuthorFromQuery(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query)) return (null, null);
+
+            var q = query.Trim();
+
+            // Pattern: "Title by Author" (use last occurrence of " by ")
+            var byIndex = q.LastIndexOf(" by ", StringComparison.OrdinalIgnoreCase);
+            if (byIndex > 0)
+            {
+                var title = q.Substring(0, byIndex).Trim();
+                var author = q.Substring(byIndex + 4).Trim();
+                return (string.IsNullOrWhiteSpace(title) ? null : title, string.IsNullOrWhiteSpace(author) ? null : author);
+            }
+
+            // Pattern: "Title - Author"
+            var dashParts = q.Split(new[] { " - " }, 2, StringSplitOptions.None);
+            if (dashParts.Length == 2)
+            {
+                var title = dashParts[0].Trim();
+                var author = dashParts[1].Trim();
+                return (string.IsNullOrWhiteSpace(title) ? null : title, string.IsNullOrWhiteSpace(author) ? null : author);
+            }
+
+            // Pattern: "Author, Title" -> return (Title, Author)
+            var commaParts = q.Split(new[] { ',' }, 2);
+            if (commaParts.Length == 2)
+            {
+                var author = commaParts[0].Trim();
+                var title = commaParts[1].Trim();
+                return (string.IsNullOrWhiteSpace(title) ? null : title, string.IsNullOrWhiteSpace(author) ? null : author);
+            }
+
+            return (null, null);
+        }
+
         private string BuildTorznabUrl(Indexer indexer, string query, string? category)
         {
             var url = indexer.Url.TrimEnd('/');
@@ -3038,6 +3212,44 @@ namespace Listenarr.Api.Services
             {
                 return rawUrl ?? "Indexer";
             }
+        }
+
+        /// <summary>
+        /// Remove illegal/unsupported characters from indexer search queries.
+        /// Strips a curated set of punctuation/symbols, smart quotes, control
+        /// and formatting Unicode categories, then collapses whitespace.
+        /// </summary>
+        private string SanitizeIndexerQuery(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query)) return string.Empty;
+
+            // Characters explicitly requested to strip
+            // Added parentheses to remove '(' and ')' from queries
+            const string forbidden = "*/\\<>:?|^~`$#%&+={}[]'\"!()";
+
+            var sb = new System.Text.StringBuilder(query.Length);
+            foreach (var ch in query)
+            {
+                // Remove control and format characters
+                var uc = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch);
+                if (char.IsControl(ch) || uc == System.Globalization.UnicodeCategory.Format)
+                    continue;
+
+                // Remove explicit forbidden ASCII symbols
+                if (forbidden.IndexOf(ch) >= 0)
+                    continue;
+
+                // Remove common smart quotes and other punctuation variants
+                // Left/right single quotation mark, left/right double quotation mark
+                if (ch == '\u2018' || ch == '\u2019' || ch == '\u201C' || ch == '\u201D')
+                    continue;
+
+                sb.Append(ch);
+            }
+
+            // Collapse runs of whitespace to single space and trim
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(sb.ToString(), "\\s+", " ").Trim();
+            return cleaned;
         }
 
         private async Task<List<SearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)

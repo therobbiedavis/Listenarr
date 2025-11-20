@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.38] - 2025-11-20
+
+### Added
+
+- MyAnonamouse search improvements: added targeted audiobook searches (sets `main_cat=13`) and refined request payloads to match the indexer's `loadSearchJSONbasic.php` form shape for more reliable results.
+
+### Changed
+
+- SearchService: switched MyAnonamouse requests to use the site-expected form-encoded payload, include `tor[text]`, `tor[main_cat][]`, `tor[searchIn]=torrents`, and scoped `tor[srchIn][...]` flags to prefer title/author where available.
+- Improved response parsing for MyAnonamouse: robust detection and prioritization of magnet links and .torrent URLs (including constructing magnet links from known hashes), and conservative NZB handling when explicit NZB fields are present.
+- Query sanitization: sanitize indexer queries to remove problematic characters (curly apostrophes and parentheses) that impacted matching on MyAnonamouse.
+- Logging: outbound MyAnonamouse payloads are logged at Information level to aid debugging and verification.
+
+### Fixed
+
+- Reduced false-positive ebook results from MyAnonamouse searches by targeting audiobooks and tightening search fields.
+- Hardened parsing to populate `SearchResult` fields (Title, Torrent/Magnet/NZB URLs, Size, Seeders) for a wider range of MyAnonamouse response shapes.
+
+
 ## [0.2.37] - 2025-11-19
 
 ### Added
