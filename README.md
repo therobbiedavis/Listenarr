@@ -10,7 +10,8 @@
   <a href="https://github.com/therobbiedavis/Listenarr/releases"><img alt="Release" src="https://img.shields.io/github/v/release/therobbiedavis/Listenarr?style=flat-square"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square"></a>
   <a href="https://github.com/therobbiedavis/Listenarr/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/therobbiedavis/Listenarr/total?style=flat-square"></a>
-  <a href="https://hub.docker.com/r/therobbiedavis/listenarr"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/therobbiedavis/listenarr?style=flat-square"></a>
+  <a href="https://github.com/therobbiedavis/Listenarr/pkgs/container/listenarr"><img alt="GHCR" src="https://img.shields.io/badge/ghcr.io-listenarr-181717?style=flat-square&logo=github"></a>
+  <a href="https://hub.docker.com/r/therobbiedavis/listenarr"><img alt="Docker Hub Mirror" src="https://img.shields.io/badge/docker%20hub-mirror-0db7ed?style=flat-square&logo=docker"></a>
 </p>
 
 ---
@@ -48,6 +49,8 @@ The easiest way to get started is to use Docker (recommended for production), pr
 
 ### Docker (Recommended for Production)
 
+> **Container images:** GHCR is the preferred registry for Listenarr. Use `ghcr.io/therobbiedavis/listenarr:<tag>` for the latest builds. A Docker Hub mirror (`docker.io/therobbiedavis/listenarr:<tag>`) is still published for backwards compatibility.
+
 ```bash
 docker run -d \
   --name listenarr \
@@ -55,13 +58,13 @@ docker run -d \
   ##OPTIONAL: Used by Discord Bot
   -e LISTENARR_PUBLIC_URL=https://your-domain.com \
   -v listenarr_data:/app/config \
-  therobbiedavis/listenarr:canary
+  ghcr.io/therobbiedavis/listenarr:canary
 ```
 
 **Service will be available at:**
 - Web App: http://localhost:5000
 
-**Available Tags:**
+**Available Tags (GHCR + Docker Hub mirror):**
 - ~~`latest` / `stable`~~ - Latest stable release (available soon)
 - `canary` - Latest canary build (pre-release)
 - `canary-X.Y.Z` - Specific canary version
@@ -73,7 +76,7 @@ docker run -d \
 version: '3.8'
 services:
   listenarr:
-    image: therobbiedavis/listenarr:canary
+    image: ghcr.io/therobbiedavis/listenarr:canary
     ports:
       - "5000:5000"
     environment:
@@ -81,6 +84,8 @@ services:
     volumes:
       - listenarr_data:/app/config
     restart: unless-stopped
+
+# For Docker Hub, replace the image with docker.io/therobbiedavis/listenarr:canary
 
 volumes:
   listenarr_data:
@@ -257,9 +262,11 @@ This means you can run the helper once and enter your public domain (for example
 
 Listenarr uses GitHub Actions for automated building and deployment:
 
-- **Canary Builds** (on `canary` pushes): Builds self-contained executables (Linux x64, Windows x64) and Docker images. Creates GitHub pre-releases with downloadable zips and pushes Docker images tagged as `canary` and `canary-X.Y.Z`.
-- **Nightly Builds** (on `develop` pushes): Builds self-contained executables (Linux x64, Windows x64) and Docker images. Creates GitHub pre-releases with downloadable zips and pushes Docker images tagged as `nightly` and `nightly-X.Y.Z`.
-- **Release Builds** (on version tags): Builds executables for Linux x64, Windows x64, and macOS x64. Creates GitHub releases with artifacts and pushes Docker images tagged as `stable`, `latest`, and `X.Y.Z`.
+- **Canary Builds** (on `canary` pushes): Builds self-contained executables (Linux x64, Windows x64) and publishes container images tagged `canary` / `canary-X.Y.Z` to GHCR & Docker Hub.
+- **Nightly Builds** (on `develop` pushes): Builds self-contained executables (Linux x64, Windows x64) and publishes container images tagged `nightly` / `nightly-X.Y.Z` to GHCR & Docker Hub.
+- **Release Builds** (on version tags): Builds executables for Linux x64, Windows x64, and macOS x64. Creates GitHub releases and publishes container images tagged `stable`, `latest`, and `X.Y.Z` to GHCR & Docker Hub.
+
+All workflows push to `ghcr.io/therobbiedavis/listenarr` and `docker.io/therobbiedavis/listenarr`.
 
 Version numbers are automatically incremented:
 - Canary: Patch version +1
