@@ -249,22 +249,21 @@
               </div>
             </div>
               <div class="config-actions">
-              <button 
-                @click="toggleApiConfig(api)" 
+              <button    
+                @click="toggleApiConfig(api)"
                 class="icon-button"
-                :title="api.isEnabled ? 'Disable' : 'Enable'"
-              >
+                >
                 <template v-if="api.isEnabled">
                   <PhToggleRight />
                 </template>
                 <template v-else>
                   <PhToggleLeft />
                 </template>
-              </button>
+              </button>  
               <button @click="editApiConfig(api)" class="icon-button" title="Edit">
                 <PhPencil />
               </button>
-              <button @click="deleteApiConfig(api.id)" class="icon-button danger" title="Delete">
+              <button @click="confirmDeleteApi(api)" class="icon-button danger" title="Delete">
                 <PhTrash />
               </button>
             </div>
@@ -399,7 +398,7 @@
               <button @click="editMapping(mapping)" class="edit-button" title="Edit">
                 <PhPencil />
               </button>
-              <button @click="deleteMapping(mapping.id)" class="delete-button" title="Delete">
+              <button @click="confirmDeleteMapping(mapping)" class="delete-button" title="Delete">
                 <PhTrash />
               </button>
             </div>
@@ -436,6 +435,34 @@
             <div class="modal-actions">
               <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
               <button @click="saveMapping()" class="save-button"><PhCheck /> Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Delete Remote Path Mapping Confirmation Modal -->
+        <div v-if="mappingToDelete" class="modal-overlay" @click="mappingToDelete = null">
+          <div class="modal-content" @click.stop>
+            <div class="modal-header">
+              <h3>
+                <PhWarningCircle />
+                Delete Remote Path Mapping
+              </h3>
+              <button @click="mappingToDelete = null" class="modal-close">
+                <PhX />
+              </button>
+            </div>
+            <div class="modal-body">
+              <p>Are you sure you want to delete the remote path mapping <strong>{{ mappingToDelete.name || mappingToDelete.remotePath }}</strong>?</p>
+              <p>This action cannot be undone.</p>
+            </div>
+            <div class="modal-actions">
+              <button @click="mappingToDelete = null" class="cancel-button">
+                Cancel
+              </button>
+              <button @click="executeDeleteMapping()" class="delete-button">
+                <PhTrash />
+                Delete
+              </button>
             </div>
           </div>
         </div>
@@ -790,7 +817,7 @@
                 <input v-model="settings.adminUsername" type="text" placeholder="Admin username" class="admin-input" />
                 <div class="password-field">
                   <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
-                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide password' : 'Show password'">
                     <template v-if="showPassword">
                       <PhEyeSlash />
                     </template>
@@ -895,7 +922,7 @@
               <label>US Proxy Password (optional)</label>
               <div class="password-field">
                 <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
-                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide password' : 'Show password'">
                   <template v-if="showPassword">
                     <PhEyeSlash />
                   </template>
@@ -989,7 +1016,7 @@
             <label>Bot Token</label>
             <div class="password-field">
               <input :type="showPassword ? 'text' : 'password'" v-model="settings.discordBotToken" placeholder="Bot token (keep secret)" class="admin-input password-input" />
-              <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide token' : 'Show token'">
+              <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide token' : 'Show token'">
                 <template v-if="showPassword">
                   <PhEyeSlash />
                 </template>
@@ -1326,7 +1353,6 @@
         </div>
       </div>
     </div>
-  </div>
 
   <!-- Webhook Configuration Modal -->
   <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm" @keydown.esc="closeWebhookForm">
@@ -1482,13 +1508,7 @@
     @saved="loadIndexers()"
   />
 
-  <!-- Quality Profile Form Modal -->
-  <QualityProfileFormModal
-    :visible="showQualityProfileForm"
-    :profile="editingQualityProfile"
-    @close="showQualityProfileForm = false; editingQualityProfile = null"
-    @save="saveQualityProfile"
-  />
+  
 
   <!-- Delete Client Confirmation Modal -->
   <div v-if="clientToDelete" class="modal-overlay" @click="clientToDelete = null">
@@ -1518,6 +1538,34 @@
     </div>
   </div>
 
+  <!-- Delete Metadata Source Confirmation Modal -->
+  <div v-if="apiToDelete" class="modal-overlay" @click="apiToDelete = null">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <h3>
+          <PhWarningCircle />
+          Delete Metadata Source
+        </h3>
+        <button @click="apiToDelete = null" class="modal-close">
+          <PhX />
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete the metadata source <strong>{{ apiToDelete.name }}</strong>?</p>
+        <p>This action cannot be undone.</p>
+      </div>
+      <div class="modal-actions">
+        <button @click="apiToDelete = null" class="cancel-button">
+          Cancel
+        </button>
+        <button @click="executeDeleteApi()" class="delete-button">
+          <PhTrash />
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Indexer Confirmation Modal -->
   <div v-if="indexerToDelete" class="modal-overlay" @click="indexerToDelete = null">
     <div class="modal-content" @click.stop>
@@ -1535,13 +1583,14 @@
         <p>This action cannot be undone.</p>
       </div>
         <div class="modal-actions">
-        <button @click="indexerToDelete = null" class="cancel-button">
-          Cancel
-        </button>
-        <button @click="executeDeleteIndexer" class="delete-button">
-          <PhTrash />
-          Delete
-        </button>
+          <button type="button" @click="indexerToDelete = null" class="cancel-button">
+            Cancel
+          </button>
+          <button type="button" @click="executeDeleteIndexer()" class="delete-button modal-delete-button">
+            <PhTrash />
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1967,6 +2016,7 @@ const adminUsers = ref<Array<{ id: number; username: string; email?: string; isA
   defineExpose({ toggleShowPassword })
 const showMappingForm = ref(false)
 const mappingToEdit = ref<RemotePathMapping | null>(null)
+const mappingToDelete = ref<RemotePathMapping | null>(null)
 
 
 
@@ -2053,16 +2103,27 @@ const editClientConfig = (client: DownloadClientConfiguration) => {
   showClientForm.value = true
 }
 
-const deleteApiConfig = async (id: string) => {
-  const ok = await showConfirm('Are you sure you want to delete this API configuration?', 'Delete API')
-  if (!ok) return
+const apiToDelete = ref<ApiConfiguration | null>(null)
+
+const confirmDeleteApi = (api: ApiConfiguration) => {
+  apiToDelete.value = api
+}
+
+const executeDeleteApi = async (id?: string) => {
+  const apiId = id || apiToDelete.value?.id
+  if (!apiId) return
+
   try {
-    await configStore.deleteApiConfiguration(id)
+    await configStore.deleteApiConfiguration(apiId)
     toast.success('API', 'API configuration deleted successfully')
+    // Refresh API list if the store provides a loader
+    try { await configStore.loadApiConfigurations() } catch {}
   } catch (error) {
     console.error('Failed to delete API configuration:', error)
     const errorMessage = formatApiError(error)
     toast.error('API delete failed', errorMessage)
+  } finally {
+    apiToDelete.value = null
   }
 }
 
@@ -2632,16 +2693,23 @@ const saveMapping = async () => {
 
 const editMapping = (mapping: RemotePathMapping) => openMappingForm(mapping)
 
-const deleteMapping = async (id: number) => {
-  const ok = await showConfirm('Delete this remote path mapping?', 'Delete Mapping')
-  if (!ok) return
+const confirmDeleteMapping = (mapping: RemotePathMapping) => {
+  mappingToDelete.value = mapping
+}
+
+const executeDeleteMapping = async (id?: number) => {
+  const mappingId = id || mappingToDelete.value?.id
+  if (!mappingId) return
+
   try {
-    await deleteRemotePathMapping(id)
-    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== id)
+    await deleteRemotePathMapping(mappingId)
+    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== mappingId)
     toast.success('Remote path mapping', 'Remote path mapping deleted')
   } catch (err) {
     console.error('Failed to delete mapping', err)
     toast.error('Delete failed', 'Failed to delete mapping')
+  } finally {
+    mappingToDelete.value = null
   }
 }
 
@@ -3101,6 +3169,15 @@ async function loadTabContents(tab: string) {
         if (!loaded.clients) {
           await configStore.loadDownloadClientConfigurations()
           loaded.clients = true
+        }
+        // Also load remote path mappings for the clients tab
+        if (!loaded.mappings) {
+          try {
+            remotePathMappings.value = await getRemotePathMappings()
+            loaded.mappings = true
+          } catch (e) {
+            console.debug('Failed to load remote path mappings', e)
+          }
         }
         break
       case 'quality-profiles':
@@ -4798,6 +4875,53 @@ onMounted(async () => {
   justify-content: flex-end;
   padding: 1.5rem 2rem;
   border-top: 1px solid #444;
+}
+
+/* Ensure modal context delete buttons are full-size, not the small icon-style
+   square buttons used elsewhere in the UI. This overrides the
+   generic .delete-button rules with a more suitable modal appearance. */
+.modal-overlay .modal-content .modal-actions .delete-button,
+.modal-content .modal-actions .delete-button,
+.modal-overlay .modal-content .modal-actions .modal-delete-button,
+.modal-content .modal-actions .modal-delete-button {
+  /* Stronger selector to guarantee modal buttons override list/icon buttons */
+  padding: 0.75rem 1.25rem;
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1rem;
+  min-width: 120px; /* ensure modal delete button is clearly larger than icon buttons */
+  height: auto;
+  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
+}
+
+/* Keep hover style consistent and prominent */
+.modal-overlay .modal-content .modal-actions .delete-button:hover,
+.modal-content .modal-actions .delete-button:hover {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(231, 76, 60, 0.24);
+}
+
+.modal-actions .delete-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.35);
+}
+
+.modal-actions .delete-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .cancel-button {

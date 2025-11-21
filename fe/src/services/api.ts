@@ -765,39 +765,39 @@ class ApiService {
 
   // Remote Path Mappings
   async getRemotePathMappings(): Promise<RemotePathMapping[]> {
-    return this.request<RemotePathMapping[]>('/remotepath')
+    return this.request<RemotePathMapping[]>('/remotepathmappings')
   }
 
   async getRemotePathMappingById(id: number): Promise<RemotePathMapping> {
-    return this.request<RemotePathMapping>(`/remotepath/${id}`)
+    return this.request<RemotePathMapping>(`/remotepathmappings/${id}`)
   }
 
   async getRemotePathMappingsByClient(downloadClientId: string): Promise<RemotePathMapping[]> {
-    return this.request<RemotePathMapping[]>(`/remotepath/client/${encodeURIComponent(downloadClientId)}`)
+    return this.request<RemotePathMapping[]>(`/remotepathmappings/client/${encodeURIComponent(downloadClientId)}`)
   }
 
   async createRemotePathMapping(mapping: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>): Promise<RemotePathMapping> {
-    return this.request<RemotePathMapping>('/remotepath', {
+    return this.request<RemotePathMapping>('/remotepathmappings', {
       method: 'POST',
       body: JSON.stringify(mapping)
     })
   }
 
   async updateRemotePathMapping(id: number, mapping: Partial<RemotePathMapping>): Promise<RemotePathMapping> {
-    return this.request<RemotePathMapping>(`/remotepath/${id}`, {
+    return this.request<RemotePathMapping>(`/remotepathmappings/${id}`, {
       method: 'PUT',
       body: JSON.stringify({ ...mapping, id })
     })
   }
 
   async deleteRemotePathMapping(id: number): Promise<void> {
-    return this.request<void>(`/remotepath/${id}`, {
+    return this.request<void>(`/remotepathmappings/${id}`, {
       method: 'DELETE'
     })
   }
 
   async translatePath(request: TranslatePathRequest): Promise<TranslatePathResponse> {
-    return this.request<TranslatePathResponse>('/remotepath/translate', {
+    return this.request<TranslatePathResponse>('/remotepathmappings/translate', {
       method: 'POST',
       body: JSON.stringify(request)
     })
