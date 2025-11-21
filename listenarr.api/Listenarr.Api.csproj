@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.2.38</Version>
-    <AssemblyVersion>0.2.38</AssemblyVersion>
+    <Version>0.2.39</Version>
+    <AssemblyVersion>0.2.39</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
