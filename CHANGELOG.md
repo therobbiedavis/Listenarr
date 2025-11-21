@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.39] - 2025-11-21
+## [0.2.40] - 2025-11-21
+
+### Added
+
+- **Automatic Remote Path Mapping Assignment**: When creating a new remote path mapping, it is now automatically assigned to the selected download client if a `downloadClientId` is provided, streamlining the user workflow
+- **Reactive UI Updates**: Remote path mapping assignments update local state immediately for instant UI feedback while asynchronously saving changes to the server
+- **Error Recovery**: If server synchronization fails during client configuration updates, local changes are automatically reverted to maintain data consistency
+
+### Changed
+
+- **SettingsView.vue**: Enhanced `saveMapping` function to handle automatic client assignment with immediate local state updates and server error recovery
 
 ### Added
 
