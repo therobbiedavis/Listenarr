@@ -2716,6 +2716,32 @@ const saveMapping = async () => {
     } else {
       const created = await createRemotePathMapping(payload)
       remotePathMappings.value.push(created)
+
+      // Automatically assign the new mapping to the selected download client
+      if (payload.downloadClientId) {
+        const selectedClient = configStore.downloadClientConfigurations.find(c => c.id === payload.downloadClientId)
+        if (selectedClient) {
+          const updatedClient = { ...selectedClient }
+          if (!updatedClient.settings.remotePathMappingIds) {
+            updatedClient.settings.remotePathMappingIds = []
+          }
+          if (!updatedClient.settings.remotePathMappingIds.includes(created.id)) {
+            updatedClient.settings.remotePathMappingIds.push(created.id)
+            // Update local state immediately for reactive UI
+            const clientIndex = configStore.downloadClientConfigurations.findIndex(c => c.id === payload.downloadClientId)
+            if (clientIndex !== -1) {
+              configStore.downloadClientConfigurations[clientIndex] = updatedClient
+            }
+            // Also save to server (don't await to avoid blocking UI)
+            configStore.saveDownloadClientConfiguration(updatedClient).catch(err => {
+              console.error('Failed to save client configuration:', err)
+              // Revert local change on error
+              configStore.loadDownloadClientConfigurations()
+            })
+          }
+        }
+      }
+
       toast.success('Remote path mapping', 'Remote path mapping created')
     }
 
