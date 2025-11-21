@@ -606,7 +606,8 @@ function getResultScore(resultId: string): QualityScore | undefined {
 // Return the best available external link for a search result
 function getResultLink(result: SearchResult): string | undefined {
   if (!result) return undefined
-  if ((result as any).resultUrl) return (result as any).resultUrl
+  const r = result as unknown as Record<string, unknown>
+  if (typeof r.resultUrl === 'string') return r.resultUrl
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl

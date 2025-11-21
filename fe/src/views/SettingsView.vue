@@ -355,6 +355,17 @@
                 <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
               </div>
               <div class="detail-row">
+                <PhLinkSimple />
+                <span class="detail-label">Mappings:</span>
+                <div class="feature-badges">
+                  <span v-for="m in getMappingsForClient(client)" :key="m.id" class="badge">
+                    <PhLink />
+                    {{ m.name || m.remotePath }}
+                  </span>
+                  <span v-if="getMappingsForClient(client).length === 0" class="detail-value">(none)</span>
+                </div>
+              </div>
+              <div class="detail-row">
                 <PhCheckCircle />
                 <span class="detail-label">Status:</span>
                 <span class="detail-value" :class="{ success: client.isEnabled, error: !client.isEnabled }">
@@ -2404,6 +2415,30 @@ const getClientTypeClass = (type: string): string => {
   return typeMap[type.toLowerCase()] || 'torrent'
 }
 
+// Return remote path mappings assigned to a given download client.
+const getMappingsForClient = (client: import('@/types').DownloadClientConfiguration): import('@/types').RemotePathMapping[] => {
+  // Build a set of mapping IDs that should be considered assigned to this client.
+  const assignedIds = new Set<number>()
+
+  // Only use IDs from the client settings (remotePathMappingIds)
+  try {
+    const s = (client as unknown as Record<string, unknown>)?.settings as Record<string, unknown> | undefined
+    const raw = s?.remotePathMappingIds ?? s?.RemotePathMappingIds
+    if (Array.isArray(raw)) {
+      for (const v of raw) {
+        const n = Number(v)
+        if (!Number.isNaN(n)) assignedIds.add(n)
+      }
+    }
+  } catch {
+    // ignore malformed settings
+  }
+
+  // Return only the mappings that match the assigned IDs (preserves order in remotePathMappings)
+  if (assignedIds.size === 0) return []
+  return remotePathMappings.value.filter(m => assignedIds.has(m.id))
+}
+
 const saveApiConfig = async () => {
   try {
     // Validate required fields
@@ -3201,20 +3236,21 @@ async function loadTabContents(tab: string) {
           if (raw) {
             // Normalize values coming from the backend which may use PascalCase
             // property names (e.g., EnableAmazonSearch) instead of camelCase.
-            const normalized: Record<string, unknown> = { ...raw }
+            const rawObj = raw as Record<string, unknown>
+            const normalized: Record<string, unknown> = { ...rawObj }
 
             // Helper to prefer camelCase, then PascalCase, then fallback
             const pickBool = (camel: string, pascal: string, fallback: boolean) => {
-              const c = (raw as any)[camel]
-              const p = (raw as any)[pascal]
+              const c = rawObj[camel]
+              const p = rawObj[pascal]
               if (c !== undefined && c !== null) return Boolean(c)
               if (p !== undefined && p !== null) return Boolean(p)
               return fallback
             }
 
             const pickNumber = (camel: string, pascal: string, fallback: number) => {
-              const c = (raw as any)[camel]
-              const p = (raw as any)[pascal]
+              const c = rawObj[camel]
+              const p = rawObj[pascal]
               const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
               // Treat zero as missing and use fallback
               if (!val || Number.isNaN(val)) return fallback
@@ -3238,16 +3274,10 @@ async function loadTabContents(tab: string) {
             normalized.searchFuzzyThreshold = fuzzy
 
             // Set camelCase properties for the UI binding and saving
-            settings.value = normalized as any
+            settings.value = normalized as unknown as ApplicationSettings
 
             // Sync normalized object back to the store so other consumers use it
-            // `applicationSettings` is a ref in the store; set its `.value` instead
-            if (typeof (configStore.applicationSettings as any) === 'object' && 'value' in (configStore.applicationSettings as any)) {
-              ;(configStore.applicationSettings as any).value = settings.value
-            } else {
-              // Fallback for legacy test setups: assign directly
-              configStore.applicationSettings = settings.value
-            }
+            configStore.applicationSettings = settings.value
           } else {
             settings.value = null
           }
@@ -3280,17 +3310,18 @@ async function loadTabContents(tab: string) {
           // Reuse the same normalization logic for requests tab load
           const rawReq = configStore.applicationSettings ? { ...configStore.applicationSettings } : null
           if (rawReq) {
-            const normalizedReq: Record<string, unknown> = { ...rawReq }
+            const rawReqObj = rawReq as Record<string, unknown>
+            const normalizedReq: Record<string, unknown> = { ...rawReqObj }
             const pickBoolReq = (camel: string, pascal: string, fallback: boolean) => {
-              const c = (rawReq as any)[camel]
-              const p = (rawReq as any)[pascal]
+              const c = rawReqObj[camel]
+              const p = rawReqObj[pascal]
               if (c !== undefined && c !== null) return Boolean(c)
               if (p !== undefined && p !== null) return Boolean(p)
               return fallback
             }
             const pickNumberReq = (camel: string, pascal: string, fallback: number) => {
-              const c = (rawReq as any)[camel]
-              const p = (rawReq as any)[pascal]
+              const c = rawReqObj[camel]
+              const p = rawReqObj[pascal]
               const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
               if (!val || Number.isNaN(val)) return fallback
               return val
@@ -3301,12 +3332,8 @@ async function loadTabContents(tab: string) {
             normalizedReq.searchCandidateCap = pickNumberReq('searchCandidateCap', 'SearchCandidateCap', 100)
             normalizedReq.searchResultCap = pickNumberReq('searchResultCap', 'SearchResultCap', 100)
             normalizedReq.searchFuzzyThreshold = pickNumberReq('searchFuzzyThreshold', 'SearchFuzzyThreshold', 0.2)
-            settings.value = normalizedReq as any
-            if (typeof (configStore.applicationSettings as any) === 'object' && 'value' in (configStore.applicationSettings as any)) {
-              ;(configStore.applicationSettings as any).value = settings.value
-            } else {
-              configStore.applicationSettings = settings.value
-            }
+            settings.value = normalizedReq as unknown as ApplicationSettings
+            configStore.applicationSettings = settings.value
           } else {
             settings.value = null
           }

@@ -107,7 +107,25 @@ export interface DownloadClientConfiguration {
   downloadPath: string
   useSSL: boolean
   isEnabled: boolean
-  settings: Record<string, unknown>
+  // Client-specific settings. Use `DownloadClientSettings` for typed access
+  settings: DownloadClientSettings
+}
+
+export interface DownloadClientSettings {
+  apiKey?: string
+  category?: string
+  tags?: string
+  recentPriority?: string
+  olderPriority?: string
+  removeCompleted?: boolean
+  removeFailed?: boolean
+  initialState?: string
+  sequentialOrder?: boolean
+  firstAndLastFirst?: boolean
+  contentLayout?: string
+  // Optional mapping to one or more remote path mapping IDs
+  remotePathMappingIds?: number[]
+  [key: string]: unknown
 }
 
 export interface RemotePathMapping {

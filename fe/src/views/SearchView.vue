@@ -174,7 +174,7 @@ const isAddingToLibrary = ref(false)
 const addedResults = ref(new Set<string>())
 const qualityScores = ref<Map<string, QualityScore>>(new Map())
 const defaultProfile = ref<QualityProfile | null>(null)
-const rawDebugResults = ref<any[] | null>(null)
+const rawDebugResults = ref<unknown[] | null>(null)
 
 // Load default quality profile on mount
 onMounted(async () => {
@@ -185,36 +185,37 @@ onMounted(async () => {
   }
   // Expose the search store and search results for quick debugging in DevTools
   try {
-    ;(window as any).searchStore = searchStore
-    ;(window as any).searchResults = searchStore.searchResults
+    const w = window as unknown as Record<string, unknown>
+    w.searchStore = searchStore
+    w.searchResults = searchStore.searchResults
     console.debug('[SearchView] Exposed searchStore and searchResults on window for debugging')
   } catch {}
 })
 
 const fetchRawDebug = async (q: string) => {
-  try {
-    const results = await apiService.intelligentSearch(q || 'Harry')
-    rawDebugResults.value = results
-    try { (window as any).rawDebugResults = results } catch {}
-    console.debug('[SearchView] Raw debug results fetched (apiService)', results)
-  } catch (e) {
-    console.error('[SearchView] Raw debug fetch failed (apiService)', e)
-    rawDebugResults.value = null
-  }
+    try {
+      const results = await apiService.intelligentSearch(q || 'Harry')
+      rawDebugResults.value = results as unknown[]
+      try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
+      console.debug('[SearchView] Raw debug results fetched (apiService)', results)
+    } catch (e) {
+      console.error('[SearchView] Raw debug fetch failed (apiService)', e)
+      rawDebugResults.value = null
+    }
 }
 
 const fetchRawDebugWindow = async (q: string) => {
-  try {
-    const resp = await window.fetch(`/api/search/intelligent?query=${encodeURIComponent(q)}`, { credentials: 'include' })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const results = await resp.json()
-    rawDebugResults.value = results
-    try { (window as any).rawDebugResults = results } catch {}
-    console.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
-  } catch (e) {
-    console.error('[SearchView] Raw debug fetch failed (window.fetch)', e)
-    rawDebugResults.value = null
-  }
+    try {
+      const resp = await window.fetch(`/api/search/intelligent?query=${encodeURIComponent(q)}`, { credentials: 'include' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const results = await resp.json()
+      rawDebugResults.value = results as unknown[]
+      try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
+      console.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
+    } catch (e) {
+      console.error('[SearchView] Raw debug fetch failed (window.fetch)', e)
+      rawDebugResults.value = null
+    }
 }
 
 const performSearch = async () => {
@@ -239,8 +240,9 @@ const performSearch = async () => {
   console.log('searchStore.search() completed')
   // Ensure the store and results are available on window for debugging
   try {
-    ;(window as any).searchStore = searchStore
-    ;(window as any).searchResults = searchStore.searchResults
+    const w = window as unknown as Record<string, unknown>
+    w.searchStore = searchStore
+    w.searchResults = searchStore.searchResults
     console.debug('[SearchView] Bound searchStore/searchResults to window after search')
   } catch {}
   console.log('Search results count:', searchStore.searchResults.length)
@@ -317,7 +319,11 @@ const markExistingResults = () => {
 // Watch for search results changes to mark existing audiobooks
 watch(() => searchStore.searchResults, (newVal) => {
   // Keep a developer-friendly reference for debugging
-  try { (window as any).searchResults = newVal; (window as any).searchStore = searchStore } catch {}
+  try {
+    const w = window as unknown as Record<string, unknown>
+    w.searchResults = newVal
+    w.searchStore = searchStore
+  } catch {}
 
   if (searchStore.searchResults.length > 0) {
     checkExistingInLibrary()
@@ -389,9 +395,10 @@ const getResultScore = (resultId: string): QualityScore | undefined => {
 }
 
 // Return the best available external link for a search result
-const getResultLink = (result: SearchResult): string | undefined => {
+function getResultLink(result: SearchResult): string | undefined {
   if (!result) return undefined
-  if ((result as any).resultUrl) return (result as any).resultUrl
+  const r = result as unknown as Record<string, unknown>
+  if (typeof r.resultUrl === 'string') return r.resultUrl
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl

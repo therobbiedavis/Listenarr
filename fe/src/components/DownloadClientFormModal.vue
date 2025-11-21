@@ -254,10 +254,14 @@
 
           <!-- Remote Path Mappings (only for existing clients) -->
           <div class="form-section" v-if="editingClient?.id">
-            <RemotePathMappingsManager 
-              :download-client-id="editingClient.id"
-              :download-client-name="formData.name"
-            />
+            <h3>Remote Path Mappings</h3>
+            <div class="form-group">
+              <label for="remoteMappings">Select Remote Path Mappings</label>
+              <select id="remoteMappings" v-model="formData.remotePathMappingIds" multiple size="5">
+                <option v-for="m in remotePathMappings" :key="m.id" :value="m.id">{{ m.name }} — {{ m.remotePath }}</option>
+              </select>
+              <small>Choose one or more remote path mappings to apply for this download client (Shift + Click to select multiple). If none selected, no mapping will be applied.</small>
+            </div>
           </div>
         </form>
       </div>
@@ -286,10 +290,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import type { DownloadClientConfiguration } from '@/types'
+import type { DownloadClientConfiguration, DownloadClientSettings } from '@/types'
 import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
-import RemotePathMappingsManager from './RemotePathMappingsManager.vue'
+import { getRemotePathMappings } from '@/services/api'
+import type { RemotePathMapping } from '@/types'
 
 interface Props {
   visible: boolean
@@ -332,9 +337,21 @@ const defaultFormData = {
   firstAndLastFirst: false,
   contentLayout: 'default',
   settings: {}
+  , remotePathMappingIds: [] as number[]
 }
 
 const formData = ref({ ...defaultFormData })
+
+const remotePathMappings = ref<RemotePathMapping[]>([])
+
+const loadRemotePathMappings = async () => {
+  try {
+    remotePathMappings.value = await getRemotePathMappings()
+  } catch (e) {
+    try { console.debug('Failed to load remote path mappings', e) } catch {}
+    remotePathMappings.value = []
+  }
+}
 
 const isUsenet = computed(() => {
   return formData.value.type === 'sabnzbd' || formData.value.type === 'nzbget'
@@ -389,7 +406,7 @@ const onTypeChange = () => {
 // Watch for editing client changes
 watch(() => props.editingClient, (newClient) => {
   if (newClient) {
-    const settings = newClient.settings as Record<string, unknown>
+    const settings = newClient.settings as DownloadClientSettings
     formData.value = {
       name: newClient.name,
       type: newClient.type,
@@ -412,7 +429,10 @@ watch(() => props.editingClient, (newClient) => {
       firstAndLastFirst: (settings?.firstAndLastFirst as boolean) || false,
       contentLayout: (settings?.contentLayout as string) || 'default',
       settings: newClient.settings || {}
+      , remotePathMappingIds: (settings && settings.remotePathMappingIds) ? settings.remotePathMappingIds : []
     }
+    // Load available mappings when editing a client so the dropdown can show options
+    void loadRemotePathMappings()
   } else {
     formData.value = { ...defaultFormData }
   }
@@ -468,6 +488,7 @@ const handleSubmit = async () => {
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,
         contentLayout: formData.value.contentLayout
+        , ...(formData.value.remotePathMappingIds && formData.value.remotePathMappingIds.length > 0 ? { remotePathMappingIds: formData.value.remotePathMappingIds } : {})
       }
     }
 
