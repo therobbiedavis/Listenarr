@@ -249,22 +249,21 @@
               </div>
             </div>
               <div class="config-actions">
-              <button 
-                @click="toggleApiConfig(api)" 
+              <button    
+                @click="toggleApiConfig(api)"
                 class="icon-button"
-                :title="api.isEnabled ? 'Disable' : 'Enable'"
-              >
+                >
                 <template v-if="api.isEnabled">
                   <PhToggleRight />
                 </template>
                 <template v-else>
                   <PhToggleLeft />
                 </template>
-              </button>
+              </button>  
               <button @click="editApiConfig(api)" class="icon-button" title="Edit">
                 <PhPencil />
               </button>
-              <button @click="deleteApiConfig(api.id)" class="icon-button danger" title="Delete">
+              <button @click="confirmDeleteApi(api)" class="icon-button danger" title="Delete">
                 <PhTrash />
               </button>
             </div>
@@ -356,6 +355,17 @@
                 <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
               </div>
               <div class="detail-row">
+                <PhLinkSimple />
+                <span class="detail-label">Mappings:</span>
+                <div class="feature-badges">
+                  <span v-for="m in getMappingsForClient(client)" :key="m.id" class="badge">
+                    <PhLink />
+                    {{ m.name || m.remotePath }}
+                  </span>
+                  <span v-if="getMappingsForClient(client).length === 0" class="detail-value">(none)</span>
+                </div>
+              </div>
+              <div class="detail-row">
                 <PhCheckCircle />
                 <span class="detail-label">Status:</span>
                 <span class="detail-value" :class="{ success: client.isEnabled, error: !client.isEnabled }">
@@ -399,7 +409,7 @@
               <button @click="editMapping(mapping)" class="edit-button" title="Edit">
                 <PhPencil />
               </button>
-              <button @click="deleteMapping(mapping.id)" class="delete-button" title="Delete">
+              <button @click="confirmDeleteMapping(mapping)" class="delete-button" title="Delete">
                 <PhTrash />
               </button>
             </div>
@@ -436,6 +446,34 @@
             <div class="modal-actions">
               <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
               <button @click="saveMapping()" class="save-button"><PhCheck /> Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Delete Remote Path Mapping Confirmation Modal -->
+        <div v-if="mappingToDelete" class="modal-overlay" @click="mappingToDelete = null">
+          <div class="modal-content" @click.stop>
+            <div class="modal-header">
+              <h3>
+                <PhWarningCircle />
+                Delete Remote Path Mapping
+              </h3>
+              <button @click="mappingToDelete = null" class="modal-close">
+                <PhX />
+              </button>
+            </div>
+            <div class="modal-body">
+              <p>Are you sure you want to delete the remote path mapping <strong>{{ mappingToDelete.name || mappingToDelete.remotePath }}</strong>?</p>
+              <p>This action cannot be undone.</p>
+            </div>
+            <div class="modal-actions">
+              <button @click="mappingToDelete = null" class="cancel-button">
+                Cancel
+              </button>
+              <button @click="executeDeleteMapping()" class="delete-button">
+                <PhTrash />
+                Delete
+              </button>
             </div>
           </div>
         </div>
@@ -790,7 +828,7 @@
                 <input v-model="settings.adminUsername" type="text" placeholder="Admin username" class="admin-input" />
                 <div class="password-field">
                   <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
-                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide password' : 'Show password'">
                     <template v-if="showPassword">
                       <PhEyeSlash />
                     </template>
@@ -895,7 +933,7 @@
               <label>US Proxy Password (optional)</label>
               <div class="password-field">
                 <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
-                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide password' : 'Show password'">
+                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide password' : 'Show password'">
                   <template v-if="showPassword">
                     <PhEyeSlash />
                   </template>
@@ -989,7 +1027,7 @@
             <label>Bot Token</label>
             <div class="password-field">
               <input :type="showPassword ? 'text' : 'password'" v-model="settings.discordBotToken" placeholder="Bot token (keep secret)" class="admin-input password-input" />
-              <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="showPassword as unknown as boolean" :title="showPassword ? 'Hide token' : 'Show token'">
+              <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide token' : 'Show token'">
                 <template v-if="showPassword">
                   <PhEyeSlash />
                 </template>
@@ -1326,7 +1364,6 @@
         </div>
       </div>
     </div>
-  </div>
 
   <!-- Webhook Configuration Modal -->
   <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm" @keydown.esc="closeWebhookForm">
@@ -1482,13 +1519,7 @@
     @saved="loadIndexers()"
   />
 
-  <!-- Quality Profile Form Modal -->
-  <QualityProfileFormModal
-    :visible="showQualityProfileForm"
-    :profile="editingQualityProfile"
-    @close="showQualityProfileForm = false; editingQualityProfile = null"
-    @save="saveQualityProfile"
-  />
+  
 
   <!-- Delete Client Confirmation Modal -->
   <div v-if="clientToDelete" class="modal-overlay" @click="clientToDelete = null">
@@ -1518,6 +1549,34 @@
     </div>
   </div>
 
+  <!-- Delete Metadata Source Confirmation Modal -->
+  <div v-if="apiToDelete" class="modal-overlay" @click="apiToDelete = null">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <h3>
+          <PhWarningCircle />
+          Delete Metadata Source
+        </h3>
+        <button @click="apiToDelete = null" class="modal-close">
+          <PhX />
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete the metadata source <strong>{{ apiToDelete.name }}</strong>?</p>
+        <p>This action cannot be undone.</p>
+      </div>
+      <div class="modal-actions">
+        <button @click="apiToDelete = null" class="cancel-button">
+          Cancel
+        </button>
+        <button @click="executeDeleteApi()" class="delete-button">
+          <PhTrash />
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Indexer Confirmation Modal -->
   <div v-if="indexerToDelete" class="modal-overlay" @click="indexerToDelete = null">
     <div class="modal-content" @click.stop>
@@ -1535,13 +1594,14 @@
         <p>This action cannot be undone.</p>
       </div>
         <div class="modal-actions">
-        <button @click="indexerToDelete = null" class="cancel-button">
-          Cancel
-        </button>
-        <button @click="executeDeleteIndexer" class="delete-button">
-          <PhTrash />
-          Delete
-        </button>
+          <button type="button" @click="indexerToDelete = null" class="cancel-button">
+            Cancel
+          </button>
+          <button type="button" @click="executeDeleteIndexer()" class="delete-button modal-delete-button">
+            <PhTrash />
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1967,6 +2027,7 @@ const adminUsers = ref<Array<{ id: number; username: string; email?: string; isA
   defineExpose({ toggleShowPassword })
 const showMappingForm = ref(false)
 const mappingToEdit = ref<RemotePathMapping | null>(null)
+const mappingToDelete = ref<RemotePathMapping | null>(null)
 
 
 
@@ -2053,16 +2114,27 @@ const editClientConfig = (client: DownloadClientConfiguration) => {
   showClientForm.value = true
 }
 
-const deleteApiConfig = async (id: string) => {
-  const ok = await showConfirm('Are you sure you want to delete this API configuration?', 'Delete API')
-  if (!ok) return
+const apiToDelete = ref<ApiConfiguration | null>(null)
+
+const confirmDeleteApi = (api: ApiConfiguration) => {
+  apiToDelete.value = api
+}
+
+const executeDeleteApi = async (id?: string) => {
+  const apiId = id || apiToDelete.value?.id
+  if (!apiId) return
+
   try {
-    await configStore.deleteApiConfiguration(id)
+    await configStore.deleteApiConfiguration(apiId)
     toast.success('API', 'API configuration deleted successfully')
+    // Refresh API list if the store provides a loader
+    try { await configStore.loadApiConfigurations() } catch {}
   } catch (error) {
     console.error('Failed to delete API configuration:', error)
     const errorMessage = formatApiError(error)
     toast.error('API delete failed', errorMessage)
+  } finally {
+    apiToDelete.value = null
   }
 }
 
@@ -2341,6 +2413,30 @@ const getClientTypeClass = (type: string): string => {
     'nzbget': 'usenet'
   }
   return typeMap[type.toLowerCase()] || 'torrent'
+}
+
+// Return remote path mappings assigned to a given download client.
+const getMappingsForClient = (client: import('@/types').DownloadClientConfiguration): import('@/types').RemotePathMapping[] => {
+  // Build a set of mapping IDs that should be considered assigned to this client.
+  const assignedIds = new Set<number>()
+
+  // Only use IDs from the client settings (remotePathMappingIds)
+  try {
+    const s = (client as unknown as Record<string, unknown>)?.settings as Record<string, unknown> | undefined
+    const raw = s?.remotePathMappingIds ?? s?.RemotePathMappingIds
+    if (Array.isArray(raw)) {
+      for (const v of raw) {
+        const n = Number(v)
+        if (!Number.isNaN(n)) assignedIds.add(n)
+      }
+    }
+  } catch {
+    // ignore malformed settings
+  }
+
+  // Return only the mappings that match the assigned IDs (preserves order in remotePathMappings)
+  if (assignedIds.size === 0) return []
+  return remotePathMappings.value.filter(m => assignedIds.has(m.id))
 }
 
 const saveApiConfig = async () => {
@@ -2632,16 +2728,23 @@ const saveMapping = async () => {
 
 const editMapping = (mapping: RemotePathMapping) => openMappingForm(mapping)
 
-const deleteMapping = async (id: number) => {
-  const ok = await showConfirm('Delete this remote path mapping?', 'Delete Mapping')
-  if (!ok) return
+const confirmDeleteMapping = (mapping: RemotePathMapping) => {
+  mappingToDelete.value = mapping
+}
+
+const executeDeleteMapping = async (id?: number) => {
+  const mappingId = id || mappingToDelete.value?.id
+  if (!mappingId) return
+
   try {
-    await deleteRemotePathMapping(id)
-    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== id)
+    await deleteRemotePathMapping(mappingId)
+    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== mappingId)
     toast.success('Remote path mapping', 'Remote path mapping deleted')
   } catch (err) {
     console.error('Failed to delete mapping', err)
     toast.error('Delete failed', 'Failed to delete mapping')
+  } finally {
+    mappingToDelete.value = null
   }
 }
 
@@ -3102,6 +3205,15 @@ async function loadTabContents(tab: string) {
           await configStore.loadDownloadClientConfigurations()
           loaded.clients = true
         }
+        // Also load remote path mappings for the clients tab
+        if (!loaded.mappings) {
+          try {
+            remotePathMappings.value = await getRemotePathMappings()
+            loaded.mappings = true
+          } catch (e) {
+            console.debug('Failed to load remote path mappings', e)
+          }
+        }
         break
       case 'quality-profiles':
         if (!loaded.profiles) {
@@ -3124,20 +3236,21 @@ async function loadTabContents(tab: string) {
           if (raw) {
             // Normalize values coming from the backend which may use PascalCase
             // property names (e.g., EnableAmazonSearch) instead of camelCase.
-            const normalized: Record<string, unknown> = { ...raw }
+            const rawObj = raw as Record<string, unknown>
+            const normalized: Record<string, unknown> = { ...rawObj }
 
             // Helper to prefer camelCase, then PascalCase, then fallback
             const pickBool = (camel: string, pascal: string, fallback: boolean) => {
-              const c = (raw as any)[camel]
-              const p = (raw as any)[pascal]
+              const c = rawObj[camel]
+              const p = rawObj[pascal]
               if (c !== undefined && c !== null) return Boolean(c)
               if (p !== undefined && p !== null) return Boolean(p)
               return fallback
             }
 
             const pickNumber = (camel: string, pascal: string, fallback: number) => {
-              const c = (raw as any)[camel]
-              const p = (raw as any)[pascal]
+              const c = rawObj[camel]
+              const p = rawObj[pascal]
               const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
               // Treat zero as missing and use fallback
               if (!val || Number.isNaN(val)) return fallback
@@ -3161,16 +3274,10 @@ async function loadTabContents(tab: string) {
             normalized.searchFuzzyThreshold = fuzzy
 
             // Set camelCase properties for the UI binding and saving
-            settings.value = normalized as any
+            settings.value = normalized as unknown as ApplicationSettings
 
             // Sync normalized object back to the store so other consumers use it
-            // `applicationSettings` is a ref in the store; set its `.value` instead
-            if (typeof (configStore.applicationSettings as any) === 'object' && 'value' in (configStore.applicationSettings as any)) {
-              ;(configStore.applicationSettings as any).value = settings.value
-            } else {
-              // Fallback for legacy test setups: assign directly
-              configStore.applicationSettings = settings.value
-            }
+            configStore.applicationSettings = settings.value
           } else {
             settings.value = null
           }
@@ -3203,17 +3310,18 @@ async function loadTabContents(tab: string) {
           // Reuse the same normalization logic for requests tab load
           const rawReq = configStore.applicationSettings ? { ...configStore.applicationSettings } : null
           if (rawReq) {
-            const normalizedReq: Record<string, unknown> = { ...rawReq }
+            const rawReqObj = rawReq as Record<string, unknown>
+            const normalizedReq: Record<string, unknown> = { ...rawReqObj }
             const pickBoolReq = (camel: string, pascal: string, fallback: boolean) => {
-              const c = (rawReq as any)[camel]
-              const p = (rawReq as any)[pascal]
+              const c = rawReqObj[camel]
+              const p = rawReqObj[pascal]
               if (c !== undefined && c !== null) return Boolean(c)
               if (p !== undefined && p !== null) return Boolean(p)
               return fallback
             }
             const pickNumberReq = (camel: string, pascal: string, fallback: number) => {
-              const c = (rawReq as any)[camel]
-              const p = (rawReq as any)[pascal]
+              const c = rawReqObj[camel]
+              const p = rawReqObj[pascal]
               const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
               if (!val || Number.isNaN(val)) return fallback
               return val
@@ -3224,12 +3332,8 @@ async function loadTabContents(tab: string) {
             normalizedReq.searchCandidateCap = pickNumberReq('searchCandidateCap', 'SearchCandidateCap', 100)
             normalizedReq.searchResultCap = pickNumberReq('searchResultCap', 'SearchResultCap', 100)
             normalizedReq.searchFuzzyThreshold = pickNumberReq('searchFuzzyThreshold', 'SearchFuzzyThreshold', 0.2)
-            settings.value = normalizedReq as any
-            if (typeof (configStore.applicationSettings as any) === 'object' && 'value' in (configStore.applicationSettings as any)) {
-              ;(configStore.applicationSettings as any).value = settings.value
-            } else {
-              configStore.applicationSettings = settings.value
-            }
+            settings.value = normalizedReq as unknown as ApplicationSettings
+            configStore.applicationSettings = settings.value
           } else {
             settings.value = null
           }
@@ -4798,6 +4902,53 @@ onMounted(async () => {
   justify-content: flex-end;
   padding: 1.5rem 2rem;
   border-top: 1px solid #444;
+}
+
+/* Ensure modal context delete buttons are full-size, not the small icon-style
+   square buttons used elsewhere in the UI. This overrides the
+   generic .delete-button rules with a more suitable modal appearance. */
+.modal-overlay .modal-content .modal-actions .delete-button,
+.modal-content .modal-actions .delete-button,
+.modal-overlay .modal-content .modal-actions .modal-delete-button,
+.modal-content .modal-actions .modal-delete-button {
+  /* Stronger selector to guarantee modal buttons override list/icon buttons */
+  padding: 0.75rem 1.25rem;
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1rem;
+  min-width: 120px; /* ensure modal delete button is clearly larger than icon buttons */
+  height: auto;
+  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
+}
+
+/* Keep hover style consistent and prominent */
+.modal-overlay .modal-content .modal-actions .delete-button:hover,
+.modal-content .modal-actions .delete-button:hover {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(231, 76, 60, 0.24);
+}
+
+.modal-actions .delete-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.35);
+}
+
+.modal-actions .delete-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .cancel-button {

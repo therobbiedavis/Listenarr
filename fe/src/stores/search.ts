@@ -14,7 +14,7 @@ export const useSearchStore = defineStore('search', () => {
 
   // Expose store refs for debugging in browser DevTools
   try {
-    ;(window as any).pinia_search = {
+    ;(window as unknown as Record<string, unknown>).pinia_search = {
       searchResults,
       isSearching,
       searchQuery,

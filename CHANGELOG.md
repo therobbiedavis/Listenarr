@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.39] - 2025-11-21
+
+### Added
+
+- **Remote Path Mapping Assignment**: Download clients can now be assigned one or more remote path mappings directly through a dropdown selector in the client configuration modal
+- **Dynamic Remote Path Mapping Loading**: Remote path mappings are loaded dynamically when editing download clients for better data initialization
+- **Visual Remote Path Mapping Display**: Settings view now shows which remote path mappings are assigned to each download client
+- **Confirmation Modals for Deletions**: Added confirmation modals for deleting APIs, remote path mappings, and metadata sources to prevent accidental deletions
+- **Enhanced Type Safety**: Introduced `DownloadClientSettings` type and extended `DownloadClientConfiguration` for better typed access to client settings including `remotePathMappingIds`
+
+### Changed
+
+- **API Endpoint Consistency**: Updated all remote path mapping API calls in `api.ts` to use pluralized `/remotepathmappings` endpoints for consistency with backend routes
+- **Download Client Form Modal**: Replaced `RemotePathMappingsManager` component with a streamlined dropdown selector for assigning remote path mappings
+- **Settings View Layout**: Improved organization of remote path mapping display and deletion flows with confirmation modals
+- **Type Safety Improvements**: Replaced unsafe `window as any` type assertions with safer `window as unknown as Record<string, unknown>` throughout the codebase
+- **Password Field Accessibility**: Updated password visibility toggle buttons to use correct boolean values for `aria-pressed` attribute
+
+### Fixed
+
+- **Remote Path Mapping Reactivity**: Fixed reactivity issues with remote path mapping assignments in download client settings
+- **Indexer Delete Button Styling**: Resolved CSS issues with delete button styling in indexer configuration
+- **Type Assertion Safety**: Refactored `getResultLink` function in search components to use safer type assertions and prevent runtime errors
+- **Modal Delete Button Styling**: Improved styling of modal delete buttons to be more prominent and accessible, distinguishing them from icon-style list buttons
+
+
+
 ## [0.2.38] - 2025-11-20
 
 ### Added
