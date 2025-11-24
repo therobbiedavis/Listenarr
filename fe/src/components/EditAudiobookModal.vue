@@ -82,6 +82,21 @@
             </p>
           </div>
 
+          <!-- Destination / Base Path -->
+          <div class="form-group">
+            <label class="form-label">
+              <i class="ph ph-folder"></i>
+              Destination Folder
+            </label>
+            <div class="destination-display">
+              <div class="destination-row">
+                <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
+                <input type="text" v-model="formData.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+              </div>
+              <p class="help-text">Root (left) is read-only — edit the output path relative to it on the right.</p>
+            </div>
+          </div>
+
           <!-- Tags -->
           <div class="form-group">
             <label class="form-label">
@@ -172,6 +187,10 @@
             <button type="button" class="btn btn-secondary" @click="close">
               Cancel
             </button>
+            <div v-if="moveJob" class="move-status">
+              <small><strong>Move Job</strong>: {{ moveJob.jobId }} — <em>{{ moveJob.status }}</em></small>
+              <div v-if="moveJob.target"><small>Target: {{ moveJob.target }}</small></div>
+            </div>
             <button
               type="submit"
               class="btn btn-primary"
@@ -192,8 +211,11 @@
 import { ref, computed, watch } from 'vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
+import { showConfirm } from '@/composables/useConfirm'
+import { signalRService } from '@/services/signalr'
 import type { Audiobook, QualityProfile } from '@/types'
 import { PhX } from '@phosphor-icons/vue'
+import { useConfigurationStore } from '@/stores/configuration'
 
 interface Props {
   isOpen: boolean
@@ -206,6 +228,8 @@ interface FormData {
   tags: string[]
   abridged: boolean
   explicit: boolean
+  basePath?: string | null
+  relativePath?: string | null
 }
 
 const props = defineProps<Props>()
@@ -216,8 +240,11 @@ const emit = defineEmits<{
 
 const qualityProfiles = ref<QualityProfile[]>([])
 const rootFolders = ref<string[]>([])
+const configStore = useConfigurationStore()
+const rootPath = ref<string | null>(null)
 const saving = ref(false)
 const newTag = ref('')
+const toast = useToast()
 
 const formData = ref<FormData>({
   monitored: true,
@@ -225,24 +252,32 @@ const formData = ref<FormData>({
   tags: [],
   abridged: false,
   explicit: false
+  ,basePath: null
 })
+
+// Move job tracking (shows queued/processing/completed/failed state)
+const moveJob = ref<{ jobId: string; status: string; target?: string; error?: string } | null>(null)
+const moveUnsub = ref<(() => void) | null>(null)
 
 const hasChanges = computed(() => {
   if (!props.audiobook) return false
 
   const tagsChanged = JSON.stringify([...formData.value.tags].sort()) !== JSON.stringify([...(props.audiobook.tags || [])].sort())
 
+  const basePathChanged = (props.audiobook?.basePath || '') !== (combinedBasePath() || '')
+
   return formData.value.monitored !== Boolean(props.audiobook.monitored) ||
     formData.value.qualityProfileId !== (props.audiobook.qualityProfileId ?? null) ||
     tagsChanged ||
     formData.value.abridged !== Boolean(props.audiobook.abridged) ||
-    formData.value.explicit !== Boolean(props.audiobook.explicit)
+    formData.value.explicit !== Boolean(props.audiobook.explicit) ||
+    basePathChanged
 })
 
 watch(() => props.isOpen, async (isOpen) => {
   if (isOpen && props.audiobook) {
     await loadData()
-    initializeForm()
+    await initializeForm()
   }
 })
 
@@ -251,18 +286,19 @@ async function loadData() {
     // Load quality profiles
     qualityProfiles.value = await apiService.getQualityProfiles()
 
-    // Load root folders from configuration
-    const appSettings = await apiService.getApplicationSettings()
-    if (appSettings.outputPath) {
+    // Load root folders from configuration via the configuration store
+    await configStore.loadApplicationSettings()
+    const appSettings = configStore.applicationSettings
+    if (appSettings && appSettings.outputPath) {
       rootFolders.value = [appSettings.outputPath]
-      // TODO: If you implement multiple root folders, load them here
+      rootPath.value = appSettings.outputPath
     }
   } catch (error) {
     console.error('Failed to load edit data:', error)
   }
 }
 
-function initializeForm() {
+async function initializeForm() {
   if (!props.audiobook) return
 
   formData.value = {
@@ -270,12 +306,54 @@ function initializeForm() {
     qualityProfileId: props.audiobook.qualityProfileId ?? null,
     tags: [...(props.audiobook.tags || [])],
     abridged: Boolean(props.audiobook.abridged),
-    explicit: Boolean(props.audiobook.explicit)
+    explicit: Boolean(props.audiobook.explicit),
+    basePath: props.audiobook.basePath ?? null
+    ,relativePath: null
   }
+
+    // If there's an existing basePath that uses the configured root, derive the relative path
+    try {
+      if (formData.value.basePath && rootPath.value) {
+        const base = formData.value.basePath
+        const root = rootPath.value
+        if (base.startsWith(root)) {
+          const rel = base.slice(root.length).replace(/^[/\\]+/, '')
+          formData.value.relativePath = rel
+        }
+      }
+
+      // IMPORTANT: Do not use metadata to fill the destination input for edits.
+      // If the audiobook has a stored basePath we must use that value from the DB
+      // and must not overwrite it with metadata-derived previews. Only when there
+      // is no basePath present could we consider a preview (not applied here).
+      return
+    } catch (err) {
+      // Non-fatal: any error deriving relative path from stored basePath
+      console.debug('Preview path unavailable:', err)
+    }
+}
+
+function combinedBasePath(): string | null {
+  const r = rootPath.value || ''
+  const rel = (formData.value.relativePath || '').trim()
+  if (!r && !rel) return null
+  if (!r) return rel
+  if (!rel) return r
+  const needsSep = !(r.endsWith('/') || r.endsWith('\\'))
+  return r + (needsSep ? '/' : '') + rel
 }
 
 async function handleSave() {
   if (!props.audiobook || !hasChanges.value) return
+  // If the base path (destination) changed, confirm with the user before proceeding
+  const combined = combinedBasePath()
+  const originalBase = props.audiobook.basePath || ''
+  if ((combined || '') !== originalBase) {
+    const message = `You're changing the destination from:\n\n${originalBase || '<none>'}\n\nto:\n\n${combined || '<none>'}\n\nEverything in the current destination will be moved to the new destination and the current destination will be deleted. Do you want to continue?`
+    // Use centralized app confirm so UI is consistent and non-blocking
+    const ok = await showConfirm(message, 'Move Audiobook', { confirmText: 'Move', cancelText: 'Cancel', danger: true })
+    if (!ok) return
+  }
 
   saving.value = true
   try {
@@ -285,6 +363,12 @@ async function handleSave() {
       tags: formData.value.tags,
       abridged: formData.value.abridged,
       explicit: formData.value.explicit
+    }
+
+    // If user changed destination/base path, include the combined root+relative value in updates
+    const combined = combinedBasePath()
+    if ((combined || '') !== (props.audiobook.basePath || '')) {
+      ;(updates as Partial<Audiobook>).basePath = combined ?? undefined
     }
     
     // If qualityProfileId is null, send -1 to signal "use default"
@@ -298,11 +382,43 @@ async function handleSave() {
     // Call single update API
     await apiService.updateAudiobook(props.audiobook.id, updates)
 
+    // If base path changed, enqueue server-side move and show progress via SignalR
+    if ((combined || '') !== (props.audiobook.basePath || '')) {
+      try {
+        const res = await apiService.moveAudiobook(props.audiobook.id, combined ?? '', originalBase || undefined)
+        toast.info('Move queued', `Move job queued (${res.jobId}). Moving files in background.`)
+
+        // Record initial move job state and subscribe to updates
+        moveJob.value = { jobId: res.jobId, status: 'Queued', target: combined ?? undefined }
+        moveUnsub.value = signalRService.onMoveJobUpdate((job) => {
+          if (!job || !job.jobId) return
+          if (String(job.jobId).toLowerCase() !== String(res.jobId).toLowerCase()) return
+
+          // Update local job state
+          moveJob.value = { jobId: job.jobId, status: job.status, target: job.target, error: job.error }
+
+            if (job.status === 'Completed') {
+              toast.success('Move completed', `Files moved to ${job.target || combined}`)
+              try { if (moveUnsub.value) moveUnsub.value() } catch {}
+              moveUnsub.value = null
+            } else if (job.status === 'Failed') {
+              toast.error('Move failed', job.error || 'Move job failed. Check logs for details.')
+              try { if (moveUnsub.value) moveUnsub.value() } catch {}
+              moveUnsub.value = null
+          } else if (job.status === 'Processing') {
+            toast.info('Move in progress', `Moving files to ${job.target || combined}`)
+          }
+        })
+      } catch (moveErr) {
+        console.error('Failed to enqueue move job:', moveErr)
+        toast.error('Move failed', 'Failed to enqueue move job. Please try again.')
+      }
+    }
+
     emit('saved')
     close()
   } catch (error) {
     console.error('Failed to save audiobook edits:', error)
-    const toast = useToast()
     toast.error('Save failed', 'Failed to save changes. Please try again.')
   } finally {
     saving.value = false
@@ -322,6 +438,14 @@ function removeTag(index: number) {
 }
 
 function close() {
+  // If there's an active move subscription, unsubscribe to avoid leaks
+  try {
+    if (moveUnsub.value) {
+      try { moveUnsub.value() } catch {}
+      moveUnsub.value = null
+    }
+  } catch {}
+  moveJob.value = null
   emit('close')
 }
 </script>
@@ -600,6 +724,18 @@ function close() {
   background-color: #005fa3;
 }
 
+.move-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-right: 1rem;
+  color: #dfe6ff;
+}
+.move-status small {
+  color: #cfd8ff;
+}
+
 .btn i.ph-spin {
   animation: spin 1s linear infinite;
 }
@@ -813,5 +949,52 @@ function close() {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Destination display styles (shared with AddLibraryModal) */
+.destination-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+/* root-label is used instead of readonly-path */
+
+.form-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #3a3a3a;
+  background-color: #2a2a2a;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 3px rgba(0,122,204,0.06);
+}
+
+/* Row layout for destination: root left, input right */
+.destination-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.root-label {
+  width: fit-content;
+  max-width: 40%;
+  padding: 0.45rem 0 0,45rem 0.6rem;
+  color: #ccc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.relative-input {
+  flex: 1 1 auto;
 }
 </style>

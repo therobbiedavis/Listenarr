@@ -514,17 +514,26 @@ class ApiService {
     return this.request<Audiobook[]>('/library')
   }
 
-  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean; searchResult?: SearchResult }): Promise<{ message: string; audiobook: Audiobook }> {
+  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean; searchResult?: SearchResult; destinationPath?: string }): Promise<{ message: string; audiobook: Audiobook }> {
     const request = {
       metadata,
       monitored: options?.monitored ?? true,
       qualityProfileId: options?.qualityProfileId,
       autoSearch: options?.autoSearch ?? false,
-      searchResult: options?.searchResult
+      searchResult: options?.searchResult,
+      destinationPath: options?.destinationPath
     }
     return this.request<{ message: string; audiobook: Audiobook }>('/library/add', {
       method: 'POST',
       body: JSON.stringify(request)
+    })
+  }
+
+  async previewLibraryPath(metadata: AudibleBookMetadata, destinationRoot?: string): Promise<{ fullPath: string; relativePath: string; root?: string }> {
+    const body = { metadata, destinationRoot }
+    return this.request<{ fullPath: string; relativePath: string; root?: string }>('/library/preview-path', {
+      method: 'POST',
+      body: JSON.stringify(body)
     })
   }
 
@@ -543,6 +552,15 @@ class ApiService {
     return this.request<{ message: string; audiobook: Audiobook }>(`/library/${id}`, {
       method: 'PUT',
       body: JSON.stringify(audiobook)
+    })
+  }
+
+  async moveAudiobook(id: number, destinationPath: string, sourcePath?: string): Promise<{ message: string; jobId: string }> {
+    const body: any = { destinationPath }
+    if (sourcePath) body.sourcePath = sourcePath
+    return this.request<{ message: string; jobId: string }>(`/library/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify(body)
     })
   }
 

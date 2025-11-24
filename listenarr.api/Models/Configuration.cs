@@ -80,7 +80,7 @@ namespace Listenarr.Api.Models
     {
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
         public string OutputPath { get; set; } = string.Empty;
-        // Updated for audiobook-oriented naming: {Author}/{Series}/{DiskNumber:00}/{ChapterNumber:00} - {Title}
+        // Updated for audiobook-oriented naming: {Author}/{Series}/{Title}
         // Available variables:
         // {Author} - Audiobook author/narrator
         // {Series} - Series name (if applicable)
@@ -90,7 +90,7 @@ namespace Listenarr.Api.Models
         // {ChapterNumber} or {ChapterNumber:00} - Chapter number (00 = zero-padded)
         // {Year} - Publication year
         // {Quality} - Audio quality (e.g., "64kbps mp3")
-        public string FileNamingPattern { get; set; } = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+        public string FileNamingPattern { get; set; } = "{Author}/{Series}/{Title}";
         public bool EnableMetadataProcessing { get; set; } = true;
         public bool EnableCoverArtDownload { get; set; } = true;
         public string AudnexusApiUrl { get; set; } = "https://api.audnex.us";

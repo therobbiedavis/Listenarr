@@ -672,7 +672,7 @@
 
             <div class="form-group">
               <label>File Naming Pattern</label>
-              <input v-model="settings.fileNamingPattern" type="text" placeholder="{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}">
+              <input v-model="settings.fileNamingPattern" type="text" placeholder="{Author}/{Series}/{Title}">
               <span class="form-help">
                 Pattern for organizing audiobook files. Available variables:<br>
                 <code>{Author}</code> - Author/narrator name<br>

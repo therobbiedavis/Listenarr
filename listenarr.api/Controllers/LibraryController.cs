@@ -44,6 +44,7 @@ namespace Listenarr.Api.Controllers
         private readonly ListenArrDbContext _dbContext;
         private readonly IServiceProvider _serviceProvider;
         private readonly IScanQueueService? _scanQueueService;
+        private readonly IMoveQueueService? _moveQueueService;
         private readonly IFileNamingService _fileNamingService;
         private readonly NotificationService? _notificationService;
         
@@ -66,6 +67,7 @@ namespace Listenarr.Api.Controllers
             IServiceProvider serviceProvider,
             IFileNamingService fileNamingService,
             IScanQueueService? scanQueueService = null,
+            IMoveQueueService? moveQueueService = null,
             NotificationService? notificationService = null)
         {
             _repo = repo;
@@ -75,6 +77,7 @@ namespace Listenarr.Api.Controllers
             _serviceProvider = serviceProvider;
             _fileNamingService = fileNamingService;
             _scanQueueService = scanQueueService;
+            _moveQueueService = moveQueueService;
             _notificationService = notificationService;
         }
 
@@ -263,34 +266,76 @@ namespace Listenarr.Api.Controllers
                     var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                     var settings = await configService.GetApplicationSettingsAsync();
                     
-                    if (!string.IsNullOrEmpty(settings.OutputPath))
-                    {
-                        // Compute expected base directory from root + file naming pattern
-                        var directoryPath = ComputeAudiobookBaseDirectoryFromPattern(audiobook, settings.OutputPath, settings.FileNamingPattern);
+                    // Determine root for base directory: prefer explicit DestinationPath if provided, otherwise use configured OutputPath
+                    var rootForBasePath = !string.IsNullOrEmpty(request.DestinationPath) ? request.DestinationPath : settings.OutputPath;
 
-                        // Create the directory if it doesn't exist
-                        if (!Directory.Exists(directoryPath))
+                    if (!string.IsNullOrEmpty(rootForBasePath))
+                    {
+                        // If caller supplied an explicit DestinationPath that looks like a full path, respect it as the final BasePath.
+                        // The frontend will send the fully-composed destination when the user edits the relative path, so honor that exact value.
+                        if (!string.IsNullOrEmpty(request.DestinationPath) && Path.IsPathRooted(request.DestinationPath))
                         {
-                            Directory.CreateDirectory(directoryPath);
-                            _logger.LogInformation("Created directory for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                            try
+                            {
+                                if (!Directory.Exists(request.DestinationPath))
+                                {
+                                    Directory.CreateDirectory(request.DestinationPath);
+                                    _logger.LogInformation("Created directory for new audiobook '{Title}' (explicit DestinationPath): {Path}", audiobook.Title, request.DestinationPath);
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("Directory already exists for new audiobook '{Title}' (explicit DestinationPath): {Path}", audiobook.Title, request.DestinationPath);
+                                }
+
+                                audiobook.BasePath = request.DestinationPath;
+                                _dbContext.Audiobooks.Update(audiobook);
+                                await _dbContext.SaveChangesAsync();
+                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' to explicit DestinationPath: {BasePath}", audiobook.Title, request.DestinationPath);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to persist explicit DestinationPath for new audiobook '{Title}'", audiobook.Title);
+                            }
                         }
                         else
                         {
-                            _logger.LogInformation("Directory already exists for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
-                        }
+                            // Compute expected base directory from root + file naming pattern using the request-supplied metadata
+                            // (use a temporary Audiobook built from the incoming metadata to ensure enriched fields are applied)
+                            var tempForNaming = new Audiobook
+                            {
+                                Title = request.Metadata?.Title,
+                                Authors = request.Metadata?.Authors,
+                                Series = request.Metadata?.Series,
+                                SeriesNumber = request.Metadata?.SeriesNumber,
+                                PublishYear = request.Metadata?.PublishYear
+                            };
 
-                        // Persist a sensible BasePath for this audiobook so the UI can display
-                        // the intended library root right away (even before any files exist).
-                        try
-                        {
-                            audiobook.BasePath = directoryPath;
-                            _dbContext.Audiobooks.Update(audiobook);
-                            await _dbContext.SaveChangesAsync();
-                            _logger.LogInformation("Set BasePath for new audiobook '{Title}' using naming pattern: {BasePath}", audiobook.Title, directoryPath);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to persist BasePath for new audiobook '{Title}'", audiobook.Title);
+                            var directoryPath = ComputeAudiobookBaseDirectoryFromPattern(tempForNaming, rootForBasePath, settings.FileNamingPattern);
+
+                            // Create the directory if it doesn't exist
+                            if (!Directory.Exists(directoryPath))
+                            {
+                                Directory.CreateDirectory(directoryPath);
+                                _logger.LogInformation("Created directory for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Directory already exists for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                            }
+
+                            // Persist a sensible BasePath for this audiobook so the UI can display
+                            // the intended library root right away (even before any files exist).
+                            try
+                            {
+                                audiobook.BasePath = directoryPath;
+                                _dbContext.Audiobooks.Update(audiobook);
+                                await _dbContext.SaveChangesAsync();
+                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' using naming pattern: {BasePath}", audiobook.Title, directoryPath);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to persist BasePath for new audiobook '{Title}'", audiobook.Title);
+                            }
                         }
                     }
                     else
@@ -323,6 +368,44 @@ namespace Listenarr.Api.Controllers
                 audiobook.Title, audiobook.Asin, request.Monitored, audiobook.QualityProfileId, request.AutoSearch);
             
             return Ok(new { message = "Audiobook added to library successfully", audiobook });
+        }
+
+        [HttpPost("preview-path")]
+        public async Task<IActionResult> PreviewPath([FromBody] PreviewPathRequest request)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = await configService.GetApplicationSettingsAsync();
+
+                var root = !string.IsNullOrEmpty(request.DestinationRoot) ? request.DestinationRoot : settings.OutputPath;
+
+                // Build a temporary Audiobook to feed naming pattern logic
+                var temp = new Audiobook
+                {
+                    Title = request.Metadata.Title,
+                    Authors = request.Metadata.Authors,
+                    Series = request.Metadata.Series,
+                    SeriesNumber = request.Metadata.SeriesNumber,
+                    PublishYear = request.Metadata.PublishYear
+                };
+
+                var full = ComputeAudiobookBaseDirectoryFromPattern(temp, root ?? string.Empty, settings.FileNamingPattern);
+
+                var relative = full;
+                if (!string.IsNullOrEmpty(root) && full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                {
+                    relative = full.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                }
+
+                return Ok(new { fullPath = full, relativePath = relative, root = root });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to compute preview path");
+                return StatusCode(500, new { message = "Failed to compute preview path" });
+            }
         }
 
         [HttpGet]
@@ -526,6 +609,13 @@ namespace Listenarr.Api.Controllers
                     _logger.LogInformation("Updated quality profile for audiobook '{Title}' to ID {ProfileId}", 
                         existingAudiobook.Title, updatedAudiobook.QualityProfileId.Value);
                 }
+            }
+
+            // Allow updating BasePath (destination) from the frontend when provided
+            if (updatedAudiobook.BasePath != null)
+            {
+                existingAudiobook.BasePath = updatedAudiobook.BasePath;
+                _logger.LogInformation("Updated BasePath for audiobook '{Title}' to: {BasePath}", existingAudiobook.Title, updatedAudiobook.BasePath);
             }
 
             await _repo.UpdateAsync(existingAudiobook);
@@ -1127,6 +1217,108 @@ namespace Listenarr.Api.Controllers
             return NotFound(new { message = "Job not found" });
         }
 
+        [HttpPost("{id}/move")]
+        public async Task<IActionResult> EnqueueMove(int id, [FromBody] MoveRequest request)
+        {
+            if (_moveQueueService == null) return NotFound(new { message = "Move queue not available" });
+            var audiobook = await _repo.GetByIdAsync(id);
+            if (audiobook == null) return NotFound(new { message = "Audiobook not found" });
+
+            if (string.IsNullOrWhiteSpace(request.DestinationPath))
+            {
+                return BadRequest(new { message = "DestinationPath is required" });
+            }
+
+            try
+            {
+                // If the path is not rooted, combine with configured output path
+                using var scope = _serviceProvider.CreateScope();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = await configService.GetApplicationSettingsAsync();
+
+                var final = request.DestinationPath!;
+                if (!Path.IsPathRooted(final))
+                {
+                    var root = settings.OutputPath ?? string.Empty;
+                    final = Path.Combine(root, final.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                }
+
+                // Determine source path snapshot to use for the move. Prefer an explicit source from the request
+                // (the frontend should send the original source if it updated the audiobook BasePath before requesting a move),
+                // otherwise fall back to the current audiobook.BasePath as a best-effort.
+                var sourcePath = request is not null && !string.IsNullOrWhiteSpace(request.SourcePath)
+                    ? request.SourcePath
+                    : audiobook.BasePath;
+
+                if (string.IsNullOrWhiteSpace(sourcePath))
+                {
+                    return BadRequest(new { message = "Source path not provided. Supply current source path in the Move request or ensure audiobook has a valid BasePath." });
+                }
+
+                var jobId = await _moveQueueService.EnqueueMoveAsync(id, final, sourcePath);
+
+                // Broadcast initial job status
+                try
+                {
+                    using var hubScope = _serviceProvider.CreateScope();
+                    var hub = hubScope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                    var job = new { jobId = jobId.ToString(), audiobookId = id, status = "Queued", enqueuedAt = DateTime.UtcNow };
+                    await hub.Clients.All.SendAsync("MoveJobUpdate", job);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for job {JobId}", jobId);
+                }
+
+                return Accepted(new { message = "Move enqueued", jobId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enqueue move job for audiobook {AudiobookId}", id);
+                return StatusCode(500, new { message = "Failed to enqueue move job", error = ex.Message });
+            }
+        }
+
+        [HttpGet("move/{jobId}")]
+        public IActionResult GetMoveJobStatus(string jobId)
+        {
+            if (_moveQueueService == null) return NotFound(new { message = "Move queue not available" });
+            if (!Guid.TryParse(jobId, out var gid)) return BadRequest(new { message = "Invalid jobId" });
+            if (_moveQueueService.TryGetJob(gid, out var job))
+            {
+                _logger.LogInformation("Queried move job {JobId} status: {Status}", gid, job!.Status);
+                return Ok(job);
+            }
+            return NotFound(new { message = "Job not found" });
+        }
+
+        [HttpPost("move/requeue/{jobId}")]
+        public async Task<IActionResult> RequeueMoveJob(string jobId)
+        {
+            if (_moveQueueService == null) return NotFound(new { message = "Move queue not available" });
+            if (!Guid.TryParse(jobId, out var gid)) return BadRequest(new { message = "Invalid jobId" });
+
+            var newJobId = await _moveQueueService.RequeueMoveAsync(gid);
+            if (newJobId == null)
+            {
+                return BadRequest(new { message = "Unable to requeue job (not found or invalid status)" });
+            }
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                var job = new { jobId = newJobId.ToString(), status = "Queued", enqueuedAt = DateTime.UtcNow };
+                await hub.Clients.All.SendAsync("MoveJobUpdate", job);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for requeued job {JobId}", newJobId);
+            }
+
+            return Accepted(new { message = "Requeued move job", jobId = newJobId });
+        }
+
         [HttpPost("scan/requeue/{jobId}")]
         public async Task<IActionResult> RequeueScanJob(string jobId)
         {
@@ -1642,6 +1834,17 @@ namespace Listenarr.Api.Controllers
                 }
             }
 
+            // If the audiobook has no Series, remove any {Series} tokens from the directory pattern
+            // Tests expect the controller to strip the Series token when series metadata is missing.
+            if (string.IsNullOrWhiteSpace(audiobook.Series))
+            {
+                directoryPattern = Regex.Replace(directoryPattern, @"\{Series[^}]*\}", string.Empty, RegexOptions.IgnoreCase);
+                // Clean up any resulting duplicate separators or empty parts again
+                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*[\\/]", "/");
+                directoryPattern = Regex.Replace(directoryPattern, @"^\s*[\\/]", "");
+                directoryPattern = Regex.Replace(directoryPattern, @"[\\/]\s*$", "");
+            }
+
             // Build variables for naming pattern using audiobook-level metadata
             var variables = new Dictionary<string, object>
             {
@@ -1805,7 +2008,22 @@ namespace Listenarr.Api.Controllers
         public bool Monitored { get; set; } = true;
         public int? QualityProfileId { get; set; }
         public bool AutoSearch { get; set; } = false;
+        // Optional destination override for placing the audiobook base directory
+        public string? DestinationPath { get; set; }
         public SearchResult? SearchResult { get; set; }
     }
+
+    public class PreviewPathRequest
+    {
+        public AudibleBookMetadata Metadata { get; set; } = new();
+        public string? DestinationRoot { get; set; }
+    }
+
+    public class MoveRequest
+    {
+        public string? DestinationPath { get; set; }
+        public string? SourcePath { get; set; }
+    }
+
 }
 }

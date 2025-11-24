@@ -230,6 +230,11 @@ builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
 // Background worker to consume scan jobs and persist audiobook files
 builder.Services.AddHostedService<ScanBackgroundService>();
 
+// Move queue: enqueue safe move operations when an audiobook BasePath changes
+builder.Services.AddSingleton<IMoveQueueService, MoveQueueService>();
+// Background worker to consume move jobs and perform safe filesystem move
+builder.Services.AddHostedService<MoveBackgroundService>();
+
 // Register background service for daily cache cleanup
 builder.Services.AddHostedService<ImageCacheCleanupService>();
 

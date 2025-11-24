@@ -3913,7 +3913,7 @@ namespace Listenarr.Api.Services
 
                                                     var filenamePattern = settings.FileNamingPattern;
                                                     if (string.IsNullOrWhiteSpace(filenamePattern))
-                                                        filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                                        filenamePattern = "{Author}/{Series}/{Title}";
 
                                                     // If using audiobook BasePath, strip directory components from the pattern (use filename-only)
                                                     if (abForNaming != null && !string.IsNullOrWhiteSpace(abForNaming.BasePath))
@@ -3938,7 +3938,9 @@ namespace Listenarr.Api.Services
                                                     };
 
                                                     var patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
+                                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                                                        || filenamePattern.IndexOf('/') >= 0
+                                                        || filenamePattern.IndexOf('\\') >= 0;
                                                     var treatAsFilename = !patternAllowsSubfolders;
 
                                                     var filename = fileNamingService.ApplyNamingPattern(filenamePattern, variablesForFile, treatAsFilename);
@@ -4152,7 +4154,7 @@ namespace Listenarr.Api.Services
                                             var fullPattern = settings.FileNamingPattern;
                                             if (string.IsNullOrWhiteSpace(fullPattern))
                                             {
-                                                fullPattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                                fullPattern = "{Author}/{Series}/{Title}";
                                             }
 
                                             // Find the last '/' in the pattern to get just the filename part
@@ -4181,7 +4183,7 @@ namespace Listenarr.Api.Services
                                             filenamePattern = settings.FileNamingPattern;
                                             if (string.IsNullOrWhiteSpace(filenamePattern))
                                             {
-                                                filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                                filenamePattern = "{Author}/{Series}/{Title}";
                                             }
                                         }
                                     }
@@ -4196,7 +4198,7 @@ namespace Listenarr.Api.Services
                                         filenamePattern = settings.FileNamingPattern;
                                         if (string.IsNullOrWhiteSpace(filenamePattern))
                                         {
-                                            filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                                filenamePattern = "{Author}/{Series}/{Title}";
                                         }
                                     }
                                 }
@@ -4212,7 +4214,7 @@ namespace Listenarr.Api.Services
                                     filenamePattern = settings.FileNamingPattern;
                                     if (string.IsNullOrWhiteSpace(filenamePattern))
                                     {
-                                        filenamePattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                                        filenamePattern = "{Author}/{Series}/{Title}";
                                     }
                                 }
                                 
@@ -4250,7 +4252,9 @@ namespace Listenarr.Api.Services
                                 if (!string.IsNullOrWhiteSpace(filenamePattern))
                                 {
                                     patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
+                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                                        || filenamePattern.IndexOf('/') >= 0
+                                        || filenamePattern.IndexOf('\\') >= 0;
                                 }
 
                                 // Enforce: only allow subfolders when the pattern explicitly includes DiskNumber or ChapterNumber.

@@ -30,7 +30,7 @@ namespace Listenarr.Api.Services
 
             if (string.IsNullOrWhiteSpace(pattern))
             {
-                pattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                pattern = "{Author}/{Series}/{Title}";
             }
 
             // Helper to pick the first non-empty value
@@ -125,7 +125,7 @@ namespace Listenarr.Api.Services
 
             if (string.IsNullOrWhiteSpace(pattern))
             {
-                pattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}";
+                pattern = "{Author}/{Series}/{Title}";
             }
 
             // Helper to pick the first non-empty value

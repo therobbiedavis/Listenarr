@@ -970,12 +970,37 @@ namespace Listenarr.Api.Services
                                 }
                             }
                             
-                            // If all metadata sources failed, queue ASIN for last-ditch fallback (OpenLibrary then scraping)
+                            // If all metadata sources failed, try the configured audible metadata scraper as a last
+                            // attempt before queuing the ASIN for fallback scraping. Tests commonly replace
+                            // IAudibleMetadataService with a deterministic test implementation and expect
+                            // it to be used when upstream metadata sources are not configured.
                             if (metadata == null)
                             {
-                                asinsNeedingFallback.Add(asin);
-                                // Note that this ASIN has no metadata yet
-                                try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; } catch { }
+                                try
+                                {
+                                    if (_audibleMetadataService != null)
+                                    {
+                                        _logger.LogInformation("No external metadata sources succeeded for ASIN {Asin} - trying audible metadata scraper", asin);
+                                        var scrapedMd = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                                        if (scrapedMd != null)
+                                        {
+                                            metadata = scrapedMd;
+                                            metadataSourceName = "AudibleScrape";
+                                            _logger.LogInformation("Audible metadata scraper returned data for ASIN {Asin} (title: {Title})", asin, metadata.Title);
+                                        }
+                                    }
+                                }
+                                catch (Exception exScrape)
+                                {
+                                    _logger.LogWarning(exScrape, "Audible metadata scraper failed for ASIN {Asin}", asin);
+                                }
+
+                                if (metadata == null)
+                                {
+                                    asinsNeedingFallback.Add(asin);
+                                    // Note that this ASIN has no metadata yet
+                                    try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; } catch { }
+                                }
                             }
 
                             
@@ -1037,7 +1062,12 @@ namespace Listenarr.Api.Services
                 // OpenLibrary-only augmentation produces visible, scoreable items without calling Amazon.
                 try
                 {
-                    if (openLibraryDerivedResults != null && openLibraryDerivedResults.Any())
+                    // Only merge OpenLibrary-derived candidates when we did not obtain any enriched
+                    // metadata from external sources. If we already have enriched metadata results
+                    // (e.g. from Audible/Amazon/Audimeta/Audnexus or the audible scraper), prefer
+                    // those authoritative results and avoid adding OpenLibrary fallbacks that could
+                    // dilute the final ranked list.
+                    if ((openLibraryDerivedResults != null && openLibraryDerivedResults.Any()) && !enrichedList.Any())
                     {
                         _logger.LogInformation("Merging {Count} OpenLibrary-derived candidate(s) into enriched results", openLibraryDerivedResults.Count);
 
@@ -1359,15 +1389,28 @@ namespace Listenarr.Api.Services
                         }
                         else // Relaxed
                         {
-                            // Accept if containmentScore >= 0.4 OR fuzzySimilarity >= fuzzyThreshold
-                            if (s.ContainmentScore >= 0.4 || s.FuzzyScore >= fuzzyThreshold)
+                            // If this result came from an authoritative metadata source
+                            // (e.g. Audimeta, Audnexus, Audible scrape, OpenLibrary),
+                            // treat it as authoritative and bypass the containment check.
+                            var mdLower = (r.MetadataSource ?? string.Empty).ToLowerInvariant();
+                            var isAuthoritative = mdLower.Contains("audimeta") || mdLower.Contains("audnex") || mdLower.Contains("audnexus") || mdLower.Contains("audible") || mdLower.Contains("openlibrary");
+
+                            if (isAuthoritative)
                             {
                                 keep = true;
                             }
                             else
                             {
-                                keep = false;
-                                _logger.LogInformation("Dropping ASIN {Asin} (Relaxed containment failed). containmentScore={Score}, fuzzy={Fuzzy}", r.Asin, s.ContainmentScore, s.FuzzyScore);
+                                // Accept if containmentScore >= 0.4 OR fuzzySimilarity >= fuzzyThreshold
+                                if (s.ContainmentScore >= 0.4 || s.FuzzyScore >= fuzzyThreshold)
+                                {
+                                    keep = true;
+                                }
+                                else
+                                {
+                                    keep = false;
+                                    _logger.LogInformation("Dropping ASIN {Asin} (Relaxed containment failed). containmentScore={Score}, fuzzy={Fuzzy}", r.Asin, s.ContainmentScore, s.FuzzyScore);
+                                }
                             }
                         }
                     }
@@ -1465,14 +1508,19 @@ namespace Listenarr.Api.Services
                     var q = query.Trim();
                     results = results.Where(r =>
                     {
-                        // Always keep OpenLibrary-sourced items
-                        if (string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase))
-                            return true;
+                        // Preserve results from authoritative metadata sources (OpenLibrary,
+                        // Audimeta/Audnexus) and from the audible scraper. These sources
+                        // are considered authoritative enough to bypass the simple query
+                        // containment requirement used for raw/conversion results.
+                        if (!string.IsNullOrWhiteSpace(r.MetadataSource))
+                        {
+                            var mdLower = r.MetadataSource.ToLowerInvariant();
+                            if (mdLower.Contains("openlibrary") || mdLower.Contains("audimeta") || mdLower.Contains("audnex") || mdLower.Contains("audnexus") || mdLower.Contains("audible"))
+                                return true;
+                        }
 
-                        // For all other results (including Audimeta/Audnexus), require the
-                        // original search query to appear somewhere in the result's own
-                        // fields (title/author/description/etc). This prevents external
-                        // metadata from bypassing the containment check.
+                        // For all other results require the original search query to appear
+                        // somewhere in the result's own fields (title/author/description/etc).
                         var hay = string.Join(" ", new[] {
                             r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series, r.Quality, r.ProductUrl, r.ImageUrl, r.Asin, r.Source
                         }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();

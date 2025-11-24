@@ -1,0 +1,178 @@
+using System.Collections.Concurrent;
+using System.Threading.Channels;
+using System.Threading.Tasks;
+using System;
+using System.Linq;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using Listenarr.Api.Models;
+
+
+namespace Listenarr.Api.Services
+{
+    public class MoveQueueService : IMoveQueueService
+    {
+        private readonly ConcurrentDictionary<Guid, MoveJob> _jobs = new();
+        private readonly Channel<MoveJob> _channel = Channel.CreateUnbounded<MoveJob>();
+        private readonly ILogger<MoveQueueService> _logger;
+        private readonly IServiceProvider _serviceProvider;
+
+        public MoveQueueService(ILogger<MoveQueueService> logger, IServiceProvider serviceProvider)
+        {
+            _logger = logger;
+            _serviceProvider = serviceProvider;
+        }
+
+        public ChannelReader<MoveJob> Reader => _channel.Reader;
+
+        public async Task<Guid> EnqueueMoveAsync(int audiobookId, string requestedPath, string? sourcePath = null)
+        {
+            try
+            {
+                // Check DB for existing active job
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+
+                var requestedLower = (requestedPath ?? string.Empty).ToLower();
+                var existingDb = db.MoveJobs.FirstOrDefault(j => j.AudiobookId == audiobookId &&
+                    ((j.RequestedPath ?? string.Empty).ToLower() == requestedLower) &&
+                    (j.Status == "Queued" || j.Status == "Processing"));
+
+                if (existingDb != null)
+                {
+                    _jobs[existingDb.Id] = existingDb;
+                    _logger.LogInformation("Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id", existingDb.Id, audiobookId, requestedPath);
+                    return existingDb.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed during dedupe check for move job; will enqueue new job");
+            }
+
+            var job = new MoveJob { AudiobookId = audiobookId, RequestedPath = requestedPath, EnqueuedAt = DateTime.UtcNow, Status = "Queued", SourcePath = sourcePath };
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                db.MoveJobs.Add(job);
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist move job to database; proceeding with in-memory job");
+            }
+
+            _jobs[job.Id] = job;
+            _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, requestedPath);
+            await _channel.Writer.WriteAsync(job);
+            return job.Id;
+        }
+
+        public bool TryGetJob(Guid id, out MoveJob? job)
+        {
+            if (_jobs.TryGetValue(id, out job)) return true;
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                job = db.MoveJobs.FirstOrDefault(j => j.Id == id);
+                if (job != null) _jobs[id] = job;
+                return job != null;
+            }
+            catch
+            {
+                job = null;
+                return false;
+            }
+        }
+
+        public void UpdateJobStatus(Guid id, string status, string? error = null)
+        {
+            if (_jobs.TryGetValue(id, out var job))
+            {
+                job.Status = status;
+                job.Error = error;
+                job.UpdatedAt = DateTime.UtcNow;
+                _jobs[id] = job;
+            }
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var dbJob = db.MoveJobs.FirstOrDefault(j => j.Id == id);
+                if (dbJob != null)
+                {
+                    dbJob.Status = status;
+                    dbJob.Error = error;
+                    dbJob.UpdatedAt = DateTime.UtcNow;
+                    db.MoveJobs.Update(dbJob);
+                    db.SaveChanges();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist move job status change for {JobId}", id);
+            }
+
+            _logger.LogInformation("Updated move job {JobId} status to {Status}", id, status);
+        }
+
+        public async Task<Guid?> RequeueMoveAsync(Guid jobId)
+        {
+            MoveJob? job = null;
+            if (!_jobs.TryGetValue(jobId, out job))
+            {
+                try
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                    job = db.MoveJobs.FirstOrDefault(j => j.Id == jobId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to read move job from DB while requeueing {JobId}", jobId);
+                }
+
+                if (job == null)
+                {
+                    _logger.LogWarning("Attempted to requeue unknown move job {JobId}", jobId);
+                    return null;
+                }
+            }
+
+            if (!CanRequeueJobStatus(job.Status))
+            {
+                _logger.LogInformation("Move job {JobId} has status {Status} and cannot be requeued", jobId, job.Status);
+                return null;
+            }
+
+            var newJob = new MoveJob { AudiobookId = job.AudiobookId, RequestedPath = job.RequestedPath, EnqueuedAt = DateTime.UtcNow, Status = "Queued", SourcePath = job.SourcePath };
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                db.MoveJobs.Add(newJob);
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist requeued move job to database; proceeding with in-memory job");
+            }
+
+            _jobs[newJob.Id] = newJob;
+            _logger.LogInformation("Requeueing move job {OldJobId} as new job {NewJobId} for audiobook {AudiobookId}", jobId, newJob.Id, job.AudiobookId);
+            await _channel.Writer.WriteAsync(newJob);
+            return newJob.Id;
+        }
+
+        private static bool CanRequeueJobStatus(string status)
+        {
+            return string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status, "Queued", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+}

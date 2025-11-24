@@ -25,6 +25,7 @@ namespace Listenarr.Api.Models
     {
         public DbSet<Audiobook> Audiobooks { get; set; }
     public DbSet<AudiobookFile> AudiobookFiles { get; set; }
+        public DbSet<MoveJob> MoveJobs { get; set; }
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; }
         public DbSet<History> History { get; set; }
         public DbSet<Indexer> Indexers { get; set; }
@@ -342,6 +343,10 @@ namespace Listenarr.Api.Models
             // History table - optimized for recent activity queries
             modelBuilder.Entity<History>()
                 .HasIndex(h => h.Timestamp);
+
+            // MoveJobs - allow querying by audiobook and status
+            modelBuilder.Entity<MoveJob>()
+                .HasIndex(m => new { m.AudiobookId, m.Status });
         }
     }
 }
