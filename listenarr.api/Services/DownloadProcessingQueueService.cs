@@ -39,6 +39,37 @@ namespace Listenarr.Api.Services
 
         public async Task<string> QueueDownloadProcessingAsync(string downloadId, string sourcePath, string? downloadClientId = null)
         {
+            // Prevent duplicate active jobs for the same download by returning
+            // an existing active job if present. Also avoid rapid requeueing
+            // by honoring recently completed jobs (small cooldown window).
+            var now = DateTime.UtcNow;
+            var recentCompletedCutoff = now.AddSeconds(-300); // 5 minute cooldown
+
+            var existingActive = await _context.DownloadProcessingJobs
+                .Where(j => j.DownloadId == downloadId && 
+                           (j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
+                .OrderBy(j => j.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (existingActive != null)
+            {
+                _logger.LogInformation("Duplicate enqueue prevented - returning existing active job {JobId} for download {DownloadId}", existingActive.Id, downloadId);
+                return existingActive.Id;
+            }
+
+            // If we have a recently completed job for the same download, avoid
+            // requeuing immediately — return the most recent completed job id.
+            var recentCompleted = await _context.DownloadProcessingJobs
+                .Where(j => j.DownloadId == downloadId && j.Status == ProcessingJobStatus.Completed && j.CompletedAt.HasValue && j.CompletedAt >= recentCompletedCutoff)
+                .OrderByDescending(j => j.CompletedAt)
+                .FirstOrDefaultAsync();
+
+            if (recentCompleted != null)
+            {
+                _logger.LogInformation("Download {DownloadId} has a recent completed job {JobId} (within cooldown), not queuing new job", downloadId, recentCompleted.Id);
+                return recentCompleted.Id;
+            }
+
             var job = new DownloadProcessingJob
             {
                 DownloadId = downloadId,

@@ -204,6 +204,8 @@ builder.Services.AddScoped<IDownloadService, DownloadService>();
 builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
 builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
 builder.Services.AddScoped<IFileNamingService, FileNamingService>();
+// Centralized import service: handles moving/copying, naming and audiobook registration
+builder.Services.AddScoped<IImportService, ImportService>();
 builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
 builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();

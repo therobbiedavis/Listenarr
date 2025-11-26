@@ -569,4 +569,27 @@ namespace Listenarr.Api.Services
         /// <returns>True if a new record was created, false if it already existed</returns>
         Task<bool> EnsureAudiobookFileAsync(int audiobookId, string filePath, string? source = "scan");
     }
+
+    /// <summary>
+    /// Import service responsible for moving/copying completed download files into the library/output
+    /// and registering audiobook file entries. This centralizes naming, directory creation and
+    /// file operations so manual and automatic imports share the same behavior.
+    /// </summary>
+    public interface IImportService
+    {
+        /// <summary>
+        /// Import a single completed file
+        /// </summary>
+        Task<ImportResult> ImportSingleFileAsync(string downloadId, int? audiobookId, string sourcePath, ApplicationSettings settings, CancellationToken ct = default);
+
+        /// <summary>
+        /// Import multiple files from a directory (multi-file import)
+        /// </summary>
+        Task<List<ImportResult>> ImportFilesFromDirectoryAsync(string downloadId, int? audiobookId, IEnumerable<string> files, ApplicationSettings settings, CancellationToken ct = default);
+
+        /// <summary>
+        /// Reprocess an existing file path (useful for reprocessing completed downloads)
+        /// </summary>
+        Task<ImportResult> ReprocessExistingFileAsync(string downloadId, int? audiobookId, string sourcePath, ApplicationSettings settings, CancellationToken ct = default);
+    }
 }

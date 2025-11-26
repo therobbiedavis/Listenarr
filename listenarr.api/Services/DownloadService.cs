@@ -44,6 +44,7 @@ namespace Listenarr.Api.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IRemotePathMappingService _pathMappingService;
+        private readonly IImportService _importService;
         private readonly ISearchService _searchService;
         private readonly NotificationService? _notificationService;
         private readonly IMemoryCache _cache;
@@ -75,6 +76,7 @@ namespace Listenarr.Api.Services
             HttpClient httpClient,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory serviceScopeFactory,
+            IImportService importService,
             IRemotePathMappingService pathMappingService,
             ISearchService searchService,
             IHubContext<DownloadHub> hubContext,
@@ -89,6 +91,7 @@ namespace Listenarr.Api.Services
             _httpClient = httpClient;
             _httpClientFactory = httpClientFactory;
             _serviceScopeFactory = serviceScopeFactory;
+            _importService = importService;
             _pathMappingService = pathMappingService;
             _searchService = searchService;
             _hubContext = hubContext;
@@ -3895,275 +3898,17 @@ namespace Listenarr.Api.Services
 
                             if (files.Any())
                             {
-                                _logger.LogInformation("Download {DownloadId} contains {Count} files - importing each file to audiobook folder if appropriate", downloadId, files.Count);
-
-                                // Precompute audiobook and best existing quality BEFORE importing any files in this batch.
-                                // This prevents earlier imports in this batch from causing later candidates to be skipped
-                                // due to quality comparisons against files we just added.
-                                Audiobook? batchAudiobook = null;
-                                string? bestExisting = null;
-                                QualityProfile? abProfile = null;
-                                if (completedDownload.AudiobookId != null)
+                                _logger.LogInformation("Download {DownloadId} contains {Count} files - delegating multi-file import to ImportService", downloadId, files.Count);
+                                var importResults = await _importService.ImportFilesFromDirectoryAsync(downloadId, completedDownload.AudiobookId, files, settings);
+                                foreach (var ir in importResults)
                                 {
-                                    try
+                                    if (ir.Success)
                                     {
-                                        batchAudiobook = await dbContext.Audiobooks
-                                            .Include(a => a.QualityProfile)
-                                            .Include(a => a.Files)
-                                            .FirstOrDefaultAsync(a => a.Id == completedDownload.AudiobookId.Value);
-
-                                        abProfile = batchAudiobook?.QualityProfile;
-
-                                        if (batchAudiobook != null && batchAudiobook.Files != null && batchAudiobook.Files.Any())
-                                        {
-                                            foreach (var f in batchAudiobook.Files)
-                                            {
-                                                try
-                                                {
-                                                    string q = string.Empty;
-                                                    if (!string.IsNullOrEmpty(f.Format)) q = f.Format;
-                                                    if (f.Bitrate.HasValue)
-                                                    {
-                                                        var kb = f.Bitrate.Value / 1000;
-                                                        if (kb >= 320) q = "MP3 320kbps";
-                                                        else if (kb >= 256) q = "MP3 256kbps";
-                                                        else if (kb >= 192) q = "MP3 192kbps";
-                                                        else if (kb >= 128) q = "MP3 128kbps";
-                                                    }
-                                                    if (string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(f.Path)) q = DetermineQualityFromMetadata(null, f.Path);
-
-                                                    if (string.IsNullOrEmpty(bestExisting)) bestExisting = q;
-                                                    else if (!string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(bestExisting) && abProfile != null)
-                                                    {
-                                                        if (IsQualityBetter(q, bestExisting, abProfile)) bestExisting = q;
-                                                    }
-                                                }
-                                                catch { }
-                                            }
-                                        }
+                                        _logger.LogInformation("Imported file {Source} -> {FinalPath} (download {DownloadId})", ir.SourcePath, ir.FinalPath, downloadId);
                                     }
-                                    catch (Exception ex)
+                                    else
                                     {
-                                        _logger.LogDebug(ex, "Failed to load audiobook for batch quality evaluation (DownloadId: {DownloadId})", downloadId);
-                                    }
-                                }
-
-                                foreach (var file in files)
-                                {
-                                    try
-                                    {
-                                        var candidateMetadata = (AudioMetadata?)null;
-                                        if (metadataService != null)
-                                        {
-                                            try { candidateMetadata = await metadataService.ExtractFileMetadataAsync(file); } catch { candidateMetadata = null; }
-                                        }
-                                        var candidateQuality = DetermineQualityFromMetadata(candidateMetadata, file);
-
-                                        // If linked to audiobook, decide whether to import based on quality profile (compare against pre-loop snapshot)
-                                        if (completedDownload.AudiobookId != null)
-                                        {
-                                            try
-                                            {
-                                                if (batchAudiobook != null && batchAudiobook.Files != null && batchAudiobook.Files.Any())
-                                                {
-                                                    if (!IsQualityBetter(candidateQuality, bestExisting, abProfile))
-                                                    {
-                                                        _logger.LogInformation("Skipping import of file {File} for audiobook {AudiobookId} because candidate quality '{Candidate}' is not better than existing '{Existing}'", file, batchAudiobook.Id, candidateQuality, bestExisting);
-                                                        continue; // skip importing this file
-                                                    }
-                                                }
-                                            }
-                                            catch (Exception ex)
-                                            {
-                                                _logger.LogDebug(ex, "Failed to evaluate quality for multi-file import {File}", file);
-                                            }
-                                        }
-
-                                        // Determine destination directory (prefer audiobook basepath)
-                                        string destDirForFile = string.Empty;
-                                        Audiobook? abForNaming = null;
-                                        if (completedDownload.AudiobookId != null)
-                                        {
-                                            try
-                                            {
-                                                abForNaming = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                                                if (abForNaming != null && !string.IsNullOrWhiteSpace(abForNaming.BasePath)) destDirForFile = abForNaming.BasePath;
-                                            }
-                                            catch { destDirForFile = string.Empty; }
-                                        }
-                                        if (string.IsNullOrWhiteSpace(destDirForFile)) destDirForFile = settings.OutputPath ?? "./completed";
-
-                                        // Only perform file operations if destination directory exists (do not create)
-                                        if (!string.IsNullOrEmpty(destDirForFile) && Directory.Exists(destDirForFile))
-                                        {
-                                            // Compute destination filename. Prefer applying the file naming pattern when metadata processing is enabled
-                                            string destPathForFile;
-                                            try
-                                            {
-                                                if (fileNamingService != null && settings.EnableMetadataProcessing)
-                                                {
-                                                    // Build naming metadata: prefer audiobook metadata when available, otherwise use extracted candidate metadata
-                                                    var namingMetadata = new AudioMetadata();
-                                                    if (abForNaming != null)
-                                                    {
-                                                        namingMetadata.Title = abForNaming.Title ?? Path.GetFileNameWithoutExtension(file);
-                                                        namingMetadata.Artist = (abForNaming.Authors != null && abForNaming.Authors.Any()) ? string.Join(", ", abForNaming.Authors) : string.Empty;
-                                                        namingMetadata.AlbumArtist = namingMetadata.Artist;
-                                                        namingMetadata.Series = abForNaming.Series;
-                                                    }
-                                                    else if (candidateMetadata != null)
-                                                    {
-                                                        namingMetadata = candidateMetadata;
-                                                    }
-                                                    else
-                                                    {
-                                                        namingMetadata.Title = Path.GetFileNameWithoutExtension(file);
-                                                    }
-
-                                                    var filenamePattern = settings.FileNamingPattern;
-                                                    if (string.IsNullOrWhiteSpace(filenamePattern))
-                                                        filenamePattern = "{Author}/{Series}/{Title}";
-
-                                                    // Use the full naming pattern for destination path. If the pattern contains
-                                                    // directory separators, the destinationPath will include them (e.g.
-                                                    // {Author}/{Series}/{Title}). We do not strip pattern components when
-                                                    // using an audiobook BasePath — the full pattern will be used to determine
-                                                    // where inside the audiobook base path the final filename should be.
-
-                                                    var ext = Path.GetExtension(file);
-
-                                                    var variablesForFile = new Dictionary<string, object>
-                                                    {
-                                                        { "Author", namingMetadata.Artist ?? "Unknown Author" },
-                                                        { "Series", string.IsNullOrWhiteSpace(namingMetadata.Series) ? string.Empty : namingMetadata.Series },
-                                                        { "Title", namingMetadata.Title ?? Path.GetFileNameWithoutExtension(file) },
-                                                        { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? namingMetadata.TrackNumber?.ToString() ?? string.Empty },
-                                                        { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
-                                                        { "Quality", (namingMetadata.Bitrate.HasValue ? namingMetadata.Bitrate.ToString() + "kbps" : null) ?? namingMetadata.Format ?? string.Empty },
-                                                        { "DiskNumber", namingMetadata.DiscNumber?.ToString() ?? string.Empty },
-                                                        { "ChapterNumber", namingMetadata.TrackNumber?.ToString() ?? string.Empty }
-                                                    };
-
-                                                    var patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                                        || filenamePattern.IndexOf('/') >= 0
-                                                        || filenamePattern.IndexOf('\\') >= 0;
-                                                    var treatAsFilename = !patternAllowsSubfolders;
-
-                                                    var filename = fileNamingService.ApplyNamingPattern(filenamePattern, variablesForFile, treatAsFilename);
-                                                    if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                                                    {
-                                                        filename += ext;
-                                                    }
-
-                                                    // Sanitize if necessary
-                                                    if (!patternAllowsSubfolders)
-                                                    {
-                                                        try
-                                                        {
-                                                            var forced = Path.GetFileName(filename);
-                                                            var invalid = Path.GetInvalidFileNameChars();
-                                                            var sb = new System.Text.StringBuilder();
-                                                            foreach (var c in forced)
-                                                            {
-                                                                sb.Append(invalid.Contains(c) ? '_' : c);
-                                                            }
-                                                            filename = sb.ToString();
-                                                        }
-                                                        catch
-                                                        {
-                                                            filename = Path.GetFileName(filename);
-                                                        }
-                                                    }
-
-                                                    destPathForFile = Path.Combine(destDirForFile, filename);
-                                                }
-                                                else
-                                                {
-                                                    destPathForFile = Path.Combine(destDirForFile, Path.GetFileName(file));
-                                                }
-                                            }
-                                            catch (Exception ex)
-                                            {
-                                                _logger.LogDebug(ex, "Failed to generate filename via pattern for file {File}, falling back to original filename", file);
-                                                destPathForFile = Path.Combine(destDirForFile, Path.GetFileName(file));
-                                            }
-
-                                                    // After generating the target filename, we'll still place the file into
-                                                    // the destination directory first (original filename) then apply
-                                                    // the naming pattern on that destination file so that the file
-                                                    // exists in the destination before any renaming occurs.
-                                                    var initialDest = Path.Combine(destDirForFile, Path.GetFileName(file));
-                                                    _logger.LogDebug("Resolving initial destination for multi-file import: {Dest}", initialDest);
-                                                    var uniqueInitial = FileUtils.GetUniqueDestinationPath(initialDest);
-
-                                                    var action = settings.CompletedFileAction ?? "Move";
-                                                    if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
-                                                    {
-                                                        File.Copy(file, uniqueInitial, true);
-                                                        _logger.LogInformation("Copied file {Source} -> {Dest}", file, uniqueInitial);
-                                                    }
-                                                    else
-                                                    {
-                                                        File.Move(file, uniqueInitial, true);
-                                                        _logger.LogInformation("Moved file {Source} -> {Dest}", file, uniqueInitial);
-                                                    }
-
-                                                    // Now apply the filename pattern on the destination copy/move
-                                                    _logger.LogDebug("Applying naming pattern on destination for {File}", uniqueInitial);
-                                                    // destPathForFile already contains the desired path per the pattern
-                                                    _logger.LogDebug("Resolving unique destination for multi-file import: {Dest}", destPathForFile);
-                                                    var uniqueFinal = FileUtils.GetUniqueDestinationPath(destPathForFile);
-
-                                                    // If the final name differs from the initial unique path, move/rename it
-                                                    if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase))
-                                                    {
-                                                        try
-                                                        {
-                                                            File.Move(uniqueInitial, uniqueFinal, true);
-                                                            _logger.LogInformation("Renamed/Moved destination file {Source} -> {Final}", uniqueInitial, uniqueFinal);
-                                                        }
-                                                        catch (Exception ex)
-                                                        {
-                                                            _logger.LogWarning(ex, "Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
-                                                            // If renaming fails, keep the initial file as-is
-                                                            uniqueFinal = uniqueInitial;
-                                                        }
-                                                    }
-                                                    else
-                                                    {
-                                                        // No rename necessary
-                                                        _logger.LogDebug("Naming pattern results match initial destination, skipping rename for {File}", uniqueInitial);
-                                                    }
-
-                                                    destPathForFile = uniqueFinal;
-
-                                            // Register audiobook file if linked
-                                            if (completedDownload.AudiobookId != null)
-                                            {
-                                                try
-                                                {
-                                                    using var afScope = _serviceScopeFactory.CreateScope();
-                                                    var audioFileService = afScope.ServiceProvider.GetService<IAudioFileService>()
-                                                        ?? new AudioFileService(_serviceScopeFactory, afScope.ServiceProvider.GetService<ILogger<AudioFileService>>() ?? new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>(),
-                                                            afScope.ServiceProvider.GetRequiredService<IMemoryCache>(), afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
-
-                                                    await audioFileService.EnsureAudiobookFileAsync(completedDownload.AudiobookId.Value, destPathForFile, completedDownload.DownloadClientId ?? "download");
-                                                }
-                                                catch (Exception ex)
-                                                {
-                                                    _logger.LogWarning(ex, "Failed to create AudiobookFile for imported file {File}", file);
-                                                }
-                                            }
-                                        }
-                                        else
-                                        {
-                                            _logger.LogWarning("Destination directory does not exist for multi-file import: {DestDir}. Keeping source file: {Source}", destDirForFile, file);
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Failed processing file in directory import: {File}", file);
+                                        _logger.LogInformation("ImportService skipped/failed {Source} for download {DownloadId}: {Reason}", ir.SourcePath, downloadId, ir.SkippedReason ?? ir.Message);
                                     }
                                 }
                             }
@@ -4178,416 +3923,22 @@ namespace Listenarr.Api.Services
                     {
                         try
                         {
-                            // Determine destination path based on settings
-                            if (fileNamingService != null && settings.EnableMetadataProcessing)
+                            _logger.LogInformation("Download {DownloadId} is a single-file download - delegating single-file import to ImportService", downloadId);
+                            var importResult = await _importService.ImportSingleFileAsync(downloadId, completedDownload.AudiobookId, localPath, settings);
+                            if (importResult.Success && !string.IsNullOrWhiteSpace(importResult.FinalPath))
                             {
-                                _logger.LogDebug("Using file naming service to determine destination for download {DownloadId}", downloadId);
-                                
-                                // Build metadata for naming. Prefer audiobook metadata when available
-                                var metadata = new AudioMetadata
-                                {
-                                    Title = completedDownload.Title ?? "Unknown Title",
-                                    Artist = completedDownload.Artist,
-                                    Album = completedDownload.Album
-                                };
-
-                                // If this download is linked to an Audiobook, use its fields as authoritative
-                                AudioMetadata? namingMetadata = null;
-                                if (completedDownload.AudiobookId != null)
-                                {
-                                    try
-                                    {
-                                        var audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                                        if (audiobook != null)
-                                        {
-                                                namingMetadata = new AudioMetadata
-                                                {
-                                                    Title = audiobook.Title ?? metadata.Title,
-                                                    Artist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : (metadata.Artist ?? string.Empty),
-                                                    AlbumArtist = (audiobook.Authors != null && audiobook.Authors.Any()) ? string.Join(", ", audiobook.Authors) : (metadata.Artist ?? string.Empty),
-                                                    Series = audiobook.Series,
-                                                };
-
-                                            _logger.LogDebug("Using audiobook metadata for naming: {Title} by {Artist}", namingMetadata.Title, namingMetadata.Artist);
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to load audiobook metadata for naming");
-                                    }
-                                }
-
-                                // Try to extract metadata from file if metadata processing enabled.
-                                // If an audiobook provides authoritative naming metadata, skip parsing file tags for naming.
-                                if (metadataService != null)
-                                {
-                                    try
-                                    {
-                                        if (namingMetadata != null)
-                                        {
-                                            // We intentionally do not extract/merge file tags when audiobook DB metadata is available
-                                            // to prevent file-embedded tags from overriding the authoritative audiobook naming.
-                                            _logger.LogDebug("Skipping file metadata extraction because audiobook naming metadata is present for download {DownloadId}", downloadId);
-                                        }
-                                        else
-                                        {
-                                            var extractedMetadata = await metadataService.ExtractFileMetadataAsync(localPath);
-                                            if (extractedMetadata != null)
-                                            {
-                                                // No audiobook naming metadata - merge extracted values without overwriting existing download info
-                                                string FirstNonEmpty(params string?[] candidates)
-                                                {
-                                                    foreach (var c in candidates)
-                                                    {
-                                                        if (!string.IsNullOrWhiteSpace(c)) return c!;
-                                                    }
-                                                    return string.Empty;
-                                                }
-
-                                                metadata.Title = FirstNonEmpty(metadata.Title, extractedMetadata.Title, "Unknown Title");
-                                                metadata.Artist = FirstNonEmpty(metadata.Artist, extractedMetadata.Artist, extractedMetadata.AlbumArtist, metadata.Artist);
-                                                metadata.Album = FirstNonEmpty(metadata.Album, extractedMetadata.Album);
-
-                                                if (!metadata.SeriesPosition.HasValue && extractedMetadata.SeriesPosition.HasValue)
-                                                    metadata.SeriesPosition = extractedMetadata.SeriesPosition;
-                                                if (!metadata.TrackNumber.HasValue && extractedMetadata.TrackNumber.HasValue)
-                                                    metadata.TrackNumber = extractedMetadata.TrackNumber;
-                                                if (!metadata.DiscNumber.HasValue && extractedMetadata.DiscNumber.HasValue)
-                                                    metadata.DiscNumber = extractedMetadata.DiscNumber;
-                                                if (!metadata.Year.HasValue && extractedMetadata.Year.HasValue)
-                                                    metadata.Year = extractedMetadata.Year;
-                                                if (!metadata.Bitrate.HasValue && extractedMetadata.Bitrate.HasValue)
-                                                    metadata.Bitrate = extractedMetadata.Bitrate;
-                                                if (string.IsNullOrWhiteSpace(metadata.Format) && !string.IsNullOrWhiteSpace(extractedMetadata.Format))
-                                                    metadata.Format = extractedMetadata.Format;
-
-                                                _logger.LogDebug("Merged extracted metadata: {Title} by {Artist}", metadata.Title, metadata.Artist);
-                                            }
-                                        }
-                                    }
-                                    catch (Exception metaEx)
-                                    {
-                                        _logger.LogWarning(metaEx, "Failed to extract metadata from {FilePath}, using download info", localPath);
-                                    }
-                                }
-                                
-                                // Determine the base path for file operations
-                                string basePathForFile;
-                                string filenamePattern;
-
-                                // If this download is linked to an Audiobook with a BasePath, use it as the base directory
-                                // and extract just the filename part of the naming pattern
-                                // var usingAudiobookBasePath = false; // no longer needed
-                                if (completedDownload.AudiobookId != null && namingMetadata != null)
-                                {
-                                    try
-                                    {
-                                        var audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                                            if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
-                                            {
-                                                basePathForFile = audiobook.BasePath;
-                                                _logger.LogDebug("Using audiobook BasePath for download {DownloadId}: {BasePath}", downloadId, basePathForFile);
-
-                                                // Use the full naming pattern when calculating the destination
-                                                // inside the audiobook BasePath. This allows the configured
-                                                // file naming pattern to define subfolders under the
-                                                // audiobook base path when appropriate.
-                                                filenamePattern = settings.FileNamingPattern;
-                                                if (string.IsNullOrWhiteSpace(filenamePattern))
-                                                {
-                                                    filenamePattern = "{Author}/{Series}/{Title}";
-                                                }
-                                        }
-                                        else
-                                        {
-                                            // Fallback to global output path with full pattern
-                                            basePathForFile = settings.OutputPath;
-                                            if (string.IsNullOrWhiteSpace(basePathForFile))
-                                            {
-                                                basePathForFile = "./completed";
-                                                _logger.LogDebug("No output path configured, using default: {DefaultPath}", basePathForFile);
-                                            }
-                                            filenamePattern = settings.FileNamingPattern;
-                                            if (string.IsNullOrWhiteSpace(filenamePattern))
-                                            {
-                                                filenamePattern = "{Author}/{Series}/{Title}";
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Failed to load audiobook for BasePath, falling back to global output path");
-                                        basePathForFile = settings.OutputPath;
-                                        if (string.IsNullOrWhiteSpace(basePathForFile))
-                                        {
-                                            basePathForFile = "./completed";
-                                        }
-                                        filenamePattern = settings.FileNamingPattern;
-                                        if (string.IsNullOrWhiteSpace(filenamePattern))
-                                        {
-                                                filenamePattern = "{Author}/{Series}/{Title}";
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    // Not an audiobook download, use global output path with full pattern
-                                    basePathForFile = settings.OutputPath;
-                                    if (string.IsNullOrWhiteSpace(basePathForFile))
-                                    {
-                                        basePathForFile = "./completed";
-                                        _logger.LogDebug("No output path configured, using default: {DefaultPath}", basePathForFile);
-                                    }
-                                    filenamePattern = settings.FileNamingPattern;
-                                    if (string.IsNullOrWhiteSpace(filenamePattern))
-                                    {
-                                        filenamePattern = "{Author}/{Series}/{Title}";
-                                    }
-                                }
-                                
-                                // Generate filename using the appropriate pattern
-                                var ext = Path.GetExtension(localPath);
-                                var metadataForNaming = namingMetadata ?? metadata;
-                                
-                                // Build variables for filename pattern
-                                var variables = new Dictionary<string, object>
-                                {
-                                    { "Author", metadataForNaming.Artist ?? "Unknown Author" },
-                                    { "Series", string.IsNullOrWhiteSpace(metadataForNaming.Series) ? string.Empty : metadataForNaming.Series },
-                                    { "Title", metadataForNaming.Title ?? "Unknown Title" },
-                                    { "SeriesNumber", metadataForNaming.SeriesPosition?.ToString() ?? metadataForNaming.TrackNumber?.ToString() ?? string.Empty },
-                                    { "Year", metadataForNaming.Year?.ToString() ?? string.Empty },
-                                    { "Quality", (metadataForNaming.Bitrate.HasValue ? metadataForNaming.Bitrate.ToString() + "kbps" : null) ?? metadataForNaming.Format ?? string.Empty },
-                                    { "DiskNumber", metadataForNaming.DiscNumber?.ToString() ?? string.Empty },
-                                    { "ChapterNumber", metadataForNaming.TrackNumber?.ToString() ?? string.Empty }
-                                };
-
-                                // Log naming variables for debugging (sensitive paths not included)
-                                try
-                                {
-                                    var varDbg = string.Join(", ", variables.Select(kv => $"{kv.Key}={(kv.Value == null ? "(null)" : kv.Value.ToString())}"));
-                                    _logger.LogDebug("Filename variables for download {DownloadId}: {Vars}", downloadId, varDbg);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogDebug(ex, "Failed to log filename variables for download {DownloadId}", downloadId);
-                                }
-
-                                // Decide whether we are using an audiobook BasePath. When using a BasePath
-                                // avoid creating arbitrary subfolders (treat pattern as filename-only).
-                                var usingAudiobookBasePath = false;
-                                // Only set usingAudiobookBasePath true when the destination base path came from the audiobook
-                                // record rather than default/global output path.
-                                if (completedDownload.AudiobookId != null)
-                                {
-                                    try
-                                    {
-                                        var checkAb = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                                        if (checkAb != null && !string.IsNullOrWhiteSpace(checkAb.BasePath))
-                                        {
-                                            usingAudiobookBasePath = true;
-                                        }
-                                    }
-                                    catch { /* ignore */ }
-                                }
-
-                                // Only allow subfolders when not importing into an audiobook BasePath. When using BasePath
-                                // we must avoid creating arbitrary subfolders except those explicitly intended (e.g., Disk/Chapter).
-                                var patternAllowsSubfolders = false;
-                                if (!string.IsNullOrWhiteSpace(filenamePattern))
-                                {
-                                    patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                        || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                        || filenamePattern.IndexOf('/') >= 0
-                                        || filenamePattern.IndexOf('\\') >= 0;
-                                }
-
-                                // Enforce: only allow subfolders when the pattern explicitly includes DiskNumber or ChapterNumber.
-                                // This prevents arbitrary folders being created from tokens like {Title} or {Series}.
-                                // If we are using audiobook BasePath, force filename-only to avoid creating
-                                // unexpected subfolders under a user-provided base path.
-                                var treatAsFilename = usingAudiobookBasePath ? true : !patternAllowsSubfolders;
-
-                                _logger.LogDebug("PatternAllowsSubfolders={Allows} => enforce filename-only when false (treatAsFilename={Treat}) for download {DownloadId}",
-                                    patternAllowsSubfolders, treatAsFilename, downloadId);
-
-                                var filename = fileNamingService.ApplyNamingPattern(filenamePattern, variables, treatAsFilename);
-                                // If pattern resulted in any directory separators unexpectedly, log them
-                                if (filename.IndexOfAny(new[] { '/', '\\' }) >= 0)
-                                {
-                                    _logger.LogWarning("Generated filename contains directory separators for download {DownloadId}: '{Filename}' (treatAsFilename={Treat}). This may create extra folders.", downloadId, filename, treatAsFilename);
-                                }
-                                if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    filename += ext;
-                                }
-
-                                // If pattern does NOT allow subfolders, ensure filename is a single file name (no path separators)
-                                if (!patternAllowsSubfolders)
-                                {
-                                    try
-                                    {
-                                        var forced = Path.GetFileName(filename);
-                                        // sanitize invalid filename chars
-                                        var invalid = Path.GetInvalidFileNameChars();
-                                        var sb = new System.Text.StringBuilder();
-                                        foreach (var c in forced)
-                                        {
-                                            sb.Append(invalid.Contains(c) ? '_' : c);
-                                        }
-                                        filename = sb.ToString();
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to sanitize forced filename for download {DownloadId}", downloadId);
-                                        filename = Path.GetFileName(filename);
-                                    }
-                                }
-
-                                // Combine base path with generated filename
-                                destinationPath = Path.Combine(basePathForFile, filename);
-
-                                _logger.LogInformation("Generated destination path for download {DownloadId}: {DestinationPath}", downloadId, destinationPath);
-                                try
-                                {
-                                    var destDirCheck = Path.GetDirectoryName(destinationPath) ?? string.Empty;
-                                    _logger.LogDebug("Destination directory for download {DownloadId}: '{DestDir}' Exists={Exists}", downloadId, destDirCheck, Directory.Exists(destDirCheck));
-
-                                    // If dest dir is root or output path root, log that specifically
-                                    var rootNormalized = Path.GetPathRoot(destDirCheck) ?? string.Empty;
-                                    if (!string.IsNullOrEmpty(rootNormalized) && string.Equals(rootNormalized.TrimEnd(Path.DirectorySeparatorChar), destDirCheck.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        _logger.LogWarning("Destination directory for download {DownloadId} is the drive/root path: '{DestDir}' - this can cause files to be placed at root.", downloadId, destDirCheck);
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogDebug(ex, "Failed to inspect destination directory for download {DownloadId}", downloadId);
-                                }
+                                finalPath = importResult.FinalPath;
+                                _logger.LogInformation("ImportService completed single-file import {Source} -> {Final} for download {DownloadId}", localPath, finalPath, downloadId);
                             }
                             else
                             {
-                                // Simple naming - use original filename in output directory
-                                var effectiveOutputPath = settings.OutputPath;
-                                if (string.IsNullOrWhiteSpace(effectiveOutputPath))
-                                {
-                                    effectiveOutputPath = "./completed";
-                                    _logger.LogDebug("No output path configured, using default for simple naming: {DefaultPath}", effectiveOutputPath);
-                                }
-                                
-                                var fileName = Path.GetFileName(localPath);
-                                destinationPath = Path.Combine(effectiveOutputPath, fileName);
-                                _logger.LogInformation("Using simple destination path for download {DownloadId}: {DestinationPath}", 
-                                    downloadId, destinationPath);
-                            }
-                            
-                            // Determine destination directory and create it if necessary (align with manual import behavior)
-                            var destDir = Path.GetDirectoryName(destinationPath);
-                            if (!string.IsNullOrEmpty(destDir))
-                            {
-                                Directory.CreateDirectory(destDir);
-                            }
-
-                            // Perform file operations now that the directory exists
-                            if (!string.IsNullOrEmpty(destDir) && Directory.Exists(destDir))
-                            {
-                                // Perform file operation if source and destination are different
-                                if (!string.Equals(Path.GetFullPath(localPath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var action = settings.CompletedFileAction ?? "Move";
-
-                                    // First: move/copy into the destination directory using the original filename
-                                    var initialDest = Path.Combine(destDir, Path.GetFileName(localPath));
-                                    _logger.LogDebug("Resolving initial destination for single-file import: {Initial}", initialDest);
-                                    var uniqueInitial = FileUtils.GetUniqueDestinationPath(initialDest);
-
-                                    if (!string.Equals(Path.GetFullPath(localPath), Path.GetFullPath(uniqueInitial), StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            File.Copy(localPath, uniqueInitial, true);
-                                            _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
-                                                downloadId, localPath, uniqueInitial);
-                                        }
-                                        else
-                                        {
-                                            // Default to Move
-                                            File.Move(localPath, uniqueInitial, true);
-                                            _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
-                                                downloadId, localPath, uniqueInitial);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // File is already at the initial destination - no copy/move required
-                                        _logger.LogDebug("File is already located at initial destination for download {DownloadId}: {Path}", downloadId, uniqueInitial);
-                                    }
-
-                                    // Set current finalPath to the initial location we moved/copied into
-                                    finalPath = uniqueInitial;
-
-                                    // Next: apply filename pattern (if enabled) to the file now in destination
-                                    try
-                                    {
-                                        // Only apply naming when metadata processing and fileNamingService are enabled
-                                        if (fileNamingService != null && settings.EnableMetadataProcessing)
-                                        {
-                                            _logger.LogDebug("Applying naming pattern on destination for download {DownloadId}", downloadId);
-
-                                            // destinationPath contains the path matching the pattern generated earlier
-                                            var desiredFinal = destinationPath;
-
-                                            // Ensure unique target name
-                                            var uniqueFinal = FileUtils.GetUniqueDestinationPath(desiredFinal);
-
-                                            // Ensure we only attempt rename if paths differ, and the target directory exists
-                                            var finalDir = Path.GetDirectoryName(uniqueFinal) ?? string.Empty;
-                                            if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase)
-                                                && (string.IsNullOrEmpty(finalDir) || Directory.Exists(finalDir)))
-                                            {
-                                                try
-                                                {
-                                                    File.Move(uniqueInitial, uniqueFinal, true);
-                                                    _logger.LogInformation("Renamed destination {Source} -> {Final} for download {DownloadId}", uniqueInitial, uniqueFinal, downloadId);
-                                                    finalPath = uniqueFinal;
-                                                }
-                                                catch (Exception ex)
-                                                {
-                                                    _logger.LogWarning(ex, "Failed to rename destination file to pattern path for download {DownloadId}, keeping {Path}", downloadId, uniqueInitial);
-                                                    // keep uniqueInitial as finalPath
-                                                }
-                                            }
-                                            else
-                                            {
-                                                _logger.LogDebug("No rename required or target directory missing for download {DownloadId}. Keeping {Path}", downloadId, uniqueInitial);
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Failed applying naming pattern on destination for download {DownloadId}", downloadId);
-                                    }
-
-                                }
-                                else
-                                {
-                                    _logger.LogDebug("Source and destination are the same for download {DownloadId}, no file operation needed", downloadId);
-                                }
-                            }
-                            else
-                            {
-                                // Failed to create destination directory during import.
-                                // Leave the file in its original location and log a warning.
-                                _logger.LogWarning("Failed to create destination directory for download {DownloadId}: {DestDir}. Keeping file at original location: {Source}",
-                                    downloadId, destDir ?? "(null)", localPath);
+                                _logger.LogInformation("ImportService did not move the file for download {DownloadId}: {Reason}", downloadId, importResult.SkippedReason ?? importResult.Message);
                                 finalPath = localPath;
                             }
                         }
                         catch (Exception fileEx)
                         {
-                            _logger.LogError(fileEx, "Failed to move/copy file for download {DownloadId}: {Source} -> {Destination}. Using original path.", 
-                                downloadId, localPath, destinationPath);
-                            // Continue with original path if file operation fails
+                            _logger.LogError(fileEx, "Failed delegating single-file import to ImportService for download {DownloadId} (source: {Source}). Using original path.", downloadId, localPath);
                             finalPath = localPath;
                         }
                     }
@@ -4658,28 +4009,36 @@ namespace Listenarr.Api.Services
                                     var doImport = true;
                                     string? candidateQuality = null;
 
-                                    // Prefer explicit metadata on the download
-                                    if (completedDownload.Metadata != null && completedDownload.Metadata.TryGetValue("Quality", out var qobj) && qobj != null)
-                                    {
-                                        candidateQuality = qobj.ToString();
-                                    }
-
-                                    // If not present, try to extract from the file at finalPath
-                                    if (string.IsNullOrEmpty(candidateQuality) && metadataService != null && File.Exists(finalPath))
-                                    {
-                                        try
-                                        {
-                                            var extracted = await metadataService.ExtractFileMetadataAsync(finalPath);
-                                            candidateQuality = DetermineQualityFromMetadata(extracted, finalPath);
-                                        }
-                                        catch { }
-                                    }
-
-                                    // Load audiobook and evaluate existing best quality
+                                    // Load audiobook for quality comparison
                                     var audiobook = await dbContext.Audiobooks
                                         .Include(a => a.QualityProfile)
                                         .Include(a => a.Files)
                                         .FirstOrDefaultAsync(a => a.Id == audiobookId);
+
+                                    // For audiobooks, use DB quality instead of parsing the file
+                                    if (audiobook != null)
+                                    {
+                                        candidateQuality = audiobook.Quality;
+                                    }
+                                    else
+                                    {
+                                        // For non-audiobooks, prefer explicit metadata on the download
+                                        if (completedDownload.Metadata != null && completedDownload.Metadata.TryGetValue("Quality", out var qobj) && qobj != null)
+                                        {
+                                            candidateQuality = qobj.ToString();
+                                        }
+
+                                        // If not present, try to extract from the file at finalPath
+                                        if (string.IsNullOrEmpty(candidateQuality) && metadataService != null && File.Exists(finalPath))
+                                        {
+                                            try
+                                            {
+                                                var extracted = await metadataService.ExtractFileMetadataAsync(finalPath);
+                                                candidateQuality = DetermineQualityFromMetadata(extracted, finalPath);
+                                            }
+                                            catch { }
+                                        }
+                                    }
 
                                     if (audiobook != null && audiobook.Files != null && audiobook.Files.Any())
                                     {

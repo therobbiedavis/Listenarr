@@ -30,7 +30,11 @@ namespace Listenarr.Api.Tests
         [Fact]
         public async Task QualityGating_SkipsLowerQualityImport()
         {
-            var db = CreateInMemoryDb();
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
 
             // Create audiobook and an existing high-quality file
             var book = new Audiobook { Title = "The High Quality Book" };
@@ -101,10 +105,14 @@ namespace Listenarr.Api.Tests
             httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
             var cacheMock = new Mock<IMemoryCache>();
             var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
-            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(db);
+            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(() => new ListenArrDbContext(options));
+            dbFactoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(() => new ListenArrDbContext(options));
             var pathMappingMock = new Mock<IRemotePathMappingService>();
             var searchMock = new Mock<ISearchService>();
 
+            var importService = new ImportService(dbFactoryMock.Object, scopeFactory, new FileNamingService(configMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>()), metadataMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>());
+
+            // one importService instance for this test
             var downloadService = new DownloadService(
                 repoMock.Object,
                 configMock.Object,
@@ -113,6 +121,7 @@ namespace Listenarr.Api.Tests
                 httpClient,
                 httpClientFactoryMock.Object,
                 scopeFactory,
+                importService,
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,
@@ -133,7 +142,11 @@ namespace Listenarr.Api.Tests
         [Fact]
         public async Task MultiFileImport_ImportsAllFiles_WithUniqueNames()
         {
-            var db = CreateInMemoryDb();
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            var db = new ListenArrDbContext(options);
 
             var book = new Audiobook { Title = "Multi Book", BasePath = Path.Combine(Path.GetTempPath(), "listenarr-multi", Guid.NewGuid().ToString()) };
             db.Audiobooks.Add(book);
@@ -200,9 +213,12 @@ namespace Listenarr.Api.Tests
             httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
             var cacheMock = new Mock<IMemoryCache>();
             var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
-            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(db);
+            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(() => new ListenArrDbContext(options));
+            dbFactoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(() => new ListenArrDbContext(options));
             var pathMappingMock = new Mock<IRemotePathMappingService>();
             var searchMock = new Mock<ISearchService>();
+
+            var importService = new ImportService(dbFactoryMock.Object, scopeFactory, new FileNamingService(configMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>()), metadataMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>());
 
             var downloadService = new DownloadService(
                 repoMock.Object,
@@ -212,6 +228,7 @@ namespace Listenarr.Api.Tests
                 httpClient,
                 httpClientFactoryMock.Object,
                 scopeFactory,
+                importService,
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,
@@ -393,11 +410,14 @@ namespace Listenarr.Api.Tests
 
             var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
             dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(db);
+            dbFactoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(db);
 
             // Metrics mock to assert telemetry
             var metricsMock = new Mock<IAppMetricsService>();
 
             // Construct the service under test (use our HttpClient and factory)
+            var importService4 = new Mock<IImportService>();
+
             var downloadService = new DownloadService(
                 repoMock.Object,
                 configMock.Object,
@@ -406,6 +426,7 @@ namespace Listenarr.Api.Tests
                 httpClient,
                 httpFactoryMock.Object,
                 scopeFactory,
+                importService4.Object,
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,

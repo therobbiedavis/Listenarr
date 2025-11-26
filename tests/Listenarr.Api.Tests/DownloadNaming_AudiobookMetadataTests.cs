@@ -85,15 +85,19 @@ namespace Listenarr.Api.Tests
             // Create DownloadService
             var repoMock = new Mock<IAudiobookRepository>();
             var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings { OutputPath = outputDir, EnableMetadataProcessing = true, CompletedFileAction = "Move" });
             var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<DownloadService>>();
             var httpClient = new System.Net.Http.HttpClient();
             var httpClientFactoryMock = new Mock<IHttpClientFactory>();
             httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
             var cacheMock = new Mock<IMemoryCache>();
             var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
-            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(db);
+            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(() => new ListenArrDbContext(options));
+            dbFactoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(() => new ListenArrDbContext(options));
             var pathMappingMock = new Mock<IRemotePathMappingService>();
             var searchMock = new Mock<ISearchService>();
+
+            var importService = new ImportService(dbFactoryMock.Object, scopeFactory, new FileNamingService(configMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>()), metadataMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>());
 
             var downloadService = new DownloadService(
                 repoMock.Object,
@@ -103,6 +107,7 @@ namespace Listenarr.Api.Tests
                 httpClient,
                 httpClientFactoryMock.Object,
                 scopeFactory,
+                importService,
                 pathMappingMock.Object,
                 searchMock.Object,
                 hubContextMock.Object,
