@@ -38,3 +38,17 @@ if (typeof (window as unknown as { WebSocket?: unknown }).WebSocket === 'undefin
 
 // Provide a noop for console.debug in tests where code wraps in try/catch
 if (typeof console.debug !== 'function') console.debug = console.log.bind(console)
+
+// Provide a simple localStorage polyfill for tests that rely on it
+// Ensure a working localStorage implementation exists for tests. Some test
+// runners may set a placeholder object; normalize it so .setItem/.getItem exist.
+if (typeof (globalThis as unknown as { localStorage?: unknown }).localStorage === 'undefined' ||
+    typeof (globalThis as any).localStorage?.setItem !== 'function') {
+  ;(globalThis as unknown as { localStorage?: any }).localStorage = {
+    _store: {} as Record<string, string>,
+    getItem(key: string) { return this._store[key] ?? null },
+    setItem(key: string, value: string) { this._store[key] = value + '' },
+    removeItem(key: string) { delete this._store[key] },
+    clear() { this._store = {} }
+  }
+}

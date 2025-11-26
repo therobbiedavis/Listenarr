@@ -58,6 +58,7 @@ namespace Listenarr.Api.Controllers
         /// <param name="serviceProvider">Service provider used to create scoped services when required.</param>
         /// <param name="fileNamingService">Service responsible for applying file naming patterns.</param>
         /// <param name="scanQueueService">Optional background scan queue service for asynchronous scans.</param>
+        /// <param name="moveQueueService">Optional background move queue service for processing move requests.</param>
         /// <param name="notificationService">Service for sending webhook notifications.</param>
         public LibraryController(
             IAudiobookRepository repo, 

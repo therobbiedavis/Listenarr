@@ -30,13 +30,16 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly ILogger<DownloadProcessingBackgroundService> _logger;
         private readonly TimeSpan _processingInterval = TimeSpan.FromSeconds(10); // Check every 10 seconds
+        private readonly IAppMetricsService _metrics;
 
         public DownloadProcessingBackgroundService(
             IServiceScopeFactory serviceScopeFactory,
-            ILogger<DownloadProcessingBackgroundService> logger)
+            ILogger<DownloadProcessingBackgroundService> logger,
+            IAppMetricsService metrics)
         {
             _serviceScopeFactory = serviceScopeFactory;
             _logger = logger;
+            _metrics = metrics;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -298,7 +301,13 @@ namespace Listenarr.Api.Services
 
                 if (!File.Exists(localPath))
                 {
-                    throw new FileNotFoundException($"Source file not found: {localPath}");
+                    // Source missing at processing-time. Schedule a retry instead of throwing so transient
+                    // races (file still being moved by another process) don't permanently fail the job.
+                    job.AddLogEntry($"Source file not found at processing time: {localPath}");
+                    _metrics?.Increment("processing.source_missing");
+                    job.ScheduleRetry();
+                    job.ErrorMessage = $"Source file not found at processing time: {localPath}";
+                    return;
                 }
             }
 
@@ -391,6 +400,18 @@ namespace Listenarr.Api.Services
                     {
                         try
                         {
+                            // Log source state immediately before attempting the file operation for diagnostics
+                            try
+                            {
+                                var exists = File.Exists(sourcePath);
+                                var size = exists ? new FileInfo(sourcePath).Length : (long?)null;
+                                var last = exists ? File.GetLastWriteTimeUtc(sourcePath).ToString("o") : "(not found)";
+                                job.AddLogEntry($"Operation pre-check: sourceExists={exists}, size={(size.HasValue? size.ToString():"(n/a)")}, lastWriteUtc={last}");
+                            }
+                            catch (Exception ex)
+                            {
+                                job.AddLogEntry($"Failed to collect source diagnostics: {ex.Message}");
+                            }
                             var extractedMetadata = await metadataService.ExtractFileMetadataAsync(sourcePath);
                             if (extractedMetadata != null)
                             {
@@ -431,7 +452,6 @@ namespace Listenarr.Api.Services
                     }
 
                     // Generate path using naming pattern
-                    var ext = Path.GetExtension(sourcePath);
                     // Use namingMetadata if present (authoritative audiobook fields), otherwise use metadata
                     var metadataForNaming = namingMetadata ?? metadata;
 
@@ -452,10 +472,55 @@ namespace Listenarr.Api.Services
                     {
                         // ignore logging errors
                     }
-                    // Use the overload that accepts an explicit outputPath so the naming service combines correctly
-                    var generatedPath = fileNamingService != null
-                        ? await fileNamingService.GenerateFilePathAsync(metadataForNaming, settings.OutputPath ?? string.Empty, null, null, ext)
-                        : Path.GetFileName(sourcePath);
+                    // For processing jobs, compute the appropriate destination directory first.
+                    // If the download is linked to an audiobook and the audiobook has a BasePath,
+                    // prefer that as the base directory (and use filename-only pattern in those
+                    // cases). Otherwise use the configured OutputPath. We will place the file into
+                    // the destination directory using the original filename first, then later
+                    // ProcessCompletedDownloadAsync will apply the full naming pattern (including
+                    // creating subfolders when allowed).
+                    var ext = Path.GetExtension(sourcePath);
+                    var basePathForFile = settings.OutputPath ?? string.Empty;
+                    var filenamePattern = settings.FileNamingPattern ?? string.Empty;
+
+                    // If the download links to an audiobook and we've built an audiobook naming
+                    // metadata above, prefer the audiobook BasePath and switch to a filename-only
+                    // pattern so we don't create arbitrary folders inside an audiobook base path.
+                    try
+                    {
+                        if (download != null && download.AudiobookId != null)
+                        {
+                            var audiobook = await dbContext.Audiobooks.FindAsync(download.AudiobookId);
+                            if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
+                            {
+                                basePathForFile = audiobook.BasePath;
+
+                                // If a global pattern exists, use only the filename portion when an
+                                // audiobook BasePath is present; this avoids creating unintended
+                                // subfolders under the audiobook base path.
+                                // Use the configured filename pattern in full when computing the
+                                // tentative generated path relative to the audiobook BasePath.
+                                filenamePattern = settings.FileNamingPattern;
+                                if (string.IsNullOrWhiteSpace(filenamePattern)) filenamePattern = "{Author}/{Series}/{Title}";
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // Now generate a tentative path using the filename-only or relative pattern
+                    // so we can compute the destination directory. We'll not actually apply the
+                    // full pattern on the source; instead we will place the file into destDir
+                    // using original filename first.
+                    string generatedPath;
+                    if (fileNamingService != null && settings.EnableMetadataProcessing)
+                    {
+                        // Generate a full path relative to the chosen basePathForFile (may include subfolders)
+                        generatedPath = await fileNamingService.GenerateFilePathAsync(metadataForNaming, basePathForFile, null, null, ext);
+                    }
+                    else
+                    {
+                        generatedPath = Path.GetFileName(sourcePath);
+                    }
 
                     // Preserve subdirectories from the generated path. The naming pattern may include
                     // subfolders (e.g. {Author}/{Series}/...). If the generatedPath is rooted, use it
@@ -468,13 +533,14 @@ namespace Listenarr.Api.Services
                     var patternAllowsSubfolders = fullPattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
                         || fullPattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0;
 
+                    // Compute the destinationPath so we know where to place the file initially.
                     if (Path.IsPathRooted(generatedPath))
                     {
                         destinationPath = generatedPath;
                     }
                     else
                     {
-                        var outputRoot = settings.OutputPath ?? string.Empty;
+                        var outputRoot = basePathForFile ?? string.Empty;
 
                         if (!patternAllowsSubfolders)
                         {
@@ -504,7 +570,7 @@ namespace Listenarr.Api.Services
                         }
                     }
 
-                    job.AddLogEntry($"Generated destination (preserving subfolders): {destinationPath}");
+                    job.AddLogEntry($"Initial destination inside output root: {destinationPath}");
                     try
                     {
                         var destDirForCheck = Path.GetDirectoryName(destinationPath) ?? string.Empty;
@@ -573,15 +639,104 @@ namespace Listenarr.Api.Services
                             var uniqueDest = FileUtils.GetUniqueDestinationPath(destinationPath);
                             if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
                             {
-                                File.Copy(sourcePath, uniqueDest, true);
-                                job.AddLogEntry($"Copied file: {sourcePath} -> {uniqueDest}");
+                                try
+                                {
+                                    File.Copy(sourcePath, uniqueDest, true);
+                                    job.AddLogEntry($"Copied file: {sourcePath} -> {uniqueDest}");
+                                }
+                                catch (FileNotFoundException fnf)
+                                {
+                                    job.AddLogEntry($"Copy failed - source not found: {fnf.Message}");
+                                    _metrics?.Increment("processing.copy_source_not_found");
+                                    job.ScheduleRetry();
+                                    job.ErrorMessage = fnf.Message;
+                                    return;
+                                }
+                                catch (UnauthorizedAccessException uae)
+                                {
+                                    job.AddLogEntry($"Copy failed - unauthorized access: {uae.Message}");
+                                    try
+                                    {
+                                        var diagDestDir = Path.GetDirectoryName(uniqueDest) ?? string.Empty;
+                                        job.AddLogEntry($"Copy destination dir exists={Directory.Exists(diagDestDir)} PathRoot={(string.IsNullOrEmpty(diagDestDir) ? "(n/a)" : Path.GetPathRoot(diagDestDir) ?? "(no-root)")}");
+                                    }
+                                    catch { }
+                                    try { _metrics?.Increment("processing.move_unauthorized"); } catch { }
+                                    try
+                                    {
+                                        job.AddLogEntry($"Process identity: {Environment.UserDomainName}\\{Environment.UserName}");
+                                    }
+                                    catch { }
+                                    job.ErrorMessage = uae.Message;
+                                    job.ScheduleRetry();
+                                    return;
+                                }
+                                catch (IOException ioex)
+                                {
+                                    var msg = ioex.Message ?? string.Empty;
+                                    if (msg.IndexOf("being used by another process", StringComparison.OrdinalIgnoreCase) >= 0 || ioex.HResult == unchecked((int)0x80070020))
+                                    {
+                                        job.AddLogEntry($"Copy failed due to sharing violation (file locked): {ioex.Message}");
+                                        try { _metrics?.Increment("processing.move_file_locked"); } catch { }
+                                        job.ErrorMessage = ioex.Message;
+                                        job.ScheduleRetry();
+                                        return;
+                                    }
+                                    throw;
+                                }
                             }
                             else
                             {
                                 // Default to Move
-                                File.Move(sourcePath, uniqueDest, true);
-                                job.AddLogEntry($"Moved file: {sourcePath} -> {uniqueDest}");
+                                try
+                                {
+                                    File.Move(sourcePath, uniqueDest, true);
+                                    job.AddLogEntry($"Moved file: {sourcePath} -> {uniqueDest}");
+                                }
+                                catch (FileNotFoundException fnf)
+                                {
+                                    // File disappeared between the earlier checks and the move. Treat as transient and retry.
+                                    job.AddLogEntry($"Move failed - source not found: {fnf.Message}");
+                                    _metrics?.Increment("processing.move_source_not_found");
+                                    job.ScheduleRetry();
+                                    job.ErrorMessage = fnf.Message;
+                                    return;
+                                }
+                                catch (UnauthorizedAccessException uae)
+                                {
+                                    job.AddLogEntry($"Move failed - unauthorized access: {uae.Message}");
+                                    try
+                                    {
+                                        var diagDestDir = Path.GetDirectoryName(uniqueDest) ?? string.Empty;
+                                        job.AddLogEntry($"Move destination dir exists={Directory.Exists(diagDestDir)} PathRoot={(string.IsNullOrEmpty(diagDestDir) ? "(n/a)" : Path.GetPathRoot(diagDestDir) ?? "(no-root)")}");
+                                    }
+                                    catch { }
+                                    try { _metrics?.Increment("processing.move_unauthorized"); } catch { }
+                                    try
+                                    {
+                                        job.AddLogEntry($"Process identity: {Environment.UserDomainName}\\{Environment.UserName}");
+                                    }
+                                    catch { }
+                                    job.ErrorMessage = uae.Message;
+                                    job.ScheduleRetry();
+                                    return;
+                                }
+                                catch (IOException ioex)
+                                {
+                                    var msg = ioex.Message ?? string.Empty;
+                                    if (msg.IndexOf("being used by another process", StringComparison.OrdinalIgnoreCase) >= 0 || ioex.HResult == unchecked((int)0x80070020))
+                                    {
+                                        job.AddLogEntry($"Move failed due to sharing violation (file locked): {ioex.Message}");
+                                        try { _metrics?.Increment("processing.move_file_locked"); } catch { }
+                                        job.ErrorMessage = ioex.Message;
+                                        job.ScheduleRetry();
+                                        return;
+                                    }
+                                    throw;
+                                }
                             }
+                            
+                            
                             destinationPath = uniqueDest;
 
                             // Verification: ensure destination exists and (if sourceSize available) sizes match
@@ -636,6 +791,7 @@ namespace Listenarr.Api.Services
                     // leave the file in place and log a warning.
                     job.AddLogEntry($"Destination directory does not exist: {destDir}. Skipping file move/copy and keeping source: {sourcePath}");
                     job.ErrorMessage = $"Destination directory does not exist: {destDir}";
+                    _metrics?.Increment("processing.dest_dir_missing");
                     job.DestinationPath = sourcePath;
                 }
             }

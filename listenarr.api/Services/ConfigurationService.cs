@@ -219,7 +219,12 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error loading application settings from database");
+                // On error while loading settings we intentionally do NOT perform any
+                // runtime schema changes (eg. ALTER TABLE). Schema changes must be
+                // applied via EF migrations or external DB migration tools.
+                _logger.LogError(ex, "Error loading application settings from database (no runtime ALTERs will be attempted)");
+                // Return a fresh default settings instance so callers can continue using
+                // a consistent ApplicationSettings object without crashing the host.
                 return new ApplicationSettings();
             }
         }
@@ -284,7 +289,9 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error saving application settings to database");
+                _logger.LogError(ex, "Error saving application settings to database (no runtime ALTERs will be attempted)");
+                // Re-throw to let higher-level handlers surface the failure. We intentionally
+                // do not attempt to alter the schema automatically here.
                 throw;
             }
         }

@@ -710,6 +710,24 @@
               <input v-model.number="settings.pollingIntervalSeconds" type="number" min="10" max="300">
               <span class="form-help">How often to check download status (10-300 seconds)</span>
             </div>
+
+            <div class="form-group">
+              <label>Download Completion Stability (seconds)</label>
+              <input v-model.number="settings.downloadCompletionStabilitySeconds" type="number" min="1" max="600">
+              <span class="form-help">How long (seconds) a download must be seen as complete on the client before finalization begins. Increase for clients that post-process/extract after completion.</span>
+            </div>
+
+            <div class="form-group">
+              <label>Missing-source Retry Initial Delay (seconds)</label>
+              <input v-model.number="settings.missingSourceRetryInitialDelaySeconds" type="number" min="1" max="600">
+              <span class="form-help">Initial retry delay (seconds) used when files are not yet available at finalization time.</span>
+            </div>
+
+            <div class="form-group">
+              <label>Missing-source Max Retries</label>
+              <input v-model.number="settings.missingSourceMaxRetries" type="number" min="0" max="20">
+              <span class="form-help">Maximum number of retries to attempt if the finalized download's source files are missing.</span>
+            </div>
           </div>
 
           <div class="form-section">
@@ -3253,6 +3271,13 @@ async function loadTabContents(tab: string) {
           await configStore.loadApplicationSettings()
           // Ensure sensible default
           if (settings.value && !settings.value.completedFileAction) settings.value.completedFileAction = 'Move'
+          // Ensure new settings have sensible defaults when not present
+          if (settings.value && (settings.value.downloadCompletionStabilitySeconds === undefined || settings.value.downloadCompletionStabilitySeconds === null))
+            settings.value.downloadCompletionStabilitySeconds = 10
+          if (settings.value && (settings.value.missingSourceRetryInitialDelaySeconds === undefined || settings.value.missingSourceRetryInitialDelaySeconds === null))
+            settings.value.missingSourceRetryInitialDelaySeconds = 30
+          if (settings.value && (settings.value.missingSourceMaxRetries === undefined || settings.value.missingSourceMaxRetries === null))
+            settings.value.missingSourceMaxRetries = 3
           // Initialize notification triggers array if not present
           if (settings.value && !settings.value.enabledNotificationTriggers) settings.value.enabledNotificationTriggers = []
           // Ensure new search settings have sensible defaults when not present

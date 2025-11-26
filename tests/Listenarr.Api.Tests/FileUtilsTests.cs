@@ -126,7 +126,7 @@ namespace Listenarr.Api.Tests
         [Trait("Category", "Integration")]
         public void GetUniqueDestinationPath_WriteDeniedByAcl_OnWindows()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (!OperatingSystem.IsWindows())
             {
                 // Not applicable on non-Windows platforms in this test
                 return;

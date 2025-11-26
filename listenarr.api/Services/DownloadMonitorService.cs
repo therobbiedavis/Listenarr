@@ -32,20 +32,29 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly ILogger<DownloadMonitorService> _logger;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IAppMetricsService _metrics;
         private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
         private readonly Dictionary<string, Download> _lastDownloadStates = new();
     // Tracks downloads that appear complete and the time they were first observed complete
     private readonly Dictionary<string, DateTime> _completionCandidates = new();
     private readonly TimeSpan _completionStableWindow = TimeSpan.FromSeconds(10);
+    // Track missing-source retry attempts and scheduled retries to avoid duplicate scheduling
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _missingSourceRetryAttempts = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _missingSourceRetryScheduled = new();
 
         public DownloadMonitorService(
             IServiceScopeFactory serviceScopeFactory,
             IHubContext<DownloadHub> hubContext,
-            ILogger<DownloadMonitorService> logger)
+            ILogger<DownloadMonitorService> logger,
+            IHttpClientFactory httpClientFactory,
+            IAppMetricsService? appMetrics = null)
         {
             _serviceScopeFactory = serviceScopeFactory;
             _hubContext = hubContext;
             _logger = logger;
+            _httpClientFactory = httpClientFactory;
+            _metrics = appMetrics ?? new NoopAppMetricsService();
         }
 
         /// <summary>
@@ -183,6 +192,46 @@ namespace Listenarr.Api.Services
             }
         }
 
+        /// <summary>
+        /// Broadcast a candidate update for a download so clients can show completion candidates
+        /// without requiring the DB status to change.
+        /// </summary>
+        private async Task BroadcastCandidateUpdateAsync(Download dl, bool isCandidate, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var metadata = (dl.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                metadata["CompletionCandidate"] = isCandidate;
+
+                var payload = new
+                {
+                    id = dl.Id,
+                    audiobookId = dl.AudiobookId,
+                    title = dl.Title,
+                    artist = dl.Artist,
+                    album = dl.Album,
+                    originalUrl = dl.OriginalUrl,
+                    // Surface as Completed so UI's Completed lists can include candidates
+                    status = isCandidate ? DownloadStatus.Completed.ToString() : dl.Status.ToString(),
+                    progress = dl.Progress,
+                    totalSize = dl.TotalSize,
+                    downloadedSize = dl.DownloadedSize,
+                    finalPath = dl.FinalPath,
+                    startedAt = dl.StartedAt,
+                    completedAt = dl.CompletedAt,
+                    errorMessage = dl.ErrorMessage,
+                    downloadClientId = dl.DownloadClientId,
+                    metadata = metadata
+                };
+
+                await _hubContext.Clients.All.SendAsync("DownloadUpdate", new[] { payload }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast candidate update for {DownloadId}", dl.Id);
+            }
+        }
+
         private async Task PollDownloadClientsAsync(
             List<Download> downloads, 
             IConfigurationService configService,
@@ -239,7 +288,8 @@ namespace Listenarr.Api.Services
                 {
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
 
-                    using var http = new HttpClient();
+                    using var http = _httpClientFactory.CreateClient("DownloadClient");
+                    _logger.LogInformation("Created HttpClient from factory for SABnzbd polling. BaseAddress={BaseAddress}", http.BaseAddress);
 
                     // Login
                     using var loginData = new FormUrlEncodedContent(new[]
@@ -412,11 +462,33 @@ namespace Listenarr.Api.Services
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.", 
                                         dl.Id, matched.Name, completionPath);
+                                    // Broadcast candidate so UI can surface it immediately
+                                    _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
                                 }
 
+                                // Use configured stability window if available
+                                TimeSpan stableWindow = _completionStableWindow;
+                                try
+                                {
+                                    using var settingsScope = _serviceScopeFactory.CreateScope();
+                                    var cfg = settingsScope.ServiceProvider.GetService<IConfigurationService>();
+                                    if (cfg != null)
+                                    {
+                                        var appSettings = await cfg.GetApplicationSettingsAsync();
+                                        if (appSettings != null && appSettings.DownloadCompletionStabilitySeconds > 0)
+                                        {
+                                            stableWindow = TimeSpan.FromSeconds(appSettings.DownloadCompletionStabilitySeconds);
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to read application settings for stability window, falling back to default");
+                                }
+
                                 var firstSeen = _completionCandidates[dl.Id];
-                                if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
+                                if (DateTime.UtcNow - firstSeen >= stableWindow)
                                 {
                                     // Finalize: attempt to move/copy files and mark complete
                                     _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (qBittorrent). Torrent: {TorrentName}, Size: {Size:N0} bytes. Finalizing from path: {Path}", 
@@ -431,15 +503,16 @@ namespace Listenarr.Api.Services
                                         dl.Id, remainingTime.TotalSeconds);
                                 }
                             }
-                            else
-                            {
-                                // Not complete anymore - remove candidate if present
-                                if (_completionCandidates.ContainsKey(dl.Id))
+                                else
                                 {
-                                    _completionCandidates.Remove(dl.Id);
-                                    _logger.LogDebug("Download {DownloadId} no longer appears complete in qBittorrent, removed from candidates", dl.Id);
+                                    // Not complete anymore - remove candidate if present
+                                    if (_completionCandidates.ContainsKey(dl.Id))
+                                    {
+                                        _completionCandidates.Remove(dl.Id);
+                                        _logger.LogDebug("Download {DownloadId} no longer appears complete in qBittorrent, removed from candidates", dl.Id);
+                                        _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
+                                    }
                                 }
-                            }
                         }
                         catch (Exception ex)
                         {
@@ -466,7 +539,7 @@ namespace Listenarr.Api.Services
                 try
                 {
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
-                    using var http = new HttpClient();
+                    using var http = _httpClientFactory.CreateClient("DownloadClient");
 
                     // Get session id
                     string sessionId = string.Empty;
@@ -532,6 +605,7 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed complete candidate (Transmission). Waiting for stability window.", dl.Id);
+                                    _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
                                 }
 
@@ -545,10 +619,14 @@ namespace Listenarr.Api.Services
                                     _completionCandidates.Remove(dl.Id);
                                 }
                             }
-                            else
-                            {
-                                if (_completionCandidates.ContainsKey(dl.Id)) _completionCandidates.Remove(dl.Id);
-                            }
+                                else
+                                {
+                                if (_completionCandidates.ContainsKey(dl.Id))
+                                {
+                                    _completionCandidates.Remove(dl.Id);
+                                    _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
+                                }
+                                }
                         }
                         catch (Exception ex)
                         {
@@ -673,7 +751,7 @@ namespace Listenarr.Api.Services
                                 .ToList();
 
                             _logger.LogInformation("Found {FileCount} audio files in directory {Directory}", foundFiles.Count, localPath);
-                            
+                            try { _metrics.Increment("finalize.files.found_in_dir", foundFiles.Count); } catch { }
                             foreach (var file in foundFiles.Take(5)) // Log first 5 files for debugging
                             {
                                 var fileInfo = new FileInfo(file);
@@ -703,6 +781,7 @@ namespace Listenarr.Api.Services
                                     sourceFile = bestMatch.Path;
                                     _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)", 
                                         Path.GetFileName(sourceFile), bestMatch.MatchScore, bestMatch.Size);
+                                    try { _metrics.Increment("finalize.file.selected_from_dir"); } catch { }
                                 }
                             }
                         }
@@ -714,6 +793,88 @@ namespace Listenarr.Api.Services
                     else
                     {
                         _logger.LogWarning("Local path does not exist or is not accessible: {LocalPath}", localPath);
+
+                        // Heuristic attempts to handle common SABnzbd/staging variations
+                        // Some clients (and SABnzbd history entries) append numeric suffixes
+                        // like '.1' to folder names or file names. Try stripping trailing
+                        // numeric suffix and/or searching the parent directory for a
+                        // similarly named folder that contains valid audio files.
+                        try
+                        {
+                            // Normalize: remove any trailing slash for manipulation
+                            var trimmed = localPath.TrimEnd('/', '\\');
+
+                            // 1) Strip trailing numeric suffixes like '.1', '.2' etc
+                            var noNumericSuffix = System.Text.RegularExpressions.Regex.Replace(trimmed, @"\.\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                            if (!string.Equals(noNumericSuffix, trimmed, StringComparison.OrdinalIgnoreCase))
+                            {
+                                // If this candidate exists, treat it as the local path
+                                if (File.Exists(noNumericSuffix) && settings.AllowedFileExtensions.Any(ext => noNumericSuffix.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    sourceFile = noNumericSuffix;
+                                    foundFiles.Add(sourceFile);
+                                    _logger.LogInformation("Found file by stripping numeric suffix: {File}", sourceFile);
+                                    try { _metrics.Increment("finalize.heuristic.strip_suffix"); } catch { }
+                                }
+                                else if (Directory.Exists(noNumericSuffix))
+                                {
+                                    var tmpFiles = Directory.GetFiles(noNumericSuffix, "*.*", SearchOption.AllDirectories)
+                                        .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
+                                        .ToList();
+
+                                    if (tmpFiles.Any())
+                                    {
+                                        foundFiles = tmpFiles;
+                                        sourceFile = tmpFiles.OrderByDescending(f => new FileInfo(f).Length).First();
+                                        _logger.LogInformation("Found files by stripping numeric suffix in directory: {Directory}. Selected: {File}", noNumericSuffix, sourceFile);
+                                        try { _metrics.Increment("finalize.heuristic.strip_suffix"); } catch { }
+                                    }
+                                }
+                            }
+
+                            // 2) If still not found, search parent directory for near matches
+                            if (string.IsNullOrEmpty(sourceFile))
+                            {
+                                var parent = Path.GetDirectoryName(trimmed);
+                                if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+                                {
+                                    var baseName = Path.GetFileName(trimmed);
+                                    // Remove a trailing numeric suffix for matching purposes
+                                    var baseNoSuffix = System.Text.RegularExpressions.Regex.Replace(baseName, @"\.\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                                    var candidateDirs = Directory.GetDirectories(parent)
+                                        .Where(d => Path.GetFileName(d).IndexOf(baseNoSuffix, StringComparison.OrdinalIgnoreCase) >= 0)
+                                        .ToList();
+
+                                    foreach (var cand in candidateDirs)
+                                    {
+                                        try
+                                        {
+                                            var candFiles = Directory.GetFiles(cand, "*.*", SearchOption.AllDirectories)
+                                                .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
+                                                .ToList();
+
+                                            if (candFiles.Any())
+                                            {
+                                                sourceFile = candFiles.OrderByDescending(f => new FileInfo(f).Length).First();
+                                                foundFiles = candFiles;
+                                                _logger.LogInformation("Found file by searching parent directory: {Candidate} -> {File}", cand, sourceFile);
+                                                try { _metrics.Increment("finalize.heuristic.parent_search_found"); } catch { }
+                                                break;
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogWarning(ex, "Error scanning candidate directory {Directory}", cand);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Heuristic search for alternate local path variants failed: {LocalPath}", localPath);
+                        }
                     }
                 }
 
@@ -771,14 +932,31 @@ namespace Listenarr.Api.Services
                     var dockerPaths = new List<string>();
                     
                     // Common Docker path variations
-                    var pathVariations = new[]
+                    var variations = new List<string> { clientPath };
+
+                    // Common Docker path variations
+                    try
                     {
-                        clientPath,
-                        clientPath.Replace("/data", "/host/data"),
-                        clientPath.Replace(client.DownloadPath, "/host" + client.DownloadPath),
-                        Path.Combine("/host", clientPath.TrimStart('/')),
-                        Path.Combine("/data", clientPath.TrimStart('/'))
-                    };
+                        // Replace container /data path with /host/data if present
+                        variations.Add(clientPath.Replace("/data", "/host/data"));
+
+                        // Only attempt to replace client.DownloadPath if it is non-empty.
+                        // String.Replace throws when oldValue is empty, and some clients
+                        // may not set DownloadPath, so guard against that case.
+                        if (!string.IsNullOrEmpty(client.DownloadPath))
+                        {
+                            variations.Add(clientPath.Replace(client.DownloadPath, "/host" + client.DownloadPath));
+                        }
+
+                        variations.Add(Path.Combine("/host", clientPath.TrimStart('/')));
+                        variations.Add(Path.Combine("/data", clientPath.TrimStart('/')));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Error building docker path variations for {ClientPath}", clientPath);
+                    }
+
+                    var pathVariations = variations.Distinct().ToArray();
                     
                     foreach (var variation in pathVariations.Distinct())
                     {
@@ -882,10 +1060,120 @@ namespace Listenarr.Api.Services
 
                 if (string.IsNullOrEmpty(sourceFile) || !File.Exists(sourceFile))
                 {
-                    _logger.LogError("Unable to locate source file for download {DownloadId}. Searched paths: ClientPath={ClientPath}, LocalPath={LocalPath}, FinalPath={FinalPath}, DownloadPath={DownloadPath}", 
-                        download.Id, clientPath, localPath, download.FinalPath, download.DownloadPath);
+                    // If the background processing queue already has an active job for this
+                    // download, it's likely a race: the file is being moved/processed by the
+                    // background worker. Avoid logging a noisy error and let the background
+                    // worker finish. Only surface an error if there is no active processing job.
+                    try
+                    {
+                        var processingQueue = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                        if (processingQueue != null)
+                        {
+                            var jobs = await processingQueue.GetJobsForDownloadAsync(download.Id);
+                            if (jobs != null && jobs.Any(j => j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
+                            {
+                                _logger.LogDebug("Download {DownloadId} appears to be currently processed by the background queue - skipping missing-source check", download.Id);
+                                return;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Failing this diagnostic lookup shouldn't hide the underlying problem - fall through and log the error
+                        _logger.LogDebug(ex, "Error while checking processing queue for download {DownloadId}", download.Id);
+                    }
+
+                    // If we get here and no processing job is active, it's likely the files are not yet
+                    // present (extraction/unpack not finished). Rather than immediately erroring out
+                    // we schedule a bounded retry/backoff so transient delays are handled gracefully.
+                    int attempts = 0;
+                    int maxRetries = 3;
+                    int initialDelay = 30;
+
+                    try
+                    {
+                        var appSettings = await configService.GetApplicationSettingsAsync();
+                        if (appSettings != null)
+                        {
+                            maxRetries = Math.Max(0, appSettings.MissingSourceMaxRetries);
+                            initialDelay = Math.Max(1, appSettings.MissingSourceRetryInitialDelaySeconds);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to read application settings for missing-source retry, falling back to defaults");
+                    }
+
+                    // Read or initialize attempt count
+                    attempts = _missingSourceRetryAttempts.GetOrAdd(download.Id, 0);
+
+                    if (attempts >= maxRetries)
+                    {
+                        _logger.LogError("Unable to locate source file for download {DownloadId} after {Attempts} attempts. Searched paths: ClientPath={ClientPath}, LocalPath={LocalPath}, FinalPath={FinalPath}, DownloadPath={DownloadPath}",
+                            download.Id, attempts, clientPath, localPath, download.FinalPath, download.DownloadPath);
+                        try { _metrics.Increment("finalize.failed.file_not_found"); } catch { }
+                        try { _metrics.Increment("finalize.retry.exhausted"); } catch { }
+                        // Reset retry tracking if we have exhausted attempts
+                        _missingSourceRetryAttempts.TryRemove(download.Id, out _);
+                        _missingSourceRetryScheduled.TryRemove(download.Id, out _);
+                        return;
+                    }
+
+                    // Ensure we only schedule one retry task per download at a time
+                    var scheduled = _missingSourceRetryScheduled.GetOrAdd(download.Id, false);
+                    if (scheduled)
+                    {
+                        _logger.LogDebug("Retry already scheduled for download {DownloadId}, skipping duplicate schedule", download.Id);
+                        return;
+                    }
+
+                    // Mark as scheduled and increment attempt counter
+                    _missingSourceRetryScheduled[download.Id] = true;
+                    _missingSourceRetryAttempts.AddOrUpdate(download.Id, 1, (k, v) => v + 1);
+
+                    // Compute exponential backoff delay
+                    var currentAttempt = _missingSourceRetryAttempts[download.Id];
+                    var delaySeconds = initialDelay * (int)Math.Pow(2, Math.Max(0, currentAttempt - 1));
+                    _logger.LogInformation("Source not found for download {DownloadId}. Scheduling retry #{Attempt} in {Delay}s (paths: {LocalPath})", download.Id, currentAttempt, delaySeconds, localPath);
+
+                    try { _metrics.Increment("finalize.retry.scheduled"); } catch { }
+
+                    // Fire-and-forget retry task. Use a safe small delay and then attempt finalize again.
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                            // Attempt finalization again; do not pass the original cancellation token to avoid accidental cancellation
+                            await FinalizeDownloadAsync(download, clientPath, client, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Scheduled retry for download {DownloadId} failed", download.Id);
+                            try { _metrics.Increment("finalize.retry.scheduled.failed"); } catch { }
+                        }
+                        finally
+                        {
+                            _missingSourceRetryScheduled.TryRemove(download.Id, out _);
+                        }
+                    });
+
                     return;
                 }
+
+                // If we had scheduled attempts previously, count this as a retry-success
+                try
+                {
+                    if (_missingSourceRetryAttempts.TryGetValue(download.Id, out var prevAttempts) && prevAttempts > 0)
+                    {
+                        try { _metrics.Increment("finalize.retry.success"); } catch { }
+                    }
+                }
+                catch { }
+
+                // Clear any retry tracking since we've located the file successfully
+                _missingSourceRetryAttempts.TryRemove(download.Id, out _);
+                _missingSourceRetryScheduled.TryRemove(download.Id, out _);
 
                 var sourceFileInfo = new FileInfo(sourceFile);
                 _logger.LogInformation("Source file located: {SourceFile} ({Size:N0} bytes)", sourceFile, sourceFileInfo.Length);
@@ -1112,7 +1400,7 @@ namespace Listenarr.Api.Services
                 {
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
 
-                    using var http = new HttpClient();
+                    using var http = _httpClientFactory.CreateClient("DownloadClient");
 
                     // Get API key from settings
                     var apiKey = "";
@@ -1146,9 +1434,30 @@ namespace Listenarr.Api.Services
                                 {
                                     var nzoId = slot.TryGetProperty("nzo_id", out var nzoIdProp) ? nzoIdProp.GetString() ?? "" : "";
                                     var filename = slot.TryGetProperty("filename", out var filenameProp) ? filenameProp.GetString() ?? "" : "";
-                                    var percentage = slot.TryGetProperty("percentage", out var percentageProp) ? percentageProp.GetDouble() : 0.0;
-                                    var mb = slot.TryGetProperty("mb", out var mbProp) ? mbProp.GetDouble() : 0.0;
-                                    var mbleft = slot.TryGetProperty("mbleft", out var mbleftProp) ? mbleftProp.GetDouble() : 0.0;
+                                    // SABnzbd sometimes returns numeric values as numbers or strings.
+                                    // Be defensive and accept either JSON number or JSON string.
+                                    double GetDoubleValue(System.Text.Json.JsonElement el)
+                                    {
+                                        try
+                                        {
+                                            if (el.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                                return el.GetDouble();
+
+                                            if (el.ValueKind == System.Text.Json.JsonValueKind.String)
+                                            {
+                                                var s = el.GetString();
+                                                if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                                                    return v;
+                                            }
+                                        }
+                                        catch { }
+
+                                        return 0.0;
+                                    }
+
+                                    var percentage = slot.TryGetProperty("percentage", out var percentageProp) ? GetDoubleValue(percentageProp) : 0.0;
+                                    var mb = slot.TryGetProperty("mb", out var mbProp) ? GetDoubleValue(mbProp) : 0.0;
+                                    var mbleft = slot.TryGetProperty("mbleft", out var mbleftProp) ? GetDoubleValue(mbleftProp) : 0.0;
                                     var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
                                     var category = slot.TryGetProperty("cat", out var catProp) ? catProp.GetString() ?? "" : "";
 
@@ -1160,12 +1469,16 @@ namespace Listenarr.Api.Services
                                     if (matchingDownload != null)
                                     {
                                         // Calculate progress and update
-                                        var progress = percentage / 100.0;
-                                        var downloadedSize = (long)(mb * 1024 * 1024 * progress); // Convert MB to bytes
-                                        var totalSize = (long)(mb * 1024 * 1024); // Convert MB to bytes
-                                        var amountLeft = (long)(mbleft * 1024 * 1024); // Convert MB to bytes
+                                        // percentage is provided by SABnzbd as a percent (e.g. 50.0). Our UpdateDownloadProgressAsync
+                                        // expects a percentage in the 0..100 range. Use the percentage directly.
+                                        var progressPercent = percentage; // 0..100
 
-                                        await UpdateDownloadProgressAsync(matchingDownload.Id, progress, amountLeft, status, dbContext, cancellationToken);
+                                        // Convert sizes from MB -> bytes
+                                        var totalSize = (long)(mb * 1024 * 1024);
+                                        var amountLeft = (long)(mbleft * 1024 * 1024);
+
+                                        // Update progress using percent and amountLeft (UpdateDownloadProgressAsync uses percent->downloaded size calculation when TotalSize is set)
+                                        await UpdateDownloadProgressAsync(matchingDownload.Id, progressPercent, amountLeft, status, dbContext, cancellationToken);
                                     }
                                 }
                                 catch (Exception ex)
@@ -1198,13 +1511,15 @@ namespace Listenarr.Api.Services
                     }
 
                     // Build a lookup of completed items for faster matching
-                    var completedItems = new List<(string Name, string Status, string Path, DateTime CompletedTime)>();
+                    // Include nzo_id when available so we can match downloads by ID as well
+                    var completedItems = new List<(string Name, string Status, string Path, DateTime CompletedTime, string NzoId)>();
                     
                     foreach (var slot in slots.EnumerateArray())
                     {
                         var name = slot.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
                         var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
                         var path = slot.TryGetProperty("storage", out var pathProp) ? pathProp.GetString() ?? "" : "";
+                        var nzoId = slot.TryGetProperty("nzo_id", out var nzoIdProp) ? nzoIdProp.GetString() ?? "" : "";
                         
                         // Parse completion time
                         var completedTime = DateTime.MinValue;
@@ -1218,7 +1533,9 @@ namespace Listenarr.Api.Services
                             (status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
                              status.Equals("Complete", StringComparison.OrdinalIgnoreCase)))
                         {
-                            completedItems.Add((name, status, path, completedTime));
+                            _logger.LogInformation("SABnzbd history slot parsed: nzo_id={NzoId}, name={Name}, status={Status}, path={Path}, completed={Completed}", nzoId, name, status, path, completedTime);
+                            
+                            completedItems.Add((name, status, path, completedTime, nzoId));
                         }
                     }
 
@@ -1232,25 +1549,66 @@ namespace Listenarr.Api.Services
                         {
                             // Find matching active download by NZO ID
                             var matchingItem = completedItems.FirstOrDefault(item =>
+                                // Match by NZO ID (strongest) or fall back to name/title matching
+                                (!string.IsNullOrEmpty(item.NzoId) && !string.IsNullOrEmpty(dl.DownloadClientId) &&
+                                    string.Equals(item.NzoId, dl.DownloadClientId, StringComparison.OrdinalIgnoreCase)) ||
                                 string.Equals(item.Name, dl.Title, StringComparison.OrdinalIgnoreCase) ||
                                 (!string.IsNullOrEmpty(dl.Title) && item.Name.Contains(dl.Title, StringComparison.OrdinalIgnoreCase))
                             );
 
                             if (!string.IsNullOrEmpty(matchingItem.Name))
                             {
+                                // Record match type metrics
+                                try
+                                {
+                                    if (!string.IsNullOrEmpty(matchingItem.NzoId) && !string.IsNullOrEmpty(dl.DownloadClientId) && string.Equals(matchingItem.NzoId, dl.DownloadClientId, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _metrics.Increment("sabnzbd.history.match.nzo");
+                                    }
+                                    else if (!string.IsNullOrEmpty(matchingItem.Name) && string.Equals(matchingItem.Name, dl.Title, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _metrics.Increment("sabnzbd.history.match.title_exact");
+                                    }
+                                    else
+                                    {
+                                        _metrics.Increment("sabnzbd.history.match.title_contains");
+                                    }
+                                }
+                                catch { }
                                 _logger.LogInformation("Found completed SABnzbd download: {DownloadTitle} -> {CompletedName} at {Path}", 
                                     dl.Title, matchingItem.Name, matchingItem.Path);
 
                                 // Check stability window
+                                // Use configured stability window if available
+                                TimeSpan stableWindow = _completionStableWindow;
+                                try
+                                {
+                                    using var settingsScope = _serviceScopeFactory.CreateScope();
+                                    var cfg = settingsScope.ServiceProvider.GetService<IConfigurationService>();
+                                    if (cfg != null)
+                                    {
+                                        var appSettings = await cfg.GetApplicationSettingsAsync();
+                                        if (appSettings != null && appSettings.DownloadCompletionStabilitySeconds > 0)
+                                        {
+                                            stableWindow = TimeSpan.FromSeconds(appSettings.DownloadCompletionStabilitySeconds);
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to read application settings for stability window, falling back to default");
+                                }
                                 if (!_completionCandidates.ContainsKey(dl.Id))
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (SABnzbd). Waiting for stability window.", dl.Id);
+                                    // Broadcast candidate so UI can surface it immediately
+                                    _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
                                 }
 
                                 var firstSeen = _completionCandidates[dl.Id];
-                                if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
+                                if (DateTime.UtcNow - firstSeen >= stableWindow)
                                 {
                                     _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (SABnzbd). Finalizing from path: {Path}", 
                                         dl.Id, matchingItem.Path);
@@ -1267,6 +1625,7 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates.Remove(dl.Id);
                                     _logger.LogDebug("Download {DownloadId} no longer appears complete in SABnzbd, removed from candidates", dl.Id);
+                                    _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
                             }
                         }
@@ -1479,6 +1838,8 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (NZBGet). Waiting for stability window.", dl.Id);
+                                    // Broadcast candidate so UI can surface it immediately
+                                    _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
                                 }
 
@@ -1498,6 +1859,7 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates.Remove(dl.Id);
                                     _logger.LogDebug("Download {DownloadId} no longer appears complete in NZBGet, removed from candidates", dl.Id);
+                                    _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
                             }
                         }

@@ -181,6 +181,15 @@ namespace Listenarr.Api.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("DownloadCompletionStabilitySeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MissingSourceMaxRetries")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MissingSourceRetryInitialDelaySeconds")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Webhooks")
                         .HasColumnType("TEXT");
 

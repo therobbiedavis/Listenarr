@@ -138,6 +138,8 @@ builder.Services.AddHttpClient("DownloadClient")
 builder.Services.AddHttpClient("DirectDownload")
     .ConfigureHttpClient(client =>
     {
+            
+                    
         // Allow up to 2 hours for large file downloads
         client.Timeout = TimeSpan.FromHours(2);
     })
@@ -214,6 +216,9 @@ builder.Services.AddSingleton<IDiscordBotService, DiscordBotService>();
 
 // Toast service for broadcasting UI toasts via SignalR
 builder.Services.AddSingleton<IToastService, ToastService>();
+
+// Minimal application metrics service for telemetry/metrics counters used by tests and instrumentation
+builder.Services.AddSingleton<IAppMetricsService, NoopAppMetricsService>();
 
 // Notification service for webhook notifications
 builder.Services.AddScoped<NotificationService>();
@@ -496,6 +501,10 @@ using (var scope = app.Services.CreateScope())
         // Apply SQLite PRAGMA settings after database is created
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
+        
+        // NOTE: Automatic schema ALTERs were intentionally removed from startup.
+        // Schema changes should be applied by EF migrations. See Migration:
+        // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
     }
     catch (Exception ex)
     {

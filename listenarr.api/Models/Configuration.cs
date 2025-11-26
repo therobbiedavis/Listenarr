@@ -99,6 +99,17 @@ namespace Listenarr.Api.Models
         public bool EnableNotifications { get; set; } = false;
         public List<string> AllowedFileExtensions { get; set; } = new() { ".mp3", ".flac", ".m4a", ".m4b", ".ogg" };
 
+        // Number of seconds a download must be observed in the client as "complete" before
+        // the system will finalize it (stability window). Keeping a short default (10s)
+        // avoids accidental long delays while still allowing this to be tuned by admins.
+        public int DownloadCompletionStabilitySeconds { get; set; } = 10;
+
+        // Retry/backoff settings for when a finalized download has no discoverable source file
+        // at the time of finalization. These control how the monitor schedules retries when
+        // files are still being extracted/moved by the client.
+        public int MissingSourceRetryInitialDelaySeconds { get; set; } = 30;
+        public int MissingSourceMaxRetries { get; set; } = 3;
+
     // External request settings: control retry behavior for US-domain preference and optional HTTP proxy
     public bool PreferUsDomain { get; set; } = true;
     public bool UseUsProxy { get; set; } = false;

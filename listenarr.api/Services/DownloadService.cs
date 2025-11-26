@@ -47,6 +47,7 @@ namespace Listenarr.Api.Services
         private readonly ISearchService _searchService;
         private readonly NotificationService? _notificationService;
         private readonly IMemoryCache _cache;
+        private readonly IAppMetricsService _metrics;
         
         // Track qBittorrent sync state for incremental updates (clientId -> last rid)
         private readonly Dictionary<string, int> _qbittorrentSyncState = new();
@@ -78,7 +79,8 @@ namespace Listenarr.Api.Services
             ISearchService searchService,
             IHubContext<DownloadHub> hubContext,
             IMemoryCache cache,
-            NotificationService? notificationService = null)
+            NotificationService? notificationService = null,
+            IAppMetricsService? appMetrics = null)
         {
             _audiobookRepository = audiobookRepository;
             _configurationService = configurationService;
@@ -92,6 +94,7 @@ namespace Listenarr.Api.Services
             _hubContext = hubContext;
             _cache = cache;
             _notificationService = notificationService;
+            _metrics = appMetrics ?? new NoopAppMetricsService();
         }
 
         public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
@@ -339,6 +342,7 @@ namespace Listenarr.Api.Services
             }
 
             // Build search query from audiobook metadata
+             // Build search query from audiobook metadata
             var searchQuery = BuildSearchQuery(audiobook);
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
@@ -1704,11 +1708,115 @@ namespace Listenarr.Api.Services
                         
                         if (orphanedDownloads.Any())
                         {
+                            // If this is a SABnzbd client, consult the client's history first
+                            // SAFETY: If history fetch fails, skip purging to avoid accidental deletion
+                            var toPurge = orphanedDownloads;
+                            try
+                            {
+                                if (string.Equals(client.Type, "sabnzbd", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // Build history request
+                                    var apiKey = "";
+                                    if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                                        apiKey = apiKeyObj?.ToString() ?? "";
+
+                                    if (!string.IsNullOrEmpty(apiKey))
+                                    {
+                                        try
+                                        {
+                                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+                                            var historyUrl = $"{baseUrl}?mode=history&output=json&limit=100&apikey={Uri.EscapeDataString(apiKey)}";
+                                            var historyResp = await _httpClient.GetAsync(historyUrl);
+                                            if (historyResp.IsSuccessStatusCode)
+                                            {
+                                                var historyText = await historyResp.Content.ReadAsStringAsync();
+                                                if (!string.IsNullOrWhiteSpace(historyText))
+                                                {
+                                                    try
+                                                    {
+                                                        var doc = JsonDocument.Parse(historyText);
+                                                        var root = doc.RootElement;
+                                                        var historySlots = new List<(string nzo, string name)>();
+
+                                                        if (root.TryGetProperty("history", out var history) && history.TryGetProperty("slots", out var slots) && slots.ValueKind == JsonValueKind.Array)
+                                                        {
+                                                            foreach (var slot in slots.EnumerateArray())
+                                                            {
+                                                                var nzoId = slot.TryGetProperty("nzo_id", out var nzo) ? nzo.GetString() ?? string.Empty : string.Empty;
+                                                                var name = slot.TryGetProperty("name", out var nm) ? nm.GetString() ?? string.Empty : string.Empty;
+                                                                historySlots.Add((nzoId, name));
+                                                            }
+                                                        }
+
+                                                        // Filter orphaned downloads: keep them if we *don't* find them in history
+                                                        toPurge = orphanedDownloads.Where(d =>
+                                                        {
+                                                            try
+                                                            {
+                                                                // If the DB record stores the nzo id directly as the DownloadClientId, skip purging
+                                                                if (!string.IsNullOrEmpty(d.DownloadClientId) && historySlots.Any(h => h.nzo.Equals(d.DownloadClientId, StringComparison.OrdinalIgnoreCase)))
+                                                                {
+                                                                    try { _metrics.Increment("download.purge.skipped.history.nzo_match"); } catch { }
+                                                                    return false;
+                                                                }
+
+                                                                // Match by title similarity against history name entries -> skip purging
+                                                                if (!string.IsNullOrEmpty(d.Title) && historySlots.Any(h => !string.IsNullOrEmpty(h.name) && IsMatchingTitle(d.Title, h.name)))
+                                                                {
+                                                                    try { _metrics.Increment("download.purge.skipped.history.title_match"); } catch { }
+                                                                    return false;
+                                                                }
+
+                                                                // No match in history -> eligible to purge
+                                                                return true;
+                                                            }
+                                                            catch
+                                                            {
+                                                                // If anything goes wrong, be conservative and avoid purging this download
+                                                                return false;
+                                                            }
+                                                        }).ToList();
+                                                    }
+                                                    catch (Exception hx)
+                                                    {
+                                                        _logger.LogWarning(hx, "Failed to parse SABnzbd history for client {ClientName}, skipping purge for safety", client.Name);
+                                                        // Keep toPurge as orphanedDownloads but bail out of purging below
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                _logger.LogWarning("Failed to fetch SABnzbd history for client {ClientName}: {StatusCode}", client.Name, historyResp.StatusCode);
+                                                try { _metrics.Increment("download.purge.skipped.history.fetch_failed"); } catch { }
+                                                // skip purging when we couldn't confirm history to avoid accidental deletions
+                                                toPurge = new List<Download>();
+                                            }
+                                        }
+                                        catch (Exception hx)
+                                        {
+                                            _logger.LogWarning(hx, "Error while fetching SABnzbd history for client {ClientName}, skipping purge for safety", client.Name);
+                                            try { _metrics.Increment("download.purge.skipped.history.fetch_error"); } catch { }
+                                            toPurge = new List<Download>();
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("SABnzbd client {ClientName} missing apiKey in settings, skipping orphan purge for safety", client.Name);
+                                        try { _metrics.Increment("download.purge.skipped.history.missing_api_key"); } catch { }
+                                        toPurge = new List<Download>();
+                                    }
+                                }
+                            }
+                            catch (Exception hx)
+                            {
+                                _logger.LogWarning(hx, "Unexpected error while checking history before purge for client {ClientName}, skipping purge for safety", client.Name);
+                                toPurge = new List<Download>();
+                            }
                             using (var purgeScope = _serviceScopeFactory.CreateScope())
                             {
                                 var dbContext = purgeScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                                 
-                                foreach (var orphanedDownload in orphanedDownloads)
+                                    foreach (var orphanedDownload in toPurge)
                                 {
                                     var trackedDownload = await dbContext.Downloads.FindAsync(orphanedDownload.Id);
                                     if (trackedDownload != null)
@@ -1716,12 +1824,13 @@ namespace Listenarr.Api.Services
                                         dbContext.Downloads.Remove(trackedDownload);
                                         _logger.LogInformation("Purged orphaned download record: {DownloadId} '{Title}' (no longer exists in {ClientName} queue)", 
                                             orphanedDownload.Id, orphanedDownload.Title, client.Name);
+                                            try { _metrics.Increment("download.purged.count"); } catch { }
                                     }
                                 }
                                 
                                 await dbContext.SaveChangesAsync();
                                 _logger.LogInformation("Purged {Count} orphaned download records from {ClientName}", 
-                                    orphanedDownloads.Count, client.Name);
+                                    toPurge.Count, client.Name);
                             }
                         }
                     }
@@ -3915,13 +4024,11 @@ namespace Listenarr.Api.Services
                                                     if (string.IsNullOrWhiteSpace(filenamePattern))
                                                         filenamePattern = "{Author}/{Series}/{Title}";
 
-                                                    // If using audiobook BasePath, strip directory components from the pattern (use filename-only)
-                                                    if (abForNaming != null && !string.IsNullOrWhiteSpace(abForNaming.BasePath))
-                                                    {
-                                                        var lastSlashIndex = filenamePattern.LastIndexOf('/');
-                                                        if (lastSlashIndex >= 0 && lastSlashIndex < filenamePattern.Length - 1)
-                                                            filenamePattern = filenamePattern.Substring(lastSlashIndex + 1);
-                                                    }
+                                                    // Use the full naming pattern for destination path. If the pattern contains
+                                                    // directory separators, the destinationPath will include them (e.g.
+                                                    // {Author}/{Series}/{Title}). We do not strip pattern components when
+                                                    // using an audiobook BasePath — the full pattern will be used to determine
+                                                    // where inside the audiobook base path the final filename should be.
 
                                                     var ext = Path.GetExtension(file);
 
@@ -3982,21 +4089,54 @@ namespace Listenarr.Api.Services
                                                 destPathForFile = Path.Combine(destDirForFile, Path.GetFileName(file));
                                             }
 
-                                            // Ensure uniqueness AFTER applying any naming pattern
-                                            _logger.LogDebug("Resolving unique destination for multi-file import: {Dest}", destPathForFile);
-                                            destPathForFile = FileUtils.GetUniqueDestinationPath(destPathForFile);
+                                                    // After generating the target filename, we'll still place the file into
+                                                    // the destination directory first (original filename) then apply
+                                                    // the naming pattern on that destination file so that the file
+                                                    // exists in the destination before any renaming occurs.
+                                                    var initialDest = Path.Combine(destDirForFile, Path.GetFileName(file));
+                                                    _logger.LogDebug("Resolving initial destination for multi-file import: {Dest}", initialDest);
+                                                    var uniqueInitial = FileUtils.GetUniqueDestinationPath(initialDest);
 
-                                            var action = settings.CompletedFileAction ?? "Move";
-                                            if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                File.Copy(file, destPathForFile, true);
-                                                _logger.LogInformation("Copied file {Source} -> {Dest}", file, destPathForFile);
-                                            }
-                                            else
-                                            {
-                                                File.Move(file, destPathForFile, true);
-                                                _logger.LogInformation("Moved file {Source} -> {Dest}", file, destPathForFile);
-                                            }
+                                                    var action = settings.CompletedFileAction ?? "Move";
+                                                    if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        File.Copy(file, uniqueInitial, true);
+                                                        _logger.LogInformation("Copied file {Source} -> {Dest}", file, uniqueInitial);
+                                                    }
+                                                    else
+                                                    {
+                                                        File.Move(file, uniqueInitial, true);
+                                                        _logger.LogInformation("Moved file {Source} -> {Dest}", file, uniqueInitial);
+                                                    }
+
+                                                    // Now apply the filename pattern on the destination copy/move
+                                                    _logger.LogDebug("Applying naming pattern on destination for {File}", uniqueInitial);
+                                                    // destPathForFile already contains the desired path per the pattern
+                                                    _logger.LogDebug("Resolving unique destination for multi-file import: {Dest}", destPathForFile);
+                                                    var uniqueFinal = FileUtils.GetUniqueDestinationPath(destPathForFile);
+
+                                                    // If the final name differs from the initial unique path, move/rename it
+                                                    if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        try
+                                                        {
+                                                            File.Move(uniqueInitial, uniqueFinal, true);
+                                                            _logger.LogInformation("Renamed/Moved destination file {Source} -> {Final}", uniqueInitial, uniqueFinal);
+                                                        }
+                                                        catch (Exception ex)
+                                                        {
+                                                            _logger.LogWarning(ex, "Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
+                                                            // If renaming fails, keep the initial file as-is
+                                                            uniqueFinal = uniqueInitial;
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        // No rename necessary
+                                                        _logger.LogDebug("Naming pattern results match initial destination, skipping rename for {File}", uniqueInitial);
+                                                    }
+
+                                                    destPathForFile = uniqueFinal;
 
                                             // Register audiobook file if linked
                                             if (completedDownload.AudiobookId != null)
@@ -4143,33 +4283,20 @@ namespace Listenarr.Api.Services
                                     try
                                     {
                                         var audiobook = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
-                                        if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
-                                        {
-                                            basePathForFile = audiobook.BasePath;
-                                            _logger.LogDebug("Using audiobook BasePath for download {DownloadId}: {BasePath}", downloadId, basePathForFile);
-
-                                            // usingAudiobookBasePath no longer tracked here
-
-                                            // Extract filename-only pattern (everything after the last '/')
-                                            var fullPattern = settings.FileNamingPattern;
-                                            if (string.IsNullOrWhiteSpace(fullPattern))
+                                            if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
                                             {
-                                                fullPattern = "{Author}/{Series}/{Title}";
-                                            }
+                                                basePathForFile = audiobook.BasePath;
+                                                _logger.LogDebug("Using audiobook BasePath for download {DownloadId}: {BasePath}", downloadId, basePathForFile);
 
-                                            // Find the last '/' in the pattern to get just the filename part
-                                            var lastSlashIndex = fullPattern.LastIndexOf('/');
-                                            if (lastSlashIndex >= 0 && lastSlashIndex < fullPattern.Length - 1)
-                                            {
-                                                filenamePattern = fullPattern.Substring(lastSlashIndex + 1);
-                                            }
-                                            else
-                                            {
-                                                // No directory separators, use the whole pattern as filename
-                                                filenamePattern = fullPattern;
-                                            }
-
-                                            _logger.LogDebug("Using filename-only pattern for audiobook download {DownloadId}: {Pattern}", downloadId, filenamePattern);
+                                                // Use the full naming pattern when calculating the destination
+                                                // inside the audiobook BasePath. This allows the configured
+                                                // file naming pattern to define subfolders under the
+                                                // audiobook base path when appropriate.
+                                                filenamePattern = settings.FileNamingPattern;
+                                                if (string.IsNullOrWhiteSpace(filenamePattern))
+                                                {
+                                                    filenamePattern = "{Author}/{Series}/{Title}";
+                                                }
                                         }
                                         else
                                         {
@@ -4246,6 +4373,24 @@ namespace Listenarr.Api.Services
                                     _logger.LogDebug(ex, "Failed to log filename variables for download {DownloadId}", downloadId);
                                 }
 
+                                // Decide whether we are using an audiobook BasePath. When using a BasePath
+                                // avoid creating arbitrary subfolders (treat pattern as filename-only).
+                                var usingAudiobookBasePath = false;
+                                // Only set usingAudiobookBasePath true when the destination base path came from the audiobook
+                                // record rather than default/global output path.
+                                if (completedDownload.AudiobookId != null)
+                                {
+                                    try
+                                    {
+                                        var checkAb = await dbContext.Audiobooks.FindAsync(completedDownload.AudiobookId.Value);
+                                        if (checkAb != null && !string.IsNullOrWhiteSpace(checkAb.BasePath))
+                                        {
+                                            usingAudiobookBasePath = true;
+                                        }
+                                    }
+                                    catch { /* ignore */ }
+                                }
+
                                 // Only allow subfolders when not importing into an audiobook BasePath. When using BasePath
                                 // we must avoid creating arbitrary subfolders except those explicitly intended (e.g., Disk/Chapter).
                                 var patternAllowsSubfolders = false;
@@ -4259,7 +4404,9 @@ namespace Listenarr.Api.Services
 
                                 // Enforce: only allow subfolders when the pattern explicitly includes DiskNumber or ChapterNumber.
                                 // This prevents arbitrary folders being created from tokens like {Title} or {Series}.
-                                var treatAsFilename = !patternAllowsSubfolders;
+                                // If we are using audiobook BasePath, force filename-only to avoid creating
+                                // unexpected subfolders under a user-provided base path.
+                                var treatAsFilename = usingAudiobookBasePath ? true : !patternAllowsSubfolders;
 
                                 _logger.LogDebug("PatternAllowsSubfolders={Allows} => enforce filename-only when false (treatAsFilename={Treat}) for download {DownloadId}",
                                     patternAllowsSubfolders, treatAsFilename, downloadId);
@@ -4334,10 +4481,14 @@ namespace Listenarr.Api.Services
                                     downloadId, destinationPath);
                             }
                             
-                            // Determine destination directory but DO NOT create it.
+                            // Determine destination directory and create it if necessary (align with manual import behavior)
                             var destDir = Path.GetDirectoryName(destinationPath);
+                            if (!string.IsNullOrEmpty(destDir))
+                            {
+                                Directory.CreateDirectory(destDir);
+                            }
 
-                            // Only perform file operations if the destination directory already exists.
+                            // Perform file operations now that the directory exists
                             if (!string.IsNullOrEmpty(destDir) && Directory.Exists(destDir))
                             {
                                 // Perform file operation if source and destination are different
@@ -4345,25 +4496,78 @@ namespace Listenarr.Api.Services
                                 {
                                     var action = settings.CompletedFileAction ?? "Move";
 
-                                    // Ensure we don't overwrite existing files by generating a unique destination
-                                    _logger.LogDebug("Resolving unique destination for single-file import: {Dest}", destinationPath);
-                                    var uniqueDestination = FileUtils.GetUniqueDestinationPath(destinationPath);
-                                    if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                                    // First: move/copy into the destination directory using the original filename
+                                    var initialDest = Path.Combine(destDir, Path.GetFileName(localPath));
+                                    _logger.LogDebug("Resolving initial destination for single-file import: {Initial}", initialDest);
+                                    var uniqueInitial = FileUtils.GetUniqueDestinationPath(initialDest);
+
+                                    if (!string.Equals(Path.GetFullPath(localPath), Path.GetFullPath(uniqueInitial), StringComparison.OrdinalIgnoreCase))
                                     {
-                                        File.Copy(localPath, uniqueDestination, true);
-                                        _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
-                                            downloadId, localPath, uniqueDestination);
+                                        if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            File.Copy(localPath, uniqueInitial, true);
+                                            _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
+                                                downloadId, localPath, uniqueInitial);
+                                        }
+                                        else
+                                        {
+                                            // Default to Move
+                                            File.Move(localPath, uniqueInitial, true);
+                                            _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
+                                                downloadId, localPath, uniqueInitial);
+                                        }
                                     }
                                     else
                                     {
-                                        // Default to Move
-                                        File.Move(localPath, uniqueDestination, true);
-                                        _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
-                                            downloadId, localPath, uniqueDestination);
+                                        // File is already at the initial destination - no copy/move required
+                                        _logger.LogDebug("File is already located at initial destination for download {DownloadId}: {Path}", downloadId, uniqueInitial);
                                     }
 
-                                    // Update the final path to the new location
-                                    finalPath = uniqueDestination;
+                                    // Set current finalPath to the initial location we moved/copied into
+                                    finalPath = uniqueInitial;
+
+                                    // Next: apply filename pattern (if enabled) to the file now in destination
+                                    try
+                                    {
+                                        // Only apply naming when metadata processing and fileNamingService are enabled
+                                        if (fileNamingService != null && settings.EnableMetadataProcessing)
+                                        {
+                                            _logger.LogDebug("Applying naming pattern on destination for download {DownloadId}", downloadId);
+
+                                            // destinationPath contains the path matching the pattern generated earlier
+                                            var desiredFinal = destinationPath;
+
+                                            // Ensure unique target name
+                                            var uniqueFinal = FileUtils.GetUniqueDestinationPath(desiredFinal);
+
+                                            // Ensure we only attempt rename if paths differ, and the target directory exists
+                                            var finalDir = Path.GetDirectoryName(uniqueFinal) ?? string.Empty;
+                                            if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase)
+                                                && (string.IsNullOrEmpty(finalDir) || Directory.Exists(finalDir)))
+                                            {
+                                                try
+                                                {
+                                                    File.Move(uniqueInitial, uniqueFinal, true);
+                                                    _logger.LogInformation("Renamed destination {Source} -> {Final} for download {DownloadId}", uniqueInitial, uniqueFinal, downloadId);
+                                                    finalPath = uniqueFinal;
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger.LogWarning(ex, "Failed to rename destination file to pattern path for download {DownloadId}, keeping {Path}", downloadId, uniqueInitial);
+                                                    // keep uniqueInitial as finalPath
+                                                }
+                                            }
+                                            else
+                                            {
+                                                _logger.LogDebug("No rename required or target directory missing for download {DownloadId}. Keeping {Path}", downloadId, uniqueInitial);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Failed applying naming pattern on destination for download {DownloadId}", downloadId);
+                                    }
+
                                 }
                                 else
                                 {
@@ -4372,9 +4576,9 @@ namespace Listenarr.Api.Services
                             }
                             else
                             {
-                                // Do not create directories during import. If the destination directory doesn't exist,
-                                // leave the file in its original location and log a warning.
-                                _logger.LogWarning("Destination directory does not exist for download {DownloadId}: {DestDir}. Not creating directories during import. Keeping file at original location: {Source}",
+                                // Failed to create destination directory during import.
+                                // Leave the file in its original location and log a warning.
+                                _logger.LogWarning("Failed to create destination directory for download {DownloadId}: {DestDir}. Keeping file at original location: {Source}",
                                     downloadId, destDir ?? "(null)", localPath);
                                 finalPath = localPath;
                             }
