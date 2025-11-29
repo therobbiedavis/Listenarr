@@ -26,6 +26,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.DataProtection;
 using Serilog;
+using Serilog.Events;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -33,18 +34,36 @@ using Polly.Extensions.Http;
 // Pass a non-null args array to satisfy nullable analysis
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
-// Configure Serilog for file logging with rotation and SignalR broadcasting
+// Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
 var signalRSink = new SignalRLogSink();
+
+// Industry-standard defaults:
+// - Application logs at Information
+// - Third-party and framework logs (Microsoft/System) at Warning
+// - EF Core DB command logging elevated to Warning by default (can be lowered to Debug for troubleshooting)
 Log.Logger = new Serilog.LoggerConfiguration()
+    .Enrich.FromLogContext()
+    // Use explicit properties to avoid optional enrichers that may not be present in all builds
+    .Enrich.WithProperty("Machine", Environment.MachineName)
+    .Enrich.WithProperty("ProcessId", Environment.ProcessId)
+    .Enrich.WithProperty("Application", "Listenarr.Api")
     .MinimumLevel.Information()
-    .WriteTo.Console()
+    // Framework and system noise should be at Warning by default
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("System", LogEventLevel.Warning)
+    // EF Core: keep DB command messages higher than app logs; changeable via configuration when needed
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
+    // Console sink for developer-friendly output (includes SourceContext for quick tracing)
+    .WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    // Primary file sink with daily rolling and structured JSON compatible output template
     .WriteTo.File(
         logFilePath,
         rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 30, // Keep 30 days of logs
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .WriteTo.Sink(signalRSink) // Add SignalR sink for real-time log broadcasting
+        retainedFileCountLimit: 30,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.Sink(signalRSink)
     .CreateLogger();
 
 // Use Serilog for logging
@@ -112,15 +131,15 @@ builder.Services.AddHttpClient("DownloadClient")
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
         .CircuitBreakerAsync(
-            handledEventsAllowedBeforeBreaking: 5,
+            handledEventsAllowedBeforeBreaking: 3,
             durationOfBreak: TimeSpan.FromSeconds(30),
             onBreak: (outcome, duration) =>
             {
-                Console.WriteLine($"[CIRCUIT BREAKER] Download client circuit opened due to {outcome.Exception?.Message ?? "policy trigger"}. Breaking for {duration.TotalSeconds}s");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Download client circuit opened due to {Reason}. Breaking for {Seconds}s", outcome.Exception?.Message ?? "policy trigger", duration.TotalSeconds);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Download client circuit reset - service recovered");
+                Log.Logger.Information("[CIRCUIT BREAKER] Download client circuit reset - service recovered");
             }
         ))
     .AddPolicyHandler(HttpPolicyExtensions
@@ -130,7 +149,7 @@ builder.Services.AddHttpClient("DownloadClient")
             sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
             onRetry: (outcome, timespan, retryAttempt, context) =>
             {
-                Console.WriteLine($"[RETRY] Download client retry attempt {retryAttempt} after {timespan.TotalSeconds}s delay");
+                Log.Logger.Information("[RETRY] Download client retry attempt {Attempt} after {Delay}s delay", retryAttempt, timespan.TotalSeconds);
             }
         ));
 
@@ -155,11 +174,11 @@ builder.Services.AddHttpClient("DirectDownload")
             durationOfBreak: TimeSpan.FromMinutes(1),
             onBreak: (outcome, duration) =>
             {
-                Console.WriteLine($"[CIRCUIT BREAKER] Direct download circuit opened. Breaking for {duration.TotalMinutes}m");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Direct download circuit opened. Breaking for {Minutes}m", duration.TotalMinutes);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Direct download circuit reset");
+                Log.Logger.Information("[CIRCUIT BREAKER] Direct download circuit reset");
             }
         ))
     .AddPolicyHandler(HttpPolicyExtensions
@@ -174,7 +193,14 @@ builder.Services.AddHttpClient("DirectDownload")
 // Compute an absolute path for the SQLite file based on the content root so
 // the published exe will create/use the intended config/database path even
 // when the working directory differs.
+// Compute default SQLite DB path (config/database/listenarr.db) relative to content root.
 var sqliteDbPath = Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db");
+// Ensure directory exists at startup so EF migrations can create the DB file there
+var sqliteDbDir = Path.GetDirectoryName(sqliteDbPath);
+if (!string.IsNullOrEmpty(sqliteDbDir) && !Directory.Exists(sqliteDbDir))
+{
+    Directory.CreateDirectory(sqliteDbDir);
+}
 
 // Use DbContextFactory for better scoped context management
 builder.Services.AddDbContextFactory<ListenArrDbContext>(options =>
@@ -206,6 +232,14 @@ builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
 builder.Services.AddScoped<IFileNamingService, FileNamingService>();
 // Centralized import service: handles moving/copying, naming and audiobook registration
 builder.Services.AddScoped<IImportService, ImportService>();
+// Centralized file mover for robust move/copy with retries and diagnostics
+builder.Services.AddScoped<IFileMover, FileMover>();
+// Bind FileMover options from configuration (optional)
+builder.Services.Configure<Listenarr.Api.Services.FileMoverOptions>(builder.Configuration.GetSection("FileMover"));
+// Process runner for external process execution (robocopy, ffprobe, playwright installer)
+builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
+// Store for persisting external process execution outputs (stdout/stderr) - best-effort
+builder.Services.AddScoped<IProcessExecutionStore, ProcessExecutionStore>();
 builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
 builder.Services.AddScoped<ISystemService, SystemService>();
 builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
@@ -284,7 +318,7 @@ builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
             onRetry: (outcome, timespan, retryAttempt, context) =>
             {
                 var reason = outcome.Result != null ? $"HTTP {(int)outcome.Result.StatusCode}" : outcome.Exception?.Message;
-                Console.WriteLine($"[RETRY] Amazon search retry attempt {retryAttempt} due to {reason}. Waiting {timespan.TotalSeconds}s");
+                Log.Logger.Information("[RETRY] Amazon search retry attempt {Attempt} due to {Reason}. Waiting {Delay}s", retryAttempt, reason, timespan.TotalSeconds);
             }))
     // Circuit-breaker: raise threshold slightly to avoid tripping on short throttling bursts
     .AddPolicyHandler(HttpPolicyExtensions
@@ -298,11 +332,11 @@ builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
             onBreak: (outcome, duration) =>
             {
                 var reason = outcome.Result != null ? $"HTTP {(int)outcome.Result.StatusCode}" : outcome.Exception?.Message ?? "policy trigger";
-                Console.WriteLine($"[CIRCUIT BREAKER] Amazon search circuit opened due to {reason}. Breaking for {duration.TotalMinutes}m");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Amazon search circuit opened due to {Reason}. Breaking for {Minutes}m", reason, duration.TotalMinutes);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Amazon search circuit reset");
+                Log.Logger.Information("[CIRCUIT BREAKER] Amazon search circuit reset");
             }
         ));
 
@@ -311,18 +345,18 @@ builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
     })
-    .AddPolicyHandler(HttpPolicyExtensions
+            .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
         .CircuitBreakerAsync(
             handledEventsAllowedBeforeBreaking: 4,
             durationOfBreak: TimeSpan.FromMinutes(2),
             onBreak: (outcome, duration) =>
             {
-                Console.WriteLine($"[CIRCUIT BREAKER] Audible search circuit opened. Breaking for {duration.TotalMinutes}m");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Audible search circuit opened. Breaking for {Minutes}m", duration.TotalMinutes);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Audible search circuit reset");
+                Log.Logger.Information("[CIRCUIT BREAKER] Audible search circuit reset");
             }
         ))
     .AddPolicyHandler(HttpPolicyExtensions
@@ -362,20 +396,30 @@ builder.Services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() =>
     }
     catch (Exception ex) 
     { 
-        Console.WriteLine($"[WARNING] Failed to configure proxy settings: {ex.Message}");
+        Log.Logger.Warning("[WARNING] Failed to configure proxy settings: {Message}", ex.Message);
     }
 
     return handler;
 });
 
-// Register Playwright page fetcher for JS-rendered pages and bot-workarounds
-// Register Playwright-based page fetcher (used as a fallback for JS-rendered / bot-protected pages)
-builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightPageFetcher, Listenarr.Api.Services.PlaywrightPageFetcher>();
+// Read Playwright enablement flag from config (default true)
+var playwrightEnabled = builder.Configuration.GetValue<bool>("Playwright:Enabled", true);
 
-// Playwright install status and background installer
-builder.Services.AddSingleton<Listenarr.Api.Services.PlaywrightInstallStatus>();
-builder.Services.AddHostedService<Listenarr.Api.Services.PlaywrightInstallBackgroundService>();
-builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightInstaller, Listenarr.Api.Services.PlaywrightInstaller>();
+// Register Playwright services only when enabled in configuration
+if (playwrightEnabled)
+{
+    // Register Playwright page fetcher for JS-rendered pages and bot-workarounds
+    builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightPageFetcher, Listenarr.Api.Services.PlaywrightPageFetcher>();
+
+    // Playwright install status and background installer
+    builder.Services.AddSingleton<Listenarr.Api.Services.PlaywrightInstallStatus>();
+    builder.Services.AddHostedService<Listenarr.Api.Services.PlaywrightInstallBackgroundService>();
+    builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightInstaller, Listenarr.Api.Services.PlaywrightInstaller>();
+}
+else
+{
+    Log.Logger.Information("Playwright integration is disabled via configuration; skipping Playwright service registration.");
+}
 
 // CORS is handled by reverse proxy (nginx, Traefik, Caddy, etc.)
 // Only add CORS support for local development
@@ -415,7 +459,7 @@ builder.Services.AddSwaggerGen(options =>
     }
     catch (Exception ex) 
     { 
-        Console.WriteLine($"[WARNING] Failed to include XML comments in Swagger: {ex.Message}");
+        Log.Logger.Warning("[WARNING] Failed to include XML comments in Swagger: {Message}", ex.Message);
     }
     // Use full type names for schema Ids (replace '+' from nested types with '.') to
     // avoid collisions between nested controller DTOs and top-level DTOs that share
@@ -657,19 +701,28 @@ try
                                 UseShellExecute = false,
                                 CreateNoWindow = true
                             };
-                            using var proc = System.Diagnostics.Process.Start(psi);
-                            if (proc != null)
+
+                            var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                            if (processRunner != null)
                             {
-                                await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-                                if (proc.ExitCode == 0)
+                                var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromSeconds(90).TotalMilliseconds, cancellationToken: cts.Token).ConfigureAwait(false);
+                                if (result.TimedOut)
+                                {
+                                    logger.LogWarning("PowerShell Playwright install script timed out after {Timeout}s", TimeSpan.FromSeconds(90).TotalSeconds);
+                                }
+                                else if (result.ExitCode == 0)
                                 {
                                     logger.LogInformation("PowerShell Playwright install script completed successfully");
                                     return true;
                                 }
                                 else
                                 {
-                                    logger.LogWarning("PowerShell Playwright install script failed with exit code {ExitCode}", proc.ExitCode);
+                                    logger.LogWarning("PowerShell Playwright install script failed with exit code {ExitCode}. StdErr: {Err}", result.ExitCode, result.Stderr?.Length > 1000 ? result.Stderr.Substring(0, 1000) : result.Stderr);
                                 }
+                            }
+                            else
+                            {
+                                logger.LogWarning("IProcessRunner is not available; skipping PowerShell Playwright install script fallback.");
                             }
                         }
                     }
@@ -697,19 +750,28 @@ try
                                 UseShellExecute = false,
                                 CreateNoWindow = true
                             };
-                            using var proc = System.Diagnostics.Process.Start(psi);
-                            if (proc != null)
+
+                            var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                            if (processRunner != null)
                             {
-                                await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-                                if (proc.ExitCode == 0)
+                                var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromSeconds(90).TotalMilliseconds, cancellationToken: cts.Token).ConfigureAwait(false);
+                                if (result.TimedOut)
+                                {
+                                    logger.LogWarning("Bash Playwright install script timed out after {Timeout}s", TimeSpan.FromSeconds(90).TotalSeconds);
+                                }
+                                else if (result.ExitCode == 0)
                                 {
                                     logger.LogInformation("Bash Playwright install script completed successfully");
                                     return true;
                                 }
                                 else
                                 {
-                                    logger.LogWarning("Bash Playwright install script failed with exit code {ExitCode}", proc.ExitCode);
+                                    logger.LogWarning("Bash Playwright install script failed with exit code {ExitCode}. StdErr: {Err}", result.ExitCode, result.Stderr?.Length > 1000 ? result.Stderr.Substring(0, 1000) : result.Stderr);
                                 }
+                            }
+                            else
+                            {
+                                logger.LogWarning("IProcessRunner is not available; skipping bash Playwright install script fallback.");
                             }
                         }
                     }
@@ -721,94 +783,51 @@ try
             }
 
             // Fallback: try npx playwright install (requires Node.js available on PATH)
-            try
-            {
-                // Install only Chromium to reduce download size and time. Stream output so we can
-                // observe progress in logs. Give a much larger timeout (10 minutes) because browser
-                // artifacts are large and may take time on slow networks.
-                logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
-                var psi = new System.Diagnostics.ProcessStartInfo
+                try
                 {
-                    FileName = "npx",
-                    Arguments = "playwright install chromium",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
-                {
-                    var outSb = new System.Text.StringBuilder();
-                    var errSb = new System.Text.StringBuilder();
-
-                    // Read streams asynchronously to avoid deadlocks and to capture progress
-                    var outTask = Task.Run(async () =>
+                    // Install only Chromium to reduce download size and time. Give a much larger
+                    // timeout (10 minutes) because browser artifacts are large and may take time
+                    // on slow networks. Use the IProcessRunner when available so output is
+                    // captured and timeouts are enforced consistently.
+                    logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
+                    var psi = new System.Diagnostics.ProcessStartInfo
                     {
-                        var buffer = new char[4096];
-                        while (!proc.StandardOutput.EndOfStream)
+                        FileName = "npx",
+                        Arguments = "playwright install chromium",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                    if (processRunner != null)
+                    {
+                        var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                        logger.LogDebug("Playwright npx output: {Out}\n{Err}", result.Stdout, result.Stderr);
+                        if (result.TimedOut)
                         {
-                            var read = await proc.StandardOutput.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-                            if (read > 0)
-                            {
-                                outSb.Append(buffer, 0, read);
-                                // Log progress in debug so user can enable debug level if needed
-                                logger.LogDebug("[playwright:npx][out] {Chunk}", new string(buffer, 0, read));
-                            }
+                            logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
                         }
-                    });
-
-                    var errTask = Task.Run(async () =>
-                    {
-                        var buffer = new char[4096];
-                        while (!proc.StandardError.EndOfStream)
+                        else if (result.ExitCode == 0)
                         {
-                            var read = await proc.StandardError.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-                            if (read > 0)
-                            {
-                                errSb.Append(buffer, 0, read);
-                                logger.LogDebug("[playwright:npx][err] {Chunk}", new string(buffer, 0, read));
-                            }
+                            logger.LogInformation("'npx playwright install chromium' completed successfully");
+                            return true;
                         }
-                    });
-
-                    // Wait up to 10 minutes for the installer to complete
-                    using var npxCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                    try
-                    {
-                        await Task.WhenAll(outTask, errTask).ConfigureAwait(false);
-                        await proc.WaitForExitAsync(npxCts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
-                    }
-
-                    var outText = outSb.ToString();
-                    var errText = errSb.ToString();
-                    logger.LogDebug("Playwright npx output: {Out}\n{Err}", outText, errText);
-
-                    if (!proc.HasExited)
-                    {
-                        try { proc.Kill(); } catch { }
-                        logger.LogWarning("'npx playwright install chromium' did not finish in the allotted time");
-                    }
-                    else if (proc.ExitCode == 0)
-                    {
-                        logger.LogInformation("'npx playwright install chromium' completed successfully");
-                        return true;
+                        else
+                        {
+                            logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", result.ExitCode);
+                        }
                     }
                     else
                     {
-                        logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", proc.ExitCode);
+                        logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "'npx playwright install chromium' attempt failed or npx not available");
-            }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "'npx playwright install chromium' attempt failed or npx not available");
+                }
 
             // As a last resort, ask the PlaywrightPageFetcher to ensure browsers are initialized.
             // Use the explicit TryEnsureInitializedAsync method so we can reliably detect whether

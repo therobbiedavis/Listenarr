@@ -22,11 +22,13 @@ namespace Listenarr.Api.Services
         private IPlaywright? _playwright;
         private IBrowser? _browser;
         private readonly SemaphoreSlim _initLock = new(1, 1);
+        private readonly IProcessRunner? _processRunner;
 
-        public PlaywrightPageFetcher(ILogger<PlaywrightPageFetcher> logger, IOptions<ExternalRequestOptions> options)
+        public PlaywrightPageFetcher(ILogger<PlaywrightPageFetcher> logger, IOptions<ExternalRequestOptions> options, IProcessRunner? processRunner = null)
         {
             _logger = logger;
             _options = options?.Value ?? new ExternalRequestOptions();
+            _processRunner = processRunner;
         }
 
         private async Task EnsureInitializedAsync()
@@ -62,17 +64,22 @@ namespace Listenarr.Api.Services
                                 UseShellExecute = false,
                                 CreateNoWindow = true
                             };
-                            using var proc = System.Diagnostics.Process.Start(psi);
-                            if (proc != null)
+
+                            if (_processRunner != null)
                             {
-                                // Wait up to 2 minutes
-                                var completed = proc.WaitForExit(120000);
-                                var outText = await proc.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
-                                var errText = await proc.StandardError.ReadToEndAsync().ConfigureAwait(false);
-                                if (completed && proc.ExitCode == 0)
-                                    _logger.LogInformation("Playwright browsers installed via npx");
+                                var pr = await _processRunner.RunAsync(psi, timeoutMs: 2 * 60 * 1000).ConfigureAwait(false);
+                                if (!pr.TimedOut && pr.ExitCode == 0)
+                                {
+                                    _logger.LogInformation("Playwright browsers installed via npx (process runner)");
+                                }
                                 else
-                                    _logger.LogDebug("Playwright npx install output: {Out}\n{Err}", outText, errText);
+                                {
+                                    _logger.LogDebug("Playwright npx install output: {Out}\n{Err}", pr.Stdout, pr.Stderr);
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("IProcessRunner is not available; skipping npx Playwright install fallback in PlaywrightPageFetcher.");
                             }
                         }
                         catch (Exception ex2)

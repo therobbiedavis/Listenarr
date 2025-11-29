@@ -1,6 +1,7 @@
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace Listenarr.Api.Controllers
 {
@@ -12,13 +13,15 @@ namespace Listenarr.Api.Controllers
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<DiscordController> _logger;
         private readonly IDiscordBotService _botService;
+        private readonly IProcessRunner _processRunner;
 
-        public DiscordController(IConfigurationService configurationService, IHttpClientFactory httpClientFactory, ILogger<DiscordController> logger, IDiscordBotService botService)
+        public DiscordController(IConfigurationService configurationService, IHttpClientFactory httpClientFactory, ILogger<DiscordController> logger, IDiscordBotService botService, IProcessRunner processRunner)
         {
             _configurationService = configurationService;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
             _botService = botService;
+            _processRunner = processRunner;
         }
 
         /// <summary>
@@ -258,6 +261,37 @@ namespace Listenarr.Api.Controllers
                     return Ok(new { success = true, message = "Bot is already running", status = "running" });
                 }
 
+                // Run lightweight diagnostics first so we can surface missing files/node
+                try
+                {
+                    var diagAction = await Diagnostics();
+                    if (diagAction is OkObjectResult okObj && okObj.Value != null)
+                    {
+                        // Serialize the diagnostics value and inspect key fields
+                        var serialized = JsonSerializer.Serialize(okObj.Value);
+                        using var doc = JsonDocument.Parse(serialized);
+                        var root = doc.RootElement;
+
+                        var botDirExists = root.TryGetProperty("botDirExists", out var bd) && bd.GetBoolean();
+                        var indexExists = root.TryGetProperty("indexExists", out var ix) && ix.GetBoolean();
+                        var nodeError = root.TryGetProperty("nodeError", out var ne) && ne.ValueKind != JsonValueKind.Null ? ne.GetString() : null;
+
+                        if (!botDirExists || !indexExists)
+                        {
+                            return BadRequest(new { success = false, message = "Discord bot files are missing", diagnostics = root });
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(nodeError))
+                        {
+                            return BadRequest(new { success = false, message = "Node.js not available or returned an error", nodeError });
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to run diagnostics before starting bot");
+                }
+
                 var started = await _botService.StartBotAsync();
                 if (started)
                 {
@@ -331,7 +365,7 @@ namespace Listenarr.Api.Controllers
         /// Returns whether the bot directory and index.js exist and whether `node` is available.
         /// </summary>
         [HttpGet("diagnostics")]
-        public IActionResult Diagnostics()
+        public async Task<IActionResult> Diagnostics()
         {
             try
             {
@@ -359,13 +393,12 @@ namespace Listenarr.Api.Controllers
                         WorkingDirectory = botDirectory
                     };
 
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    if (proc != null)
+                    var res = await _processRunner.RunAsync(psi, 2000);
+                    nodeVersion = res.Stdout?.Trim();
+                    nodeError = res.Stderr?.Trim();
+                    if (res.TimedOut)
                     {
-                        // Give it up to 2s to respond
-                        if (!proc.WaitForExit(2000)) proc.Kill(true);
-                        nodeVersion = proc.StandardOutput.ReadToEnd()?.Trim();
-                        nodeError = proc.StandardError.ReadToEnd()?.Trim();
+                        nodeError = (nodeError ?? string.Empty) + " (timed out)";
                     }
                 }
                 catch (Exception ex)

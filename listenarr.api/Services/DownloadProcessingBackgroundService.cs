@@ -637,12 +637,22 @@ namespace Listenarr.Api.Services
                             // Ensure unique destination to avoid overwriting
                             _logger.LogDebug("Resolving unique destination for background job: {Dest}", destinationPath);
                             var uniqueDest = FileUtils.GetUniqueDestinationPath(destinationPath);
+                            var fileMover = scope.ServiceProvider.GetService<IFileMover>();
                             if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
                             {
                                 try
                                 {
-                                    File.Copy(sourcePath, uniqueDest, true);
-                                    job.AddLogEntry($"Copied file: {sourcePath} -> {uniqueDest}");
+                                    if (fileMover != null)
+                                    {
+                                        var ok = await fileMover.CopyFileAsync(sourcePath, uniqueDest);
+                                        if (ok) job.AddLogEntry($"Copied file: {sourcePath} -> {uniqueDest}");
+                                        else throw new IOException("CopyFileAsync failed");
+                                    }
+                                    else
+                                    {
+                                        File.Copy(sourcePath, uniqueDest, true);
+                                        job.AddLogEntry($"Copied file: {sourcePath} -> {uniqueDest}");
+                                    }
                                 }
                                 catch (FileNotFoundException fnf)
                                 {
@@ -690,8 +700,17 @@ namespace Listenarr.Api.Services
                                 // Default to Move
                                 try
                                 {
-                                    File.Move(sourcePath, uniqueDest, true);
-                                    job.AddLogEntry($"Moved file: {sourcePath} -> {uniqueDest}");
+                                    if (fileMover != null)
+                                    {
+                                        var ok = await fileMover.MoveFileAsync(sourcePath, uniqueDest);
+                                        if (ok) job.AddLogEntry($"Moved file: {sourcePath} -> {uniqueDest}");
+                                        else throw new IOException("MoveFileAsync failed");
+                                    }
+                                    else
+                                    {
+                                        File.Move(sourcePath, uniqueDest, true);
+                                        job.AddLogEntry($"Moved file: {sourcePath} -> {uniqueDest}");
+                                    }
                                 }
                                 catch (FileNotFoundException fnf)
                                 {

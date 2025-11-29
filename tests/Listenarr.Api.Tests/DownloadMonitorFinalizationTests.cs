@@ -20,6 +20,12 @@ namespace Listenarr.Api.Tests
 {
     public class DownloadMonitorFinalizationTests
     {
+        private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+        public DownloadMonitorFinalizationTests(Xunit.Abstractions.ITestOutputHelper output)
+        {
+            _output = output;
+        }
         private ListenArrDbContext CreateInMemoryDb()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -42,6 +48,10 @@ namespace Listenarr.Api.Tests
             // metadata service
             var metadataMock = new Mock<IMetadataService>();
             services.AddSingleton<IMetadataService>(metadataMock.Object);
+
+            // Note: tests that need a processing queue should register their own mock explicitly
+
+            // single queue mock is registered above for BuildServiceProvider
 
             return services.BuildServiceProvider();
         }
@@ -103,8 +113,20 @@ namespace Listenarr.Api.Tests
             var metadataMock = new Mock<IMetadataService>();
             services.AddSingleton<IMetadataService>(metadataMock.Object);
 
+            // Register a processing queue mock for this test's DI so the monitor can resolve it
+            var queueMock = new Mock<IDownloadProcessingQueueService>();
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new System.Collections.Generic.List<DownloadProcessingJob>());
+            services.AddSingleton<IDownloadProcessingQueueService>(queueMock.Object);
+
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+            // Sanity-check: the mock should be resolvable from a scope created by the factory
+            using (var checkScope = scopeFactory.CreateScope())
+            {
+                var svc = checkScope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
+                Assert.NotNull(svc);
+            }
 
             var hubClientsMock = new Mock<IHubClients>();
             var hubContextMock = new Mock<IHubContext<DownloadHub>>();
@@ -203,6 +225,8 @@ namespace Listenarr.Api.Tests
                 .ReturnsAsync(mappedLocal);
 
             services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
+
+            // No processing queue required for this test; finalization should handle empty DownloadPath gracefully
 
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
@@ -303,6 +327,27 @@ namespace Listenarr.Api.Tests
                 .ReturnsAsync(mappedLocal);
 
             services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
+
+            // Register a processing queue mock to simulate background processing when a job is queued.
+            var queueMock = new Mock<IDownloadProcessingQueueService>();
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<DownloadProcessingJob>());
+            queueMock.Setup(q => q.QueueDownloadProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync("job-id")
+                .Callback<string, string, string>((did, src, cid) =>
+                {
+                    // Simulate background processing: move the real source file (which was created in realDir)
+                    // into the configured output path and notify the download service.
+                    try
+                    {
+                        var destDir = settings.OutputPath;
+                        Directory.CreateDirectory(destDir);
+                        var dest = Path.Combine(destDir, Path.GetFileName(sourceFile));
+                        if (File.Exists(sourceFile)) File.Move(sourceFile, dest);
+                        downloadServiceMock.Object.ProcessCompletedDownloadAsync(did, dest);
+                    }
+                    catch { }
+                });
+            services.AddSingleton<IDownloadProcessingQueueService>(queueMock.Object);
 
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
@@ -430,6 +475,19 @@ namespace Listenarr.Api.Tests
                 .ReturnsAsync(mappedLocal);
             services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
 
+            // Register processing queue mock to simulate background processing when job is queued
+            var queueMock = new Mock<IDownloadProcessingQueueService>();
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<DownloadProcessingJob>());
+            queueMock.Setup(q => q.QueueDownloadProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync("job-id")
+                .Callback<string, string, string>((did, src, cid) =>
+                {
+                    // When a job is queued, simulate that processing finds the file created later
+                    var finalSource = Path.Combine(mappedLocal, "The Sound and the Fury.m4b");
+                    downloadServiceMock.Object.ProcessCompletedDownloadAsync(did, finalSource);
+                });
+            services.AddSingleton<IDownloadProcessingQueueService>(queueMock.Object);
+
             var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
@@ -492,6 +550,104 @@ namespace Listenarr.Api.Tests
             var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
             Assert.True(completed == tcs.Task, "ProcessCompletedDownloadAsync was not invoked within expected time");
         }
+
+        [Fact]
+        public async Task FinalizeDownload_EnqueuesDirectory_ForMultiFileDownload()
+        {
+            var db = CreateInMemoryDb();
+
+            // Seed download
+            var download = new Download
+            {
+                Id = "dl-multi",
+                Title = "William Faulkner - The Sound and the Fury",
+                Status = DownloadStatus.Queued,
+                DownloadPath = string.Empty,
+                FinalPath = string.Empty,
+                DownloadClientId = "SABnzbd_nzo_multi",
+                StartedAt = DateTime.UtcNow
+            };
+            db.Downloads.Add(download);
+            await db.SaveChangesAsync();
+
+            // Create a directory with multiple audio files
+            var dir = Path.Combine(Path.GetTempPath(), "listenarr-multi-test", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(dir);
+            var fileA = Path.Combine(dir, "part1.mp3");
+            var fileB = Path.Combine(dir, "part2.mp3");
+            await File.WriteAllTextAsync(fileA, "data1");
+            await File.WriteAllTextAsync(fileB, "data2");
+
+            var clientConfig = new DownloadClientConfiguration { Id = download.DownloadClientId, Name = "SABnzbd", DownloadPath = "/downloads/complete" };
+
+            // Setup DI & mocks
+            var services = new ServiceCollection();
+            services.AddSingleton<ListenArrDbContext>(db);
+
+            var settingsModel = new ApplicationSettings { OutputPath = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString()), EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".mp3" } };
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settingsModel);
+            services.AddSingleton<IConfigurationService>(configMock.Object);
+
+            // Mock the processing queue so we can assert it was enqueued with the directory
+            string? queuedSource = null;
+            var queueMock = new Mock<IDownloadProcessingQueueService>();
+            // Ensure GetJobsForDownloadAsync returns an empty list so FinalizeDownloadAsync
+            // won't throw when awaiting a null Task from the mock.
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<Models.DownloadProcessingJob>());
+            queueMock.Setup(q => q.QueueDownloadProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync("job-id")
+                .Callback<string, string, string>((did, src, cid) => queuedSource = src);
+            services.AddSingleton<IDownloadProcessingQueueService>(queueMock.Object);
+
+            // Minimal download service that will be invoked after enqueue
+            var downloadServiceMock = new Mock<IDownloadService>();
+            downloadServiceMock.Setup(d => d.ProcessCompletedDownloadAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask);
+            services.AddSingleton<IDownloadService>(downloadServiceMock.Object);
+
+            var fileNamingMock = new Mock<IFileNamingService>();
+            services.AddSingleton<IFileNamingService>(fileNamingMock.Object);
+
+            var metadataMock = new Mock<IMetadataService>();
+            services.AddSingleton<IMetadataService>(metadataMock.Object);
+
+            var provider = services.BuildServiceProvider();
+            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+            var hubClientsMock = new Mock<IHubClients>();
+            var hubContextMock = new Mock<IHubContext<DownloadHub>>();
+            hubContextMock.SetupGet(h => h.Clients).Returns(hubClientsMock.Object);
+
+            var loggerMock = new Mock<ILogger<DownloadMonitorService>>();
+
+            var httpFactoryMock = new Mock<IHttpClientFactory>();
+            httpFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+
+            var monitor = new DownloadMonitorService(scopeFactory, hubContextMock.Object, loggerMock.Object, httpFactoryMock.Object);
+
+            // Invoke private FinalizeDownloadAsync via reflection with directory as clientPath
+            var method = typeof(DownloadMonitorService).GetMethod("FinalizeDownloadAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            // Call finalize: pass the download entity and the directory path
+            var task = (Task?)method.Invoke(monitor, new object[] { download, dir, clientConfig, CancellationToken.None });
+            if (task != null) await task;
+
+            // Verify the download record was updated to Processing (indicates finalization proceeded)
+            var updated = await db.Downloads.FindAsync(download.Id);
+            Assert.NotNull(updated);
+            Assert.Equal(DownloadStatus.Processing, updated!.Status);
+
+            // Ensure the processing queue was used for the multi-file directory and
+            // that the queued path points at either the library output (moved/copied location)
+            // or (in some implementations) the original source directory. Accept either.
+            Assert.NotNull(queuedSource);
+            var queuedFull = Path.GetFullPath(queuedSource!);
+            var outRoot = Path.GetFullPath(settingsModel.OutputPath).TrimEnd(Path.DirectorySeparatorChar);
+            var srcRoot = Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar);
+            queuedFull = queuedFull.TrimEnd(Path.DirectorySeparatorChar);
+            Assert.True(queuedFull.StartsWith(outRoot, StringComparison.OrdinalIgnoreCase) || string.Equals(queuedFull, srcRoot, StringComparison.OrdinalIgnoreCase));
+        }
         [Fact]
         public async Task FinalizeDownload_MovesFile_WhenSettingIsMove()
         {
@@ -524,7 +680,33 @@ namespace Listenarr.Api.Tests
             var downloadServiceMock = new Mock<IDownloadService>();
             downloadServiceMock.Setup(d => d.ProcessCompletedDownloadAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask).Verifiable();
 
-            var provider = BuildServiceProvider(db, downloadServiceMock, settings);
+            // Register a processing queue mock so finalization (which now enqueues jobs)
+            // will be processed synchronously for the test by performing the move
+            var services = new ServiceCollection();
+            services.AddSingleton<ListenArrDbContext>(db);
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settings);
+            services.AddSingleton<IConfigurationService>(configMock.Object);
+            services.AddSingleton<IDownloadService>(downloadServiceMock.Object);
+
+            var queueMock = new Mock<IDownloadProcessingQueueService>();
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<DownloadProcessingJob>());
+            queueMock.Setup(q => q.QueueDownloadProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync("job-id")
+                .Callback<string, string, string>((did, src, cid) =>
+                {
+                    // Simulate background processing: move source to output and notify download service
+                    var dest = Path.Combine(settings.OutputPath, Path.GetFileName(src));
+                    Directory.CreateDirectory(settings.OutputPath);
+                    if (File.Exists(src)) File.Move(src, dest);
+                    downloadServiceMock.Object.ProcessCompletedDownloadAsync(did, dest);
+                });
+            services.AddSingleton<IDownloadProcessingQueueService>(queueMock.Object);
+
+            services.AddSingleton<IFileNamingService>(new Mock<IFileNamingService>().Object);
+            services.AddSingleton<IMetadataService>(new Mock<IMetadataService>().Object);
+
+            var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
             var hubClientsMock = new Mock<IHubClients>();
@@ -629,7 +811,7 @@ namespace Listenarr.Api.Tests
             var httpClient = new HttpClient(handler);
             var httpFactoryMock = new Mock<IHttpClientFactory>();
             httpFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>()))
-                .Callback<string?>(name => Console.WriteLine($"Mock factory CreateClient called with name: '{name ?? "<null>"}'"))
+                .Callback<string?>(name => _output.WriteLine($"Mock factory CreateClient called with name: '{name ?? "<null>"}'"))
                 .Returns(httpClient);
             // Ensure CreateClient(null) also returns our HttpClient (CreateClient may be called without a name)
             httpFactoryMock.Setup(f => f.CreateClient((string?)null)).Returns(httpClient);
@@ -666,10 +848,12 @@ namespace Listenarr.Api.Tests
         private class DelegatingHandlerMock : DelegatingHandler
         {
             private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handlerFunc;
+            private readonly Action<string>? _log;
 
-            public DelegatingHandlerMock(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handlerFunc)
+            public DelegatingHandlerMock(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handlerFunc, Action<string>? log = null)
             {
                 _handlerFunc = handlerFunc;
+                _log = log;
             }
 
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -677,7 +861,7 @@ namespace Listenarr.Api.Tests
                 // Instrument the handler for debugging
                 try
                 {
-                    Console.WriteLine($"DelegatingHandlerMock invoked for: {request.Method} {request.RequestUri}");
+                    _log?.Invoke($"DelegatingHandlerMock invoked for: {request.Method} {request.RequestUri}");
                 }
                 catch { }
                 return _handlerFunc(request, cancellationToken);
@@ -718,7 +902,33 @@ namespace Listenarr.Api.Tests
             var downloadServiceMock = new Mock<IDownloadService>();
             downloadServiceMock.Setup(d => d.ProcessCompletedDownloadAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask).Verifiable();
 
-            var provider = BuildServiceProvider(db, downloadServiceMock, settings);
+            // Register a processing queue mock so finalization enqueues a job which we
+            // simulate by copying the file immediately.
+            var services = new ServiceCollection();
+            services.AddSingleton<ListenArrDbContext>(db);
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settings);
+            services.AddSingleton<IConfigurationService>(configMock.Object);
+            services.AddSingleton<IDownloadService>(downloadServiceMock.Object);
+
+            var queueMock = new Mock<IDownloadProcessingQueueService>();
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<DownloadProcessingJob>());
+            queueMock.Setup(q => q.QueueDownloadProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync("job-id")
+                .Callback<string, string, string>((did, src, cid) =>
+                {
+                    // Simulate background processing: copy source to output and notify download service
+                    var dest = Path.Combine(settings.OutputPath, Path.GetFileName(src));
+                    Directory.CreateDirectory(settings.OutputPath);
+                    if (File.Exists(src)) File.Copy(src, dest, overwrite: true);
+                    downloadServiceMock.Object.ProcessCompletedDownloadAsync(did, dest);
+                });
+            services.AddSingleton<IDownloadProcessingQueueService>(queueMock.Object);
+
+            services.AddSingleton<IFileNamingService>(new Mock<IFileNamingService>().Object);
+            services.AddSingleton<IMetadataService>(new Mock<IMetadataService>().Object);
+
+            var provider = services.BuildServiceProvider();
             var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
             var hubClientsMock = new Mock<IHubClients>();

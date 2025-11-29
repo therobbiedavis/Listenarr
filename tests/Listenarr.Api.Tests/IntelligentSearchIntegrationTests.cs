@@ -35,6 +35,9 @@ namespace Listenarr.Api.Tests
 
                     // Ensure Amazon search returns no results for deterministic output
                     services.AddSingleton<IAmazonSearchService>(sp => new TestAmazonSearchService());
+
+                        // Prevent external HTTP calls for images during tests by injecting a test image cache
+                        services.AddSingleton<IImageCacheService>(sp => new TestImageCacheService());
                 });
             }).CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
@@ -111,6 +114,31 @@ namespace Listenarr.Api.Tests
         {
             // Tests don't need product page scraping; return null
             return Task.FromResult<AmazonSearchResult?>(null);
+        }
+    }
+
+    // Test image cache that avoids external network calls
+    internal class TestImageCacheService : IImageCacheService
+    {
+        public Task<string?> DownloadAndCacheImageAsync(string imageUrl, string identifier)
+        {
+            // Return a deterministic, non-network path used by tests
+            return Task.FromResult<string?>("cache/images/test.jpg");
+        }
+
+        public Task<string?> MoveToLibraryStorageAsync(string identifier, string? imageUrl = null)
+        {
+            return Task.FromResult<string?>("cache/images/library/test.jpg");
+        }
+
+        public Task<string?> GetCachedImagePathAsync(string identifier)
+        {
+            return Task.FromResult<string?>("cache/images/test.jpg");
+        }
+
+        public Task ClearTempCacheAsync()
+        {
+            return Task.CompletedTask;
         }
     }
 }

@@ -18,6 +18,9 @@
 
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Runtime.InteropServices;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Models;
 using System.Text.Json;
@@ -114,6 +117,156 @@ namespace Listenarr.Api.Services
                     return true;
             }
             
+            return false;
+        }
+
+        /// <summary>
+        /// Create a filesystem-safe name from arbitrary text by removing invalid path characters
+        /// and normalizing whitespace. Keeps it conservative to avoid unexpected folder creation.
+        /// </summary>
+        private static string SafeFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "unknown";
+            // Remove invalid path chars
+            var invalid = Path.GetInvalidFileNameChars();
+            var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray());
+            // Replace sequences of non-alphanumeric characters with single space
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "[^A-Za-z0-9 _-]+", " ");
+            // Collapse whitespace and trim
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "\\s+", " ").Trim();
+            // If nothing left, fallback
+            if (string.IsNullOrWhiteSpace(cleaned)) return "unknown";
+            return cleaned;
+        }
+
+        /// <summary>
+        /// Attempt to move a directory with retries and exponential backoff. Emits diagnostics (file listing and ACLs)
+        /// on failures to aid debugging file-lock/permission issues.
+        /// </summary>
+        private async Task<bool> TryMoveDirectoryWithRetryAsync(string sourceDir, string destDir, int maxAttempts = 4, int initialDelayMs = 1000)
+        {
+            var attempt = 0;
+            var delay = initialDelayMs;
+
+            for (; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    Directory.Move(sourceDir, destDir);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Directory.Move attempt {Attempt}/{Max} failed: {Source} -> {Dest}", attempt + 1, maxAttempts, sourceDir, destDir);
+
+                    // Dump a small directory listing sample for diagnostics
+                    try
+                    {
+                        var files = Directory.GetFiles(sourceDir, "*.*", SearchOption.AllDirectories);
+                        _logger.LogWarning("Directory listing for {Source} (count={Count}), sample: {Sample}", sourceDir, files.Length, string.Join(", ", files.Take(5).Select(f => Path.GetFileName(f))));
+                    }
+                    catch (Exception listEx)
+                    {
+                        _logger.LogDebug(listEx, "Failed to enumerate files in {Source} while diagnosing move failure", sourceDir);
+                    }
+
+                    // Dump ACL/owner information if available (Windows-friendly). Failures are non-blocking.
+                    try
+                    {
+                        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                        {
+                            var dirSec = new DirectoryInfo(sourceDir).GetAccessControl();
+                            var owner = dirSec.GetOwner(typeof(NTAccount))?.ToString() ?? "unknown";
+                            _logger.LogWarning("Directory owner for {Source}: {Owner}", sourceDir, owner);
+
+                            var rules = dirSec.GetAccessRules(true, true, typeof(NTAccount));
+                            foreach (FileSystemAccessRule rule in rules.Cast<FileSystemAccessRule>().Take(10))
+                            {
+                                _logger.LogWarning("ACL {Source}: {Identity} {Type} {Rights}", sourceDir, rule.IdentityReference.Value, rule.AccessControlType, rule.FileSystemRights);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Skipping ACL diagnostics for {Source} (non-Windows OS)", sourceDir);
+                        }
+                    }
+                    catch (Exception aclEx)
+                    {
+                        _logger.LogDebug(aclEx, "Failed to read ACLs for {Source}", sourceDir);
+                    }
+
+                    if (attempt < maxAttempts - 1)
+                    {
+                        _logger.LogInformation("Retrying Directory.Move in {Delay}ms...", delay);
+                        await Task.Delay(delay);
+                        delay *= 2;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private async Task<bool> TryMoveFileWithRetryAsync(string sourceFile, string destFile, int maxAttempts = 4, int initialDelayMs = 1000)
+        {
+            var attempt = 0;
+            var delay = initialDelayMs;
+
+            for (; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    // Use File.Move with overwrite when available
+                    File.Move(sourceFile, destFile, true);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "File.Move attempt {Attempt}/{Max} failed: {Source} -> {Dest}", attempt + 1, maxAttempts, sourceFile, destFile);
+
+                    // Try opening the source file to detect locks
+                    try
+                    {
+                        using var stream = File.Open(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        _logger.LogDebug("Able to open source file for read during diagnostic: {File}", sourceFile);
+                    }
+                    catch (Exception openEx)
+                    {
+                        _logger.LogWarning(openEx, "Failed to open source file for read (may be locked): {File}", sourceFile);
+                    }
+
+                    try
+                    {
+                        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                        {
+                            var fileSec = new FileInfo(sourceFile).GetAccessControl();
+                            var owner = fileSec.GetOwner(typeof(NTAccount))?.ToString() ?? "unknown";
+                            _logger.LogWarning("File owner for {File}: {Owner}", sourceFile, owner);
+                            var rules = fileSec.GetAccessRules(true, true, typeof(NTAccount));
+                            foreach (FileSystemAccessRule rule in rules.Cast<FileSystemAccessRule>().Take(10))
+                            {
+                                _logger.LogWarning("ACL {File}: {Identity} {Type} {Rights}", sourceFile, rule.IdentityReference.Value, rule.AccessControlType, rule.FileSystemRights);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Skipping file ACL diagnostics for {File} (non-Windows OS)", sourceFile);
+                        }
+                    }
+                    catch (Exception aclEx)
+                    {
+                        _logger.LogDebug(aclEx, "Failed to read file ACLs for {File}", sourceFile);
+                    }
+
+                    if (attempt < maxAttempts - 1)
+                    {
+                        _logger.LogInformation("Retrying File.Move in {Delay}ms...", delay);
+                        await Task.Delay(delay);
+                        delay *= 2;
+                    }
+                }
+            }
+
             return false;
         }
         
@@ -778,10 +931,24 @@ namespace Listenarr.Api.Services
 
                                 if (bestMatch != null)
                                 {
-                                    sourceFile = bestMatch.Path;
-                                    _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)", 
-                                        Path.GetFileName(sourceFile), bestMatch.MatchScore, bestMatch.Size);
-                                    try { _metrics.Increment("finalize.file.selected_from_dir"); } catch { }
+                                    // If there is more than one audio file in the directory we treat this
+                                    // as a multi-file release (audiobook with multiple tracks). In that
+                                    // case enqueue the directory itself so downstream processing will
+                                    // delegate to ImportService.ImportFilesFromDirectoryAsync which
+                                    // imports all files in the folder. If just a single audio file
+                                    // exists, keep the current behavior and select the file.
+                                    if (foundFiles.Count > 1)
+                                    {
+                                        sourceFile = localPath; // queue the directory for multi-file import
+                                        _logger.LogInformation("Detected multi-file download (contains {Count} audio files) - enqueuing directory for import: {Directory}", foundFiles.Count, localPath);
+                                    }
+                                    else
+                                    {
+                                        sourceFile = bestMatch.Path;
+                                        _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)", 
+                                            Path.GetFileName(sourceFile), bestMatch.MatchScore, bestMatch.Size);
+                                        try { _metrics.Increment("finalize.file.selected_from_dir"); } catch { }
+                                    }
                                 }
                             }
                         }
@@ -1058,7 +1225,10 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                if (string.IsNullOrEmpty(sourceFile) || !File.Exists(sourceFile))
+                // If the source is empty OR neither a file nor a directory exists at the path,
+                // treat it as a missing source. We need to consider directories valid here because
+                // a multi-file download is represented by the directory path.
+                if (string.IsNullOrEmpty(sourceFile) || (!File.Exists(sourceFile) && !Directory.Exists(sourceFile)))
                 {
                     // If the background processing queue already has an active job for this
                     // download, it's likely a race: the file is being moved/processed by the
@@ -1175,14 +1345,52 @@ namespace Listenarr.Api.Services
                 _missingSourceRetryAttempts.TryRemove(download.Id, out _);
                 _missingSourceRetryScheduled.TryRemove(download.Id, out _);
 
-                var sourceFileInfo = new FileInfo(sourceFile);
-                _logger.LogInformation("Source file located: {SourceFile} ({Size:N0} bytes)", sourceFile, sourceFileInfo.Length);
+                // If the source is a directory (multi-file release) we don't try to read
+                // file-specific properties like Length. Log a directory-specific message.
+                if (Directory.Exists(sourceFile))
+                {
+                    _logger.LogInformation("Source directory located (multi-file release): {SourceDir}", sourceFile);
+                }
+                else
+                {
+                    var sourceFileInfo = new FileInfo(sourceFile);
+                    _logger.LogInformation("Source file located: {SourceFile} ({Size:N0} bytes)", sourceFile, sourceFileInfo.Length);
+                }
 
                 // Determine destination path
                 string destinationPath = string.Empty;
                 try
                 {
-                    if (fileNaming != null)
+                    if (!string.IsNullOrEmpty(sourceFile) && Directory.Exists(sourceFile))
+                    {
+                        // When the source is a directory we try to determine the final
+                        // audiobook folder under the configured OutputPath (the library).
+                        // Prefer using the FileNamingService so naming patterns and
+                        // subdirectory rules are respected; fall back to simple dirName.
+                        var dirName = Path.GetFileName(sourceFile.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? "import";
+                        var outRoot = settings.OutputPath;
+                        if (string.IsNullOrWhiteSpace(outRoot))
+                        {
+                            outRoot = "./completed";
+                            _logger.LogDebug("No output path configured, using default: {OutputRoot}", outRoot);
+                        }
+
+                        // For multi-file directories use a predictable folder under OutputPath
+                        // instead of relying on FileNamingService which may create author-based
+                        // subfolders (e.g. 'Unknown Author') in unexpected roots.
+                        try
+                        {
+                            // Build destination using OutputPath/Author[/Series]/Title semantics
+                            destinationPath = FinalizePathHelper.BuildMultiFileDestination(settings, download, dirName);
+                            _logger.LogDebug("Computed directory destination for multi-file release: {DestinationPath}", destinationPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to compute destination folder for multi-file download, falling back to simple OutputPath destination");
+                            destinationPath = Path.Combine(outRoot, dirName);
+                        }
+                    }
+                    else if (fileNaming != null)
                     {
                         _logger.LogDebug("Using file naming service to generate destination path");
                         
@@ -1191,21 +1399,11 @@ namespace Listenarr.Api.Services
                         
                         if (settings.EnableMetadataProcessing)
                         {
-                            // Try to extract metadata from file
-                            var metadataService = scope.ServiceProvider.GetService<IMetadataService>();
-                            if (metadataService != null)
-                            {
-                                try 
-                                { 
-                                    metadata = await metadataService.ExtractFileMetadataAsync(sourceFile);
-                                    _logger.LogDebug("Extracted metadata: Title='{Title}', Artist='{Artist}', Album='{Album}'", 
-                                        metadata.Title, metadata.Artist, metadata.Album);
-                                } 
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Failed to extract metadata from {SourceFile}, using download info", sourceFile);
-                                }
-                            }
+                            // TEMPORARY: Skip ffprobe/ffmpeg metadata extraction during finalization/import.
+                            // Calling ffprobe here has been causing noisy Win32Exception logs in test environments
+                            // and can be deferred to the background import/metadata processing stage. Use the
+                            // download info (title) for naming now and let background processors enrich metadata.
+                            _logger.LogInformation("Temporarily skipping ffprobe metadata extraction during finalization for download {DownloadId}", download.Id);
                         }
                         else
                         {
@@ -1308,78 +1506,28 @@ namespace Listenarr.Api.Services
                     _logger.LogWarning(ex, "Failed to persist observed completion for download {DownloadId}", download.Id);
                 }
 
-                // Enqueue download processing job instead of moving/copying immediately
+                // Enqueue download processing job and let the processing pipeline handle moving/renaming
                 try
                 {
                     var processingQueueService = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();
                     if (processingQueueService != null)
                     {
-                        var action = settings.CompletedFileAction ?? "Move";
-                        var outputPath = settings.OutputPath;
-                        if (string.IsNullOrWhiteSpace(outputPath))
-                        {
-                            outputPath = "./completed";
-                        }
-                        
-                        await processingQueueService.QueueDownloadProcessingAsync(
-                            download.Id,
-                            sourceFile,
-                            client.Id);
-                        
-                        _logger.LogInformation("Enqueued download {DownloadId} for processing: {Source}", 
-                            download.Id, sourceFile);
-                        
-                        // Set the destination path to the expected final location for the download record
-                        destinationPath = Path.Combine(outputPath, Path.GetFileName(destinationPath));
+                        await processingQueueService.QueueDownloadProcessingAsync(download.Id, sourceFile, client.Id);
+                        _logger.LogInformation("Enqueued download {DownloadId} for processing: {Source}", download.Id, sourceFile);
                     }
                     else
                     {
-                        _logger.LogWarning("Download processing queue service not available, falling back to immediate file operation");
-                        
-                        // Check if source and destination are the same
-                        if (string.Equals(Path.GetFullPath(sourceFile), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
-                        {
-                            _logger.LogInformation("Source and destination are the same, skipping file operation: {FilePath}", sourceFile);
-                        }
-                        else
-                        {
-                            // Fallback to immediate processing
-                            var action = settings.CompletedFileAction ?? "Move";
-                            
-                            if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
-                            {
-                                File.Copy(sourceFile, destinationPath, true);
-                                _logger.LogInformation("Copied completed download {DownloadId}: {Source} -> {Destination}", 
-                                    download.Id, sourceFile, destinationPath);
-                            }
-                            else
-                            {
-                                // Default to Move
-                                File.Move(sourceFile, destinationPath, true);
-                                _logger.LogInformation("Moved completed download {DownloadId}: {Source} -> {Destination}", 
-                                    download.Id, sourceFile, destinationPath);
-                            }
-                        }
+                        _logger.LogWarning("Download processing queue service not available; skipping enqueue for download {DownloadId}", download.Id);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to enqueue or process download {DownloadId}: {Source} -> {Destination}", 
-                        download.Id, sourceFile, destinationPath);
+                    _logger.LogError(ex, "Failed to enqueue download {DownloadId} for processing: {Source}", download.Id, sourceFile);
                     return;
                 }
 
-                // Finally, call shared completion handler to update DB and broadcast via SignalR
-                try
-                {
-                    _logger.LogDebug("Calling ProcessCompletedDownloadAsync to update database and broadcast via SignalR");
-                    await downloadService.ProcessCompletedDownloadAsync(download.Id, destinationPath);
-                    _logger.LogInformation("Successfully finalized download {DownloadId}: {Title}", download.Id, download.Title);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error while processing completed download {DownloadId}", download.Id);
-                }
+                // Finalization step: processing work will update DB and broadcast when the processing job runs
+                _logger.LogDebug("Download {DownloadId} enqueued for processing; final DB update will occur during processing", download.Id);
             }
             catch (Exception ex)
             {

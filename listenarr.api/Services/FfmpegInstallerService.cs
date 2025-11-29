@@ -19,15 +19,17 @@ namespace Listenarr.Api.Services
         private readonly ILogger<FfmpegInstallerService> _logger;
     private readonly HttpClient _httpClient;
     private readonly IStartupConfigService _startupConfigService;
+        private readonly IProcessRunner? _processRunner;
         // Allow disabling auto-download via environment variable
         private readonly bool _autoInstall;
 
-        public FfmpegInstallerService(ILogger<FfmpegInstallerService> logger, IStartupConfigService startupConfigService)
+        public FfmpegInstallerService(ILogger<FfmpegInstallerService> logger, IStartupConfigService startupConfigService, IProcessRunner? processRunner = null)
         {
             _logger = logger;
             _httpClient = new HttpClient();
             _autoInstall = Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE")?.ToLower() != "false"; // default true
             _startupConfigService = startupConfigService;
+            _processRunner = processRunner;
         }
 
         private static async Task TryDeleteFileAsync(string path, int retries = 3, int delayMs = 100, CancellationToken cancellationToken = default)
@@ -54,7 +56,7 @@ namespace Listenarr.Api.Services
         /// </summary>
         public Task<string?> GetFfprobePathAsync(bool ensureInstalled = false)
         {
-            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config", "ffmpeg");
+            var baseDir = Path.Combine(AppContext.BaseDirectory, "config", "ffmpeg");
             Directory.CreateDirectory(baseDir);
 
             var ffprobeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffprobe.exe" : "ffprobe";
@@ -76,7 +78,7 @@ namespace Listenarr.Api.Services
         /// </summary>
         public async Task<string?> EnsureFfprobeInstalledAsync()
         {
-            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config", "ffmpeg");
+            var baseDir = Path.Combine(AppContext.BaseDirectory, "config", "ffmpeg");
             Directory.CreateDirectory(baseDir);
 
             var ffprobeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffprobe.exe" : "ffprobe";
@@ -238,9 +240,17 @@ namespace Listenarr.Api.Services
                                 UseShellExecute = false,
                                 CreateNoWindow = true
                             };
-                            using var p = System.Diagnostics.Process.Start(psi);
-                            p?.WaitForExit(30000);
-                            await TryDeleteFileAsync(tmpFile);
+
+                            if (_processRunner != null)
+                            {
+                                await _processRunner.RunAsync(psi, 30000);
+                                await TryDeleteFileAsync(tmpFile);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("IProcessRunner is not available; skipping system 'tar' extraction fallback for {Tmp}", tmpFile);
+                                await TryDeleteFileAsync(tmpFile);
+                            }
                         }
                         catch { /* best-effort */ }
                     }
@@ -257,21 +267,28 @@ namespace Listenarr.Api.Services
                         var candidates = Directory.GetFiles(baseDir, "ffprobe*", SearchOption.AllDirectories);
                         foreach (var cand in candidates)
                         {
-                            try
-                            {
-                                var psiCh = new System.Diagnostics.ProcessStartInfo
+                                try
                                 {
-                                    FileName = "chmod",
-                                    Arguments = $"+x \"{cand}\"",
-                                    RedirectStandardOutput = true,
-                                    RedirectStandardError = true,
-                                    UseShellExecute = false,
-                                    CreateNoWindow = true
-                                };
-                                using var p3 = System.Diagnostics.Process.Start(psiCh);
-                                p3?.WaitForExit(3000);
-                            }
-                            catch { /* best effort */ }
+                                    var psiCh = new System.Diagnostics.ProcessStartInfo
+                                    {
+                                        FileName = "chmod",
+                                        Arguments = $"+x \"{cand}\"",
+                                        RedirectStandardOutput = true,
+                                        RedirectStandardError = true,
+                                        UseShellExecute = false,
+                                        CreateNoWindow = true
+                                    };
+
+                                    if (_processRunner != null)
+                                    {
+                                        await _processRunner.RunAsync(psiCh, 3000);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("IProcessRunner is not available; skipping system 'chmod' fallback for {Candidate}", cand);
+                                    }
+                                }
+                                catch { /* best effort */ }
                         }
                     }
                     catch { /* best effort */ }
@@ -364,8 +381,15 @@ namespace Listenarr.Api.Services
                                         UseShellExecute = false,
                                         CreateNoWindow = true
                                     };
-                                    using var p3 = System.Diagnostics.Process.Start(psiCh);
-                                    p3?.WaitForExit(3000);
+
+                                    if (_processRunner != null)
+                                    {
+                                        await _processRunner.RunAsync(psiCh, 3000);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("IProcessRunner is not available; skipping system 'chmod' fallback for {Dest}", dest);
+                                    }
                                 }
                                 catch { /* best effort */ }
                             }

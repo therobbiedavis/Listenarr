@@ -18,6 +18,7 @@ namespace Listenarr.Api.Services
         private readonly IStartupConfigService _startupConfigService;
         private readonly IHostEnvironment _hostEnvironment;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IProcessRunner? _processRunner;
         private Process? _botProcess;
         private readonly object _processLock = new object();
 
@@ -25,12 +26,14 @@ namespace Listenarr.Api.Services
             ILogger<DiscordBotService> logger, 
             IStartupConfigService startupConfigService, 
             IHostEnvironment hostEnvironment,
-            IHttpContextAccessor httpContextAccessor)
+            IHttpContextAccessor httpContextAccessor,
+            IProcessRunner? processRunner = null)
         {
             _logger = logger;
             _startupConfigService = startupConfigService;
             _hostEnvironment = hostEnvironment;
             _httpContextAccessor = httpContextAccessor;
+            _processRunner = processRunner;
         }
 
         public async Task<bool> StartBotAsync()
@@ -112,14 +115,79 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Starting Discord bot with command: {Command} {Args} in {WorkingDir}",
                     startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory);
 
+                // If we have a process runner available, use it to perform a quick pre-flight
+                // check (e.g. `node --version`) so we can give a clearer diagnostic when Node
+                // is not available on the PATH. We still start the long-running bot process
+                // via Process.Start so we retain the ability to kill and inspect the child.
+                if (_processRunner != null)
+                {
+                    try
+                    {
+                        var checkPsi = new ProcessStartInfo
+                        {
+                            FileName = "node",
+                            Arguments = "--version",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WorkingDirectory = botDirectory
+                        };
+
+                        var check = await _processRunner.RunAsync(checkPsi, 5000);
+                        if (check.TimedOut)
+                        {
+                            _logger.LogWarning("Pre-flight node --version check timed out");
+                        }
+                        else if (check.ExitCode != 0)
+                        {
+                            _logger.LogWarning("Pre-flight node --version returned non-zero (ExitCode={Code}). Stderr: {Err}", check.ExitCode, check.Stderr);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Detected node: {Out}", check.Stdout?.Trim());
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "node --version pre-flight check failed (node may not be available in PATH)");
+                    }
+                }
+
                 lock (_processLock)
                 {
-                    _botProcess = Process.Start(startInfo);
+                    if (_processRunner != null)
+                    {
+                        _botProcess = _processRunner.StartProcess(startInfo);
+                    }
+                    else
+                    {
+                        _botProcess = Process.Start(startInfo);
+                    }
+
                     if (_botProcess != null)
                     {
+                        try
+                        {
+                            _botProcess.EnableRaisingEvents = true;
+                        }
+                        catch { }
+
                         _botProcess.Exited += (sender, e) =>
                         {
-                            _logger.LogInformation("Discord bot process exited with code: {ExitCode}", _botProcess.ExitCode);
+                            try
+                            {
+                                if (sender is Process exitedProc)
+                                {
+                                    try
+                                    {
+                                        _logger.LogInformation("Discord bot process exited with code: {ExitCode}", exitedProc.ExitCode);
+                                    }
+                                    catch { }
+                                }
+                            }
+                            catch { }
+
                             // Clear the process reference so it can be restarted
                             lock (_processLock)
                             {
@@ -128,8 +196,16 @@ namespace Listenarr.Api.Services
                         };
 
                         // Start async reading of output to prevent deadlocks
-                        _ = Task.Run(() => ReadOutputAsync(_botProcess));
-                        _ = Task.Run(() => ReadErrorAsync(_botProcess));
+                        var localProc = _botProcess;
+                        if (localProc?.StandardOutput != null)
+                        {
+                            _ = Task.Run(() => ReadOutputAsync(localProc));
+                        }
+
+                        if (localProc?.StandardError != null)
+                        {
+                            _ = Task.Run(() => ReadErrorAsync(localProc));
+                        }
                     }
                 }
 
@@ -220,29 +296,63 @@ namespace Listenarr.Api.Services
             return fallbackUrl;
         }
 
-        public Task<bool> StopBotAsync()
+        public async Task<bool> StopBotAsync()
         {
             lock (_processLock)
             {
                 if (_botProcess == null || _botProcess.HasExited)
                 {
                     _logger.LogInformation("Bot is not running");
-                    return Task.FromResult(true);
+                    return true;
+                }
+            }
+
+            try
+            {
+                Process? proc;
+                lock (_processLock)
+                {
+                    proc = _botProcess;
                 }
 
+                if (proc == null)
+                {
+                    _logger.LogInformation("Bot is not running");
+                    return true;
+                }
+
+                _logger.LogInformation("Stopping Discord bot process");
                 try
                 {
-                    _logger.LogInformation("Stopping Discord bot process");
-                    _botProcess.Kill(true); // Kill entire process tree
-                    _botProcess.WaitForExit(5000); // Wait up to 5 seconds
-                    _botProcess = null;
-                    return Task.FromResult(true);
+                    proc.Kill(true); // Kill entire process tree
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to stop Discord bot");
-                    return Task.FromResult(false);
+                    _logger.LogWarning(ex, "Error killing bot process (may have exited already)");
                 }
+
+                // Wait up to 5 seconds for process exit
+                try
+                {
+                    using var cts = new CancellationTokenSource(5000);
+                    await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("Timed out waiting for Discord bot to exit after kill");
+                }
+
+                lock (_processLock)
+                {
+                    _botProcess = null;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to stop Discord bot");
+                return false;
             }
         }
 

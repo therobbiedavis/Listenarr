@@ -717,6 +717,44 @@ namespace Listenarr.Api.Migrations
                     b.ToTable("MoveJobs");
                 });
 
+            modelBuilder.Entity("Listenarr.Api.Models.ProcessExecutionLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Arguments")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ExitCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TimedOut")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Stdout")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stderr")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ProcessExecutionLogs");
+                });
+
             modelBuilder.Entity("Listenarr.Api.Models.QualityProfile", b =>
                 {
                     b.Property<int>("Id")

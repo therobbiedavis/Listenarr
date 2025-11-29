@@ -12,18 +12,19 @@ namespace Listenarr.Api.Tests
     internal class DelegatingHandlerMock : DelegatingHandler
     {
         private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handlerFunc;
+        private readonly Action<string>? _log;
 
-        public DelegatingHandlerMock(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handlerFunc)
+        public DelegatingHandlerMock(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handlerFunc, Action<string>? log = null)
         {
             _handlerFunc = handlerFunc ?? throw new ArgumentNullException(nameof(handlerFunc));
+            _log = log;
         }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             try
             {
-                // Lightweight instrumentation for debugging in CI/logs
-                Console.WriteLine($"DelegatingHandlerMock invoked for: {request.Method} {request.RequestUri}");
+                _log?.Invoke($"DelegatingHandlerMock invoked for: {request.Method} {request.RequestUri}");
             }
             catch { }
 

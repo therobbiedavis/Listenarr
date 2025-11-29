@@ -18,6 +18,7 @@
 
 using Serilog.Core;
 using Serilog.Events;
+using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Models;
@@ -103,9 +104,41 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception ex)
                 {
-                    // Don't log errors from the log sink to avoid infinite loops
-                    // Just write to console as a fallback
-                    Console.WriteLine($"[SignalRLogSink] Error broadcasting log: {ex.Message}");
+                    // If the host is shutting down the service provider may be disposed.
+                    // Swallow disposal-related exceptions (including when wrapped in AggregateException
+                    // or InnerExceptions) to avoid noisy CI logs during shutdown.
+                    static bool IsOrContainsObjectDisposed(Exception? e)
+                    {
+                        while (e != null)
+                        {
+                            if (e is ObjectDisposedException)
+                                return true;
+
+                            if (e is AggregateException agg)
+                            {
+                                foreach (var ie in agg.InnerExceptions)
+                                {
+                                    if (IsOrContainsObjectDisposed(ie))
+                                        return true;
+                                }
+
+                                return false;
+                            }
+
+                            e = e.InnerException;
+                        }
+
+                        return false;
+                    }
+
+                    if (IsOrContainsObjectDisposed(ex))
+                    {
+                        return;
+                    }
+
+                    // Don't log errors from the log sink to avoid infinite loops.
+                    // Use Trace so output is still available for diagnostics without feeding back into Serilog.
+                    Trace.TraceError($"[SignalRLogSink] Error broadcasting log: {ex.Message}");
                 }
             });
         }

@@ -417,6 +417,19 @@ namespace Listenarr.Api.Services
         {
             try
             {
+                // Allow CI or explicit opt-out to skip Playwright browser installation/usage.
+                // Some CI images do not have Node/npx or Playwright browsers available and
+                // attempting to install or run Playwright at test time produces noisy errors.
+                var ciEnv = Environment.GetEnvironmentVariable("CI");
+                var skipInstall = Environment.GetEnvironmentVariable("PLAYWRIGHT_SKIP_INSTALL");
+                if ((!string.IsNullOrEmpty(ciEnv) && ciEnv.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrEmpty(skipInstall) && skipInstall.Equals("true", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var pwLoggerSkip = _loggerFactory.CreateLogger("PlaywrightFallback");
+                    pwLoggerSkip.LogInformation("Skipping Playwright rendering for {Url} due to CI or PLAYWRIGHT_SKIP_INSTALL=true", url);
+                    return (null, 0);
+                }
+
                 var pwLogger = _loggerFactory.CreateLogger("PlaywrightFallback");
                 pwLogger.LogDebug("Starting Playwright rendering for {Url}", url);
                 System.Threading.Interlocked.Increment(ref _playwrightFallbackCount);

@@ -36,6 +36,7 @@ namespace Listenarr.Api.Models
         public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; }
         public DbSet<QualityProfile> QualityProfiles { get; set; }
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
+        public DbSet<ProcessExecutionLog> ProcessExecutionLogs { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)

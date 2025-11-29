@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Api.Models;
 
 namespace Listenarr.Api.Services
@@ -17,6 +18,7 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IFileNamingService _fileNamingService;
         private readonly IMetadataService? _metadataService;
+        private readonly IFileMover _fileMover;
         private readonly ILogger<ImportService> _logger;
 
         public ImportService(
@@ -24,13 +26,27 @@ namespace Listenarr.Api.Services
             IServiceScopeFactory scopeFactory,
             IFileNamingService fileNamingService,
             IMetadataService? metadataService,
-            ILogger<ImportService> logger)
+            IFileMover fileMover,
+            ILogger<ImportService>? logger = null)
         {
             _dbFactory = dbFactory;
             _scopeFactory = scopeFactory;
             _fileNamingService = fileNamingService;
             _metadataService = metadataService;
-            _logger = logger;
+            _fileMover = fileMover;
+            _logger = logger ?? NullLogger<ImportService>.Instance;
+        }
+
+        // Compatibility overload: older tests and callers used to pass ILogger as the fifth parameter.
+        // Preserve that signature by providing an overload that supplies a no-op NullFileMover.
+        public ImportService(
+            IDbContextFactory<ListenArrDbContext> dbFactory,
+            IServiceScopeFactory scopeFactory,
+            IFileNamingService fileNamingService,
+            IMetadataService? metadataService,
+            ILogger<ImportService>? logger = null)
+            : this(dbFactory, scopeFactory, fileNamingService, metadataService, new NullFileMover(), logger)
+        {
         }
 
         public async Task<ImportResult> ImportSingleFileAsync(string downloadId, int? audiobookId, string sourcePath, ApplicationSettings settings, CancellationToken ct = default)
@@ -170,20 +186,28 @@ namespace Listenarr.Api.Services
                     var action = settings.CompletedFileAction ?? "Move";
                     if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
                     {
-                        File.Copy(sourcePath, uniqueInitial, true);
-                        result.WasCopied = true;
+                        var ok = await _fileMover.CopyFileAsync(sourcePath, uniqueInitial);
+                        if (ok) result.WasCopied = true;
                     }
                     else
                     {
-                        File.Move(sourcePath, uniqueInitial, true);
-                        result.WasMoved = true;
+                        var ok = await _fileMover.MoveFileAsync(sourcePath, uniqueInitial);
+                        if (ok) result.WasMoved = true;
                     }
 
                     // Now apply filename pattern
                     var uniqueFinal = FileUtils.GetUniqueDestinationPath(destinationPath);
                     if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase))
                     {
-                        try { File.Move(uniqueInitial, uniqueFinal, true); }
+                        try
+                        {
+                            var ok = await _fileMover.MoveFileAsync(uniqueInitial, uniqueFinal);
+                            if (!ok)
+                            {
+                                _logger.LogWarning("ImportSingleFile: failed to rename {Source} -> {Dest}", uniqueInitial, uniqueFinal);
+                                uniqueFinal = uniqueInitial;
+                            }
+                        }
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "ImportSingleFile: failed to rename {Source} -> {Dest}", uniqueInitial, uniqueFinal);
@@ -409,15 +433,21 @@ namespace Listenarr.Api.Services
                             var action = settings.CompletedFileAction ?? "Move";
                             if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
                             {
-                                File.Copy(file, uniqueInitial, true);
-                                _logger.LogInformation("ImportFilesFromDirectory: Copied file {Source} -> {Dest}", file, uniqueInitial);
-                                res.WasCopied = true;
+                                var ok = await _fileMover.CopyFileAsync(file, uniqueInitial);
+                                if (ok)
+                                {
+                                    _logger.LogInformation("ImportFilesFromDirectory: Copied file {Source} -> {Dest}", file, uniqueInitial);
+                                    res.WasCopied = true;
+                                }
                             }
                             else
                             {
-                                File.Move(file, uniqueInitial, true);
-                                _logger.LogInformation("ImportFilesFromDirectory: Moved file {Source} -> {Dest}", file, uniqueInitial);
-                                res.WasMoved = true;
+                                var ok = await _fileMover.MoveFileAsync(file, uniqueInitial);
+                                if (ok)
+                                {
+                                    _logger.LogInformation("ImportFilesFromDirectory: Moved file {Source} -> {Dest}", file, uniqueInitial);
+                                    res.WasMoved = true;
+                                }
                             }
 
                             // Now apply the filename pattern on the destination copy/move
@@ -428,8 +458,16 @@ namespace Listenarr.Api.Services
                             {
                                 try
                                 {
-                                    File.Move(uniqueInitial, uniqueFinal, true);
-                                    _logger.LogInformation("ImportFilesFromDirectory: Renamed/Moved destination file {Source} -> {Final}", uniqueInitial, uniqueFinal);
+                                    var ok = await _fileMover.MoveFileAsync(uniqueInitial, uniqueFinal);
+                                    if (ok)
+                                    {
+                                        _logger.LogInformation("ImportFilesFromDirectory: Renamed/Moved destination file {Source} -> {Final}", uniqueInitial, uniqueFinal);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("ImportFilesFromDirectory: Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
+                                        uniqueFinal = uniqueInitial;
+                                    }
                                 }
                                 catch (Exception ex)
                                 {
@@ -536,3 +574,97 @@ namespace Listenarr.Api.Services
         }
     }
 }
+
+    // Simple no-op/fallback file mover used for compatibility in tests when DI IFileMover isn't provided.
+    internal class NullFileMover : global::Listenarr.Api.Services.IFileMover
+    {
+        public Task<bool> CopyDirectoryAsync(string sourceDir, string destDir)
+        {
+            try
+            {
+                if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+                foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+                {
+                    var rel = Path.GetRelativePath(sourceDir, file);
+                    var dest = Path.Combine(destDir, rel);
+                    var d = Path.GetDirectoryName(dest);
+                    if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
+                    File.Copy(file, dest, true);
+                }
+                return Task.FromResult(true);
+            }
+            catch
+            {
+                return Task.FromResult(false);
+            }
+        }
+
+        public Task<bool> CopyFileAsync(string sourceFile, string destFile)
+        {
+            try
+            {
+                var d = Path.GetDirectoryName(destFile);
+                if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
+                File.Copy(sourceFile, destFile, true);
+                return Task.FromResult(true);
+            }
+            catch
+            {
+                return Task.FromResult(false);
+            }
+        }
+
+        public Task<bool> MoveDirectoryAsync(string sourceDir, string destDir)
+        {
+            try
+            {
+                if (Directory.Exists(destDir))
+                {
+                    // fallback: copy contents then delete
+                    var ok = CopyDirectoryAsync(sourceDir, destDir).GetAwaiter().GetResult();
+                    if (ok) Directory.Delete(sourceDir, true);
+                    return Task.FromResult(ok);
+                }
+
+                Directory.Move(sourceDir, destDir);
+                return Task.FromResult(true);
+            }
+            catch
+            {
+                try
+                {
+                    var ok = CopyDirectoryAsync(sourceDir, destDir).GetAwaiter().GetResult();
+                    if (ok) Directory.Delete(sourceDir, true);
+                    return Task.FromResult(ok);
+                }
+                catch
+                {
+                    return Task.FromResult(false);
+                }
+            }
+        }
+
+        public Task<bool> MoveFileAsync(string sourceFile, string destFile)
+        {
+            try
+            {
+                var d = Path.GetDirectoryName(destFile);
+                if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
+                File.Move(sourceFile, destFile);
+                return Task.FromResult(true);
+            }
+            catch
+            {
+                try
+                {
+                    File.Copy(sourceFile, destFile, true);
+                    File.Delete(sourceFile);
+                    return Task.FromResult(true);
+                }
+                catch
+                {
+                    return Task.FromResult(false);
+                }
+            }
+        }
+    }
