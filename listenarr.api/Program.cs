@@ -804,7 +804,7 @@ try
                     if (processRunner != null)
                     {
                         var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                        logger.LogDebug("Playwright npx output: {Out}\n{Err}", result.Stdout, result.Stderr);
+                        logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(result.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         if (result.TimedOut)
                         {
                             logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);

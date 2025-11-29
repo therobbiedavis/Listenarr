@@ -96,11 +96,11 @@ namespace Listenarr.Api.Services
                         if (!pr.TimedOut && pr.ExitCode <= 7 && pr.ExitCode >= 0)
                         {
                             _logger.LogInformation("Robocopy fallback succeeded with exit code {Code}", pr.ExitCode);
-                            _logger.LogDebug("Robocopy stdout: {Out}", Truncate(pr.Stdout, 2000));
+                            _logger.LogDebug("Robocopy stdout: {Out}", LogRedaction.RedactText(Truncate(pr.Stdout, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
                             return true;
                         }
 
-                        _logger.LogWarning("Robocopy fallback failed or returned non-success code: {Code}. Stderr: {Err}", pr.ExitCode, Truncate(pr.Stderr, 2000));
+                        _logger.LogWarning("Robocopy fallback failed or returned non-success code: {Code}. Stderr: {Err}", pr.ExitCode, LogRedaction.RedactText(Truncate(pr.Stderr, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
                     }
                 }
                 catch (Exception rex)
@@ -187,11 +187,11 @@ namespace Listenarr.Api.Services
                         if (!pr.TimedOut && pr.ExitCode <= 7 && pr.ExitCode >= 0)
                         {
                             _logger.LogInformation("Robocopy fallback succeeded with exit code {Code}", pr.ExitCode);
-                            _logger.LogDebug("Robocopy stdout: {Out}", Truncate(pr.Stdout, 2000));
+                            _logger.LogDebug("Robocopy stdout: {Out}", LogRedaction.RedactText(Truncate(pr.Stdout, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
                             return true;
                         }
 
-                        _logger.LogWarning("Robocopy fallback failed or returned non-success code: {Code}. Stderr: {Err}", pr.ExitCode, Truncate(pr.Stderr, 2000));
+                        _logger.LogWarning("Robocopy fallback failed or returned non-success code: {Code}. Stderr: {Err}", pr.ExitCode, LogRedaction.RedactText(Truncate(pr.Stderr, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
                     }
                 }
                 catch (Exception rex)
@@ -291,12 +291,12 @@ namespace Listenarr.Api.Services
                     var pr = await _processRunner.RunAsync(startInfo, _options.RobocopyTimeoutMs);
                     if (pr.TimedOut)
                     {
-                        _logger.LogWarning("Robocopy timed out after {Ms}ms. Stdout: {Out} Stderr: {Err}", _options.RobocopyTimeoutMs, Truncate(pr.Stdout, 2000), Truncate(pr.Stderr, 2000));
+                        _logger.LogWarning("Robocopy timed out after {Ms}ms. Stdout: {Out} Stderr: {Err}", _options.RobocopyTimeoutMs, LogRedaction.RedactText(Truncate(pr.Stdout, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(Truncate(pr.Stderr, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
                         return null;
                     }
 
                     var exit = pr.ExitCode;
-                    _logger.LogDebug("Robocopy exit code {Exit}. Stdout: {Out} Stderr: {Err}", exit, Truncate(pr.Stdout, 2000), Truncate(pr.Stderr, 2000));
+                    _logger.LogDebug("Robocopy exit code {Exit}. Stdout: {Out} Stderr: {Err}", exit, LogRedaction.RedactText(Truncate(pr.Stdout, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(Truncate(pr.Stderr, 2000), LogRedaction.GetSensitiveValuesFromEnvironment()));
                     return exit;
                 }
                 else

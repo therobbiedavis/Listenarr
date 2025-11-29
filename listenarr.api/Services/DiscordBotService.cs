@@ -19,6 +19,7 @@ namespace Listenarr.Api.Services
         private readonly IHostEnvironment _hostEnvironment;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IProcessRunner? _processRunner;
+        private string? _botApiKey;
         private Process? _botProcess;
         private readonly object _processLock = new object();
 
@@ -94,8 +95,9 @@ namespace Listenarr.Api.Services
                     var cfg = _startupConfigService.GetConfig();
                     if (cfg != null && !string.IsNullOrWhiteSpace(cfg.ApiKey))
                     {
-                        startInfo.EnvironmentVariables["LISTENARR_API_KEY"] = cfg.ApiKey;
-                        _logger.LogInformation("Passing LISTENARR_API_KEY to bot process (length={Len})", cfg.ApiKey.Length);
+                        _botApiKey = cfg.ApiKey;
+                        startInfo.EnvironmentVariables["LISTENARR_API_KEY"] = _botApiKey;
+                        _logger.LogInformation("Passing LISTENARR_API_KEY to bot process (present=true)");
                     }
                 }
                 catch (Exception ex)
@@ -141,11 +143,11 @@ namespace Listenarr.Api.Services
                         }
                         else if (check.ExitCode != 0)
                         {
-                            _logger.LogWarning("Pre-flight node --version returned non-zero (ExitCode={Code}). Stderr: {Err}", check.ExitCode, check.Stderr);
+                            _logger.LogWarning("Pre-flight node --version returned non-zero (ExitCode={Code}). Stderr: {Err}", check.ExitCode, LogRedaction.RedactText(check.Stderr, new[] { _botApiKey }));
                         }
                         else
                         {
-                            _logger.LogDebug("Detected node: {Out}", check.Stdout?.Trim());
+                            _logger.LogDebug("Detected node: {Out}", LogRedaction.RedactText(check.Stdout, new[] { _botApiKey })?.Trim());
                         }
                     }
                     catch (Exception ex)
@@ -156,14 +158,8 @@ namespace Listenarr.Api.Services
 
                 lock (_processLock)
                 {
-                    if (_processRunner != null)
-                    {
-                        _botProcess = _processRunner.StartProcess(startInfo);
-                    }
-                    else
-                    {
-                        _botProcess = Process.Start(startInfo);
-                    }
+                        // Start the long-running bot process via the process runner wrapper.
+                        _botProcess = _processRunner!.StartProcess(startInfo);
 
                     if (_botProcess != null)
                     {
@@ -392,7 +388,8 @@ namespace Listenarr.Api.Services
                     var line = await process.StandardOutput.ReadLineAsync();
                     if (line != null)
                     {
-                        _logger.LogInformation("Bot stdout: {Line}", line);
+                        var safe = LogRedaction.RedactText(line, new[] { _botApiKey });
+                        _logger.LogInformation("Bot stdout: {Line}", safe);
                     }
                 }
             }
@@ -411,7 +408,8 @@ namespace Listenarr.Api.Services
                     var line = await process.StandardError.ReadLineAsync();
                     if (line != null)
                     {
-                        _logger.LogError("Bot stderr: {Line}", line);
+                        var safe = LogRedaction.RedactText(line, new[] { _botApiKey });
+                        _logger.LogError("Bot stderr: {Line}", safe);
                     }
                 }
             }
@@ -420,5 +418,7 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Error reading bot stderr");
             }
         }
+
+        
     }
 }

@@ -1,0 +1,32 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ develop, main, canary, feature/* ]
+  pull_request:
+    branches: [ develop, main, canary ]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dotnet: [8.0]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet }}
+
+      - name: Restore
+        run: dotnet restore listenarr.sln
+
+      - name: Run unit tests (with Test environment / disable Playwright)
+        env:
+          ASPNETCORE_ENVIRONMENT: Test
+          Playwright__Enabled: 'false'
+        run: |
+          dotnet test listenarr.sln -c Release --no-restore --logger "console;verbosity=normal"
