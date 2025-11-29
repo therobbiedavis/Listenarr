@@ -824,10 +824,13 @@ namespace Listenarr.Api.Services
 
             var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
 
-            if (!loginResponse.IsSuccessStatusCode)
+                if (!loginResponse.IsSuccessStatusCode)
             {
                 // Read response body to provide more context
                 var loginResponseContent = await loginResponse.Content.ReadAsStringAsync();
+
+                // Redact any potentially sensitive values from the response when logging
+                var redactedLoginResponse = LogRedaction.RedactText(loginResponseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
 
                 // Check if this is a 403 Forbidden (authentication disabled) vs other errors
                 if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
@@ -848,8 +851,8 @@ namespace Listenarr.Api.Services
                 else
                 {
                     _logger.LogError("Failed to login to qBittorrent. Status: {Status}, Response: {Response}", 
-                        loginResponse.StatusCode, loginResponseContent);
-                    throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode} - {loginResponseContent}");
+                        loginResponse.StatusCode, redactedLoginResponse);
+                    throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode} - {redactedLoginResponse}");
                 }
             }
             else
@@ -930,9 +933,10 @@ namespace Listenarr.Api.Services
                 if (!addResponse.IsSuccessStatusCode)
                 {
                     var responseContent = await addResponse.Content.ReadAsStringAsync();
+                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogError("Failed to add torrent to qBittorrent. Status: {Status}, Response: {Response}", 
-                        addResponse.StatusCode, responseContent);
-                    throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode} - {responseContent}");
+                        addResponse.StatusCode, redacted);
+                    throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode} - {redacted}");
                 }
 
                 _logger.LogInformation("Successfully sent torrent to qBittorrent");
@@ -1072,8 +1076,9 @@ namespace Listenarr.Api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogError("Failed to add torrent to Transmission. Status: {Status}, Response: {Response}", 
-                        response.StatusCode, responseContent);
+                        response.StatusCode, redacted);
                     throw new Exception($"Failed to add torrent to Transmission: {response.StatusCode}");
                 }
 
@@ -1249,8 +1254,9 @@ namespace Listenarr.Api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError("SABnzbd returned error status {Status}: {Content}", response.StatusCode, responseContent);
-                    throw new Exception($"SABnzbd returned status {response.StatusCode}: {responseContent}");
+                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey }));
+                    _logger.LogError("SABnzbd returned error status {Status}: {Content}", response.StatusCode, redacted);
+                    throw new Exception($"SABnzbd returned status {response.StatusCode}: {redacted}");
                 }
 
                 // Defensive: ensure response body is valid JSON
@@ -1380,8 +1386,9 @@ namespace Listenarr.Api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogError("Failed to add NZB to NZBGet. Status: {Status}, Response: {Response}", 
-                        response.StatusCode, responseContent);
+                        response.StatusCode, redacted);
                     throw new Exception($"Failed to add NZB to NZBGet: {response.StatusCode}");
                 }
 
@@ -3231,8 +3238,9 @@ namespace Listenarr.Api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogWarning("Failed to remove from Transmission: Status {Status}, Response: {Response}", 
-                        response.StatusCode, responseContent);
+                        response.StatusCode, redacted);
                     return false;
                 }
 
@@ -3366,8 +3374,9 @@ namespace Listenarr.Api.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogWarning("Failed to remove from NZBGet: Status {Status}, Response: {Response}", 
-                        response.StatusCode, responseContent);
+                        response.StatusCode, redacted);
                     return false;
                 }
 

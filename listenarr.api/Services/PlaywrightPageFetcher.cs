@@ -79,7 +79,7 @@ namespace Listenarr.Api.Services
                             }
                             else
                             {
-                                _logger.LogWarning("IProcessRunner is not available; skipping npx Playwright install fallback in PlaywrightPageFetcher.");
+                                _logger.LogDebug("IProcessRunner is not available; skipping npx Playwright install fallback in PlaywrightPageFetcher.");
                             }
                         }
                         catch (Exception ex2)
@@ -104,7 +104,7 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to initialize Playwright");
+                _logger.LogDebug(ex, "Failed to initialize Playwright");
             }
             finally
             {

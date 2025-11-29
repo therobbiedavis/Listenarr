@@ -81,7 +81,9 @@ namespace Listenarr.Api.Services
                     }
                     else
                     {
-                        _logger.LogWarning("Playwright installer attempt failed (ExitCode={ExitCode}). See debug logs for stdout/stderr.", exitCode);
+                        // Lower severity to Debug in environments (tests/CI) where Playwright/browser
+                        // installation may be unavailable; keep stdout/stderr available in _status.LastOutput.
+                        _logger.LogDebug("Playwright installer attempt failed (ExitCode={ExitCode}). See debug logs for stdout/stderr.", exitCode);
                         _status.LastError = "installer failed; see LastOutput for details";
                     }
                 }
@@ -92,7 +94,8 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Playwright background installer encountered an error");
+                    // Use Debug level to avoid noisy warnings in test runs when Playwright isn't available
+                    _logger.LogDebug(ex, "Playwright background installer encountered an error");
                     _status.LastError = ex.Message;
                 }
 
@@ -104,7 +107,7 @@ namespace Listenarr.Api.Services
                 await Task.Delay(wait, stoppingToken).ConfigureAwait(false);
             }
 
-            _logger.LogWarning("Playwright background installer finished attempts without success");
+            _logger.LogDebug("Playwright background installer finished attempts without success");
         }
 
         private async Task<(bool Success, string Out, string Err, int ExitCode)> RunNpxInstallChromiumAsync(CancellationToken ct)
@@ -135,7 +138,7 @@ namespace Listenarr.Api.Services
                         }
                         else
                         {
-                            _logger.LogWarning("IProcessRunner is not available; skipping 'npx --version' check in Playwright installer.");
+                            _logger.LogDebug("IProcessRunner is not available; skipping 'npx --version' check in Playwright installer.");
                         }
                     }
                     catch (Exception ex)
@@ -147,7 +150,7 @@ namespace Listenarr.Api.Services
                 string? npxFullPath = FindExecutableOnPath("npx");
                     if (string.IsNullOrEmpty(npxFullPath))
                     {
-                        _logger.LogWarning("Could not find 'npx' on PATH for the current process. Ensure Node.js/npx is available to the service environment.");
+                        _logger.LogDebug("Could not find 'npx' on PATH for the current process. Ensure Node.js/npx is available to the service environment.");
                         // Try cmd.exe fallback anyway to get a clearer error
                         var cmdPsi = new ProcessStartInfo
                         {
@@ -166,7 +169,7 @@ namespace Listenarr.Api.Services
                         }
                         else
                         {
-                            _logger.LogWarning("IProcessRunner is not available; skipping cmd.exe npx Playwright install fallback.");
+                            _logger.LogDebug("IProcessRunner is not available; skipping cmd.exe npx Playwright install fallback.");
                             return (false, string.Empty, "IProcessRunner unavailable", -1);
                         }
                     }
@@ -188,13 +191,13 @@ namespace Listenarr.Api.Services
                     }
                     else
                     {
-                        _logger.LogWarning("IProcessRunner is not available; skipping npx Playwright install fallback.");
+                        _logger.LogDebug("IProcessRunner is not available; skipping npx Playwright install fallback.");
                         return (false, string.Empty, "IProcessRunner unavailable", -1);
                     }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Exception while running npx install");
+                _logger.LogDebug(ex, "Exception while running npx install");
                 return (false, string.Empty, ex.ToString(), -1);
             }
         }
