@@ -1565,6 +1565,8 @@ namespace Listenarr.Api.Services
 
                     // Poll SABnzbd queue for active downloads progress updates
                     var queueUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                    // Redacted queue URL for safe diagnostics
+                    _logger.LogDebug("SABnzbd poll queue URL (redacted): {Url}", LogRedaction.RedactText(queueUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
                     var queueResponse = await http.GetAsync(queueUrl, cancellationToken);
 
                     if (queueResponse.IsSuccessStatusCode)
@@ -1639,6 +1641,8 @@ namespace Listenarr.Api.Services
 
                     // Get completed downloads (history) - limit to recent items
                     var historyUrl = $"{baseUrl}?mode=history&limit=100&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                    // Redacted history URL for safe diagnostics
+                    _logger.LogDebug("SABnzbd history URL (redacted): {Url}", LogRedaction.RedactText(historyUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
                     var historyResponse = await http.GetAsync(historyUrl, cancellationToken);
 
                     if (!historyResponse.IsSuccessStatusCode)

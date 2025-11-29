@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -88,6 +89,14 @@ namespace Listenarr.Api.Tests.Services
                 proc.Start();
                 return proc;
             }
+
+            public System.IDisposable RegisterTransientSensitive(System.Collections.Generic.IEnumerable<string> values)
+            {
+                // Tests don't need transient redaction behavior; return a no-op disposable
+                return new NoopDisposable();
+            }
+
+            private class NoopDisposable : IDisposable { public void Dispose() { } }
         }
 
         [Fact]

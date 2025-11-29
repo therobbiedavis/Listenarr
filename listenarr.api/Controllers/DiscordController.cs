@@ -86,7 +86,7 @@ namespace Listenarr.Api.Controllers
 
                     // Other errors - return not installed with details
                     var guildBody = await guildResp.Content.ReadAsStringAsync();
-                    _logger.LogWarning("Discord guild check returned {Status}: {Body}", guildResp.StatusCode, guildBody);
+                    _logger.LogWarning("Discord guild check returned {Status}: {Body}", guildResp.StatusCode, LogRedaction.RedactText(guildBody, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { token })));
                     return StatusCode(500, new { success = false, message = "Failed to verify guild membership", status = (int)guildResp.StatusCode, body = guildBody });
                 }
 
@@ -104,7 +104,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 var meCheckBody = await meRespCheck.Content.ReadAsStringAsync();
-                _logger.LogWarning("Discord token validation returned {Status}: {Body}", meRespCheck.StatusCode, meCheckBody);
+                _logger.LogWarning("Discord token validation returned {Status}: {Body}", meRespCheck.StatusCode, LogRedaction.RedactText(meCheckBody, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { token })));
                 return StatusCode(500, new { success = false, message = "Failed to validate bot token", status = (int)meRespCheck.StatusCode, body = meCheckBody });
             }
             catch (Exception ex)
@@ -237,7 +237,7 @@ namespace Listenarr.Api.Controllers
                     return BadRequest(new { success = false, message = "Invalid bot token (unauthorized)", body });
                 }
 
-                _logger.LogWarning("Register commands returned {Status}: {Body}", resp.StatusCode, body);
+                _logger.LogWarning("Register commands returned {Status}: {Body}", resp.StatusCode, LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { token })));
                 return StatusCode((int)resp.StatusCode, new { success = false, message = "Failed to register commands", body });
             }
             catch (Exception ex)

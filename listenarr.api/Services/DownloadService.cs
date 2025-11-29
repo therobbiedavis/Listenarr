@@ -1242,7 +1242,7 @@ namespace Listenarr.Api.Services
                 var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
                 var requestUrl = $"{baseUrl}?{queryString}";
 
-                _logger.LogDebug("SABnzbd request URL: {Url}", requestUrl.Replace(apiKey, "***"));
+                _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
 
                 var response = await _httpClient.GetAsync(requestUrl);
                 var responseContent = await response.Content.ReadAsStringAsync();
@@ -1256,7 +1256,7 @@ namespace Listenarr.Api.Services
                 // Defensive: ensure response body is valid JSON
                 if (string.IsNullOrWhiteSpace(responseContent))
                 {
-                    _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", requestUrl);
+                    _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
                     return; // Treat as no-op (we still created a DB record earlier)
                 }
 
@@ -2739,7 +2739,9 @@ namespace Listenarr.Api.Services
 
                 // Build queue API request
                 var requestUrl = $"{baseUrl}?mode=queue&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                
+                // Log the request URL in redacted form to avoid leaking API keys
+                _logger.LogDebug("SABnzbd queue request (redacted): {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+
                 var response = await _httpClient.GetAsync(requestUrl);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -3288,6 +3290,8 @@ namespace Listenarr.Api.Services
 
                 // Build remove API request (mode=queue with name=delete and value=nzo_id)
                 var requestUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(downloadId)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                // Redact API key when logging delete requests
+                _logger.LogDebug("SABnzbd delete request (redacted): {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
                 
                 if (removeCompleted)
                 {

@@ -7,9 +7,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Api.Services
 {
+    using System.Collections.Concurrent;
+
     public class SystemProcessRunner : IProcessRunner
     {
         private readonly ILogger<SystemProcessRunner> _logger;
+        private readonly ConcurrentDictionary<string, int> _transientSensitiveCounts = new(StringComparer.Ordinal);
 
         public SystemProcessRunner(ILogger<SystemProcessRunner> logger)
         {
@@ -45,7 +48,16 @@ namespace Listenarr.Api.Services
                 }
 
                 var exit = process.ExitCode;
-                return new ProcessResult(exit, stdout.ToString(), stderr.ToString(), false);
+
+                // Collect sensitive values: environment + any transient values registered by callers
+                var sensitiveFromEnv = LogRedaction.GetSensitiveValuesFromEnvironment();
+                var transient = _transientSensitiveCounts.Keys;
+                var combined = sensitiveFromEnv.Concat(transient).Where(v => !string.IsNullOrEmpty(v));
+
+                var outText = LogRedaction.RedactText(stdout.ToString(), combined);
+                var errText = LogRedaction.RedactText(stderr.ToString(), combined);
+
+                return new ProcessResult(exit, outText, errText, false);
             }
             catch (OperationCanceledException)
             {
@@ -62,8 +74,15 @@ namespace Listenarr.Api.Services
                 }
                 catch { errText = ex.Message; }
 
+                // Redact sensitive values from the collected output before returning
+                var sensitiveFromEnvEx = LogRedaction.GetSensitiveValuesFromEnvironment();
+                var transientEx = _transientSensitiveCounts.Keys;
+                var combinedEx = sensitiveFromEnvEx.Concat(transientEx).Where(v => !string.IsNullOrEmpty(v));
+                var outTextEx = LogRedaction.RedactText(stdout.ToString(), combinedEx);
+                var errTextEx = LogRedaction.RedactText(errText, combinedEx);
+
                 _logger.LogWarning(ex, "Process runner threw an exception for {File} {Args}", startInfo.FileName, startInfo.Arguments);
-                return new ProcessResult(-1, stdout.ToString(), errText, false);
+                return new ProcessResult(-1, outTextEx, errTextEx, false);
             }
         }
 
@@ -81,6 +100,43 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogWarning(ex, "Failed to start process {File} {Args}", startInfo.FileName, startInfo.Arguments);
                 throw;
+            }
+        }
+
+        public IDisposable RegisterTransientSensitive(IEnumerable<string> values)
+        {
+            if (values == null) return new DisposableAction(() => { });
+
+            var added = new List<string>();
+            foreach (var v in values.Where(x => !string.IsNullOrEmpty(x)))
+            {
+                _transientSensitiveCounts.AddOrUpdate(v!, 1, (_, old) => old + 1);
+                added.Add(v!);
+            }
+
+            return new DisposableAction(() =>
+            {
+                foreach (var v in added)
+                {
+                    _transientSensitiveCounts.AddOrUpdate(v, 0, (_, old) => Math.Max(0, old - 1));
+                    if (_transientSensitiveCounts.TryGetValue(v, out var cnt) && cnt == 0)
+                    {
+                        _transientSensitiveCounts.TryRemove(v, out _);
+                    }
+                }
+            });
+        }
+
+        private class DisposableAction : IDisposable
+        {
+            private readonly Action _action;
+            private bool _disposed;
+            public DisposableAction(Action action) => _action = action ?? (() => { });
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                try { _action(); } catch { }
             }
         }
     }

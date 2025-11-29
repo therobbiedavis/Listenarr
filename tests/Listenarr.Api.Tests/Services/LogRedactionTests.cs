@@ -33,5 +33,22 @@ namespace Listenarr.Api.Tests.Services
                 Environment.SetEnvironmentVariable(key, null);
             }
         }
+
+        [Fact]
+        public void GetSensitiveValuesFromEnvironment_ReturnsSetVariables()
+        {
+            var key = "LISTENARR_API_KEY";
+            var secret = "env-secret-XYZ";
+            try
+            {
+                Environment.SetEnvironmentVariable(key, secret);
+                var vals = LogRedaction.GetSensitiveValuesFromEnvironment();
+                Assert.Contains(secret, vals);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(key, null);
+            }
+        }
     }
 }

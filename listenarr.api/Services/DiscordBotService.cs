@@ -136,6 +136,7 @@ namespace Listenarr.Api.Services
                             WorkingDirectory = botDirectory
                         };
 
+                        using var _reg_check = _processRunner.RegisterTransientSensitive(new[] { _botApiKey ?? string.Empty });
                         var check = await _processRunner.RunAsync(checkPsi, 5000);
                         if (check.TimedOut)
                         {
@@ -143,11 +144,11 @@ namespace Listenarr.Api.Services
                         }
                         else if (check.ExitCode != 0)
                         {
-                            _logger.LogWarning("Pre-flight node --version returned non-zero (ExitCode={Code}). Stderr: {Err}", check.ExitCode, LogRedaction.RedactText(check.Stderr, new[] { _botApiKey }));
+                            _logger.LogWarning("Pre-flight node --version returned non-zero (ExitCode={Code}). Stderr: {Err}", check.ExitCode, LogRedaction.RedactText(check.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty })));
                         }
                         else
                         {
-                            _logger.LogDebug("Detected node: {Out}", LogRedaction.RedactText(check.Stdout, new[] { _botApiKey })?.Trim());
+                            _logger.LogDebug("Detected node: {Out}", LogRedaction.RedactText(check.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty }))?.Trim());
                         }
                     }
                     catch (Exception ex)
@@ -159,6 +160,7 @@ namespace Listenarr.Api.Services
                 lock (_processLock)
                 {
                         // Start the long-running bot process via the process runner wrapper.
+                        using var _reg_start = _processRunner.RegisterTransientSensitive(new[] { _botApiKey ?? string.Empty });
                         _botProcess = _processRunner!.StartProcess(startInfo);
 
                     if (_botProcess != null)
@@ -388,7 +390,7 @@ namespace Listenarr.Api.Services
                     var line = await process.StandardOutput.ReadLineAsync();
                     if (line != null)
                     {
-                        var safe = LogRedaction.RedactText(line, new[] { _botApiKey });
+                        var safe = LogRedaction.RedactText(line, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty }));
                         _logger.LogInformation("Bot stdout: {Line}", safe);
                     }
                 }
@@ -408,7 +410,7 @@ namespace Listenarr.Api.Services
                     var line = await process.StandardError.ReadLineAsync();
                     if (line != null)
                     {
-                        var safe = LogRedaction.RedactText(line, new[] { _botApiKey });
+                        var safe = LogRedaction.RedactText(line, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty }));
                         _logger.LogError("Bot stderr: {Line}", safe);
                     }
                 }

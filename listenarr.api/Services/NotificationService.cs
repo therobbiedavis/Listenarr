@@ -218,7 +218,7 @@ namespace Listenarr.Api.Services
                         {
                             string body = string.Empty;
                             try { body = await response.Content.ReadAsStringAsync(); } catch { }
-                            _logger.LogWarning("Failed to send notification to {WebhookUrl}: {StatusCode} - {Body}", webhookUrl, response.StatusCode, body);
+                            _logger.LogWarning("Failed to send notification to {WebhookUrl}: {StatusCode} - {Body}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()), response.StatusCode, LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         }
                     }
                     else
@@ -231,13 +231,13 @@ namespace Listenarr.Api.Services
                         {
                             string body = string.Empty;
                             try { body = await response.Content.ReadAsStringAsync(); } catch { }
-                            _logger.LogWarning("Failed to send notification to {WebhookUrl}: {StatusCode} - {Body}", webhookUrl, response.StatusCode, body);
+                            _logger.LogWarning("Failed to send notification to {WebhookUrl}: {StatusCode} - {Body}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()), response.StatusCode, LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error sending notification to {WebhookUrl}", webhookUrl);
+                    _logger.LogError(ex, "Error sending notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
                 }
 
                 return;
@@ -260,12 +260,12 @@ namespace Listenarr.Api.Services
                 {
                     string body = string.Empty;
                     try { body = await response.Content.ReadAsStringAsync(); } catch { }
-                    _logger.LogWarning("Failed to send notification to {WebhookUrl}: {StatusCode} - {Body}", webhookUrl, response.StatusCode, body);
+                    _logger.LogWarning("Failed to send notification to {WebhookUrl}: {StatusCode} - {Body}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()), response.StatusCode, LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment()));
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error sending notification to {WebhookUrl}", webhookUrl);
+                _logger.LogError(ex, "Error sending notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
             }
         }
         /// <summary>

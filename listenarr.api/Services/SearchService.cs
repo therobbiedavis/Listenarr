@@ -2543,9 +2543,9 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                // Build Torznab/Newznab API URL
+                // Build Torznab/Newznab API URL (redact api keys before logging)
                 var url = BuildTorznabUrl(indexer, query, category);
-                _logger.LogDebug("Indexer API URL: {Url}", url);
+                _logger.LogDebug("Indexer API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
 
                 // Make HTTP request
                 var response = await _httpClient.GetAsync(url);
@@ -2726,14 +2726,14 @@ namespace Listenarr.Api.Services
                 cookieClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
                 cookieClient.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
 
-                _logger.LogDebug("MyAnonamouse API URL: {Url}", url);
+                _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
 
                 var response = await cookieClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("MyAnonamouse error response: {Content}", errorContent);
+                    _logger.LogWarning("MyAnonamouse error response: {Content}", LogRedaction.RedactText(errorContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
                     return new List<SearchResult>();
                 }
 
@@ -2834,7 +2834,7 @@ namespace Listenarr.Api.Services
 
                         if (dataArrayElement.ValueKind == JsonValueKind.Undefined)
                         {
-                            _logger.LogWarning("MyAnonamouse response did not contain an expected array property. Response preview: {Preview}", jsonResponse.Length > 500 ? jsonResponse.Substring(0, 500) + "..." : jsonResponse);
+                            _logger.LogWarning("MyAnonamouse response did not contain an expected array property. Response preview: {Preview}", LogRedaction.RedactText(jsonResponse.Length > 500 ? jsonResponse.Substring(0, 500) + "..." : jsonResponse, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
                             return results;
                         }
                     }
@@ -2852,7 +2852,7 @@ namespace Listenarr.Api.Services
                     {
                         var firstRaw = dataArrayElement[0].ToString();
                         var preview = firstRaw.Length > 400 ? firstRaw.Substring(0, 400) + "..." : firstRaw;
-                        _logger.LogDebug("First MyAnonamouse item preview: {Preview}", preview);
+                        _logger.LogDebug("First MyAnonamouse item preview: {Preview}", LogRedaction.RedactText(preview, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
                     }
                 }
                 catch (Exception ex)

@@ -17,6 +17,7 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
+using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -208,7 +209,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 var testUrl = $"{url}{apiPath}?{string.Join("&", queryParams)}";
-                _logger.LogDebug("Testing indexer URL: {Url}", testUrl);
+                _logger.LogDebug("Testing indexer URL: {Url}", LogRedaction.RedactText(testUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
 
                 // Make test request
                 var response = await _httpClient.GetAsync(testUrl);
@@ -440,7 +441,7 @@ namespace Listenarr.Api.Controllers
                 var testUrl = $"https://www.myanonamouse.net/tor/js/loadSearchJSONbasic.php";
 
                 _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' with MAM ID '{MamId}'", 
-                    indexer.Name, mamId);
+                    indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
 
                 // Create request with mam_id as cookie
                 var request = new HttpRequestMessage(HttpMethod.Post, testUrl);
@@ -524,7 +525,7 @@ namespace Listenarr.Api.Controllers
                 await _dbContext.SaveChangesAsync();
 
                 _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'", 
-                    indexer.Name, mamId);
+                    indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
 
                 return Ok(new { 
                     success = true, 
