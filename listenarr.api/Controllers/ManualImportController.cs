@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using System.Text.RegularExpressions;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations;
 
@@ -391,3 +391,4 @@ public class ManualImportResult
     public string? AudiobookTitle { get; set; }
     public string? Error { get; set; }
 }
+

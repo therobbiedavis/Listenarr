@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -106,3 +106,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

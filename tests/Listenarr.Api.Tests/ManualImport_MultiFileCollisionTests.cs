@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
 using Moq;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 
 namespace Listenarr.Api.Tests
@@ -84,3 +84,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+

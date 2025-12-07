@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using System.Linq;
 
@@ -255,3 +255,4 @@ public class DownloadsController : ControllerBase
         }).Cast<object>().ToList();
     }
 }
+

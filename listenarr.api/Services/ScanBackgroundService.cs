@@ -1,9 +1,9 @@
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
@@ -561,3 +561,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

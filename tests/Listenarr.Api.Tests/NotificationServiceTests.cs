@@ -1,6 +1,7 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Api.Services;
 using Xunit;
 using System.Net;
@@ -10,7 +11,7 @@ using Moq.Protected;
 using System.Threading.Tasks;
 using System.Threading;
 using Microsoft.Extensions.Logging;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Tests
 {
@@ -31,7 +32,7 @@ namespace Listenarr.Api.Tests
             var baseUrl = "https://listenarr.example.com";
 
             // Act
-            JsonNode node = NotificationService.CreateDiscordPayload(trigger, data, baseUrl);
+            JsonNode node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl);
 
             // Assert
             Assert.NotNull(node);
@@ -76,7 +77,7 @@ namespace Listenarr.Api.Tests
             };
 
             // Act
-            var node = NotificationService.CreateDiscordPayload(trigger, data, null);
+            var node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, null);
 
             // Assert
             Assert.NotNull(node);
@@ -124,7 +125,7 @@ namespace Listenarr.Api.Tests
             var baseUrl = "https://listenarr.example.com";
 
             // Act
-            var node = NotificationService.CreateDiscordPayload(trigger, data, baseUrl);
+            var node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl);
 
             // Assert
             Assert.NotNull(node);
@@ -171,7 +172,7 @@ namespace Listenarr.Api.Tests
             var baseUrl = "https://listenarr.example.com";
 
             // Act
-            var node = NotificationService.CreateDiscordPayload(trigger, data, baseUrl);
+            var node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, baseUrl);
 
             // Assert
             Assert.NotNull(node);
@@ -198,7 +199,7 @@ namespace Listenarr.Api.Tests
             ctx.Request.Scheme = "https";
             ctx.Request.Host = new HostString("listenarr.example.com");
 
-            var baseUrl = Listenarr.Api.Services.NotificationService.GetBaseUrlFromHttpContext(ctx);
+            var baseUrl = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(ctx);
             Assert.Equal("https://listenarr.example.com", baseUrl);
         }
 
@@ -217,10 +218,10 @@ namespace Listenarr.Api.Tests
             ctx.Request.Scheme = "https";
             ctx.Request.Host = new HostString("listenarr.example.com");
 
-            var derived = Listenarr.Api.Services.NotificationService.GetBaseUrlFromHttpContext(ctx);
+            var derived = NotificationPayloadBuilder.GetBaseUrlFromHttpContext(ctx);
             Assert.NotNull(derived);
 
-            var node = Listenarr.Api.Services.NotificationService.CreateDiscordPayload(trigger, data, derived);
+            var node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, derived);
             Assert.NotNull(node);
             var obj = node.AsObject();
             Assert.NotNull(obj["embeds"]);
@@ -257,7 +258,7 @@ namespace Listenarr.Api.Tests
             // We'll add them under keys so the payload parsing can pick them up; simpler to include them as part of the data
             data["publisher"] = "Pub";
 
-            var node = Listenarr.Api.Services.NotificationService.CreateDiscordPayload(trigger, data, null);
+            var node = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, null);
             Assert.NotNull(node);
             var obj = node.AsObject();
             Assert.NotNull(obj["embeds"]);
@@ -333,10 +334,15 @@ namespace Listenarr.Api.Tests
             var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
 
             // Create service
+            var services = new ServiceCollection();
+            services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
+            var provider = services.BuildServiceProvider();
+            var payloadBuilder = provider.GetRequiredService<INotificationPayloadBuilder>();
             var service = new NotificationService(
                 httpClient,
                 Mock.Of<ILogger<NotificationService>>(),
                 mockConfigService.Object,
+                payloadBuilder,
                 mockHttpContextAccessor.Object
             );
 
@@ -349,7 +355,7 @@ namespace Listenarr.Api.Tests
             Assert.NotNull(postedNode);
 
             // Compare with what CreateDiscordPayload produces
-            var expectedNode = NotificationService.CreateDiscordPayload(trigger, data, startupConfig.UrlBase);
+            var expectedNode = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, startupConfig.UrlBase);
             
             // Parse both as objects and compare key properties (excluding timestamp which is dynamic)
             var postedObj = postedNode.AsObject();
@@ -475,10 +481,15 @@ namespace Listenarr.Api.Tests
                 .Setup(x => x.GetStartupConfigAsync())
                 .ReturnsAsync(startupConfig);
 
+            var services = new ServiceCollection();
+            services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
+            var provider = services.BuildServiceProvider();
+            var payloadBuilder = provider.GetRequiredService<INotificationPayloadBuilder>();
             var service = new NotificationService(
                 httpClient,
                 Mock.Of<ILogger<NotificationService>>(),
                 mockConfigService.Object,
+                payloadBuilder,
                 Mock.Of<IHttpContextAccessor>()
             );
 

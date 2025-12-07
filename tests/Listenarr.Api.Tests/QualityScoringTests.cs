@@ -1,7 +1,7 @@
-using System;
+﻿using System;
 using System.Reflection;
 using System.Threading.Tasks;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -81,3 +81,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+

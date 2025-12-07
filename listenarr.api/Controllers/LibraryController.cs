@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -19,7 +19,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
@@ -413,10 +413,26 @@ namespace Listenarr.Api.Controllers
         public async Task<IActionResult> GetAll()
         {
             // Return audiobooks including files and an explicit 'wanted' flag
-            var audiobooks = await _dbContext.Audiobooks
-                .Include(a => a.QualityProfile)
-                .Include(a => a.Files)
-                .ToListAsync();
+            List<Audiobook> audiobooks;
+            try
+            {
+                audiobooks = await _dbContext.Audiobooks
+                    .Include(a => a.QualityProfile)
+                    .Include(a => a.Files)
+                    .ToListAsync();
+            }
+            catch (JsonException jex)
+            {
+                // Defensive fallback: if a JSON-backed column contains legacy/non-JSON values
+                // EF's JSON reader can throw during materialization. Retry without the
+                // potentially-problematic navigation (QualityProfile) so the library view
+                // can still render basic audiobook and file information.
+                _logger.LogWarning(jex, "JSON parse error retrieving audiobooks; retrying without QualityProfile include to avoid malformed JSON in DB columns.");
+
+                audiobooks = await _dbContext.Audiobooks
+                    .Include(a => a.Files)
+                    .ToListAsync();
+            }
 
             var dto = audiobooks.Select(a => new
             {
@@ -541,6 +557,85 @@ namespace Listenarr.Api.Controllers
         {
             var files = await _dbContext.AudiobookFiles.Where(f => f.AudiobookId == id).ToListAsync();
             return Ok(files);
+        }
+
+        // DEBUG: Scan JSON-backed TEXT columns for stored values that are clearly not JSON
+        // Returns a list of offending rows per configured entity so we can diagnose deserialization errors.
+        [HttpGet("debug/json-invalid")]
+        public async Task<IActionResult> GetInvalidJsonColumns()
+        {
+            // Helper to test first non-whitespace char
+            static bool LooksLikeJson(string? s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return true; // empty is handled elsewhere
+                var trimmed = s.TrimStart();
+                if (trimmed.Length == 0) return true;
+                var first = trimmed[0];
+                if (first == '{' || first == '[' || first == '"' || first == 't' || first == 'f' || first == 'n' || first == '-' || char.IsDigit(first))
+                    return true;
+                return false;
+            }
+
+            var problems = new Dictionary<string, object?>();
+
+            // QualityProfiles: Qualities, PreferredFormats, PreferredLanguages, MustContain, MustNotContain
+            var qps = await _dbContext.QualityProfiles
+                .Select(q => new
+                {
+                    q.Id,
+                    Qualities = EF.Property<string>(q, "Qualities"),
+                    PreferredFormats = EF.Property<string>(q, "PreferredFormats"),
+                    PreferredLanguages = EF.Property<string>(q, "PreferredLanguages"),
+                    MustContain = EF.Property<string>(q, "MustContain"),
+                    MustNotContain = EF.Property<string>(q, "MustNotContain")
+                })
+                .ToListAsync();
+
+            var qpProblems = qps.SelectMany(q => new[] {
+                new { Table = "QualityProfiles.Qualities", Id = q.Id, Raw = q.Qualities },
+                new { Table = "QualityProfiles.PreferredFormats", Id = q.Id, Raw = q.PreferredFormats },
+                new { Table = "QualityProfiles.PreferredLanguages", Id = q.Id, Raw = q.PreferredLanguages },
+                new { Table = "QualityProfiles.MustContain", Id = q.Id, Raw = q.MustContain },
+                new { Table = "QualityProfiles.MustNotContain", Id = q.Id, Raw = q.MustNotContain }
+            })
+            .Where(x => !LooksLikeJson(x.Raw))
+            .Select(x => new { x.Table, x.Id, Sample = (x.Raw ?? string.Empty).Substring(0, Math.Min(200, (x.Raw ?? string.Empty).Length)) })
+            .ToList();
+
+            problems["QualityProfiles"] = qpProblems;
+
+            // Downloads.Metadata
+            var downloads = await _dbContext.Downloads
+                .Select(d => new { d.Id, Metadata = EF.Property<string>(d, "Metadata") })
+                .ToListAsync();
+            var dlProblems = downloads.Where(d => !LooksLikeJson(d.Metadata))
+                .Select(d => new { Table = "Downloads.Metadata", d.Id, Sample = (d.Metadata ?? string.Empty).Substring(0, Math.Min(200, (d.Metadata ?? string.Empty).Length)) })
+                .ToList();
+            problems["Downloads"] = dlProblems;
+
+            // DownloadProcessingJobs.JobData
+            var jobs = await _dbContext.DownloadProcessingJobs
+                .Select(j => new { j.Id, JobData = EF.Property<string>(j, "JobData") })
+                .ToListAsync();
+            var jobProblems = jobs.Where(j => !LooksLikeJson(j.JobData))
+                .Select(j => new { Table = "DownloadProcessingJobs.JobData", j.Id, Sample = (j.JobData ?? string.Empty).Substring(0, Math.Min(200, (j.JobData ?? string.Empty).Length)) })
+                .ToList();
+            problems["DownloadProcessingJobs"] = jobProblems;
+
+            // ApiConfigurations: HeadersJson, ParametersJson
+            var apis = await _dbContext.ApiConfigurations
+                .Select(a => new { a.Id, Headers = EF.Property<string>(a, "HeadersJson"), Parameters = EF.Property<string>(a, "ParametersJson") })
+                .ToListAsync();
+            var apiProblems = apis.SelectMany(a => new[] {
+                new { Table = "ApiConfigurations.HeadersJson", Id = a.Id, Raw = a.Headers },
+                new { Table = "ApiConfigurations.ParametersJson", Id = a.Id, Raw = a.Parameters }
+            })
+            .Where(x => !LooksLikeJson(x.Raw))
+            .Select(x => new { x.Table, x.Id, Sample = (x.Raw ?? string.Empty).Substring(0, Math.Min(200, (x.Raw ?? string.Empty).Length)) })
+            .ToList();
+            problems["ApiConfigurations"] = apiProblems;
+
+            return Ok(problems);
         }
 
         [HttpPut("{id}")]
@@ -2028,3 +2123,4 @@ namespace Listenarr.Api.Controllers
 
 }
 }
+

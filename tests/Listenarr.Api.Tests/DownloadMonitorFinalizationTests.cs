@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
@@ -594,7 +594,7 @@ namespace Listenarr.Api.Tests
             var queueMock = new Mock<IDownloadProcessingQueueService>();
             // Ensure GetJobsForDownloadAsync returns an empty list so FinalizeDownloadAsync
             // won't throw when awaiting a null Task from the mock.
-            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<Models.DownloadProcessingJob>());
+            queueMock.Setup(q => q.GetJobsForDownloadAsync(It.IsAny<string>())).ReturnsAsync(new List<DownloadProcessingJob>());
             queueMock.Setup(q => q.QueueDownloadProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync("job-id")
                 .Callback<string, string, string>((did, src, cid) => queuedSource = src);

@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -213,3 +213,4 @@ public class RemotePathMappingService : IRemotePathMappingService
         return path;
     }
 }
+

@@ -1,11 +1,11 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using System;
 using System.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 
 namespace Listenarr.Api.Services
@@ -176,3 +176,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

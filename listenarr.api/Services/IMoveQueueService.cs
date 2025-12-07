@@ -1,6 +1,6 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -13,3 +13,4 @@ namespace Listenarr.Api.Services
         System.Threading.Channels.ChannelReader<MoveJob> Reader { get; }
     }
 }
+

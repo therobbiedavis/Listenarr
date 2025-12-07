@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -18,7 +18,7 @@
 
 using System.Net.Http;
 using System.Threading.Tasks;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using HtmlAgilityPack;
 using System.Text.Json;
 using System.Linq;
@@ -85,7 +85,7 @@ namespace Listenarr.Api.Services
 
                     var metadata = new AudibleBookMetadata();
 
-                    // Attempt to pull structured JSON-LD first (if present) — often contains reliable data
+                    // Attempt to pull structured JSON-LD first (if present) â€” often contains reliable data
                     var jsonLd = ExtractFromJsonLd(doc);
                     if (jsonLd != null)
                     {

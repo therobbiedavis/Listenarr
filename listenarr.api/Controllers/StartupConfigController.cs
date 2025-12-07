@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -50,3 +50,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services;
 
@@ -53,3 +53,4 @@ public interface IRemotePathMappingService
     /// </summary>
     Task<bool> RequiresTranslationAsync(string downloadClientId, string remotePath);
 }
+

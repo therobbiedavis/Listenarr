@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using System.Threading;
 using System.Threading.Tasks;
 using System;
@@ -6,7 +6,7 @@ using System.IO;
 using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Listenarr.Api.Services
@@ -196,3 +196,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

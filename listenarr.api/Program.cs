@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -17,7 +17,7 @@
  */
 
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Middleware;
 using System.Net;
@@ -29,6 +29,8 @@ using Serilog;
 using Serilog.Events;
 using Polly;
 using Polly.Extensions.Http;
+using Listenarr.Api.Extensions;
+using Listenarr.Infrastructure.Extensions;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
@@ -78,6 +80,13 @@ if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
 // Configure logging is now handled by Serilog above
 
 // Add services to the container.
+// If running as an integration test host, allow the test-side partial to apply any
+// additional registrations (for example AddListenarrPersistence so IDbContextFactory<>
+// is available to hosted/background services during tests).
+if (builder.Environment.IsEnvironment("Testing"))
+{
+    ApplyTestHostPatches(builder);
+}
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -153,6 +162,101 @@ builder.Services.AddHttpClient("DownloadClient")
             }
         ));
 
+ // Bind download client definitions from configuration and expose via IOptions
+builder.Services.Configure<Listenarr.Api.Services.Adapters.DownloadClientsOptions>(builder.Configuration.GetSection("DownloadClients"));
+
+// Validate download client configuration at startup, surface errors early
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Listenarr.Api.Services.Adapters.DownloadClientsOptions>, Listenarr.Api.Services.Adapters.DownloadClientsOptionsValidator>();
+
+// Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
+// qbittorrent
+builder.Services.AddHttpClient("qbittorrent")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 3,
+            durationOfBreak: TimeSpan.FromSeconds(30),
+            onBreak: (outcome, duration) =>
+            {
+                Log.Logger.Warning("[CIRCUIT BREAKER] qbittorrent client circuit opened due to {Reason}. Breaking for {Seconds}s", outcome.Exception?.Message ?? "policy trigger", duration.TotalSeconds);
+            },
+            onReset: () =>
+            {
+                Log.Logger.Information("[CIRCUIT BREAKER] qbittorrent client circuit reset - service recovered");
+            }
+        ))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(
+            retryCount: 3,
+            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+            onRetry: (outcome, timespan, retryAttempt, context) =>
+            {
+                Log.Logger.Information("[RETRY] qbittorrent client retry attempt {Attempt} after {Delay}s delay", retryAttempt, timespan.TotalSeconds);
+            }
+        ));
+
+// transmission
+builder.Services.AddHttpClient("transmission")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+// sabnzbd
+builder.Services.AddHttpClient("sabnzbd")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+// nzbget
+builder.Services.AddHttpClient("nzbget")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+// Factory to resolve adapters by logical id/type from DI (returns first registered adapter when none matches).
+builder.Services.AddSingleton<Func<string, Listenarr.Api.Services.Adapters.IDownloadClientAdapter>>(sp => id =>
+{
+    var adapters = sp.GetServices<Listenarr.Api.Services.Adapters.IDownloadClientAdapter>().ToList();
+    // Try to find by ClientId first, then by ClientType, else return first registered adapter as fallback.
+    var byId = adapters.FirstOrDefault(a => string.Equals(a.ClientId, id, StringComparison.OrdinalIgnoreCase));
+    if (byId != null) return byId;
+    var byType = adapters.FirstOrDefault(a => string.Equals(a.ClientType, id, StringComparison.OrdinalIgnoreCase));
+    if (byType != null) return byType;
+    if (adapters.Count > 0) return adapters[0];
+    throw new InvalidOperationException("No IDownloadClientAdapter implementations are registered.");
+});
+
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")
     .ConfigureHttpClient(client =>
@@ -202,102 +306,21 @@ if (!string.IsNullOrEmpty(sqliteDbDir) && !Directory.Exists(sqliteDbDir))
     Directory.CreateDirectory(sqliteDbDir);
 }
 
-// Use DbContextFactory for better scoped context management
-builder.Services.AddDbContextFactory<ListenArrDbContext>(options =>
-    options.UseSqlite($"Data Source={sqliteDbPath}"));
+ // Register persistence (DbContextFactory + compatibility DbContext + repositories) via extension
+builder.Services.AddListenarrPersistence(builder.Configuration, sqliteDbPath);
 
-// Keep AddDbContext for services that still inject DbContext directly (AudiobookRepository, etc.)
-builder.Services.AddDbContext<ListenArrDbContext>(options =>
-    options.UseSqlite($"Data Source={sqliteDbPath}"));
+// Register consolidated HttpClient policies and common typed clients
+builder.Services.AddListenarrHttpClients(builder.Configuration);
 
-builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
-builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
-// Startup config: read config.json (optional) and expose via IStartupConfigService
-builder.Services.AddSingleton<IStartupConfigService, StartupConfigService>();
-builder.Services.AddScoped<ISearchService, SearchService>();
-builder.Services.AddScoped<IMetadataService, MetadataService>();
-builder.Services.AddScoped<IAudioFileService, AudioFileService>();
-// Metadata extraction limiter to bound concurrent ffprobe calls
-builder.Services.AddSingleton<MetadataExtractionLimiter>();
-// Ffmpeg installer: provides a bundled ffprobe binary when not present on the system
-builder.Services.AddSingleton<IFfmpegService, FfmpegInstallerService>();
-// Service to accept client-pushed download updates and maintain recent-push cache
-builder.Services.AddSingleton<Listenarr.Api.Services.DownloadPushService>();
-builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
-builder.Services.AddScoped<IDownloadService, DownloadService>();
-// NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
-// Removing duplicate scoped registration to avoid overriding the typed client configuration.
-builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
-builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
-builder.Services.AddScoped<IFileNamingService, FileNamingService>();
-// Centralized import service: handles moving/copying, naming and audiobook registration
-builder.Services.AddScoped<IImportService, ImportService>();
-// Centralized file mover for robust move/copy with retries and diagnostics
-builder.Services.AddScoped<IFileMover, FileMover>();
-// Bind FileMover options from configuration (optional)
-builder.Services.Configure<Listenarr.Api.Services.FileMoverOptions>(builder.Configuration.GetSection("FileMover"));
-// Process runner for external process execution (robocopy, ffprobe, playwright installer)
-builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
-// Store for persisting external process execution outputs (stdout/stderr) - best-effort
-builder.Services.AddScoped<IProcessExecutionStore, ProcessExecutionStore>();
-builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
-builder.Services.AddScoped<ISystemService, SystemService>();
-builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
-builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
-builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
-
-// Discord bot service for managing bot process
-builder.Services.AddSingleton<IDiscordBotService, DiscordBotService>();
-
-// Toast service for broadcasting UI toasts via SignalR
-builder.Services.AddSingleton<IToastService, ToastService>();
-
-// Minimal application metrics service for telemetry/metrics counters used by tests and instrumentation
-builder.Services.AddSingleton<IAppMetricsService, NoopAppMetricsService>();
-
-// Notification service for webhook notifications
-builder.Services.AddScoped<NotificationService>();
-
-// Allow services to access the current HttpContext so NotificationService can
-// build absolute image URLs when the startup config doesn't supply a base URL.
-builder.Services.AddHttpContextAccessor();
-
-// Always register session service, but it will check config internally
-builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
-
-// Scan queue: enqueue folder scans to be processed in the background
-builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
-// Background worker to consume scan jobs and persist audiobook files
-builder.Services.AddHostedService<ScanBackgroundService>();
-
-// Move queue: enqueue safe move operations when an audiobook BasePath changes
-builder.Services.AddSingleton<IMoveQueueService, MoveQueueService>();
-// Background worker to consume move jobs and perform safe filesystem move
-builder.Services.AddHostedService<MoveBackgroundService>();
-
-// Register background service for daily cache cleanup
-builder.Services.AddHostedService<ImageCacheCleanupService>();
-
-// Register background service for temp file cleanup
-builder.Services.AddHostedService<TempFileCleanupService>();
-
-// Register background service for download monitoring and real-time updates
-builder.Services.AddHostedService<DownloadMonitorService>();
-
-// Register background service for queue monitoring (external clients) and real-time updates
-builder.Services.AddHostedService<QueueMonitorService>();
-
-// Register background service for automatic audiobook searching
-builder.Services.AddHostedService<AutomaticSearchService>();
-// Background installer for ffprobe - run in background so startup isn't blocked
-builder.Services.AddHostedService<FfmpegInstallBackgroundService>();
-
-// Background service to rescan files missing metadata
-builder.Services.AddHostedService<MetadataRescanService>();
-
-// Register background service for download processing queue
-builder.Services.AddHostedService<DownloadProcessingBackgroundService>();
+ // Register adapters and related options/validators
+builder.Services.AddListenarrAdapters(builder.Configuration);
+ 
+ // Register infrastructure implementations (repositories live in the Infrastructure project)
+builder.Services.AddListenarrInfrastructure();
+ // Register application-level services (moved from Program.cs to keep startup focused)
+builder.Services.AddListenarrAppServices(builder.Configuration);
+ // Register hosted/background services (moved from Program.cs)
+builder.Services.AddListenarrHostedServices(builder.Configuration);
 
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()

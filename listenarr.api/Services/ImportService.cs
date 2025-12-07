@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,7 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Listenarr.Api.Models;
+using Microsoft.Extensions.DependencyInjection;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -16,6 +17,7 @@ namespace Listenarr.Api.Services
     {
         private readonly IDbContextFactory<ListenArrDbContext> _dbFactory;
         private readonly IServiceScopeFactory _scopeFactory;
+        public IServiceScopeFactory ScopeFactory => _scopeFactory;
         private readonly IFileNamingService _fileNamingService;
         private readonly IMetadataService? _metadataService;
         private readonly IFileMover _fileMover;
@@ -486,7 +488,11 @@ namespace Listenarr.Api.Services
                                 {
                                     using var afScope = _scopeFactory.CreateScope();
                                     var audioFileService = afScope.ServiceProvider.GetService<IAudioFileService>()
-                                        ?? new AudioFileService(_scopeFactory, afScope.ServiceProvider.GetService<ILogger<AudioFileService>>() ?? new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>(), afScope.ServiceProvider.GetRequiredService<IMemoryCache>(), afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
+                                        ?? ActivatorUtilities.CreateInstance<AudioFileService>(afScope.ServiceProvider,
+                                            _scopeFactory,
+                                            afScope.ServiceProvider.GetService<ILogger<AudioFileService>>() ?? new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>(),
+                                            afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
+                                            afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
 
                                     var created = await audioFileService.EnsureAudiobookFileAsync(audiobookId.Value, res.FinalPath, "download");
                                     res.WasRegisteredToAudiobook = created;

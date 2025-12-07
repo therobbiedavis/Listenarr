@@ -47,6 +47,9 @@ namespace Listenarr.Api.Services
                     return new ProcessResult(-1, stdout.ToString(), stderr.ToString(), true);
                 }
 
+                // Ensure asynchronous output readers have flushed into our buffers before reading them.
+                try { process.WaitForExit(); } catch { }
+
                 var exit = process.ExitCode;
 
                 // Collect sensitive values: environment + any transient values registered by callers

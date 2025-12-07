@@ -1,7 +1,7 @@
-using System;
+﻿using System;
 using System.IO;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Xunit;
 
 namespace Listenarr.Api.Tests
@@ -37,3 +37,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+

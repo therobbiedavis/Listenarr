@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Xunit;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Api.Tests
@@ -262,3 +262,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+

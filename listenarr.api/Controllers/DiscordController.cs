@@ -1,5 +1,5 @@
-using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+﻿using Listenarr.Api.Services;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
@@ -426,3 +426,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

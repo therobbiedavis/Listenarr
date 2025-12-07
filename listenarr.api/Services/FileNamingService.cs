@@ -1,6 +1,6 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -257,8 +257,8 @@ namespace Listenarr.Api.Services
             result = Regex.Replace(result, @"[\(\[\{]\s*" + EmptySentinel + @"\s*[\)\]\}]", string.Empty);
 
             // Remove common separators adjacent to the sentinel (e.g. " - __EMPTY_VAR__" or "__EMPTY_VAR__ - ")
-            result = Regex.Replace(result, @"\s*[-–—:_]\s*" + EmptySentinel, string.Empty);
-            result = Regex.Replace(result, EmptySentinel + @"\s*[-–—:_]\s*", string.Empty);
+            result = Regex.Replace(result, @"\s*[-â€“â€”:_]\s*" + EmptySentinel, string.Empty);
+            result = Regex.Replace(result, EmptySentinel + @"\s*[-â€“â€”:_]\s*", string.Empty);
 
             // Remove sentinel next to slashes
             result = Regex.Replace(result, @"/?" + EmptySentinel + @"/?", "/");
@@ -347,3 +347,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

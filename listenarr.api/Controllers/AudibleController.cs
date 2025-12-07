@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -18,7 +18,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -138,3 +138,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

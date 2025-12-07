@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.IO;
@@ -86,7 +86,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-    public async Task<AudioMetadata> ExtractFileMetadataAsync(string filePath)
+    public async Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
         {
             try
             {
@@ -288,7 +288,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private AudioMetadata ParseAudnexusResponse(JsonElement audnexusData)
+        private AudioMetadata? ParseAudnexusResponse(JsonElement audnexusData)
         {
             // This is a simplified parser - adapt based on actual Audnexus API response structure
             var metadata = new AudioMetadata();

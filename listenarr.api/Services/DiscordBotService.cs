@@ -159,9 +159,17 @@ namespace Listenarr.Api.Services
 
                 lock (_processLock)
                 {
-                        // Start the long-running bot process via the process runner wrapper.
+                    // Start the long-running bot process via the process runner wrapper if available.
+                    if (_processRunner != null)
+                    {
                         using var _reg_start = _processRunner.RegisterTransientSensitive(new[] { _botApiKey ?? string.Empty });
-                        _botProcess = _processRunner!.StartProcess(startInfo);
+                        _botProcess = _processRunner.StartProcess(startInfo);
+                    }
+                    else
+                    {
+                        // Fallback to directly starting the process when no runner is provided.
+                        _botProcess = Process.Start(startInfo);
+                    }
 
                     if (_botProcess != null)
                     {

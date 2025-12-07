@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
 
@@ -395,7 +395,7 @@ namespace Listenarr.Api.Services
 
                     // Only extract file metadata for naming when we do NOT have audiobook naming metadata.
                     // If the download is linked to an audiobook (namingMetadata != null) we must not use
-                    // file-embedded tags for naming — the audiobook DB entry is authoritative.
+                    // file-embedded tags for naming â€” the audiobook DB entry is authoritative.
                     if (namingMetadata == null && metadataService != null)
                     {
                         try

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using System.Text.Json;
@@ -906,7 +906,7 @@ namespace Listenarr.Api.Services
                                         
                                         if (audimetaData != null)
                                         {
-                                            _logger.LogInformation("✓ Audimeta returned data for ASIN {Asin}. Title: {Title}", asin, audimetaData.Title ?? "null");
+                                            _logger.LogInformation("âœ“ Audimeta returned data for ASIN {Asin}. Title: {Title}", asin, audimetaData.Title ?? "null");
                                             metadata = ConvertAudimetaToMetadata(audimetaData, asin, originalSource ?? "Audible");
                                             metadataSourceName = source.Name; // Store which metadata source succeeded
                                             _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName}", asin, source.Name);
@@ -914,7 +914,7 @@ namespace Listenarr.Api.Services
                                         }
                                         else
                                         {
-                                            _logger.LogWarning("✗ Audimeta returned null for ASIN {Asin}", asin);
+                                            _logger.LogWarning("âœ— Audimeta returned null for ASIN {Asin}", asin);
 
                                             // Retry once without cache (force audimeta to refresh) when cache lookup fails
                                             try
@@ -923,7 +923,7 @@ namespace Listenarr.Api.Services
                                                 var audimetaRetry = await _audimetaService.GetBookMetadataAsync(asin, "us", false);
                                                 if (audimetaRetry != null)
                                                 {
-                                                    _logger.LogInformation("✓ Audimeta returned data for ASIN {Asin} on retry (no-cache). Title: {Title}", asin, audimetaRetry.Title ?? "null");
+                                                    _logger.LogInformation("âœ“ Audimeta returned data for ASIN {Asin} on retry (no-cache). Title: {Title}", asin, audimetaRetry.Title ?? "null");
                                                     metadata = ConvertAudimetaToMetadata(audimetaRetry, asin, originalSource ?? "Audible");
                                                     metadataSourceName = source.Name;
                                                     _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName} (no-cache)", asin, source.Name);
@@ -931,7 +931,7 @@ namespace Listenarr.Api.Services
                                                 }
                                                 else
                                                 {
-                                                    _logger.LogWarning("✗ Audimeta returned null on retry for ASIN {Asin}", asin);
+                                                    _logger.LogWarning("âœ— Audimeta returned null on retry for ASIN {Asin}", asin);
                                                 }
                                             }
                                             catch (Exception exRetry)
@@ -947,7 +947,7 @@ namespace Listenarr.Api.Services
                                         
                                         if (audnexusData != null)
                                         {
-                                            _logger.LogInformation("✓ Audnexus returned data for ASIN {Asin}. Title: {Title}", asin, audnexusData.Title ?? "null");
+                                            _logger.LogInformation("âœ“ Audnexus returned data for ASIN {Asin}. Title: {Title}", asin, audnexusData.Title ?? "null");
                                             metadata = ConvertAudnexusToMetadata(audnexusData, asin, originalSource ?? "Audible");
                                             metadataSourceName = source.Name; // Store which metadata source succeeded
                                             _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName}", asin, source.Name);
@@ -955,7 +955,7 @@ namespace Listenarr.Api.Services
                                         }
                                         else
                                         {
-                                            _logger.LogWarning("✗ Audnexus returned null for ASIN {Asin}", asin);
+                                            _logger.LogWarning("âœ— Audnexus returned null for ASIN {Asin}", asin);
                                         }
                                     }
                                     else
@@ -1023,12 +1023,12 @@ namespace Listenarr.Api.Services
                                 if (!string.IsNullOrEmpty(metadataSourceName))
                                 {
                                     enrichedResult.MetadataSource = metadataSourceName;
-                                    _logger.LogInformation("✓ Enriched result for ASIN {Asin} - Title: {Title}, MetadataSource: {MetadataSource}", 
+                                    _logger.LogInformation("âœ“ Enriched result for ASIN {Asin} - Title: {Title}, MetadataSource: {MetadataSource}", 
                                         asin, enrichedResult.Title ?? "null", metadataSourceName);
                                 }
                                 else
                                 {
-                                    _logger.LogWarning("⚠ Metadata obtained for ASIN {Asin} but metadataSourceName is null/empty", asin);
+                                    _logger.LogWarning("âš  Metadata obtained for ASIN {Asin} but metadataSourceName is null/empty", asin);
                                 }
                                 
                                 enriched.Add(enrichedResult);
@@ -1036,7 +1036,7 @@ namespace Listenarr.Api.Services
                             }
                             else
                             {
-                                _logger.LogWarning("✗ No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
+                                _logger.LogWarning("âœ— No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
                                 try { candidateDropReasons[asin] = "no_metadata_after_sources"; } catch { }
                             }
                         }
@@ -3758,7 +3758,7 @@ namespace Listenarr.Api.Services
                         }
 
                         // Extract author from title if possible (common format: "Author - Title")
-                        var titleParts = result.Title.Split(new[] { " - ", " – " }, StringSplitOptions.RemoveEmptyEntries);
+                        var titleParts = result.Title.Split(new[] { " - ", " â€“ " }, StringSplitOptions.RemoveEmptyEntries);
                         if (titleParts.Length >= 2)
                         {
                             result.Artist = titleParts[0].Trim();
@@ -4176,3 +4176,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

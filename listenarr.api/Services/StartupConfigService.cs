@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 using System.Text.Json;
 
 namespace Listenarr.Api.Services
@@ -160,3 +160,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

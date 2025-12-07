@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -168,7 +168,7 @@ namespace Listenarr.Api.Services
         /// </summary>
         /// <param name="client">The download client configuration to test</param>
         /// <returns>Tuple containing success flag, message, and optionally the client configuration</returns>
-        Task<(bool Success, string Message, Listenarr.Api.Models.DownloadClientConfiguration? Client)> TestDownloadClientAsync(Listenarr.Api.Models.DownloadClientConfiguration client);
+        Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client);
     }
 
     /// <summary>
@@ -298,8 +298,8 @@ namespace Listenarr.Api.Services
         /// Extracts metadata from an audio file using ffprobe
         /// </summary>
         /// <param name="filePath">Path to the audio file</param>
-        /// <returns>Extracted audio metadata</returns>
-        Task<AudioMetadata> ExtractFileMetadataAsync(string filePath);
+        /// <returns>Extracted audio metadata, or null if extraction failed</returns>
+        Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath);
         
         /// <summary>
         /// Applies metadata tags to an audio file

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using Listenarr.Api.Controllers;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 using Moq;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
@@ -113,20 +113,23 @@ namespace Listenarr.Api.Tests
             var importService = new ImportService(dbFactoryMock.Object, scopeFactory, new FileNamingService(configMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>()), metadataMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>());
 
             // one importService instance for this test
-            var downloadService = new DownloadService(
-                repoMock.Object,
-                configMock.Object,
-                dbFactoryMock.Object,
-                loggerMock.Object,
-                httpClient,
-                httpClientFactoryMock.Object,
-                scopeFactory,
-                importService,
-                pathMappingMock.Object,
-                searchMock.Object,
-                hubContextMock.Object,
-                cacheMock.Object,
-                null);
+            var provider2 = TestServiceFactory.BuildServiceProvider(services =>
+            {
+                services.AddSingleton<IAudiobookRepository>(repoMock.Object);
+                services.AddSingleton<IConfigurationService>(configMock.Object);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(dbFactoryMock.Object);
+                services.AddSingleton<Microsoft.Extensions.Logging.ILogger<DownloadService>>(loggerMock.Object);
+                services.AddSingleton<HttpClient>(httpClient);
+                services.AddSingleton<IHttpClientFactory>(httpClientFactoryMock.Object);
+                services.AddSingleton<IImportService>(importService);
+                services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
+                services.AddSingleton<ISearchService>(searchMock.Object);
+                services.AddSingleton<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>(new Mock<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>().Object);
+                services.AddSingleton<IHubContext<DownloadHub>>(hubContextMock.Object);
+                services.AddSingleton<IMemoryCache>(cacheMock.Object);
+                services.AddTransient<DownloadService>();
+            });
+            var downloadService = provider2.GetRequiredService<DownloadService>();
 
             // Act - process completed download
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
@@ -220,20 +223,23 @@ namespace Listenarr.Api.Tests
 
             var importService = new ImportService(dbFactoryMock.Object, scopeFactory, new FileNamingService(configMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>()), metadataMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>());
 
-            var downloadService = new DownloadService(
-                repoMock.Object,
-                configMock.Object,
-                dbFactoryMock.Object,
-                loggerMock.Object,
-                httpClient,
-                httpClientFactoryMock.Object,
-                scopeFactory,
-                importService,
-                pathMappingMock.Object,
-                searchMock.Object,
-                hubContextMock.Object,
-                cacheMock.Object,
-                null);
+            var provider2 = TestServiceFactory.BuildServiceProvider(services =>
+            {
+                services.AddSingleton<IAudiobookRepository>(repoMock.Object);
+                services.AddSingleton<IConfigurationService>(configMock.Object);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(dbFactoryMock.Object);
+                services.AddSingleton<Microsoft.Extensions.Logging.ILogger<DownloadService>>(loggerMock.Object);
+                services.AddSingleton<HttpClient>(httpClient);
+                services.AddSingleton<IHttpClientFactory>(httpClientFactoryMock.Object);
+                services.AddSingleton<IImportService>(importService);
+                services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
+                services.AddSingleton<ISearchService>(searchMock.Object);
+                services.AddSingleton<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>(new Mock<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>().Object);
+                services.AddSingleton<IHubContext<DownloadHub>>(hubContextMock.Object);
+                services.AddSingleton<IMemoryCache>(cacheMock.Object);
+                services.AddTransient<DownloadService>();
+            });
+            var downloadService = provider2.GetRequiredService<DownloadService>();
 
             // Act
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
@@ -418,21 +424,24 @@ namespace Listenarr.Api.Tests
             // Construct the service under test (use our HttpClient and factory)
             var importService4 = new Mock<IImportService>();
 
-            var downloadService = new DownloadService(
-                repoMock.Object,
-                configMock.Object,
-                dbFactoryMock.Object,
-                loggerMock.Object,
-                httpClient,
-                httpFactoryMock.Object,
-                scopeFactory,
-                importService4.Object,
-                pathMappingMock.Object,
-                searchMock.Object,
-                hubContextMock.Object,
-                memoryCache,
-                null,
-                metricsMock.Object);
+            var provider2 = TestServiceFactory.BuildServiceProvider(services =>
+            {
+                services.AddSingleton<IAudiobookRepository>(repoMock.Object);
+                services.AddSingleton<IConfigurationService>(configMock.Object);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(dbFactoryMock.Object);
+                services.AddSingleton<Microsoft.Extensions.Logging.ILogger<DownloadService>>(loggerMock.Object);
+                services.AddSingleton<HttpClient>(httpClient);
+                services.AddSingleton<IHttpClientFactory>(httpFactoryMock.Object);
+                services.AddSingleton<IImportService>(importService4.Object);
+                services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
+                services.AddSingleton<ISearchService>(searchMock.Object);
+                services.AddSingleton<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>(new Mock<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>().Object);
+                services.AddSingleton<IHubContext<DownloadHub>>(hubContextMock.Object);
+                services.AddSingleton<IMemoryCache>(memoryCache);
+                services.AddSingleton<IAppMetricsService>(metricsMock.Object);
+                services.AddTransient<DownloadService>();
+            });
+            var downloadService = provider2.GetRequiredService<DownloadService>();
 
             // Act - call GetQueueAsync which runs the purge path
             var result = await downloadService.GetQueueAsync();
@@ -440,7 +449,7 @@ namespace Listenarr.Api.Tests
             // Assert: the DB download should still exist (not purged) because SABnzbd history contained the matching entry
             using (var scope = provider.CreateScope())
             {
-                var dbCtx = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                await using var dbCtx = await scope.ServiceProvider.GetListenArrDbContextAsync();
                 var stillExists = await dbCtx.Downloads.FindAsync(download.Id);
                 Assert.NotNull(stillExists);
             }

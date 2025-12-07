@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
@@ -28,13 +28,16 @@ namespace Listenarr.Api.Services
     {
         private readonly ListenArrDbContext _context;
         private readonly ILogger<DownloadProcessingQueueService> _logger;
+        private readonly DownloadProcessingChannel? _channel;
 
         public DownloadProcessingQueueService(
             ListenArrDbContext context,
-            ILogger<DownloadProcessingQueueService> logger)
+            ILogger<DownloadProcessingQueueService> logger,
+            DownloadProcessingChannel? channel = null)
         {
             _context = context;
             _logger = logger;
+            _channel = channel;
         }
 
         public async Task<string> QueueDownloadProcessingAsync(string downloadId, string sourcePath, string? downloadClientId = null)
@@ -58,7 +61,7 @@ namespace Listenarr.Api.Services
             }
 
             // If we have a recently completed job for the same download, avoid
-            // requeuing immediately — return the most recent completed job id.
+            // requeuing immediately â€” return the most recent completed job id.
             var recentCompleted = await _context.DownloadProcessingJobs
                 .Where(j => j.DownloadId == downloadId && j.Status == ProcessingJobStatus.Completed && j.CompletedAt.HasValue && j.CompletedAt >= recentCompletedCutoff)
                 .OrderByDescending(j => j.CompletedAt)
@@ -86,6 +89,21 @@ namespace Listenarr.Api.Services
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("Queued download {DownloadId} for post-processing: {JobId}", downloadId, job.Id);
+
+            // If a channel is available, publish the newly queued job for in-memory consumers.
+            try
+            {
+                if (_channel != null)
+                {
+                    await _channel.EnqueueJobAsync(job.Id);
+                    _logger.LogDebug("Published job {JobId} to in-memory processing channel", job.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Do not fail the enqueue operation if the channel publish fails; log for diagnostics.
+                _logger.LogWarning(ex, "Failed to publish job {JobId} to processing channel", job.Id);
+            }
 
             return job.Id;
         }

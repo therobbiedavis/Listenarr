@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Collections.Generic;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.AspNetCore.Http;
 using Xunit;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Runtime.InteropServices;
 
 namespace Listenarr.Api.Tests.Services
@@ -153,3 +153,4 @@ namespace Listenarr.Api.Tests.Services
         }
     }
 }
+

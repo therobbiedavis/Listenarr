@@ -22,7 +22,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
 using Listenarr.Api.Hubs;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Text.Json;
 
 namespace Listenarr.Api.Services
@@ -33,6 +33,7 @@ namespace Listenarr.Api.Services
     public class DownloadMonitorService : BackgroundService
     {
         private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly Microsoft.EntityFrameworkCore.IDbContextFactory<Listenarr.Infrastructure.Models.ListenArrDbContext> _dbFactory;
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly ILogger<DownloadMonitorService> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
@@ -46,18 +47,94 @@ namespace Listenarr.Api.Services
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _missingSourceRetryAttempts = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _missingSourceRetryScheduled = new();
 
+        // Backward-compatible constructor to avoid breaking existing tests that instantiate
+        // DownloadMonitorService without providing an IDbContextFactory. This resolves the
+        // IDbContextFactory from the IServiceScopeFactory and delegates to the primary ctor.
         public DownloadMonitorService(
             IServiceScopeFactory serviceScopeFactory,
             IHubContext<DownloadHub> hubContext,
             ILogger<DownloadMonitorService> logger,
             IHttpClientFactory httpClientFactory,
             IAppMetricsService? appMetrics = null)
+            : this(
+                  serviceScopeFactory,
+                  // Resolve IDbContextFactory from a temporary scope so tests and older registrations work.
+                  // Use GetService instead of GetRequiredService and provide a fallback factory when only a
+                  // ListenArrDbContext singleton is registered (helps unit tests that register a single
+                  // ListenArrDbContext instance instead of an IDbContextFactory).
+                  CreateFallbackDbFactoryIfNeeded(serviceScopeFactory),
+                  hubContext,
+                  logger,
+                  httpClientFactory,
+                  appMetrics)
+        {
+        }
+
+        public DownloadMonitorService(
+            IServiceScopeFactory serviceScopeFactory,
+            Microsoft.EntityFrameworkCore.IDbContextFactory<Listenarr.Infrastructure.Models.ListenArrDbContext> dbFactory,
+            IHubContext<DownloadHub> hubContext,
+            ILogger<DownloadMonitorService> logger,
+            IHttpClientFactory httpClientFactory,
+            IAppMetricsService? appMetrics = null)
         {
             _serviceScopeFactory = serviceScopeFactory;
+            _dbFactory = dbFactory;
             _hubContext = hubContext;
             _logger = logger;
             _httpClientFactory = httpClientFactory;
             _metrics = appMetrics ?? new NoopAppMetricsService();
+        }
+
+        // If an IDbContextFactory is registered, return it; otherwise, if a single
+        // ListenArrDbContext instance is registered in the scope, create an adapter
+        // IDbContextFactory that returns that instance. This keeps unit tests working
+        // when they register a single in-memory ListenArrDbContext instead of a factory.
+        private static Microsoft.EntityFrameworkCore.IDbContextFactory<Listenarr.Infrastructure.Models.ListenArrDbContext> CreateFallbackDbFactoryIfNeeded(IServiceScopeFactory serviceScopeFactory)
+        {
+            using var scope = serviceScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var factory = sp.GetService<Microsoft.EntityFrameworkCore.IDbContextFactory<Listenarr.Infrastructure.Models.ListenArrDbContext>>();
+            if (factory != null) return factory;
+
+            var existing = sp.GetService<Listenarr.Infrastructure.Models.ListenArrDbContext>();
+            if (existing != null)
+            {
+                return new ExistingInstanceDbContextFactory(existing);
+            }
+
+            // No factory or instance - return a factory implementation that throws when used. This preserves
+            // the previous failure mode but with clearer semantics if this path is reached.
+            return new ThrowingDbContextFactory();
+        }
+
+        private sealed class ExistingInstanceDbContextFactory : Microsoft.EntityFrameworkCore.IDbContextFactory<Listenarr.Infrastructure.Models.ListenArrDbContext>
+        {
+            private readonly Listenarr.Infrastructure.Models.ListenArrDbContext _instance;
+            public ExistingInstanceDbContextFactory(Listenarr.Infrastructure.Models.ListenArrDbContext instance) => _instance = instance;
+
+            public Listenarr.Infrastructure.Models.ListenArrDbContext CreateDbContext()
+            {
+                return _instance;
+            }
+
+            public System.Threading.Tasks.ValueTask<Listenarr.Infrastructure.Models.ListenArrDbContext> CreateDbContextAsync(System.Threading.CancellationToken cancellationToken = default)
+            {
+                return new System.Threading.Tasks.ValueTask<Listenarr.Infrastructure.Models.ListenArrDbContext>(_instance);
+            }
+        }
+
+        private sealed class ThrowingDbContextFactory : Microsoft.EntityFrameworkCore.IDbContextFactory<Listenarr.Infrastructure.Models.ListenArrDbContext>
+        {
+            public Listenarr.Infrastructure.Models.ListenArrDbContext CreateDbContext()
+            {
+                throw new InvalidOperationException("No ListenArrDbContext or IDbContextFactory<ListenArrDbContext> is registered in the current service scope.");
+            }
+
+            public System.Threading.Tasks.ValueTask<Listenarr.Infrastructure.Models.ListenArrDbContext> CreateDbContextAsync(System.Threading.CancellationToken cancellationToken = default)
+            {
+                throw new InvalidOperationException("No ListenArrDbContext or IDbContextFactory<ListenArrDbContext> is registered in the current service scope.");
+            }
         }
 
         /// <summary>
@@ -298,7 +375,7 @@ namespace Listenarr.Api.Services
         private async Task MonitorDownloadsAsync(CancellationToken cancellationToken)
         {
             using var scope = _serviceScopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            var dbContext = _dbFactory.CreateDbContext();
             var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
 
             // Get all active downloads from database
@@ -447,8 +524,8 @@ namespace Listenarr.Api.Services
                     // Login
                     using var loginData = new FormUrlEncodedContent(new[]
                     {
-                        new KeyValuePair<string, string>("username", client.Username),
-                        new KeyValuePair<string, string>("password", client.Password)
+                        new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
+                        new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
                     });
                     var loginResp = await http.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, cancellationToken);
                     if (!loginResp.IsSuccessStatusCode)
@@ -812,7 +889,7 @@ namespace Listenarr.Api.Services
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                 var fileNaming = scope.ServiceProvider.GetService<IFileNamingService>();
                 var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var db = _dbFactory.CreateDbContext();
 
                 // Check if this download is already being processed by the background service
                 var queueService = scope.ServiceProvider.GetService<IDownloadProcessingQueueService>();

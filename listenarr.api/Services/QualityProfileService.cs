@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -25,8 +25,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Application.Repositories;
 
 namespace Listenarr.Api.Services
 {
@@ -46,16 +47,30 @@ namespace Listenarr.Api.Services
     {
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<QualityProfileService> _logger;
+        private readonly IQualityProfileRepository _repository;
 
+        public QualityProfileService(ListenArrDbContext dbContext, IQualityProfileRepository repository, ILogger<QualityProfileService> logger)
+        {
+            _dbContext = dbContext;
+            _logger = logger;
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        }
+
+        // Backwards-compatible constructor used by unit tests that previously
+        // constructed the service with (ListenArrDbContext, ILogger). Tests create
+        // the service with a null DbContext for scoring-only scenarios; provide a
+        // lightweight repository implementation that proxies to the DbContext when available.
         public QualityProfileService(ListenArrDbContext dbContext, ILogger<QualityProfileService> logger)
         {
             _dbContext = dbContext;
             _logger = logger;
+            _repository = new ApiLocalQualityProfileRepository(dbContext);
         }
 
         public async Task<List<QualityProfile>> GetAllAsync()
         {
-            return await _dbContext.QualityProfiles.ToListAsync();
+            // Delegate persistence concerns to repository which encapsulates defensive JSON handling
+            return await _repository.GetAllAsync();
         }
 
         public async Task<QualityProfile?> GetByIdAsync(int id)
@@ -157,7 +172,7 @@ namespace Listenarr.Api.Services
             if (updated)
             {
                 profile.UpdatedAt = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync();
+                await _repository.UpdateAsync(profile);
                 _logger.LogInformation("Updated quality profile '{ProfileName}' with missing qualities", profile.Name);
             }
         }
@@ -173,16 +188,14 @@ namespace Listenarr.Api.Services
             profile.CreatedAt = DateTime.UtcNow;
             profile.UpdatedAt = DateTime.UtcNow;
 
-            _dbContext.QualityProfiles.Add(profile);
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation("Created quality profile: {Name} (ID: {Id})", profile.Name, profile.Id);
-            return profile;
+            var created = await _repository.AddAsync(profile);
+            _logger.LogInformation("Created quality profile: {Name} (ID: {Id})", created.Name, created.Id);
+            return created;
         }
 
         public async Task<QualityProfile> UpdateAsync(QualityProfile profile)
         {
-            var existing = await _dbContext.QualityProfiles.FindAsync(profile.Id);
+            var existing = await _repository.FindByIdAsync(profile.Id);
             if (existing == null)
             {
                 throw new InvalidOperationException($"Quality profile with ID {profile.Id} not found");
@@ -194,33 +207,16 @@ namespace Listenarr.Api.Services
                 await UnsetAllDefaultsAsync();
             }
 
-            // Update properties
-            existing.Name = profile.Name;
-            existing.Description = profile.Description;
-            existing.Qualities = profile.Qualities;
-            existing.CutoffQuality = profile.CutoffQuality;
-            existing.MinimumSize = profile.MinimumSize;
-            existing.MaximumSize = profile.MaximumSize;
-            existing.PreferredFormats = profile.PreferredFormats;
-            existing.PreferredWords = profile.PreferredWords;
-            existing.MustNotContain = profile.MustNotContain;
-            existing.MustContain = profile.MustContain;
-            existing.PreferredLanguages = profile.PreferredLanguages;
-            existing.MinimumSeeders = profile.MinimumSeeders;
-            existing.IsDefault = profile.IsDefault;
-            existing.PreferNewerReleases = profile.PreferNewerReleases;
-            existing.MaximumAge = profile.MaximumAge;
-            existing.UpdatedAt = DateTime.UtcNow;
+            profile.UpdatedAt = DateTime.UtcNow;
+            var updated = await _repository.UpdateAsync(profile);
 
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation("Updated quality profile: {Name} (ID: {Id})", profile.Name, profile.Id);
-            return existing;
+            _logger.LogInformation("Updated quality profile: {Name} (ID: {Id})", updated.Name, updated.Id);
+            return updated;
         }
 
         public async Task<bool> DeleteAsync(int id)
         {
-            var profile = await _dbContext.QualityProfiles.FindAsync(id);
+            var profile = await _repository.FindByIdAsync(id);
             if (profile == null)
             {
                 return false;
@@ -234,8 +230,7 @@ namespace Listenarr.Api.Services
             }
 
             // Check if any audiobooks are using this profile
-            var audiobooksCount = await _dbContext.Audiobooks
-                .CountAsync(a => a.QualityProfileId == id);
+            var audiobooksCount = await _repository.CountAudiobooksUsingProfileAsync(id);
 
             if (audiobooksCount > 0)
             {
@@ -244,25 +239,22 @@ namespace Listenarr.Api.Services
                     "Please reassign those audiobooks to a different profile first.");
             }
 
-            _dbContext.QualityProfiles.Remove(profile);
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation("Deleted quality profile: {Name} (ID: {Id})", profile.Name, id);
-            return true;
+            var deleted = await _repository.DeleteAsync(id);
+            if (deleted)
+            {
+                _logger.LogInformation("Deleted quality profile: {Name} (ID: {Id})", profile.Name, id);
+            }
+            return deleted;
         }
 
         private async Task UnsetAllDefaultsAsync()
         {
-            var defaults = await _dbContext.QualityProfiles
-                .Where(p => p.IsDefault)
-                .ToListAsync();
-
+            var defaults = (await _repository.GetAllAsync()).Where(p => p.IsDefault).ToList();
             foreach (var profile in defaults)
             {
                 profile.IsDefault = false;
+                await _repository.UpdateAsync(profile);
             }
-
-            await _dbContext.SaveChangesAsync();
         }
 
         public Task<QualityScore> ScoreSearchResult(SearchResult searchResult, QualityProfile profile)
@@ -765,4 +757,71 @@ namespace Listenarr.Api.Services
             return null;
         }
     }
+
+    // NOTE: defensive JSON deserialization helpers live in Listenarr.Infrastructure.Persistence.Converters.JsonConverterHelpers
 }
+
+    // Internal lightweight implementation of IQualityProfileRepository used
+    // only for backwards compatibility in tests or hosts that construct the
+    // service directly without DI. This avoids adding a hard dependency on
+    // the infrastructure project from the API assembly.
+    internal class ApiLocalQualityProfileRepository : Listenarr.Application.Repositories.IQualityProfileRepository
+    {
+        private readonly Listenarr.Infrastructure.Models.ListenArrDbContext? _db;
+
+        public ApiLocalQualityProfileRepository(Listenarr.Infrastructure.Models.ListenArrDbContext? db)
+        {
+            _db = db;
+        }
+
+        public async Task<List<QualityProfile>> GetAllAsync()
+        {
+            if (_db == null) return new List<QualityProfile>();
+            return await _db.QualityProfiles.ToListAsync();
+        }
+
+        public async Task<QualityProfile?> FindByIdAsync(int id)
+        {
+            if (_db == null) return null;
+            return await _db.QualityProfiles.FindAsync(id);
+        }
+
+        public async Task<QualityProfile?> GetDefaultAsync()
+        {
+            if (_db == null) return null;
+            return await _db.QualityProfiles.FirstOrDefaultAsync(p => p.IsDefault);
+        }
+
+        public async Task<QualityProfile> AddAsync(QualityProfile profile)
+        {
+            if (_db == null) throw new InvalidOperationException("No DbContext available");
+            _db.QualityProfiles.Add(profile);
+            await _db.SaveChangesAsync();
+            return profile;
+        }
+
+        public async Task<QualityProfile> UpdateAsync(QualityProfile profile)
+        {
+            if (_db == null) throw new InvalidOperationException("No DbContext available");
+            _db.QualityProfiles.Update(profile);
+            await _db.SaveChangesAsync();
+            return profile;
+        }
+
+        public async Task<bool> DeleteAsync(int id)
+        {
+            if (_db == null) return false;
+            var existing = await _db.QualityProfiles.FindAsync(id);
+            if (existing == null) return false;
+            _db.QualityProfiles.Remove(existing);
+            await _db.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<int> CountAudiobooksUsingProfileAsync(int profileId)
+        {
+            if (_db == null) return 0;
+            return await _db.Audiobooks.CountAsync(a => a.QualityProfileId == profileId);
+        }
+    }
+

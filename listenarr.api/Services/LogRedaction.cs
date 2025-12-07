@@ -24,17 +24,22 @@ namespace Listenarr.Api.Services
 
             var redacted = text!;
 
-            // If no explicit secret values provided, just return text unchanged
-            if (secretValues != null)
+            // Combine provided secret values with any values discovered in the environment.
+            // This ensures callers that don't pass explicit secrets still redact known env vars.
+            var envSecrets = GetSensitiveValuesFromEnvironment();
+            var combined = (secretValues ?? Enumerable.Empty<string?>())
+                .Concat(envSecrets)
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Select(v => v!)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var s in combined)
             {
-                foreach (var s in secretValues.Where(v => !string.IsNullOrEmpty(v)).Distinct())
+                try
                 {
-                    try
-                    {
-                        redacted = redacted.Replace(s!, "<redacted>", StringComparison.Ordinal);
-                    }
-                    catch { }
+                    redacted = redacted.Replace(s, "<redacted>", StringComparison.OrdinalIgnoreCase);
                 }
+                catch { }
             }
 
             return redacted;
