@@ -309,7 +309,11 @@ namespace Listenarr.Api.Controllers
                             var tempForNaming = new Audiobook
                             {
                                 Title = request.Metadata?.Title,
-                                Authors = request.Metadata?.Authors,
+                                Authors = (request.Metadata?.Authors != null && request.Metadata.Authors.Any())
+                                            ? request.Metadata.Authors
+                                            : (!string.IsNullOrWhiteSpace(request.Metadata?.Author)
+                                                ? new List<string> { request.Metadata.Author! }
+                                                : null),
                                 Series = request.Metadata?.Series,
                                 SeriesNumber = request.Metadata?.SeriesNumber,
                                 PublishYear = request.Metadata?.PublishYear
