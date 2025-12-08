@@ -27,6 +27,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 
 namespace Listenarr.Api.Services
 {
@@ -673,8 +675,6 @@ namespace Listenarr.Api.Services
 
             _logger.LogInformation("Not a DDL, processing as torrent/usenet. DownloadType was: '{DownloadType}'", searchResult.DownloadType);
 
-
-            // If no specific client provided, auto-select based on result type
             if (downloadClientId == null)
             {
                 var isTorrent = IsTorrentResult(searchResult);
@@ -698,7 +698,6 @@ namespace Listenarr.Api.Services
 
             _logger.LogInformation("Sending to {ClientType} download client: {ClientName}", downloadClient.Type, downloadClient.Name);
 
-            // Generate download ID
             var downloadId = Guid.NewGuid().ToString();
 
             // Create Download record in database before sending to client
@@ -731,6 +730,9 @@ namespace Listenarr.Api.Services
             dbContext.Downloads.Add(download);
             await dbContext.SaveChangesAsync();
             _logger.LogInformation("Created download record in database: {DownloadId} for '{Title}'", downloadId, searchResult.Title);
+
+            // Attempt to cache MyAnonamouse torrents ahead of handing off to qBittorrent
+            await TryPrepareMyAnonamouseTorrentAsync(searchResult);
 
             // Route to appropriate client handler and capture client-specific IDs
             string? clientSpecificId = null;
@@ -874,6 +876,85 @@ namespace Listenarr.Api.Services
             }
 
             return downloadId;
+        }
+
+        private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult)
+        {
+            if (searchResult == null)
+                return;
+
+            if (string.IsNullOrEmpty(searchResult.TorrentUrl))
+            {
+                _logger.LogDebug("Skipping MyAnonamouse cache: no TorrentUrl for '{Title}'", searchResult.Title);
+                return;
+            }
+
+            if (!string.Equals(searchResult.IndexerImplementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (searchResult.TorrentFileContent != null && searchResult.TorrentFileContent.Length > 0)
+            {
+                _logger.LogDebug("MyAnonamouse torrent already cached for '{Title}'", searchResult.Title);
+                return;
+            }
+
+            try
+            {
+                var dbContext = await _dbContextFactory.CreateDbContextAsync();
+                Listenarr.Domain.Models.Indexer? indexer = null;
+
+                if (searchResult.IndexerId.HasValue)
+                {
+                    indexer = await dbContext.Indexers.FindAsync(searchResult.IndexerId.Value);
+                }
+
+                if (indexer == null)
+                {
+                    indexer = await dbContext.Indexers
+                        .Where(i => i.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                        .FirstOrDefaultAsync(i => i.Name.Equals(searchResult.Source ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (indexer == null)
+                {
+                    _logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': indexer configuration not found", searchResult.Title);
+                    return;
+                }
+
+                var mamId = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
+                if (string.IsNullOrEmpty(mamId))
+                {
+                    _logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': mam_id missing from indexer {IndexerName}", searchResult.Title, indexer.Name);
+                    return;
+                }
+
+                using var httpClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
+                _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, searchResult.TorrentUrl);
+                var response = await httpClient.GetAsync(searchResult.TorrentUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("MyAnonamouse torrent download failed for '{Title}' with status {Status}", searchResult.Title, response.StatusCode);
+                    return;
+                }
+
+                var torrentBytes = await response.Content.ReadAsByteArrayAsync();
+                if (torrentBytes == null || torrentBytes.Length == 0)
+                {
+                    _logger.LogWarning("MyAnonamouse torrent download for '{Title}' returned empty payload", searchResult.Title);
+                    return;
+                }
+
+                searchResult.TorrentFileContent = torrentBytes;
+                searchResult.TorrentFileName = MyAnonamouseHelper.ResolveTorrentFileName(response, searchResult.TorrentUrl);
+                _logger.LogInformation("Cached MyAnonamouse torrent for '{Title}' ({Bytes} bytes)", searchResult.Title, torrentBytes.Length);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cache MyAnonamouse torrent for '{Title}'", searchResult.Title);
+            }
         }
 
         private string BuildSearchQuery(Audiobook audiobook)
@@ -1111,39 +1192,59 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                // Prepare torrent add data
-                var formData = new List<KeyValuePair<string, string>>
-                {
-                    new KeyValuePair<string, string>("urls", torrentUrl),
-                    new KeyValuePair<string, string>("savepath", string.IsNullOrEmpty(client.DownloadPath) ? "" : client.DownloadPath)
-                };
+                var savePath = string.IsNullOrEmpty(client.DownloadPath) ? string.Empty : client.DownloadPath;
+                string? category = null;
+                string? tags = null;
 
-                // Add category if configured
-                if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
+                if (client.Settings != null)
                 {
-                    var category = categoryObj?.ToString();
+                    if (client.Settings.TryGetValue("category", out var categoryObj))
+                        category = categoryObj?.ToString();
+                    if (client.Settings.TryGetValue("tags", out var tagsObj))
+                        tags = tagsObj?.ToString();
+                }
+
+                if (!string.IsNullOrEmpty(category))
+                    _logger.LogInformation("Adding torrent to qBittorrent with category: {Category}", category);
+                if (!string.IsNullOrEmpty(tags))
+                    _logger.LogInformation("Adding torrent to qBittorrent with tags: {Tags}", tags);
+
+                var hasCachedTorrent = result.TorrentFileContent != null && result.TorrentFileContent.Length > 0;
+                HttpResponseMessage addResponse;
+
+                if (hasCachedTorrent)
+                {
+                    using var multipart = new MultipartFormDataContent();
+                    multipart.Add(new StringContent(savePath), "savepath");
                     if (!string.IsNullOrEmpty(category))
-                    {
-                        formData.Add(new KeyValuePair<string, string>("category", category));
-                        _logger.LogInformation("Adding torrent to qBittorrent with category: {Category}", category);
-                    }
-                }
-
-                // Add tags if configured
-                if (client.Settings != null && client.Settings.TryGetValue("tags", out var tagsObj))
-                {
-                    var tags = tagsObj?.ToString();
+                        multipart.Add(new StringContent(category), "category");
                     if (!string.IsNullOrEmpty(tags))
-                    {
-                        formData.Add(new KeyValuePair<string, string>("tags", tags));
-                        _logger.LogInformation("Adding torrent to qBittorrent with tags: {Tags}", tags);
-                    }
+                        multipart.Add(new StringContent(tags), "tags");
+
+                    var torrentFileName = string.IsNullOrEmpty(result.TorrentFileName) ? "myanonamouse.torrent" : result.TorrentFileName;
+                    var torrentContent = new ByteArrayContent(result.TorrentFileContent!);
+                    torrentContent.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
+                    multipart.Add(torrentContent, "torrents", torrentFileName);
+
+                    _logger.LogInformation("Uploading cached MyAnonamouse torrent to qBittorrent for '{Title}'", result.Title);
+                    addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", multipart);
                 }
+                else
+                {
+                    var formData = new List<KeyValuePair<string, string>>
+                    {
+                        new KeyValuePair<string, string>("urls", torrentUrl),
+                        new KeyValuePair<string, string>("savepath", savePath)
+                    };
 
-                // Add torrent
-                using var addData = new FormUrlEncodedContent(formData);
+                    if (!string.IsNullOrEmpty(category))
+                        formData.Add(new KeyValuePair<string, string>("category", category));
+                    if (!string.IsNullOrEmpty(tags))
+                        formData.Add(new KeyValuePair<string, string>("tags", tags));
 
-                var addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
+                    using var addData = new FormUrlEncodedContent(formData);
+                    addResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/add", addData);
+                }
                 if (!addResponse.IsSuccessStatusCode)
                 {
                     var responseContent = await addResponse.Content.ReadAsStringAsync();

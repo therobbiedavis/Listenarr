@@ -2578,21 +2578,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Searching MyAnonamouse for: {Query}", query);
 
                 // Parse mam_id from AdditionalSettings (robust: case-insensitive and nested)
-                var mamId = "";
-
-                if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
-                {
-                    try
-                    {
-                        using var settings = JsonDocument.Parse(indexer.AdditionalSettings);
-                        mamId = FindMamIdInJson(settings.RootElement) ?? string.Empty;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to parse MyAnonamouse settings");
-                        return new List<SearchResult>();
-                    }
-                }
+                var mamId = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
 
                 if (string.IsNullOrEmpty(mamId))
                 {
@@ -2698,38 +2684,10 @@ namespace Listenarr.Api.Services
                 request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
                 request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
 
-                // Add mam_id as a cookie for authentication (bind cookie to the indexer's base host)
-                var cookieContainer = new System.Net.CookieContainer();
-                var baseUrl = indexer.Url.TrimEnd('/');
-                var baseUri = new Uri(baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? baseUrl : "https://" + baseUrl);
-                cookieContainer.Add(baseUri, new System.Net.Cookie("mam_id", mamId));
-                try
-                {
-                    var host = baseUri.Host;
-                    if (!host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var wwwUri = new Uri($"{baseUri.Scheme}://www.{host}");
-                        cookieContainer.Add(wwwUri, new System.Net.Cookie("mam_id", mamId));
-                    }
-                }
-                catch { }
-
-                // Create HttpClientHandler with cookies
-                var handler = new HttpClientHandler
-                {
-                    CookieContainer = cookieContainer,
-                    UseCookies = true
-                };
-
-                using var cookieClient = new HttpClient(handler);
-                cookieClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                cookieClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                cookieClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                cookieClient.DefaultRequestHeaders.Referrer = new Uri("https://www.myanonamouse.net/");
-
+                using var httpClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
                 _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
 
-                var response = await cookieClient.SendAsync(request);
+                var response = await httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
@@ -3014,6 +2972,8 @@ namespace Listenarr.Api.Services
                             MagnetLink = "",
                             NzbUrl = ""
                         };
+                        result.IndexerId = indexer.Id;
+                        result.IndexerImplementation = indexer.Implementation;
                         // Robust link detection: prefer magnet/hash/torrent indicators, only treat as NZB when explicit NZB fields exist
                         try
                         {
@@ -3610,6 +3570,8 @@ namespace Listenarr.Api.Services
                             Source = indexer.Name,
                             Category = item.Element("category")?.Value ?? "Audiobook"
                         };
+                        result.IndexerId = indexer.Id;
+                        result.IndexerImplementation = indexer.Implementation;
 
                         // Parse published date
                         var pubDateStr = item.Element("pubDate")?.Value;

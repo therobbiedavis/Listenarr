@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Text.Json.Serialization;
+
 namespace Listenarr.Domain.Models
 {
     public class SearchResult
@@ -31,11 +33,19 @@ namespace Listenarr.Domain.Models
         public string MagnetLink { get; set; } = string.Empty;
         public string TorrentUrl { get; set; } = string.Empty;
         public string NzbUrl { get; set; } = string.Empty;
+        [JsonIgnore]
+        public byte[]? TorrentFileContent { get; set; }
+        [JsonIgnore]
+        public string? TorrentFileName { get; set; }
         public string Source { get; set; } = string.Empty;
         public string DownloadType { get; set; } = string.Empty; // "Torrent", "Usenet", or "DDL"
         public DateTime PublishedDate { get; set; }
         public string Quality { get; set; } = string.Empty;
         public string Format { get; set; } = string.Empty;
+
+        // Indexer metadata used to resolve tracker-specific downloads
+        public int? IndexerId { get; set; }
+        public string? IndexerImplementation { get; set; }
 
         // Additional properties for enhanced audiobook metadata
         public string? Description { get; set; }
