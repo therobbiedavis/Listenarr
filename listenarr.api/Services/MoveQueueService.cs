@@ -6,6 +6,7 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 
 namespace Listenarr.Api.Services
@@ -15,12 +16,12 @@ namespace Listenarr.Api.Services
         private readonly ConcurrentDictionary<Guid, MoveJob> _jobs = new();
         private readonly Channel<MoveJob> _channel = Channel.CreateUnbounded<MoveJob>();
         private readonly ILogger<MoveQueueService> _logger;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
 
-        public MoveQueueService(ILogger<MoveQueueService> logger, IServiceProvider serviceProvider)
+        public MoveQueueService(ILogger<MoveQueueService> logger, IServiceScopeFactory scopeFactory)
         {
-            _logger = logger;
-            _serviceProvider = serviceProvider;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         }
 
         public ChannelReader<MoveJob> Reader => _channel.Reader;
@@ -30,7 +31,7 @@ namespace Listenarr.Api.Services
             try
             {
                 // Check DB for existing active job
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
 
                 var requestedLower = (requestedPath ?? string.Empty).ToLower();
@@ -54,7 +55,7 @@ namespace Listenarr.Api.Services
 
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 db.MoveJobs.Add(job);
                 await db.SaveChangesAsync();
@@ -75,7 +76,7 @@ namespace Listenarr.Api.Services
             if (_jobs.TryGetValue(id, out job)) return true;
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 job = db.MoveJobs.FirstOrDefault(j => j.Id == id);
                 if (job != null) _jobs[id] = job;
@@ -100,7 +101,7 @@ namespace Listenarr.Api.Services
 
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 var dbJob = db.MoveJobs.FirstOrDefault(j => j.Id == id);
                 if (dbJob != null)
@@ -127,7 +128,7 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    using var scope = _serviceProvider.CreateScope();
+                    using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                     job = db.MoveJobs.FirstOrDefault(j => j.Id == jobId);
                 }
@@ -152,7 +153,7 @@ namespace Listenarr.Api.Services
             var newJob = new MoveJob { AudiobookId = job.AudiobookId, RequestedPath = job.RequestedPath, EnqueuedAt = DateTime.UtcNow, Status = "Queued", SourcePath = job.SourcePath };
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 db.MoveJobs.Add(newJob);
                 await db.SaveChangesAsync();

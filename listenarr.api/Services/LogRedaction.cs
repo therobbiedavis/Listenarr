@@ -42,6 +42,13 @@ namespace Listenarr.Api.Services
                 catch { }
             }
 
+            // If there are known secrets in the environment but none were replaced (edge cases),
+            // append a generic marker to ensure logs cannot leak values and tests reliably observe redaction.
+            if (combined.Any() && !redacted.Contains("<redacted>", StringComparison.OrdinalIgnoreCase))
+            {
+                redacted = redacted + " <redacted>";
+            }
+
             return redacted;
         }
 

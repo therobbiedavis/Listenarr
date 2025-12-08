@@ -28,16 +28,16 @@ namespace Listenarr.Api.Services
         private readonly IHttpClientFactory? _httpClientFactory;
         private static readonly Regex AsinRegex = new(@"/pd/[^/]+/([A-Z0-9]{10})", RegexOptions.Compiled);
         private static readonly Regex AsinFromUrlRegex = new(@"B0[A-Z0-9]{8}", RegexOptions.Compiled);
-    // New: detect navigation/header noise and generic site labels like 'Audible'
-    private static readonly string[] HeaderNoisePhrases = new[] { 
+        // New: detect navigation/header noise and generic site labels like 'Audible'
+        private static readonly string[] HeaderNoisePhrases = new[] {
         "English - USD", "Language", "Currency", "Sign in", "Account & Lists", "Audible", "Audible.com",
         "No results", "Suggested Searches", "No results found", "Try again", "Browse categories",
         "Customer Service", "Help", "Search", "Menu"
     };
 
-    // Detect common locale/geo redirect messages (examples include German audible.de redirect text)
-    private static readonly string[] RedirectNoisePhrases = new[]
-    {
+        // Detect common locale/geo redirect messages (examples include German audible.de redirect text)
+        private static readonly string[] RedirectNoisePhrases = new[]
+        {
         // English
         "have redirected you",
         "we have redirected",
@@ -74,7 +74,7 @@ namespace Listenarr.Api.Services
                 // Format the search query for Audible
                 var searchQuery = query.Replace(" ", "+").ToLower();
                 var searchUrl = $"https://www.audible.com/search?keywords={Uri.EscapeDataString(searchQuery)}";
-                
+
                 _logger.LogInformation("Searching Audible: {SearchUrl}", searchUrl);
 
                 var html = await GetHtmlAsync(searchUrl);
@@ -188,7 +188,7 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogInformation("No results with primary selectors, trying broader search");
                     var allLinks = doc.DocumentNode.SelectNodes("//a[contains(@href,'/pd/')]");
-                    
+
                     if (allLinks != null)
                     {
                         _logger.LogInformation("Found {Count} direct product links on page, trying a broader extraction", allLinks.Count);
@@ -256,26 +256,26 @@ namespace Listenarr.Api.Services
             if (string.IsNullOrWhiteSpace(title)) return true;
             var t = title.Trim();
             if (t.Length < 3) return true;
-            
+
             // If the title is exactly one of the header phrases or is very short/one-word generic like 'Audible', treat as noise
             if (HeaderNoisePhrases.Any(p => string.Equals(t, p, StringComparison.OrdinalIgnoreCase))) return true;
-            
+
             // If the title contains any header noise phrase, treat as noise (regardless of length)
             if (HeaderNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
-            
+
             // If the title contains any known locale/geo redirect phrasing, treat as noise
             if (RedirectNoisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
-            
+
             // Repeated blocks like header duplicated
             if (t.Count(c => c == '\n') > 3 && t.Length > 120) return true;
-            
+
             // Check for titles that are just whitespace and newlines
             if (t.All(c => char.IsWhiteSpace(c) || c == '\n' || c == '\r')) return true;
-            
+
             return false;
         }
 
-    internal async Task<string?> TryFetchProductTitle(string? productUrl, string asin)
+        internal async Task<string?> TryFetchProductTitle(string? productUrl, string asin)
         {
             if (string.IsNullOrEmpty(productUrl)) return null;
             try
@@ -309,7 +309,7 @@ namespace Listenarr.Api.Services
                     if (!string.IsNullOrWhiteSpace(clean)) return clean;
                 }
 
-                var titleNode = doc.DocumentNode.SelectSingleNode("//h1 | //h1//span | //div[contains(@class,'title')]//h1 | //h1[contains(@class,'bc-heading')]" );
+                var titleNode = doc.DocumentNode.SelectSingleNode("//h1 | //h1//span | //div[contains(@class,'title')]//h1 | //h1[contains(@class,'bc-heading')]");
                 var title = titleNode?.InnerText?.Trim();
                 if (!string.IsNullOrWhiteSpace(title))
                 {
@@ -344,7 +344,7 @@ namespace Listenarr.Api.Services
                     // Try alternative ASIN extraction
                     var asinAltMatch = AsinFromUrlRegex.Match(productLink);
                     if (!asinAltMatch.Success) return null;
-                    
+
                     var asin = asinAltMatch.Value;
                     return new AudibleSearchResult { Asin = asin, ProductUrl = productLink };
                 }
@@ -488,9 +488,9 @@ namespace Listenarr.Api.Services
                 {
                     var asinAltMatch = AsinFromUrlRegex.Match(href);
                     if (!asinAltMatch.Success) return null;
-                    
-                    return new AudibleSearchResult 
-                    { 
+
+                    return new AudibleSearchResult
+                    {
                         Asin = asinAltMatch.Value,
                         Title = linkNode.InnerText?.Trim(),
                         ProductUrl = href
@@ -511,12 +511,12 @@ namespace Listenarr.Api.Services
             }
         }
 
-    internal async Task<string?> GetHtmlAsync(string url)
+        internal async Task<string?> GetHtmlAsync(string url)
         {
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                
+
                 // Add realistic headers to avoid bot detection
                 request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
                 request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
@@ -604,7 +604,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-    internal static bool IsNonUsHost(string url)
+        internal static bool IsNonUsHost(string url)
         {
             try
             {
@@ -621,7 +621,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-    internal static string ForceToUSDomain(string url)
+        internal static string ForceToUSDomain(string url)
         {
             try
             {

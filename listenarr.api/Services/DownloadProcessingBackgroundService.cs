@@ -19,6 +19,7 @@
 using Listenarr.Domain.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -84,7 +85,7 @@ namespace Listenarr.Api.Services
             var job = await queueService.GetNextJobAsync();
             if (job == null) return;
 
-            _logger.LogInformation("Processing job {JobId} for download {DownloadId}: {JobType}", 
+            _logger.LogInformation("Processing job {JobId} for download {DownloadId}: {JobType}",
                 job.Id, job.DownloadId, job.JobType);
 
             // Mark job as processing
@@ -102,7 +103,7 @@ namespace Listenarr.Api.Services
                 if (job.Status == ProcessingJobStatus.Processing)
                 {
                     job.MarkAsCompleted();
-                    _logger.LogInformation("Successfully completed job {JobId} for download {DownloadId}", 
+                    _logger.LogInformation("Successfully completed job {JobId} for download {DownloadId}",
                         job.Id, job.DownloadId);
                 }
                 else
@@ -112,9 +113,9 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process job {JobId} for download {DownloadId}: {Error}", 
+                _logger.LogError(ex, "Failed to process job {JobId} for download {DownloadId}: {Error}",
                     job.Id, job.DownloadId, ex.Message);
-                
+
                 job.AddLogEntry($"Processing failed: {ex.Message}");
                 job.ScheduleRetry();
             }
@@ -128,17 +129,17 @@ namespace Listenarr.Api.Services
             var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
 
             var retryJobs = await queueService.GetRetryJobsAsync();
-            
+
             foreach (var job in retryJobs)
             {
-                _logger.LogInformation("Retrying job {JobId} for download {DownloadId} (attempt {Attempt}/{MaxAttempts})", 
+                _logger.LogInformation("Retrying job {JobId} for download {DownloadId} (attempt {Attempt}/{MaxAttempts})",
                     job.Id, job.DownloadId, job.RetryCount + 1, job.MaxRetries);
 
                 // Reset job to pending for processing
                 job.Status = ProcessingJobStatus.Pending;
                 job.ErrorMessage = null;
                 job.AddLogEntry($"Retry #{job.RetryCount} scheduled");
-                
+
                 await queueService.UpdateJobAsync(job);
             }
         }
@@ -168,7 +169,7 @@ namespace Listenarr.Api.Services
                 var allJobsForCandidates = await dbContext.DownloadProcessingJobs
                     .Where(j => candidateIds.Contains(j.DownloadId))
                     .ToListAsync(cancellationToken);
-                
+
                 // Group jobs by DownloadId for efficient lookup
                 var jobsByDownloadId = allJobsForCandidates
                     .GroupBy(j => j.DownloadId)
@@ -320,8 +321,8 @@ namespace Listenarr.Api.Services
         }
 
         private async Task ProcessFileWithEnhancedLogicAsync(
-            DownloadProcessingJob job, 
-            IDownloadService downloadService, 
+            DownloadProcessingJob job,
+            IDownloadService downloadService,
             ApplicationSettings settings,
             IFileNamingService? fileNamingService,
             IMetadataService? metadataService,
@@ -339,7 +340,7 @@ namespace Listenarr.Api.Services
                 if (fileNamingService != null && settings.EnableMetadataProcessing)
                 {
                     job.AddLogEntry("Using file naming service for destination path");
-                    
+
                     // Build metadata for naming - get download info from database
                     var metadata = new AudioMetadata { Title = "Unknown Title" };
                     // When possible we'll build a namingMetadata from the linked Audiobook to ensure
@@ -406,7 +407,7 @@ namespace Listenarr.Api.Services
                                 var exists = File.Exists(sourcePath);
                                 var size = exists ? new FileInfo(sourcePath).Length : (long?)null;
                                 var last = exists ? File.GetLastWriteTimeUtc(sourcePath).ToString("o") : "(not found)";
-                                job.AddLogEntry($"Operation pre-check: sourceExists={exists}, size={(size.HasValue? size.ToString():"(n/a)")}, lastWriteUtc={last}");
+                                job.AddLogEntry($"Operation pre-check: sourceExists={exists}, size={(size.HasValue ? size.ToString() : "(n/a)")}, lastWriteUtc={last}");
                             }
                             catch (Exception ex)
                             {
@@ -458,7 +459,7 @@ namespace Listenarr.Api.Services
                     // Log naming variables for diagnostics
                     try
                     {
-                        var dbgVars = $"Author={(metadataForNaming.Artist ?? "(null)")}, Series={(metadataForNaming.Series ?? "(null)" )}, Title={(metadataForNaming.Title ?? "(null)")}";
+                        var dbgVars = $"Author={(metadataForNaming.Artist ?? "(null)")}, Series={(metadataForNaming.Series ?? "(null)")}, Title={(metadataForNaming.Title ?? "(null)")}";
                         job.AddLogEntry($"Resolved naming metadata: {dbgVars}");
                     }
                     catch { }
@@ -754,8 +755,8 @@ namespace Listenarr.Api.Services
                                     throw;
                                 }
                             }
-                            
-                            
+
+
                             destinationPath = uniqueDest;
 
                             // Verification: ensure destination exists and (if sourceSize available) sizes match

@@ -116,68 +116,15 @@ namespace Listenarr.Api.Services
             var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
             _logger.LogDebug("Playwright installer PATH: {PathSnippet}", path.Length > 200 ? path.Substring(0, 200) + "..." : path);
 
+            try
+            {
+                // Quick check: npx availability
                 try
                 {
-                    // Quick check: npx availability
-                    try
+                    var check = new ProcessStartInfo
                     {
-                        var check = new ProcessStartInfo
-                        {
-                            FileName = "npx",
-                            Arguments = "--version",
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        };
-
-                        if (_processRunner != null)
-                        {
-                            var prCheck = await _processRunner.RunAsync(check, timeoutMs: 5000).ConfigureAwait(false);
-                            _logger.LogDebug("npx --version stdout: {Out}, stderr: {Err}", prCheck.Stdout, prCheck.Stderr);
-                        }
-                        else
-                        {
-                            _logger.LogDebug("IProcessRunner is not available; skipping 'npx --version' check in Playwright installer.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "npx --version check failed");
-                    }
-
-                // Attempt to resolve the full path to the npx executable (handles Windows .cmd/.exe wrappers)
-                string? npxFullPath = FindExecutableOnPath("npx");
-                    if (string.IsNullOrEmpty(npxFullPath))
-                    {
-                        _logger.LogDebug("Could not find 'npx' on PATH for the current process. Ensure Node.js/npx is available to the service environment.");
-                        // Try cmd.exe fallback anyway to get a clearer error
-                        var cmdPsi = new ProcessStartInfo
-                        {
-                            FileName = "cmd.exe",
-                            Arguments = "/C npx playwright install chromium",
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        };
-
-                        if (_processRunner != null)
-                        {
-                            var prCmd = await _processRunner.RunAsync(cmdPsi, timeoutMs: 10 * 60 * 1000, cancellationToken: ct).ConfigureAwait(false);
-                            return (prCmd.ExitCode == 0 && !prCmd.TimedOut, prCmd.Stdout ?? string.Empty, prCmd.Stderr ?? string.Empty, prCmd.ExitCode);
-                        }
-                        else
-                        {
-                            _logger.LogDebug("IProcessRunner is not available; skipping cmd.exe npx Playwright install fallback.");
-                            return (false, string.Empty, "IProcessRunner unavailable", -1);
-                        }
-                    }
-
-                    var psiResolved = new ProcessStartInfo
-                    {
-                        FileName = npxFullPath,
-                        Arguments = "playwright install chromium",
+                        FileName = "npx",
+                        Arguments = "--version",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
                         UseShellExecute = false,
@@ -186,14 +133,67 @@ namespace Listenarr.Api.Services
 
                     if (_processRunner != null)
                     {
-                        var pr = await _processRunner.RunAsync(psiResolved, timeoutMs: 10 * 60 * 1000, cancellationToken: ct).ConfigureAwait(false);
-                        return (pr.ExitCode == 0 && !pr.TimedOut, pr.Stdout ?? string.Empty, pr.Stderr ?? string.Empty, pr.ExitCode);
+                        var prCheck = await _processRunner.RunAsync(check, timeoutMs: 5000).ConfigureAwait(false);
+                        _logger.LogDebug("npx --version stdout: {Out}, stderr: {Err}", prCheck.Stdout, prCheck.Stderr);
                     }
                     else
                     {
-                        _logger.LogDebug("IProcessRunner is not available; skipping npx Playwright install fallback.");
+                        _logger.LogDebug("IProcessRunner is not available; skipping 'npx --version' check in Playwright installer.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "npx --version check failed");
+                }
+
+                // Attempt to resolve the full path to the npx executable (handles Windows .cmd/.exe wrappers)
+                string? npxFullPath = FindExecutableOnPath("npx");
+                if (string.IsNullOrEmpty(npxFullPath))
+                {
+                    _logger.LogDebug("Could not find 'npx' on PATH for the current process. Ensure Node.js/npx is available to the service environment.");
+                    // Try cmd.exe fallback anyway to get a clearer error
+                    var cmdPsi = new ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = "/C npx playwright install chromium",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    if (_processRunner != null)
+                    {
+                        var prCmd = await _processRunner.RunAsync(cmdPsi, timeoutMs: 10 * 60 * 1000, cancellationToken: ct).ConfigureAwait(false);
+                        return (prCmd.ExitCode == 0 && !prCmd.TimedOut, prCmd.Stdout ?? string.Empty, prCmd.Stderr ?? string.Empty, prCmd.ExitCode);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("IProcessRunner is not available; skipping cmd.exe npx Playwright install fallback.");
                         return (false, string.Empty, "IProcessRunner unavailable", -1);
                     }
+                }
+
+                var psiResolved = new ProcessStartInfo
+                {
+                    FileName = npxFullPath,
+                    Arguments = "playwright install chromium",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                if (_processRunner != null)
+                {
+                    var pr = await _processRunner.RunAsync(psiResolved, timeoutMs: 10 * 60 * 1000, cancellationToken: ct).ConfigureAwait(false);
+                    return (pr.ExitCode == 0 && !pr.TimedOut, pr.Stdout ?? string.Empty, pr.Stderr ?? string.Empty, pr.ExitCode);
+                }
+                else
+                {
+                    _logger.LogDebug("IProcessRunner is not available; skipping npx Playwright install fallback.");
+                    return (false, string.Empty, "IProcessRunner unavailable", -1);
+                }
             }
             catch (Exception ex)
             {

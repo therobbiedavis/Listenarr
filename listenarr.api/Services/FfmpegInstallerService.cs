@@ -17,8 +17,8 @@ namespace Listenarr.Api.Services
     public class FfmpegInstallerService : IFfmpegService
     {
         private readonly ILogger<FfmpegInstallerService> _logger;
-    private readonly HttpClient _httpClient;
-    private readonly IStartupConfigService _startupConfigService;
+        private readonly HttpClient _httpClient;
+        private readonly IStartupConfigService _startupConfigService;
         private readonly IProcessRunner? _processRunner;
         // Allow disabling auto-download via environment variable
         private readonly bool _autoInstall;
@@ -267,28 +267,28 @@ namespace Listenarr.Api.Services
                         var candidates = Directory.GetFiles(baseDir, "ffprobe*", SearchOption.AllDirectories);
                         foreach (var cand in candidates)
                         {
-                                try
+                            try
+                            {
+                                var psiCh = new System.Diagnostics.ProcessStartInfo
                                 {
-                                    var psiCh = new System.Diagnostics.ProcessStartInfo
-                                    {
-                                        FileName = "chmod",
-                                        Arguments = $"+x \"{cand}\"",
-                                        RedirectStandardOutput = true,
-                                        RedirectStandardError = true,
-                                        UseShellExecute = false,
-                                        CreateNoWindow = true
-                                    };
+                                    FileName = "chmod",
+                                    Arguments = $"+x \"{cand}\"",
+                                    RedirectStandardOutput = true,
+                                    RedirectStandardError = true,
+                                    UseShellExecute = false,
+                                    CreateNoWindow = true
+                                };
 
-                                    if (_processRunner != null)
-                                    {
-                                        await _processRunner.RunAsync(psiCh, 3000);
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning("IProcessRunner is not available; skipping system 'chmod' fallback for {Candidate}", cand);
-                                    }
+                                if (_processRunner != null)
+                                {
+                                    await _processRunner.RunAsync(psiCh, 3000);
                                 }
-                                catch { /* best effort */ }
+                                else
+                                {
+                                    _logger.LogWarning("IProcessRunner is not available; skipping system 'chmod' fallback for {Candidate}", cand);
+                                }
+                            }
+                            catch { /* best effort */ }
                         }
                     }
                     catch { /* best effort */ }

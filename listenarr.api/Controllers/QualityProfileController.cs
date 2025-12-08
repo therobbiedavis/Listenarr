@@ -187,7 +187,7 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         [HttpPost("{id}/score")]
         public async Task<ActionResult<List<QualityScore>>> ScoreResults(
-            int id, 
+            int id,
             [FromBody] List<SearchResult> searchResults)
         {
             try

@@ -1,17 +1,17 @@
- // csharp
- using System;
- using System.Linq;
- using System.Net;
- using System.Net.Http;
- using Microsoft.Extensions.Configuration;
- using Microsoft.Extensions.DependencyInjection;
- using Polly;
- using Polly.Extensions.Http;
- using Microsoft.EntityFrameworkCore;
- using Listenarr.Infrastructure.Models;
- using Listenarr.Api.Services.Adapters;
- using Listenarr.Api.Services;
- using Microsoft.Extensions.Options;
+// csharp
+using System;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Polly;
+using Polly.Extensions.Http;
+using Microsoft.EntityFrameworkCore;
+using Listenarr.Infrastructure.Models;
+using Listenarr.Api.Services.Adapters;
+using Listenarr.Api.Services;
+using Microsoft.Extensions.Options;
 
 namespace Listenarr.Api.Extensions
 {
@@ -241,7 +241,7 @@ namespace Listenarr.Api.Extensions
             // Register available adapter implementations. Keep adapters scoped because they may depend on scoped services.
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.QbittorrentAdapter>();
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.SabnzbdAdapter>();
-            
+
             // Register the concrete factory as scoped so it can safely resolve scoped adapters via DI.
             services.AddScoped<IDownloadClientAdapterFactory, Listenarr.Api.Services.Adapters.DownloadClientAdapterFactory>();
 

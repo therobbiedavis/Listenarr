@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Services
 {

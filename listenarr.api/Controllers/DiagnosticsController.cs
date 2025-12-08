@@ -14,25 +14,25 @@ namespace Listenarr.Api.Controllers
             _status = status;
         }
 
-            [HttpPost("playwright/install")]
-            public async Task<IActionResult> TriggerPlaywrightInstall([FromServices] IPlaywrightInstaller installer, CancellationToken ct)
+        [HttpPost("playwright/install")]
+        public async Task<IActionResult> TriggerPlaywrightInstall([FromServices] IPlaywrightInstaller installer, CancellationToken ct)
+        {
+            try
             {
-                try
+                var (success, outText, errText, exitCode) = await installer.InstallOnceAsync(ct).ConfigureAwait(false);
+                return Ok(new
                 {
-                    var (success, outText, errText, exitCode) = await installer.InstallOnceAsync(ct).ConfigureAwait(false);
-                    return Ok(new
-                    {
-                        success,
-                        exitCode,
-                        stdout = string.IsNullOrEmpty(outText) ? null : outText,
-                        stderr = string.IsNullOrEmpty(errText) ? null : errText
-                    });
-                }
-                catch (Exception ex)
-                {
-                    return StatusCode(500, new { error = ex.Message });
-                }
+                    success,
+                    exitCode,
+                    stdout = string.IsNullOrEmpty(outText) ? null : outText,
+                    stderr = string.IsNullOrEmpty(errText) ? null : errText
+                });
             }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
 
         [HttpGet("playwright")]
         public IActionResult GetPlaywrightStatus()

@@ -30,7 +30,7 @@ namespace Listenarr.Api.Controllers
         private readonly IWebHostEnvironment _environment;
 
         public ImagesController(
-            IImageCacheService imageCacheService, 
+            IImageCacheService imageCacheService,
             ILogger<ImagesController> logger,
             IWebHostEnvironment environment)
         {
@@ -51,7 +51,7 @@ namespace Listenarr.Api.Controllers
             {
                 // Get the cached image path (checks library first, then temp)
                 var relativePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
-                
+
                 if (relativePath == null)
                 {
                     _logger.LogWarning("Image not found for identifier: {Identifier}", identifier);
@@ -60,7 +60,7 @@ namespace Listenarr.Api.Controllers
 
                 // Build the full file path
                 var fullPath = Path.Combine(_environment.ContentRootPath, relativePath);
-                
+
                 if (!System.IO.File.Exists(fullPath))
                 {
                     _logger.LogWarning("Image file does not exist at path: {Path}", fullPath);
@@ -101,14 +101,14 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var relativePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
-                
+
                 if (relativePath == null)
                 {
                     return NotFound(new { message = "Image not found" });
                 }
 
                 var fullPath = Path.Combine(_environment.ContentRootPath, relativePath);
-                
+
                 if (System.IO.File.Exists(fullPath))
                 {
                     System.IO.File.Delete(fullPath);

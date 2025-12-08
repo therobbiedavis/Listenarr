@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Services
 {

@@ -24,10 +24,10 @@ namespace Listenarr.Domain.Models
 
         // Format name (e.g., m4b, mp3, flac)
         public string? Format { get; set; }
-    // Extracted container (e.g., M4B, MP4)
-    public string? Container { get; set; }
-    // Audio codec (e.g., aac, mp3, opus)
-    public string? Codec { get; set; }
+        // Extracted container (e.g., M4B, MP4)
+        public string? Container { get; set; }
+        // Audio codec (e.g., aac, mp3, opus)
+        public string? Codec { get; set; }
 
         // Bitrate in bits per second
         public int? Bitrate { get; set; }

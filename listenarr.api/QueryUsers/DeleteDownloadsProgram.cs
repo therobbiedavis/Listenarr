@@ -37,12 +37,12 @@ static class DeleteDownloadsProgram
             using (var cmd2 = connection.CreateCommand())
             {
                 cmd2.CommandText = "DELETE FROM sqlite_sequence WHERE name='Downloads';";
-                    try
-                    {
-                        cmd2.ExecuteNonQuery();
-                        Log.Logger.Information("Reset sqlite_sequence for Downloads (if it existed).");
-                    }
-                    catch { }
+                try
+                {
+                    cmd2.ExecuteNonQuery();
+                    Log.Logger.Information("Reset sqlite_sequence for Downloads (if it existed).");
+                }
+                catch { }
             }
 
             tx.Commit();

@@ -27,9 +27,11 @@ namespace Listenarr.Api.Hubs
     public class DownloadHub : Hub
     {
         private readonly ILogger<DownloadHub> _logger;
-        public DownloadHub(ILogger<DownloadHub> logger)
+        private readonly Listenarr.Api.Services.DownloadPushService _pushService;
+        public DownloadHub(ILogger<DownloadHub> logger, Listenarr.Api.Services.DownloadPushService pushService)
         {
             _logger = logger;
+            _pushService = pushService;
         }
 
         public override async Task OnConnectedAsync()
@@ -64,9 +66,7 @@ namespace Listenarr.Api.Hubs
 
             try
             {
-                // Resolve service from Context.GetHttpContext().RequestServices to avoid changing constructor signature
-                var pushService = Context.GetHttpContext()?.RequestServices?.GetService(typeof(Listenarr.Api.Services.DownloadPushService)) as Listenarr.Api.Services.DownloadPushService;
-                if (pushService == null)
+                if (_pushService == null)
                 {
                     _logger.LogWarning("DownloadPushService not available to handle push");
                     return;
@@ -74,7 +74,7 @@ namespace Listenarr.Api.Hubs
 
                 if (download != null)
                 {
-                    await pushService.HandlePushAsync(download);
+                    await _pushService.HandlePushAsync(download);
                 }
             }
             catch (Exception ex)

@@ -9,7 +9,7 @@ namespace Listenarr.Infrastructure.Migrations
     public partial class AddMissingApplicationSettingsColumns_Authoritative_20251116202412 : Migration
     {
         /// <inheritdoc />
-    protected override void Up(MigrationBuilder migrationBuilder)
+        protected override void Up(MigrationBuilder migrationBuilder)
         {
 
         }

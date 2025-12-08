@@ -37,17 +37,17 @@ namespace Listenarr.Api.Tests
                     // Ensure Amazon search returns no results for deterministic output
                     services.AddSingleton<IAmazonSearchService>(sp => new TestAmazonSearchService());
 
-                        // Prevent external HTTP calls for images during tests by injecting a test image cache
-                        services.AddSingleton<IImageCacheService>(sp => new TestImageCacheService());
+                    // Prevent external HTTP calls for images during tests by injecting a test image cache
+                    services.AddSingleton<IImageCacheService>(sp => new TestImageCacheService());
 
-                        // To avoid hitting the test DB schema during integration runs (some metadata
-                        // source queries may fail because of migration/schema drift), replace the
-                        // ISearchService used by controllers with a controlled mock that returns
-                        // deterministic enriched results for this test.
-                        var mockSearch = new Moq.Mock<ISearchService>();
-                        mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>()))
-                            .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "B0TESTASIN", Title = "Clean Title" } });
-                        services.AddSingleton<ISearchService>(mockSearch.Object);
+                    // To avoid hitting the test DB schema during integration runs (some metadata
+                    // source queries may fail because of migration/schema drift), replace the
+                    // ISearchService used by controllers with a controlled mock that returns
+                    // deterministic enriched results for this test.
+                    var mockSearch = new Moq.Mock<ISearchService>();
+                    mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>()))
+                        .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "B0TESTASIN", Title = "Clean Title" } });
+                    services.AddSingleton<ISearchService>(mockSearch.Object);
                 });
             }).CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 

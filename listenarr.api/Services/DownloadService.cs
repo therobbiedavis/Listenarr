@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Listenarr.Application.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
@@ -29,15 +30,15 @@ using System.Net;
 
 namespace Listenarr.Api.Services
 {
-    public class DownloadService : IDownloadService
+    public class DownloadService : IDownloadService, IDownloadOrchestrator
     {
         // Cache expiration constants
         private const int QueueCacheExpirationSeconds = 10;
         private const int ClientStatusCacheExpirationSeconds = 30;
         private const int DirectDownloadTimeoutHours = 2;
-        
+
         private readonly IHubContext<DownloadHub> _hubContext;
-        private readonly IHubBroadcaster? _hubBroadcaster;
+        private readonly Listenarr.Application.Services.IHubBroadcaster _hubBroadcaster;
         private readonly IAudiobookRepository _audiobookRepository;
         private readonly IConfigurationService _configurationService;
         private readonly IDbContextFactory<ListenArrDbContext> _dbContextFactory;
@@ -45,265 +46,62 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _serviceScopeFactory;
-            private readonly IRemotePathMappingService _pathMappingService;
-            private readonly IImportService _importService;
-            private readonly IImportService _import_service;
-            private readonly ISearchService _search_service; // kept for backwards-compat in tests if needed
+        private readonly IRemotePathMappingService _pathMappingService;
+        private readonly IImportService _importService;
         private readonly ISearchService _searchService;
-        private readonly NotificationService? _notificationService;
+        private readonly IDownloadClientGateway? _clientGateway;
+        private readonly NotificationService _notificationService;
         private readonly IMemoryCache _cache;
         private readonly IAppMetricsService _metrics;
-        
+        private readonly IDownloadQueueService _downloadQueueService;
+        private readonly ICompletedDownloadProcessor _completedDownloadProcessor;
+
         // Track qBittorrent sync state for incremental updates (clientId -> last rid)
         private readonly Dictionary<string, int> _qbittorrentSyncState = new();
-        
+
         // Track qBittorrent torrent cache for merging incremental updates (clientId -> (torrentHash -> QueueItem))
         private readonly Dictionary<string, Dictionary<string, QueueItem>> _qbittorrentTorrentCache = new();
-        
-        // Track Transmission torrent IDs and their last known state for change detection
-        // clientId -> (torrentId -> lastActivityDate)
-        private readonly Dictionary<string, Dictionary<int, long>> _transmissionTorrentStates = new();
-        
-        // Track SABnzbd last change timestamp
-        // clientId -> last_change_timestamp
-        private readonly Dictionary<string, long> _sabnzbdLastChange = new();
-        
-        // Track NZBGet last update ID
-        // clientId -> last_update_id
-        private readonly Dictionary<string, int> _nzbgetLastUpdate = new();
 
+        // Explicit constructor with injected dependencies (avoids IServiceProvider resolves)
         public DownloadService(
+            IHubContext<DownloadHub> hubContext,
             IAudiobookRepository audiobookRepository,
             IConfigurationService configurationService,
             IDbContextFactory<ListenArrDbContext> dbContextFactory,
             ILogger<DownloadService> logger,
-            HttpClient httpClient,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory serviceScopeFactory,
-            IImportService importService,
             IRemotePathMappingService pathMappingService,
+            IImportService importService,
             ISearchService searchService,
-            IHubContext<DownloadHub> hubContext,
+            IDownloadClientGateway? clientGateway,
             IMemoryCache cache,
-            IHubBroadcaster? hubBroadcaster = null,
-            NotificationService? notificationService = null,
-            IAppMetricsService? appMetrics = null)
+            IDownloadQueueService downloadQueueService,
+            ICompletedDownloadProcessor completedDownloadProcessor,
+            IAppMetricsService metrics,
+            NotificationService notificationService,
+            Listenarr.Application.Services.IHubBroadcaster? hubBroadcaster = null)
         {
-            _audiobookRepository = audiobookRepository;
-            _configurationService = configurationService;
-            _dbContextFactory = dbContextFactory;
-            _logger = logger;
-            _httpClient = httpClient;
-            _httpClientFactory = httpClientFactory;
-            _serviceScopeFactory = serviceScopeFactory;
-            _import_service = importService; // preserve original field for compatibility where referenced
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _import_service = importService;
-            _importService = importService;
-            _pathMappingService = pathMappingService;
-            _search_service = searchService;
-            _searchService = searchService;
-            _hubContext = hubContext;
-            _cache = cache;
-            _hubBroadcaster = hubBroadcaster;
-            _notificationService = notificationService;
-            _metrics = appMetrics ?? new NoopAppMetricsService();
+            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+            _hubBroadcaster = hubBroadcaster ?? new NoopHubBroadcaster();
+            _audiobookRepository = audiobookRepository ?? throw new ArgumentNullException(nameof(audiobookRepository));
+            _configurationService = configurationService ?? throw new ArgumentNullException(nameof(configurationService));
+            _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+            // Create a default HttpClient from factory for general use
+            _httpClient = _httpClientFactory.CreateClient();
+            _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
+            _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
+            _importService = importService ?? throw new ArgumentNullException(nameof(importService));
+            _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
+            _clientGateway = clientGateway;
+            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+            _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
+            _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+            _downloadQueueService = downloadQueueService ?? throw new ArgumentNullException(nameof(downloadQueueService));
+            _completedDownloadProcessor = completedDownloadProcessor ?? throw new ArgumentNullException(nameof(completedDownloadProcessor));
         }
-
-        public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
-        {
-            try
-            {
-                // Perform lightweight checks depending on client type
-                var type = client.Type?.ToLowerInvariant();
-                switch (type)
-                {
-                    case "qbittorrent":
-                        // Attempt to login to qBittorrent
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
-                            var cookieJar = new CookieContainer();
-                            var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
-                            var httpClient = _httpClientFactory.CreateClient("DownloadClient");
-                            // Note: For cookie support, we still need a custom handler here
-                            // This is acceptable for testing as it's not high-frequency
-                            using var testClient = new HttpClient(handler);
-                            using var loginData = new FormUrlEncodedContent(new[] {
-                                new KeyValuePair<string,string>("username", client.Username ?? string.Empty),
-                                new KeyValuePair<string,string>("password", client.Password ?? string.Empty)
-                            });
-                            var resp = await testClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
-                            if (resp.IsSuccessStatusCode)
-                                return (true, "qBittorrent: authentication successful", client);
-                            
-                            // 403 Forbidden can mean either:
-                            // 1. Authentication is disabled (should proceed without auth)
-                            // 2. Authentication is enabled but credentials are wrong
-                            // To distinguish, try a request without authentication
-                            if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                            {
-                                // Try a simple API call without authentication
-                                var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
-                                if (testResp.IsSuccessStatusCode)
-                                {
-                                    // API works without auth, so authentication is disabled
-                                    return (true, "qBittorrent: authentication disabled, proceeding without credentials", client);
-                                }
-                                else
-                                {
-                                    // API fails without auth, so authentication is enabled but credentials are wrong
-                                    return (false, "qBittorrent: authentication enabled but credentials are incorrect", client);
-                                }
-                            }
-
-                            var body = await resp.Content.ReadAsStringAsync();
-                            return (false, $"qBittorrent login failed: {resp.StatusCode} - {body}", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "qBittorrent test failed");
-                            return (false, "qBittorrent test failed: " + ex.Message, client);
-                        }
-
-                    case "transmission":
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
-                            // Use existing helper to get session id which attempts a request
-                            var sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
-                            return (true, "Transmission: session established", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Transmission test failed");
-                            return (false, "Transmission test failed: " + ex.Message, client);
-                        }
-
-                    case "sabnzbd":
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                            // Get API key from settings
-                            var apiKey = "";
-                            if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                                apiKey = apiKeyObj?.ToString() ?? "";
-                            if (string.IsNullOrEmpty(apiKey))
-                                return (false, "SABnzbd API key not configured in client settings", client);
-
-                            var url = $"{baseUrl}?mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                            var resp = await _httpClient.GetAsync(url);
-                            var txt = await resp.Content.ReadAsStringAsync();
-                            if (!resp.IsSuccessStatusCode)
-                                return (false, $"SABnzbd returned {resp.StatusCode}: {txt}", client);
-
-                            return (true, "SABnzbd: API reachable and key validated", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "SABnzbd test failed");
-                            return (false, "SABnzbd test failed: " + ex.Message, client);
-                        }
-
-                    case "nzbget":
-                        try
-                        {
-                            // NZBGet uses JSON-RPC - call a harmless method like 'version'
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
-                            var pingReq = new { method = "version", @params = new object[] { }, id = 1 };
-                            using var content = new StringContent(JsonSerializer.Serialize(pingReq), Encoding.UTF8, "application/json");
-                            var resp = await _httpClient.PostAsync(baseUrl, content);
-                            var txt = await resp.Content.ReadAsStringAsync();
-                            if (!resp.IsSuccessStatusCode)
-                                return (false, $"NZBGet returned {resp.StatusCode}: {txt}", client);
-                            return (true, "NZBGet: RPC reachable", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "NZBGet test failed");
-                            return (false, "NZBGet test failed: " + ex.Message, client);
-                        }
-
-                    default:
-                        return (false, $"Unsupported client type: {client.Type}", client);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during TestDownloadClientAsync");
-                return (false, ex.Message, client);
-            }
-        }
-
-        /// <summary>
-        /// Normalizes a title for better matching by removing format indicators and extra spaces
-        /// </summary>
-        private static string NormalizeTitle(string title)
-        {
-            if (string.IsNullOrWhiteSpace(title))
-                return string.Empty;
-
-            // Remove ALL bracketed content [anything] - more robust than specific patterns
-            var result = System.Text.RegularExpressions.Regex.Replace(title, @"\[.*?\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            // Remove ALL parentheses content (anything) - handles unknown quality/group indicators
-            result = System.Text.RegularExpressions.Regex.Replace(result, @"\(.*?\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            // Remove curly braces content {anything}
-            result = System.Text.RegularExpressions.Regex.Replace(result, @"\{.*?\}", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            // Remove common separators and replace with spaces
-            result = System.Text.RegularExpressions.Regex.Replace(result, @"[\-_\.]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            // Remove common quality/format indicators that might not be in brackets
-            result = System.Text.RegularExpressions.Regex.Replace(result, @"\b(mp3|m4a|m4b|flac|aac|ogg|opus|320|256|128|v0|v2|audiobook|unabridged|abridged)\b", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            // Normalize multiple spaces to single spaces
-            result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ");
-            
-            // Remove trailing/leading spaces, dashes, etc.
-            result = result.Trim(' ', '-', '.', ',');
-            
-            return result;
-        }
-
-        /// <summary>
-        /// Checks if two titles are similar enough to be considered a match
-        /// </summary>
-        private static bool AreTitlesSimilar(string title1, string title2)
-        {
-            var norm1 = NormalizeTitle(title1);
-            var norm2 = NormalizeTitle(title2);
-            
-            // Exact match after normalization
-            if (string.Equals(norm1, norm2, StringComparison.OrdinalIgnoreCase))
-                return true;
-                
-            // Bidirectional contains
-            if (norm1.Contains(norm2, StringComparison.OrdinalIgnoreCase) || 
-                norm2.Contains(norm1, StringComparison.OrdinalIgnoreCase))
-                return true;
-                
-            // First 50 chars (for very long titles)
-            if (norm1.Length > 20 && norm2.Length > 20)
-            {
-                var len = Math.Min(50, Math.Min(norm1.Length, norm2.Length));
-                if (norm1.Substring(0, len).Equals(norm2.Substring(0, len), StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            
-            return false;
-        }
-
-        // Placeholder implementations for existing interface methods
         public async Task<string> StartDownloadAsync(SearchResult searchResult, string downloadClientId, int? audiobookId = null)
         {
             return await SendToDownloadClientAsync(searchResult, downloadClientId, audiobookId);
@@ -433,24 +231,26 @@ namespace Listenarr.Api.Services
                             var importResult = await _importService.ImportSingleFileAsync(downloadId, download?.AudiobookId, finalPath, settings);
                             _logger.LogInformation("ImportSingleFileAsync result for download {DownloadId}: Success={Success}, FinalPath={FinalPath}", downloadId, importResult?.Success, importResult?.FinalPath);
 
+                            string? importedFinalPath = null;
                             if (importResult != null && importResult.Success && !string.IsNullOrWhiteSpace(importResult.FinalPath))
                             {
+                                importedFinalPath = importResult.FinalPath!;
                                 try
                                 {
                                     var updateCtx = await _dbContextFactory.CreateDbContextAsync();
                                     var tracked = await updateCtx.Downloads.FindAsync(downloadId);
                                     if (tracked != null)
                                     {
-                                        tracked.FinalPath = importResult.FinalPath;
+                                        tracked.FinalPath = importedFinalPath;
                                         updateCtx.Downloads.Update(tracked);
                                         await updateCtx.SaveChangesAsync();
-                                        _logger.LogInformation("Updated download {DownloadId} FinalPath to import result: {FinalPath}", downloadId, importResult.FinalPath);
+                                        _logger.LogInformation("Updated download {DownloadId} FinalPath to import result: {FinalPath}", downloadId, importedFinalPath);
                                     }
 
                                     // Also sync FinalPath into any scoped ListenArrDbContext so in-memory tracked entities match persisted value.
                                     try
                                     {
-                                        var scopeFactoryToUse = (_import_service as ImportService)?.ScopeFactory ?? (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
+                                        var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
                                         using var scopeSync2 = scopeFactoryToUse.CreateScope();
                                         var scopedDb2 = scopeSync2.ServiceProvider.GetService<ListenArrDbContext>();
                                         if (scopedDb2 != null)
@@ -458,7 +258,7 @@ namespace Listenarr.Api.Services
                                             var local2 = await scopedDb2.Downloads.FindAsync(downloadId);
                                             if (local2 != null)
                                             {
-                                                local2.FinalPath = importResult.FinalPath;
+                                                local2.FinalPath = importedFinalPath;
                                                 local2.Status = DownloadStatus.Completed;
                                                 _logger.LogDebug("Synchronized FinalPath into scoped ListenArrDbContext for {DownloadId}", downloadId);
                                             }
@@ -475,11 +275,11 @@ namespace Listenarr.Api.Services
                                 }
                             }
 
-                            if (download?.AudiobookId != null && importResult != null && importResult.Success && !string.IsNullOrWhiteSpace(importResult.FinalPath))
+                            if (download?.AudiobookId != null && importedFinalPath != null)
                             {
                                 try
                                 {
-                                    var scopeFactoryToUse = (_import_service as ImportService)?.ScopeFactory ?? (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
+                                    var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
                                     using var afScope = scopeFactoryToUse.CreateScope();
 
                                     // Conservative quality gating for single-file imports:
@@ -492,7 +292,7 @@ namespace Listenarr.Api.Services
                                         var metadataSvc = afScope.ServiceProvider.GetService<IMetadataService>();
                                         if (metadataSvc != null)
                                         {
-                                            var meta = await metadataSvc.ExtractFileMetadataAsync(importResult.FinalPath);
+                                            var meta = await metadataSvc.ExtractFileMetadataAsync(importedFinalPath);
                                             candidateBitrate = meta?.Bitrate;
                                         }
                                     }
@@ -533,10 +333,10 @@ namespace Listenarr.Api.Services
                                                 afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
                                                 afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
 
-                                        var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, importResult.FinalPath, "download");
+                                        var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, importedFinalPath, "download");
                                         if (created)
                                         {
-                                            _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {FinalPath}", download.AudiobookId, importResult.FinalPath);
+                                            _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {FinalPath}", download.AudiobookId, importedFinalPath);
                                         }
                                     }
                                 }
@@ -588,6 +388,113 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error in ProcessCompletedDownloadAsync for {DownloadId}", downloadId);
+            }
+        }
+
+        public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
+        {
+            try
+            {
+                var type = client.Type?.ToLowerInvariant();
+                switch (type)
+                {
+                    case "qbittorrent":
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+                            var cookieJar = new CookieContainer();
+                            var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
+                            var httpClient = _httpClientFactory.CreateClient("DownloadClient");
+                            using var testClient = new HttpClient(handler);
+                            using var loginData = new FormUrlEncodedContent(new[] {
+                                new KeyValuePair<string,string>("username", client.Username ?? string.Empty),
+                                new KeyValuePair<string,string>("password", client.Password ?? string.Empty)
+                            });
+                            var resp = await testClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+                            if (resp.IsSuccessStatusCode)
+                                return (true, "qBittorrent: authentication successful", client);
+
+                            if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                            {
+                                var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                                if (testResp.IsSuccessStatusCode)
+                                    return (true, "qBittorrent: authentication disabled, proceeding without credentials", client);
+                                else
+                                    return (false, "qBittorrent: authentication enabled but credentials are incorrect", client);
+                            }
+
+                            var body = await resp.Content.ReadAsStringAsync();
+                            return (false, $"qBittorrent login failed: {resp.StatusCode} - {body}", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "qBittorrent test failed");
+                            return (false, "qBittorrent test failed: " + ex.Message, client);
+                        }
+
+                    case "transmission":
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
+                            var sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
+                            return (true, "Transmission: session established", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Transmission test failed");
+                            return (false, "Transmission test failed: " + ex.Message, client);
+                        }
+
+                    case "sabnzbd":
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+                            var apiKey = "";
+                            if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                                apiKey = apiKeyObj?.ToString() ?? "";
+                            if (string.IsNullOrEmpty(apiKey))
+                                return (false, "SABnzbd API key not configured in client settings", client);
+
+                            var url = $"{baseUrl}?mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                            var resp = await _httpClient.GetAsync(url);
+                            var txt = await resp.Content.ReadAsStringAsync();
+                            if (!resp.IsSuccessStatusCode)
+                                return (false, $"SABnzbd returned {resp.StatusCode}: {txt}", client);
+
+                            return (true, "SABnzbd: API reachable and key validated", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "SABnzbd test failed");
+                            return (false, "SABnzbd test failed: " + ex.Message, client);
+                        }
+
+                    case "nzbget":
+                        try
+                        {
+                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
+                            var pingReq = new { method = "version", @params = new object[] { }, id = 1 };
+                            using var content = new StringContent(JsonSerializer.Serialize(pingReq), Encoding.UTF8, "application/json");
+                            var resp = await _httpClient.PostAsync(baseUrl, content);
+                            var txt = await resp.Content.ReadAsStringAsync();
+                            if (!resp.IsSuccessStatusCode)
+                                return (false, $"NZBGet returned {resp.StatusCode}: {txt}", client);
+                            return (true, "NZBGet: RPC reachable", client);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "NZBGet test failed");
+                            return (false, "NZBGet test failed: " + ex.Message, client);
+                        }
+
+                    default:
+                        return (false, $"Unsupported client type: {client.Type}", client);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during TestDownloadClientAsync");
+                return (false, ex.Message, client);
             }
         }
 
@@ -749,37 +656,37 @@ namespace Listenarr.Api.Services
 
         public async Task<string> SendToDownloadClientAsync(SearchResult searchResult, string? downloadClientId = null, int? audiobookId = null)
         {
-            _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}, AudiobookId: {AudiobookId}", 
-                searchResult.Title, 
-                searchResult.DownloadType ?? "(null)", 
+            _logger.LogInformation("SendToDownloadClientAsync called - Title: {Title}, DownloadType: '{DownloadType}', TorrentUrl: {TorrentUrl}, AudiobookId: {AudiobookId}",
+                searchResult.Title,
+                searchResult.DownloadType ?? "(null)",
                 searchResult.TorrentUrl ?? "(null)",
                 audiobookId);
-            
+
             // Check if this is a DDL (Direct Download Link) - handle it differently
             // Use case-insensitive comparison in case of serialization casing issues
-            if (!string.IsNullOrEmpty(searchResult.DownloadType) && 
+            if (!string.IsNullOrEmpty(searchResult.DownloadType) &&
                 searchResult.DownloadType.Equals("DDL", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation("Processing DDL for: {Title}, AudiobookId: {AudiobookId}", searchResult.Title, audiobookId);
                 return await DownloadDirectlyAsync(searchResult, audiobookId);
             }
-            
+
             _logger.LogInformation("Not a DDL, processing as torrent/usenet. DownloadType was: '{DownloadType}'", searchResult.DownloadType);
-        
+
 
             // If no specific client provided, auto-select based on result type
             if (downloadClientId == null)
             {
                 var isTorrent = IsTorrentResult(searchResult);
                 downloadClientId = await GetAppropriateDownloadClient(isTorrent);
-                
+
                 if (downloadClientId == null)
                 {
                     var clientType = isTorrent ? "torrent" : "NZB";
                     var neededClients = isTorrent ? "qBittorrent or Transmission" : "SABnzbd or NZBGet";
                     throw new Exception($"No suitable download client found for {clientType}. Please configure and enable a {clientType} client ({neededClients}) in Settings.");
                 }
-                
+
                 _logger.LogInformation("Auto-selected download client {ClientId} for {ClientType}", downloadClientId, isTorrent ? "torrent" : "NZB");
             }
 
@@ -854,7 +761,7 @@ namespace Listenarr.Api.Services
                 {
                     if (downloadToUpdate.Metadata == null)
                         downloadToUpdate.Metadata = new Dictionary<string, object>();
-                        
+
                     downloadToUpdate.Metadata["TorrentHash"] = clientSpecificId;
                     updateContext.Downloads.Update(downloadToUpdate);
                     await updateContext.SaveChangesAsync();
@@ -870,7 +777,7 @@ namespace Listenarr.Api.Services
                     var configService = scope.ServiceProvider.GetService<IConfigurationService>() ?? _configurationService;
                     var fileNamingService = scope.ServiceProvider.GetService<IFileNamingService>();
                     var settings = await configService.GetApplicationSettingsAsync();
-                    
+
                     // Fetch audiobook data if available for better notification content
                     object notificationData;
                     if (audiobookId.HasValue)
@@ -928,7 +835,7 @@ namespace Listenarr.Api.Services
                             downloadClient = downloadClient.Name ?? "Unknown Client"
                         };
                     }
-                    
+
                     await _notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
                 }
             }
@@ -1041,7 +948,7 @@ namespace Listenarr.Api.Services
 
             // If neither is set, we can't reliably determine the type
             // Log a warning and default to false (NZB) as a safer choice
-            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.", 
+            _logger.LogWarning("Unable to determine result type for '{Title}' from source '{Source}'. No MagnetLink, TorrentUrl, or NzbUrl found. Defaulting to NZB.",
                 result.Title, result.Source);
             return false;
         }
@@ -1051,17 +958,17 @@ namespace Listenarr.Api.Services
             var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
-            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}", 
-                isTorrent ? "torrent" : "NZB", 
+            _logger.LogInformation("Looking for {ClientType} client. Found {Count} enabled download clients: {Clients}",
+                isTorrent ? "torrent" : "NZB",
                 enabledClients.Count,
                 string.Join(", ", enabledClients.Select(c => $"{c.Name} ({c.Type})")));
 
             if (isTorrent)
             {
                 // Prefer qBittorrent, then Transmission
-                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase)) 
+                var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
                           ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
-                
+
                 if (client != null)
                 {
                     _logger.LogInformation("Selected torrent client: {ClientName} ({ClientType})", client.Name, client.Type);
@@ -1070,7 +977,7 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
                 }
-                
+
                 return client?.Id;
             }
             else
@@ -1078,7 +985,7 @@ namespace Listenarr.Api.Services
                 // Prefer SABnzbd, then NZBGet
                 var client = enabledClients.FirstOrDefault(c => c.Type.Equals("sabnzbd", StringComparison.OrdinalIgnoreCase))
                           ?? enabledClients.FirstOrDefault(c => c.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase));
-                
+
                 if (client != null)
                 {
                     _logger.LogInformation("Selected NZB client: {ClientName} ({ClientType})", client.Name, client.Type);
@@ -1087,7 +994,7 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogWarning("No NZB client (SABnzbd or NZBGet) found among enabled clients");
                 }
-                
+
                 return client?.Id;
             }
         }
@@ -1121,64 +1028,64 @@ namespace Listenarr.Api.Services
             // Create HttpClient in a scoped block so it gets disposed before the fallback hash check
             {
                 using var httpClient = new HttpClient(handler);
-            
-            // Check if authentication is required by attempting login
-            using var loginData = new FormUrlEncodedContent(new[]
-            {
+
+                // Check if authentication is required by attempting login
+                using var loginData = new FormUrlEncodedContent(new[]
+                {
                 new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
                 new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
             });
 
-            var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
+                var loginResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
 
                 if (!loginResponse.IsSuccessStatusCode)
-            {
-                // Read response body to provide more context
-                var loginResponseContent = await loginResponse.Content.ReadAsStringAsync();
-
-                // Redact any potentially sensitive values from the response when logging
-                var redactedLoginResponse = LogRedaction.RedactText(loginResponseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-
-                // Check if this is a 403 Forbidden (authentication disabled) vs other errors
-                if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
-                    // Try a simple API call without authentication
-                    var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
-                    if (testResp.IsSuccessStatusCode)
+                    // Read response body to provide more context
+                    var loginResponseContent = await loginResponse.Content.ReadAsStringAsync();
+
+                    // Redact any potentially sensitive values from the response when logging
+                    var redactedLoginResponse = LogRedaction.RedactText(loginResponseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
+
+                    // Check if this is a 403 Forbidden (authentication disabled) vs other errors
+                    if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
-                        // API works without auth, so authentication is disabled
-                        _logger.LogInformation("qBittorrent authentication disabled, proceeding without credentials");
+                        // Try a simple API call without authentication
+                        var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
+                        if (testResp.IsSuccessStatusCode)
+                        {
+                            // API works without auth, so authentication is disabled
+                            _logger.LogInformation("qBittorrent authentication disabled, proceeding without credentials");
+                        }
+                        else
+                        {
+                            // API fails without auth, so authentication is enabled but credentials are wrong
+                            throw new Exception("qBittorrent authentication enabled but credentials are incorrect");
+                        }
                     }
                     else
                     {
-                        // API fails without auth, so authentication is enabled but credentials are wrong
-                        throw new Exception("qBittorrent authentication enabled but credentials are incorrect");
+                        _logger.LogError("Failed to login to qBittorrent. Status: {Status}, Response: {Response}",
+                            loginResponse.StatusCode, redactedLoginResponse);
+                        throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode} - {redactedLoginResponse}");
                     }
                 }
                 else
                 {
-                    _logger.LogError("Failed to login to qBittorrent. Status: {Status}, Response: {Response}", 
-                        loginResponse.StatusCode, redactedLoginResponse);
-                    throw new Exception($"Failed to login to qBittorrent: {loginResponse.StatusCode} - {redactedLoginResponse}");
+                    _logger.LogInformation("Successfully authenticated with qBittorrent");
                 }
-            }
-            else
-            {
-                _logger.LogInformation("Successfully authenticated with qBittorrent");
-            }
 
-            // Get torrent URL - prefer magnet link, fall back to torrent file URL
-            var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) 
-                ? result.MagnetLink 
-                : result.TorrentUrl;
+                // Get torrent URL - prefer magnet link, fall back to torrent file URL
+                var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink)
+                    ? result.MagnetLink
+                    : result.TorrentUrl;
 
-            if (string.IsNullOrEmpty(torrentUrl))
-            {
-                throw new Exception("No magnet link or torrent URL found in search result");
-            }
+                if (string.IsNullOrEmpty(torrentUrl))
+                {
+                    throw new Exception("No magnet link or torrent URL found in search result");
+                }
 
-            _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
-            _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
+                _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
+                _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
 
                 // Get existing torrents list before adding (to find the new one)
                 var torrentsBeforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
@@ -1241,7 +1148,7 @@ namespace Listenarr.Api.Services
                 {
                     var responseContent = await addResponse.Content.ReadAsStringAsync();
                     var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-                    _logger.LogError("Failed to add torrent to qBittorrent. Status: {Status}, Response: {Response}", 
+                    _logger.LogError("Failed to add torrent to qBittorrent. Status: {Status}, Response: {Response}",
                         addResponse.StatusCode, redacted);
                     throw new Exception($"Failed to add torrent to qBittorrent: {addResponse.StatusCode} - {redacted}");
                 }
@@ -1292,12 +1199,12 @@ namespace Listenarr.Api.Services
         private async Task SendToTransmission(DownloadClientConfiguration client, SearchResult result)
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
-            
+
             try
             {
                 // Get torrent URL - prefer magnet link, fall back to torrent file URL
-                var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) 
-                    ? result.MagnetLink 
+                var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink)
+                    ? result.MagnetLink
                     : result.TorrentUrl;
 
                 if (string.IsNullOrEmpty(torrentUrl))
@@ -1320,7 +1227,7 @@ namespace Listenarr.Api.Services
 
                 // Add labels (Transmission's equivalent to categories/tags)
                 var labels = new List<string>();
-                
+
                 // Add category as a label if configured
                 if (client.Settings != null && client.Settings.TryGetValue("category", out var categoryObj))
                 {
@@ -1366,11 +1273,11 @@ namespace Listenarr.Api.Services
 
                 // Set required headers
                 httpContent.Headers.Add("X-Transmission-Session-Id", sessionId);
-                
+
                 // Use per-request authorization header (thread-safe)
                 using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
                 request.Content = httpContent;
-                
+
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
@@ -1384,7 +1291,7 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-                    _logger.LogError("Failed to add torrent to Transmission. Status: {Status}, Response: {Response}", 
+                    _logger.LogError("Failed to add torrent to Transmission. Status: {Status}, Response: {Response}",
                         response.StatusCode, redacted);
                     throw new Exception($"Transmission RPC error: {response.StatusCode}");
                 }
@@ -1398,13 +1305,13 @@ namespace Listenarr.Api.Services
 
                 // Parse response to get torrent ID
                 var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
-                
+
                 if (rpcResponse.TryGetProperty("result", out var result_prop) && result_prop.GetString() == "success")
                 {
                     string torrentId = Guid.NewGuid().ToString(); // Default fallback
-                    
+
                     // Try to get the actual torrent ID from response
-                    if (rpcResponse.TryGetProperty("arguments", out var args) && 
+                    if (rpcResponse.TryGetProperty("arguments", out var args) &&
                         args.TryGetProperty("torrent-added", out var torrentAdded) &&
                         torrentAdded.TryGetProperty("id", out var id))
                     {
@@ -1448,7 +1355,7 @@ namespace Listenarr.Api.Services
                 // Use per-request authorization header (thread-safe)
                 using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
                 request.Content = httpContent;
-                
+
                 if (!string.IsNullOrEmpty(username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{username}:{password}");
@@ -1488,7 +1395,7 @@ namespace Listenarr.Api.Services
             try
             {
                 var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                
+
                 // Get API key from settings
                 var apiKey = "";
                 if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
@@ -1613,7 +1520,7 @@ namespace Listenarr.Api.Services
         private async Task SendToNZBGet(DownloadClientConfiguration client, SearchResult result)
         {
             var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
-            
+
             try
             {
                 // Get NZB URL
@@ -1683,7 +1590,7 @@ namespace Listenarr.Api.Services
                 // Use per-request authorization header (thread-safe)
                 using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl);
                 request.Content = httpContent;
-                
+
                 if (!string.IsNullOrEmpty(client.Username))
                 {
                     var authBytes = Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}");
@@ -1697,7 +1604,7 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
-                    _logger.LogError("Failed to add NZB to NZBGet. Status: {Status}, Response: {Response}", 
+                    _logger.LogError("Failed to add NZB to NZBGet. Status: {Status}, Response: {Response}",
                         response.StatusCode, redacted);
                     throw new Exception($"Failed to add NZB to NZBGet: {response.StatusCode}");
                 }
@@ -1711,7 +1618,7 @@ namespace Listenarr.Api.Services
 
                 // Parse JSON-RPC response
                 var rpcResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
-                
+
                 if (rpcResponse.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
                 {
                     var errorMsg = "Unknown error";
@@ -1741,14 +1648,14 @@ namespace Listenarr.Api.Services
         public async Task<List<QueueItem>> GetQueueAsync()
         {
             var queueItems = new List<QueueItem>();
-            
+
             // Cache download clients for 10 seconds to reduce DB queries
             var downloadClients = await _cache.GetOrCreateAsync("DownloadClients", async entry =>
             {
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(QueueCacheExpirationSeconds);
                 return await _configurationService.GetDownloadClientConfigurationsAsync();
             }) ?? new List<DownloadClientConfiguration>();
-            
+
             var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
 
             // Get all downloads from database to filter queue items
@@ -1757,74 +1664,74 @@ namespace Listenarr.Api.Services
             List<Download> listenarrDownloads;
             {
                 var dbContext = await _dbContextFactory.CreateDbContextAsync();
-                
+
                 // Get all downloads (include failed so activity can show failed items)
                 var allDownloads = await dbContext.Downloads
                     .ToListAsync();
 
                 _logger.LogInformation("Found {TotalDownloads} downloads (including failed)", allDownloads.Count);
-                
+
                 // For DDL downloads, include active ones plus completed ones with pending processing jobs
                 var ddlDownloads = allDownloads.Where(d => d.DownloadClientId == "DDL").ToList();
                 var ddlToShow = new List<Download>();
-                
+
                 if (ddlDownloads.Any())
                 {
                     var ddlCompleted = ddlDownloads.Where(d => d.Status == DownloadStatus.Completed).ToList();
                     if (ddlCompleted.Any())
                     {
                         var completedIds = ddlCompleted.Select(d => d.Id).ToList();
-                        
+
                         // Get DDL downloads with pending/active processing jobs
                         var pendingJobs = await dbContext.DownloadProcessingJobs
-                            .Where(j => completedIds.Contains(j.DownloadId) && 
-                               (j.Status == ProcessingJobStatus.Pending || 
-                                j.Status == ProcessingJobStatus.Processing || 
+                            .Where(j => completedIds.Contains(j.DownloadId) &&
+                               (j.Status == ProcessingJobStatus.Pending ||
+                                j.Status == ProcessingJobStatus.Processing ||
                                 j.Status == ProcessingJobStatus.Retry))
                             .Select(j => j.DownloadId)
                             .Distinct()
                             .ToListAsync();
-                        
+
                         // Get DDL downloads with any processing jobs (to identify those without jobs)
                         var allJobDownloads = await dbContext.DownloadProcessingJobs
                             .Where(j => completedIds.Contains(j.DownloadId))
                             .Select(j => j.DownloadId)
                             .Distinct()
                             .ToListAsync();
-                        
+
                         // Include DDL completed downloads that either:
                         // 1. Have pending/active processing jobs, OR
                         // 2. Have no processing jobs at all (legacy downloads needing processing)
                         var ddlCompletedToShow = ddlCompleted
                             .Where(d => pendingJobs.Contains(d.Id) || !allJobDownloads.Contains(d.Id))
                             .ToList();
-                        
+
                         ddlToShow.AddRange(ddlCompletedToShow);
-                        _logger.LogInformation("DDL pending jobs count: {PendingJobs}, All job downloads count: {AllJobs}, DDL completed to show: {CompletedToShow}", 
+                        _logger.LogInformation("DDL pending jobs count: {PendingJobs}, All job downloads count: {AllJobs}, DDL completed to show: {CompletedToShow}",
                             pendingJobs.Count, allJobDownloads.Count, ddlCompletedToShow.Count);
                     }
-                    
+
                     // Add active DDL downloads (exclude Completed and Moved)
-                    ddlToShow.AddRange(ddlDownloads.Where(d => 
-                        d.Status != DownloadStatus.Completed && 
+                    ddlToShow.AddRange(ddlDownloads.Where(d =>
+                        d.Status != DownloadStatus.Completed &&
                         d.Status != DownloadStatus.Moved));
                 }
-                
+
                 // For external clients, we'll filter based on what's actually in their queues
                 // Exclude downloads that are already completed/moved to avoid duplicate queue entries
                 var externalDownloads = allDownloads
-                    .Where(d => d.DownloadClientId != "DDL" && 
-                                d.Status != DownloadStatus.Completed && 
+                    .Where(d => d.DownloadClientId != "DDL" &&
+                                d.Status != DownloadStatus.Completed &&
                                 d.Status != DownloadStatus.Moved)
                     .ToList();
-                
+
                 listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
-                
-                _logger.LogDebug("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)", 
+
+                _logger.LogDebug("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)",
                     listenarrDownloads.Count, ddlToShow.Count, externalDownloads.Count);
                 foreach (var dl in listenarrDownloads)
                 {
-                    _logger.LogDebug("Including download: {Id}, Status: {Status}, Client: {Client}, Title: '{Title}'", 
+                    _logger.LogDebug("Including download: {Id}, Status: {Status}, Client: {Client}, Title: '{Title}'",
                         dl.Id, dl.Status, dl.DownloadClientId, dl.Title);
                 }
             }
@@ -1864,24 +1771,24 @@ namespace Listenarr.Api.Services
                     // Filter to only include items that Listenarr initiated
                     _logger.LogInformation("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
                     _logger.LogInformation("Database has {DatabaseItems} Listenarr downloads for filtering", listenarrDownloads.Count);
-                    
+
                     foreach (var download in listenarrDownloads)
                     {
                         var hashValue = download.Metadata?.TryGetValue("TorrentHash", out var h) == true ? h?.ToString() : "NO_HASH";
-                        _logger.LogInformation("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}, TorrentHash={Hash}", 
+                        _logger.LogInformation("DB Download: Id={Id}, Title='{Title}', ClientId='{ClientId}', Status={Status}, TorrentHash={Hash}",
                             download.Id, download.Title, download.DownloadClientId, download.Status, hashValue);
                     }
-                    
+
                     foreach (var queueItem in clientQueue.Take(3)) // Just show first 3 to avoid spam
                     {
-                        _logger.LogInformation("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'", 
+                        _logger.LogInformation("Queue Item: Id={Id}, Title='{Title}', ClientId='{ClientId}'",
                             queueItem.Id, queueItem.Title, queueItem.DownloadClientId);
                     }
-                    
+
                     // Find queue items that correspond to Listenarr downloads
                     // Include ONLY client queue items that ARE tracked by Listenarr
-                    var initialFiltered = clientQueue.Where(queueItem => 
-                        listenarrDownloads.Any(download => 
+                    var initialFiltered = clientQueue.Where(queueItem =>
+                        listenarrDownloads.Any(download =>
                         {
                             var idMatch = download.Id == queueItem.Id;
 
@@ -1889,7 +1796,7 @@ namespace Listenarr.Api.Services
                             var hashMatch = false;
                             if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
                             {
-                                try 
+                                try
                                 {
                                     if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
                                     {
@@ -1906,29 +1813,29 @@ namespace Listenarr.Api.Services
                                 }
                             }
 
-            // Enhanced title match using robust normalization
-            var titleMatch = false;
-            try
-            {
-                if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
-                {
-                    titleMatch = IsMatchingTitle(download.Title, queueItem.Title);
-                    _logger.LogInformation("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}", 
-                        download.Id, download.Title, queueItem.Title, titleMatch);
-                }
-            }
-            catch (Exception ex) 
-            { 
-                _logger.LogWarning(ex, "Failed to match title for download {DownloadId}, defaulting to false", download.Id);
-                titleMatch = false; 
-            }
+                            // Enhanced title match using robust normalization
+                            var titleMatch = false;
+                            try
+                            {
+                                if (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title))
+                                {
+                                    titleMatch = IsMatchingTitle(download.Title, queueItem.Title);
+                                    _logger.LogInformation("Title matching for download {DownloadId}: '{DownloadTitle}' vs '{QueueTitle}' = {Match}",
+                                        download.Id, download.Title, queueItem.Title, titleMatch);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to match title for download {DownloadId}, defaulting to false", download.Id);
+                                titleMatch = false;
+                            }
 
                             var clientMatch = download.DownloadClientId == client.Id;
                             var overallMatch = clientMatch && (idMatch || hashMatch || titleMatch);
-                            
-                            _logger.LogInformation("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}", 
+
+                            _logger.LogInformation("Matching check for download {DownloadId} vs queue item {QueueId}: ClientMatch={ClientMatch}, IdMatch={IdMatch}, HashMatch={HashMatch}, TitleMatch={TitleMatch}, Overall={Overall}",
                                 download.Id, queueItem.Id, clientMatch, idMatch, hashMatch, titleMatch, overallMatch);
-                            
+
                             return overallMatch;
                         })
                     ).ToList();
@@ -2013,8 +1920,8 @@ namespace Listenarr.Api.Services
                             existingIds.Add(uc.Id);
                         }
                     }
-                    
-                    _logger.LogDebug("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items", 
+
+                    _logger.LogDebug("Client {ClientName}: {TotalItems} total items, {FilteredItems} Listenarr items",
                         client.Name, clientQueue.Count, mappedFiltered.Count);
 
                     // Purge orphaned download records that are no longer in the client's queue
@@ -2022,9 +1929,9 @@ namespace Listenarr.Api.Services
                     {
                         var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
                         var mappedDownloadIds = mappedFiltered.Select(q => q.Id).ToHashSet();
-                        
+
                         var orphanedDownloads = clientDownloads.Where(d => !mappedDownloadIds.Contains(d.Id)).ToList();
-                        
+
                         if (orphanedDownloads.Any())
                         {
                             // If this is a SABnzbd client, consult the client's history first
@@ -2135,21 +2042,21 @@ namespace Listenarr.Api.Services
                             // registrations in the ambient IServiceScope. This is more robust for tests which
                             // may only register an IDbContextFactory.
                             var purgeScopedDbContext = await _dbContextFactory.CreateDbContextAsync();
-                            
+
                             foreach (var orphanedDownload in toPurge)
                             {
                                 var trackedDownload = await purgeScopedDbContext.Downloads.FindAsync(orphanedDownload.Id);
                                 if (trackedDownload != null)
                                 {
                                     purgeScopedDbContext.Downloads.Remove(trackedDownload);
-                                    _logger.LogInformation("Purged orphaned download record: {DownloadId} '{Title}' (no longer exists in {ClientName} queue)", 
+                                    _logger.LogInformation("Purged orphaned download record: {DownloadId} '{Title}' (no longer exists in {ClientName} queue)",
                                         orphanedDownload.Id, orphanedDownload.Title, client.Name);
                                     try { _metrics.Increment("download.purged.count"); } catch { }
                                 }
                             }
-                            
+
                             await purgeScopedDbContext.SaveChangesAsync();
-                            _logger.LogInformation("Purged {Count} orphaned download records from {ClientName}", 
+                            _logger.LogInformation("Purged {Count} orphaned download records from {ClientName}",
                                 toPurge.Count, client.Name);
                         }
                     }
@@ -2223,23 +2130,23 @@ namespace Listenarr.Api.Services
             {
                 bool removedFromClient = false;
                 Download? downloadRecord = null;
-                
+
                 // Find the database record first
                 var dbContext = await _dbContextFactory.CreateDbContextAsync();
-                
+
                 // Try to find by direct ID match first
                 downloadRecord = await dbContext.Downloads.FindAsync(downloadId);
-                
+
                 // If not found, try to find by client-specific ID (e.g., torrent hash)
                 if (downloadRecord == null)
                 {
                     downloadRecord = await dbContext.Downloads
-                        .Where(d => d.Metadata != null && 
-                               d.Metadata.ContainsKey("TorrentHash") && 
+                        .Where(d => d.Metadata != null &&
+                               d.Metadata.ContainsKey("TorrentHash") &&
                                d.Metadata["TorrentHash"].ToString() == downloadId)
                         .FirstOrDefaultAsync();
                 }
-                
+
                 // If still not found, try enhanced title/name matching for legacy downloads
                 if (downloadRecord == null && downloadClientId != null)
                 {
@@ -2249,18 +2156,18 @@ namespace Listenarr.Api.Services
                         // Get queue item to find title
                         var queue = await GetQueueAsync();
                         var queueItem = queue.FirstOrDefault(q => q.Id == downloadId && q.DownloadClientId == downloadClientId);
-                        
+
                         if (queueItem != null)
                         {
                             downloadRecord = await dbContext.Downloads
                                 .Where(d => d.DownloadClientId == downloadClientId)
                                 .ToListAsync()
-                                .ContinueWith(task => task.Result.FirstOrDefault(d => 
+                                .ContinueWith(task => task.Result.FirstOrDefault(d =>
                                     IsMatchingTitle(d.Title, queueItem.Title)));
                         }
                     }
                 }
-                
+
                 if (downloadClientId == null)
                 {
                     // Try all clients to find and remove the item
@@ -2270,7 +2177,7 @@ namespace Listenarr.Api.Services
                     foreach (var client in enabledClients)
                     {
                         removedFromClient = await RemoveFromClientAsync(client, downloadId);
-                        if (removedFromClient) 
+                        if (removedFromClient)
                         {
                             downloadClientId = client.Id; // Track which client it was removed from
                             break;
@@ -2285,25 +2192,25 @@ namespace Listenarr.Api.Services
                         removedFromClient = await RemoveFromClientAsync(client, downloadId);
                     }
                 }
-                
+
                 // If successfully removed from client, also remove from database
                 if (removedFromClient && downloadRecord != null)
                 {
                     // Use a factory-created DbContext instead of resolving a scoped instance from a new scope.
                     var scopedDbContext = await _dbContextFactory.CreateDbContextAsync();
-                    
+
                     // Re-attach the entity if needed
                     var trackedDownload = await scopedDbContext.Downloads.FindAsync(downloadRecord.Id);
                     if (trackedDownload != null)
                     {
                         scopedDbContext.Downloads.Remove(trackedDownload);
                         await scopedDbContext.SaveChangesAsync();
-                        
-                        _logger.LogInformation("Removed download record from database: {DownloadId} (Title: {Title})", 
+
+                        _logger.LogInformation("Removed download record from database: {DownloadId} (Title: {Title})",
                             trackedDownload.Id, trackedDownload.Title);
                     }
                 }
-                
+
                 return removedFromClient;
             }
             catch (Exception ex)
@@ -2415,32 +2322,32 @@ namespace Listenarr.Api.Services
                             "forcedMetaDL" => "downloading",        // forced metadata downloading
                             "stalledDL" => "downloading",           // stalled downloading
                             "checkingDL" => "downloading",          // checking downloading
-                            
+
                             // Paused/Stopped states
                             "stoppedDL" => "paused",                // paused downloading (was "pausedDL")
                             "stoppedUP" => "paused",                // paused uploading
-                            
+
                             // Queued states  
                             "queuedDL" => "queued",                 // queued downloading
                             "queuedUP" => "queued",                 // queued uploading
-                            
+
                             // Seeding/Uploading states
                             "uploading" => "seeding",               // actively uploading
                             "stalledUP" => "seeding",               // stalled uploading
                             "checkingUP" => "seeding",              // checking uploading
                             "forcedUP" => "seeding",                // forced uploading
-                            
+
                             // Processing states
                             "checkingResumeData" => "downloading",  // checking resume data
                             "moving" => "downloading",              // moving files
-                            
+
                             // Error states
                             "error" => "failed",
                             "missingFiles" => "failed",
-                            
+
                             _ => "unknown"
                         };
-                        
+
                         // Determine completion: progress >= 100% AND in seeding state
                         // This is the correct way since qBittorrent doesn't have explicit completed states
                         if (progress >= 100.0 && (status == "seeding" || state == "uploading" || state == "stalledUP" || state == "checkingUP" || state == "forcedUP" || state == "stoppedUP"))
@@ -2520,9 +2427,37 @@ namespace Listenarr.Api.Services
 
         private async Task<string> DownloadDirectlyAsync(SearchResult searchResult, int? audiobookId)
         {
-            // Minimal placeholder: record a DDL download entry if needed, return generated ID
-            await Task.CompletedTask;
-            return Guid.NewGuid().ToString();
+            // Create a Download record in the database so it's tracked like other downloads.
+            try
+            {
+                var id = Guid.NewGuid().ToString();
+                var download = new Download
+                {
+                    Id = id,
+                    AudiobookId = audiobookId,
+                    Title = searchResult.Title,
+                    OriginalUrl = searchResult.TorrentUrl ?? searchResult.NzbUrl ?? searchResult.MagnetLink ?? string.Empty,
+                    Status = DownloadStatus.Queued,
+                    Progress = 0,
+                    TotalSize = searchResult.Size,
+                    DownloadedSize = 0,
+                    DownloadPath = string.Empty,
+                    FinalPath = string.Empty,
+                    StartedAt = DateTime.UtcNow,
+                    DownloadClientId = "DDL",
+                    Metadata = new Dictionary<string, object>()
+                };
+
+                var ctx = await _dbContextFactory.CreateDbContextAsync();
+                ctx.Downloads.Add(download);
+                await ctx.SaveChangesAsync();
+                return id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "DownloadDirectlyAsync: failed to create DDL download record");
+                return Guid.NewGuid().ToString();
+            }
         }
 
         private async Task LogDownloadHistory(Audiobook audiobook, string source, SearchResult result)
@@ -2548,27 +2483,76 @@ namespace Listenarr.Api.Services
             }
         }
 
+        private bool AreTitlesSimilar(string a, string b)
+        {
+            try
+            {
+                var An = NormalizeTitle(a);
+                var Bn = NormalizeTitle(b);
+                if (An.Contains(Bn) || Bn.Contains(An) || An == Bn) return true;
+                var dist = LevenshteinDistance(An, Bn);
+                var threshold = Math.Max(3, (int)(Math.Min(An.Length, Bn.Length) * 0.15));
+                return dist <= threshold;
+            }
+            catch { return false; }
+        }
+
+        private string NormalizeTitle(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            var lower = s.ToLowerInvariant();
+            var cleaned = new string(lower.Where(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch)).ToArray());
+            return string.Join(' ', cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        // Standard Levenshtein distance implementation (copied from SearchService for local use)
+        private static int LevenshteinDistance(string s, string t)
+        {
+            if (s == t) return 0;
+            if (string.IsNullOrEmpty(s)) return t.Length;
+            if (string.IsNullOrEmpty(t)) return s.Length;
+
+            var n = s.Length;
+            var m = t.Length;
+            var d = new int[n + 1, m + 1];
+
+            for (int i = 0; i <= n; d[i, 0] = i++) { }
+            for (int j = 0; j <= m; d[0, j] = j++) { }
+
+            for (int i = 1; i <= n; i++)
+            {
+                for (int j = 1; j <= m; j++)
+                {
+                    int cost = (t[j - 1] == s[i - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(
+                        Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                        d[i - 1, j - 1] + cost);
+                }
+            }
+            return d[n, m];
+        }
+
         private async Task<bool> RemoveFromClientAsync(DownloadClientConfiguration client, string downloadId)
         {
             try
             {
-                // Conservative default: attempt client-specific removal only for known types
                 if (client == null) return false;
 
-                switch (client.Type?.ToLowerInvariant())
+                if (_clientGateway != null)
                 {
-                    case "qbittorrent":
-                        // qBittorrent removal would be implemented here
+                    try
+                    {
+                        return await _clientGateway.RemoveAsync(client, downloadId, false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "RemoveFromClientAsync: client gateway failed to remove {DownloadId} from {Client}", downloadId, client.Name ?? client.Id);
                         return false;
-                    case "transmission":
-                        return false;
-                    case "sabnzbd":
-                        return false;
-                    case "nzbget":
-                        return false;
-                    default:
-                        return false;
+                    }
                 }
+
+                // Fallback conservative behavior when no gateway is available
+                return false;
             }
             catch (Exception ex)
             {
@@ -2579,19 +2563,29 @@ namespace Listenarr.Api.Services
 
         private Task<List<QueueItem>> GetTransmissionQueueOptimizedAsync(DownloadClientConfiguration client)
         {
-            // Placeholder optimized fetch - currently fall back to empty list to keep behavior safe
+            if (_clientGateway != null)
+            {
+                return _clientGateway.GetQueueAsync(client);
+            }
+
             return Task.FromResult(new List<QueueItem>());
         }
 
         private Task<List<QueueItem>> GetSABnzbdQueueOptimizedAsync(DownloadClientConfiguration client)
         {
-            // Placeholder optimized fetch
+            if (_clientGateway != null)
+            {
+                return _clientGateway.GetQueueAsync(client);
+            }
             return Task.FromResult(new List<QueueItem>());
         }
 
         private Task<List<QueueItem>> GetNZBGetQueueOptimizedAsync(DownloadClientConfiguration client)
         {
-            // Placeholder optimized fetch
+            if (_clientGateway != null)
+            {
+                return _clientGateway.GetQueueAsync(client);
+            }
             return Task.FromResult(new List<QueueItem>());
         }
 

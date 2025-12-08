@@ -52,7 +52,7 @@ namespace Listenarr.Api.Tests
             // Author should be present as a labeled field
             Assert.True(embed.ContainsKey("fields"));
             var fields = embed["fields"]!.AsArray();
-            Assert.Contains(fields, f => f.AsObject()! ["name"]!.ToString() == "Author" && f.AsObject()!["value"]!.ToString() == "Jane Doe");
+            Assert.Contains(fields, f => f.AsObject()!["name"]!.ToString() == "Author" && f.AsObject()!["value"]!.ToString() == "Jane Doe");
             Assert.True(embed.ContainsKey("thumbnail"));
             Assert.NotNull(embed["thumbnail"]);
             var thumb = embed["thumbnail"]!.AsObject();
@@ -240,7 +240,8 @@ namespace Listenarr.Api.Tests
             var fields = new List<JsonObject>();
             for (int i = 0; i < 10; i++)
             {
-                var f = new JsonObject {
+                var f = new JsonObject
+                {
                     ["name"] = "F" + i,
                     ["value"] = new string('V', 1000),
                     ["inline"] = true
@@ -248,7 +249,8 @@ namespace Listenarr.Api.Tests
                 fields.Add(f);
             }
 
-            var data = new JsonObject {
+            var data = new JsonObject
+            {
                 ["title"] = "Big Embed",
                 ["authors"] = new JsonArray("Author"),
                 ["description"] = desc
@@ -268,7 +270,7 @@ namespace Listenarr.Api.Tests
             int total = 0;
             if (embed.ContainsKey("title")) total += embed["title"]?.ToString()?.Length ?? 0;
             if (embed.ContainsKey("description")) total += embed["description"]?.ToString()?.Length ?? 0;
-            if (embed.ContainsKey("footer")) total += embed["footer"]?.AsObject()? ["text"]?.ToString()?.Length ?? 0;
+            if (embed.ContainsKey("footer")) total += embed["footer"]?.AsObject()?["text"]?.ToString()?.Length ?? 0;
             if (embed.ContainsKey("fields"))
             {
                 foreach (var f in embed["fields"]!.AsArray())
@@ -356,14 +358,14 @@ namespace Listenarr.Api.Tests
 
             // Compare with what CreateDiscordPayload produces
             var expectedNode = NotificationPayloadBuilder.CreateDiscordPayload(trigger, data, startupConfig.UrlBase);
-            
+
             // Parse both as objects and compare key properties (excluding timestamp which is dynamic)
             var postedObj = postedNode.AsObject();
             var expectedObj = expectedNode.AsObject();
-            
+
             // Compare content
             Assert.Equal(expectedObj["content"]?.ToString(), postedObj["content"]?.ToString());
-            
+
             // Compare embeds (excluding timestamp)
             Assert.True(postedObj.ContainsKey("embeds"));
             Assert.True(expectedObj.ContainsKey("embeds"));
@@ -371,14 +373,14 @@ namespace Listenarr.Api.Tests
             var expectedEmbeds = expectedObj["embeds"]!.AsArray();
             Assert.Single(postedEmbeds);
             Assert.Single(expectedEmbeds);
-            
+
             var postedEmbed = postedEmbeds[0]!.AsObject();
             var expectedEmbed = expectedEmbeds[0]!.AsObject();
-            
+
             // Compare all properties except timestamp
             Assert.Equal(expectedEmbed["title"]?.ToString(), postedEmbed["title"]?.ToString());
             Assert.Equal(expectedEmbed["description"]?.ToString(), postedEmbed["description"]?.ToString());
-            
+
             // Compare thumbnail if present
             if (expectedEmbed.ContainsKey("thumbnail"))
             {
@@ -387,7 +389,7 @@ namespace Listenarr.Api.Tests
                 var postedThumb = postedEmbed["thumbnail"]!.AsObject();
                 Assert.Equal(expectedThumb["url"]?.ToString(), postedThumb["url"]?.ToString());
             }
-            
+
             // Compare fields if present
             if (expectedEmbed.ContainsKey("fields"))
             {
@@ -395,7 +397,7 @@ namespace Listenarr.Api.Tests
                 var expectedFields = expectedEmbed["fields"]!.AsArray();
                 var postedFields = postedEmbed["fields"]!.AsArray();
                 Assert.Equal(expectedFields.Count, postedFields.Count);
-                
+
                 for (int i = 0; i < expectedFields.Count; i++)
                 {
                     var expectedField = expectedFields[i]!.AsObject();
@@ -405,7 +407,7 @@ namespace Listenarr.Api.Tests
                     Assert.Equal(expectedField["inline"]?.GetValue<bool>(), postedField["inline"]?.GetValue<bool>());
                 }
             }
-            
+
             // Compare footer if present
             if (expectedEmbed.ContainsKey("footer"))
             {

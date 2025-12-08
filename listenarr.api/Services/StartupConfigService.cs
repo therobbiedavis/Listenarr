@@ -43,7 +43,7 @@ namespace Listenarr.Api.Services
                 {
                     PropertyNameCaseInsensitive = true
                 });
-                
+
                 // Auto-generate API key if missing from existing config
                 if (_config != null && string.IsNullOrWhiteSpace(_config.ApiKey))
                 {
@@ -87,7 +87,7 @@ namespace Listenarr.Api.Services
         {
             // Generate a cryptographically secure API key for initial setup
             var apiKey = GenerateApiKey();
-            
+
             return new StartupConfig
             {
                 // Basic configuration with sensible defaults
@@ -142,11 +142,11 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Failed to save default config to {Path}", _configPath);
             }
         }
-        
+
         private void SaveConfigFile(StartupConfig? config)
         {
             if (config == null) return;
-            
+
             // Ensure the config directory exists
             var configDir = Path.GetDirectoryName(_configPath);
             if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))

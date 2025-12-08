@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Services
 {

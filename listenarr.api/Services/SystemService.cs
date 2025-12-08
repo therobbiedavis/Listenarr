@@ -43,7 +43,7 @@ namespace Listenarr.Api.Services
             {
                 var assembly = Assembly.GetExecutingAssembly();
                 var version = assembly.GetName().Version?.ToString() ?? "1.0.0";
-                
+
                 var uptime = DateTime.UtcNow - _startTime;
                 var uptimeFormatted = FormatUptime(uptime);
 
@@ -279,7 +279,7 @@ namespace Listenarr.Api.Services
             {
                 _currentProcess.Refresh();
                 var usedBytes = _currentProcess.WorkingSet64;
-                
+
                 // Get total system memory
                 var totalBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
                 var freeBytes = totalBytes - usedBytes;
@@ -308,7 +308,7 @@ namespace Listenarr.Api.Services
             try
             {
                 _currentProcess.Refresh();
-                var cpuUsage = _currentProcess.TotalProcessorTime.TotalMilliseconds / 
+                var cpuUsage = _currentProcess.TotalProcessorTime.TotalMilliseconds /
                               (DateTime.UtcNow - _currentProcess.StartTime).TotalMilliseconds * 100;
 
                 return new CpuInfo
@@ -331,7 +331,7 @@ namespace Listenarr.Api.Services
         {
             var os = Environment.OSVersion;
             var architecture = RuntimeInformation.OSArchitecture.ToString();
-            
+
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 return $"Windows {os.Version} ({architecture})";
@@ -361,7 +361,7 @@ namespace Listenarr.Api.Services
             string[] sizes = { "B", "KB", "MB", "GB", "TB" };
             double len = bytes;
             int order = 0;
-            
+
             while (len >= 1024 && order < sizes.Length - 1)
             {
                 order++;
@@ -394,11 +394,11 @@ namespace Listenarr.Api.Services
         public List<LogEntry> GetRecentLogs(int limit = 100)
         {
             var logs = new List<LogEntry>();
-            
+
             try
             {
                 var logFilePath = GetLogFilePath();
-                
+
                 if (!File.Exists(logFilePath))
                 {
                     // Return some sample logs if file doesn't exist yet
@@ -444,11 +444,11 @@ namespace Listenarr.Api.Services
                     {
                         allLines.Add(line);
                     }
-                    
+
                     // Take the last N lines
                     lines = allLines.TakeLast(limit).ToList();
                 }
-                
+
                 foreach (var line in lines)
                 {
                     var logEntry = ParseLogLine(line);
@@ -457,7 +457,7 @@ namespace Listenarr.Api.Services
                         logs.Add(logEntry);
                     }
                 }
-                
+
                 // If no logs were parsed, return sample logs
                 if (logs.Count == 0)
                 {
@@ -489,7 +489,7 @@ namespace Listenarr.Api.Services
         {
             // Get the logs directory from the application base path
             var logsDir = Path.Combine(Directory.GetCurrentDirectory(), "config", "logs");
-            
+
             // Ensure the directory exists
             if (!Directory.Exists(logsDir))
             {
@@ -500,17 +500,17 @@ namespace Listenarr.Api.Services
             // Serilog will create files like: listenarr-20251105.log
             var logFileName = $"listenarr-{DateTime.UtcNow:yyyyMMdd}.log";
             var todayLogPath = Path.Combine(logsDir, logFileName);
-            
+
             // If today's log doesn't exist yet, find the most recent log file
             if (!File.Exists(todayLogPath))
             {
                 var logFiles = Directory.GetFiles(logsDir, "listenarr-*.log")
                     .OrderByDescending(f => new FileInfo(f).LastWriteTimeUtc)
                     .ToList();
-                
+
                 return logFiles.FirstOrDefault() ?? todayLogPath;
             }
-            
+
             return todayLogPath;
         }
 
@@ -519,30 +519,30 @@ namespace Listenarr.Api.Services
             try
             {
                 // Expected Serilog format: 2025-11-05 11:43:58.516 -05:00 [INF] Message here
-                
+
                 if (string.IsNullOrWhiteSpace(line))
                     return null;
 
                 // Try to parse Serilog format with regex
                 // Format: YYYY-MM-DD HH:MM:SS.FFF ZZZ [LEVEL] Message
                 var match = System.Text.RegularExpressions.Regex.Match(
-                    line, 
+                    line,
                     @"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+[+-]\d{2}:\d{2})\s+\[(\w{3})\]\s+(.+)$"
                 );
-                
+
                 if (match.Success)
                 {
                     var timestampStr = match.Groups[1].Value;
                     var level = match.Groups[2].Value.ToUpperInvariant();
                     var message = match.Groups[3].Value;
-                    
+
                     // Parse timestamp
                     DateTime timestamp;
                     if (!DateTime.TryParse(timestampStr, out timestamp))
                     {
                         timestamp = DateTime.UtcNow;
                     }
-                    
+
                     // Map Serilog log levels
                     var mappedLevel = level switch
                     {

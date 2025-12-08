@@ -31,7 +31,7 @@ namespace Listenarr.Api.Controllers
         private readonly AudimetaService _audimetaService;
 
         public SearchController(
-            ISearchService searchService, 
+            ISearchService searchService,
             ILogger<SearchController> logger,
             AudimetaService audimetaService)
         {
@@ -70,18 +70,18 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-    [HttpGet("intelligent")]
+        [HttpGet("intelligent")]
         [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<ActionResult<List<SearchResult>>> IntelligentSearch(
-            [FromQuery] string query,
-            [FromQuery] string? category = null,
-            [FromQuery] int candidateLimit = 50,
-            [FromQuery] int returnLimit = 50,
-            [FromQuery] string containmentMode = "Relaxed",
-            [FromQuery] bool requireAuthorAndPublisher = false,
-            [FromQuery] double fuzzyThreshold = 0.7)
+                [FromQuery] string query,
+                [FromQuery] string? category = null,
+                [FromQuery] int candidateLimit = 50,
+                [FromQuery] int returnLimit = 50,
+                [FromQuery] string containmentMode = "Relaxed",
+                [FromQuery] bool requireAuthorAndPublisher = false,
+                [FromQuery] double fuzzyThreshold = 0.7)
         {
             try
             {
@@ -102,16 +102,16 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-    [HttpGet("indexers")]
+        [HttpGet("indexers")]
         [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<ActionResult<List<SearchResult>>> IndexersSearch(
-            [FromQuery] string query,
-            [FromQuery] string? category = null,
-            [FromQuery] SearchSortBy sortBy = SearchSortBy.Seeders,
-            [FromQuery] SearchSortDirection sortDirection = SearchSortDirection.Descending,
-            [FromQuery] bool isAutomaticSearch = false)
+                [FromQuery] string query,
+                [FromQuery] string? category = null,
+                [FromQuery] SearchSortBy sortBy = SearchSortBy.Seeders,
+                [FromQuery] SearchSortDirection sortDirection = SearchSortDirection.Descending,
+                [FromQuery] bool isAutomaticSearch = false)
         {
             try
             {
@@ -160,12 +160,12 @@ namespace Listenarr.Api.Controllers
         //         }
 
         //         var results = await _searchService.SearchIndexersAsync(query, category);
-                // Optional tuning parameters exposed to callers
-                //var candidateLimit = int.TryParse(Request.Query["candidateLimit"], out var cl) ? Math.Clamp(cl, 5, 200) : 50;
-                //var returnLimit = int.TryParse(Request.Query["returnLimit"], out var rl) ? Math.Clamp(rl, 1, 100) : 10;
-                //var containmentMode = Request.Query.ContainsKey("containmentMode") ? Request.Query["containmentMode"].ToString() ?? "Relaxed" : "Relaxed";
-                //var requireAuthorAndPublisher = bool.TryParse(Request.Query["requireAuthorAndPublisher"], out var rap) ? rap : false;
-                //var fuzzyThreshold = double.TryParse(Request.Query["fuzzyThreshold"], out var ft) ? Math.Clamp(ft, 0.0, 1.0) : 0.7;
+        // Optional tuning parameters exposed to callers
+        //var candidateLimit = int.TryParse(Request.Query["candidateLimit"], out var cl) ? Math.Clamp(cl, 5, 200) : 50;
+        //var returnLimit = int.TryParse(Request.Query["returnLimit"], out var rl) ? Math.Clamp(rl, 1, 100) : 10;
+        //var containmentMode = Request.Query.ContainsKey("containmentMode") ? Request.Query["containmentMode"].ToString() ?? "Relaxed" : "Relaxed";
+        //var requireAuthorAndPublisher = bool.TryParse(Request.Query["requireAuthorAndPublisher"], out var rap) ? rap : false;
+        //var fuzzyThreshold = double.TryParse(Request.Query["fuzzyThreshold"], out var ft) ? Math.Clamp(ft, 0.0, 1.0) : 0.7;
         //         return Ok(results);
         //     }
         //     catch (Exception ex)
@@ -286,7 +286,7 @@ namespace Listenarr.Api.Controllers
                 // Use intelligent search (Amazon/Audible + metadata enrichment) for Discord bot
                 // This excludes indexer results which are not suitable for bot interactions
                 var searchResults = await _searchService.IntelligentSearchAsync(query);
-                
+
                 if (searchResults == null || !searchResults.Any())
                 {
                     _logger.LogWarning("No results found for title search: {Query}", query);
@@ -391,11 +391,11 @@ namespace Listenarr.Api.Controllers
 
                 // Get enabled metadata sources ordered by priority
                 var metadataSources = await _searchService.GetEnabledMetadataSourcesAsync();
-                
-                _logger.LogInformation("Found {Count} enabled metadata sources for ASIN {Asin}: {Sources}", 
-                    metadataSources?.Count ?? 0, asin, 
+
+                _logger.LogInformation("Found {Count} enabled metadata sources for ASIN {Asin}: {Sources}",
+                    metadataSources?.Count ?? 0, asin,
                     string.Join(", ", metadataSources?.Select(s => $"{s.Name} (Priority: {s.Priority}, Enabled: {s.IsEnabled})") ?? new List<string>()));
-                
+
                 if (metadataSources == null || !metadataSources.Any())
                 {
                     _logger.LogWarning("No enabled metadata sources found for ASIN {Asin}", asin);
@@ -407,11 +407,11 @@ namespace Listenarr.Api.Controllers
                 {
                     try
                     {
-                        _logger.LogInformation("Attempting to fetch metadata from {SourceName} (Priority: {Priority}) for ASIN: {Asin}", 
+                        _logger.LogInformation("Attempting to fetch metadata from {SourceName} (Priority: {Priority}) for ASIN: {Asin}",
                             source.Name, source.Priority, asin);
 
                         object? result = null;
-                        
+
                         // Route to appropriate service based on source name/URL
                         if (source.BaseUrl.Contains("audimeta.de", StringComparison.OrdinalIgnoreCase))
                         {
@@ -433,10 +433,11 @@ namespace Listenarr.Api.Controllers
                         if (result != null)
                         {
                             _logger.LogInformation("Successfully fetched metadata from {SourceName} for ASIN: {Asin}", source.Name, asin);
-                            
+
                             // Add source information to response
-                            return Ok(new { 
-                                metadata = result, 
+                            return Ok(new
+                            {
+                                metadata = result,
                                 source = source.Name,
                                 sourceUrl = source.BaseUrl
                             });
@@ -471,7 +472,7 @@ namespace Listenarr.Api.Controllers
             try
             {
                 _logger.LogInformation("SearchByApi called with apiId: {ApiId}, query: {Query}", apiId, query);
-                
+
                 if (string.IsNullOrEmpty(query))
                 {
                     return BadRequest("Query parameter is required");

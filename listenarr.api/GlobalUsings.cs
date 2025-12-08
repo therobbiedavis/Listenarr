@@ -2,7 +2,6 @@
 // This file centralizes commonly-used namespaces so API source files don't need manual edits
 // after moving DbContext/models into Infrastructure/Domain projects.
 
-global using Listenarr.Infrastructure.Models;
 global using Listenarr.Domain.Models;
 
 // Common system usings used across services/controllers

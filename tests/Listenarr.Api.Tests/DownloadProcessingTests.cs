@@ -168,9 +168,9 @@ namespace Listenarr.Api.Tests
             Directory.CreateDirectory(basePath);
 
             // Seed an audiobook with BasePath
-            var book = new Audiobook 
-            { 
-                Title = "Test Audiobook", 
+            var book = new Audiobook
+            {
+                Title = "Test Audiobook",
                 Authors = new System.Collections.Generic.List<string> { "Test Author" },
                 BasePath = basePath
             };
@@ -210,15 +210,15 @@ namespace Listenarr.Api.Tests
             // Mock metadata service
             var metadataMock = new Mock<IMetadataService>();
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
-                .ReturnsAsync(new AudioMetadata 
-                { 
-                    Title = "Test Audiobook", 
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Title = "Test Audiobook",
                     Artist = "Test Author",
-                    Duration = TimeSpan.FromSeconds(3600), 
-                    Format = "m4b", 
-                    Bitrate = 64000, 
-                    SampleRate = 44100, 
-                    Channels = 2 
+                    Duration = TimeSpan.FromSeconds(3600),
+                    Format = "m4b",
+                    Bitrate = 64000,
+                    SampleRate = 44100,
+                    Channels = 2
                 });
 
             // Mock hub context

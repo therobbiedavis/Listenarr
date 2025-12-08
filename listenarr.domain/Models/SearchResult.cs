@@ -36,7 +36,7 @@ namespace Listenarr.Domain.Models
         public DateTime PublishedDate { get; set; }
         public string Quality { get; set; } = string.Empty;
         public string Format { get; set; } = string.Empty;
-        
+
         // Additional properties for enhanced audiobook metadata
         public string? Description { get; set; }
         public string? Publisher { get; set; }

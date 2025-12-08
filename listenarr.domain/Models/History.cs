@@ -25,42 +25,42 @@ namespace Listenarr.Domain.Models
     {
         [Key]
         public int Id { get; set; }
-        
+
         /// <summary>
         /// The audiobook ID this history entry relates to (nullable for non-audiobook events)
         /// </summary>
         public int? AudiobookId { get; set; }
-        
+
         /// <summary>
         /// Title of the audiobook (denormalized for display even if audiobook is deleted)
         /// </summary>
         public string? AudiobookTitle { get; set; }
-        
+
         /// <summary>
         /// Type of event: Added, Downloaded, Imported, Deleted, Updated, etc.
         /// </summary>
         public string EventType { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// Detailed description of the event
         /// </summary>
         public string? Message { get; set; }
-        
+
         /// <summary>
         /// Source of the action: Manual, Search, Import, Download, etc.
         /// </summary>
         public string? Source { get; set; }
-        
+
         /// <summary>
         /// Timestamp of the event
         /// </summary>
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-        
+
         /// <summary>
         /// Whether a Discord notification was sent for this event
         /// </summary>
         public bool NotificationSent { get; set; } = false;
-        
+
         /// <summary>
         /// Optional data payload (JSON string for additional context)
         /// </summary>

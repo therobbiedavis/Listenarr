@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -581,96 +582,96 @@ namespace Listenarr.Api.Services
     }
 }
 
-    // Simple no-op/fallback file mover used for compatibility in tests when DI IFileMover isn't provided.
-    internal class NullFileMover : global::Listenarr.Api.Services.IFileMover
+// Simple no-op/fallback file mover used for compatibility in tests when DI IFileMover isn't provided.
+internal class NullFileMover : global::Listenarr.Api.Services.IFileMover
+{
+    public Task<bool> CopyDirectoryAsync(string sourceDir, string destDir)
     {
-        public Task<bool> CopyDirectoryAsync(string sourceDir, string destDir)
+        try
+        {
+            if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+            foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(sourceDir, file);
+                var dest = Path.Combine(destDir, rel);
+                var d = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
+                File.Copy(file, dest, true);
+            }
+            return Task.FromResult(true);
+        }
+        catch
+        {
+            return Task.FromResult(false);
+        }
+    }
+
+    public Task<bool> CopyFileAsync(string sourceFile, string destFile)
+    {
+        try
+        {
+            var d = Path.GetDirectoryName(destFile);
+            if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
+            File.Copy(sourceFile, destFile, true);
+            return Task.FromResult(true);
+        }
+        catch
+        {
+            return Task.FromResult(false);
+        }
+    }
+
+    public Task<bool> MoveDirectoryAsync(string sourceDir, string destDir)
+    {
+        try
+        {
+            if (Directory.Exists(destDir))
+            {
+                // fallback: copy contents then delete
+                var ok = CopyDirectoryAsync(sourceDir, destDir).GetAwaiter().GetResult();
+                if (ok) Directory.Delete(sourceDir, true);
+                return Task.FromResult(ok);
+            }
+
+            Directory.Move(sourceDir, destDir);
+            return Task.FromResult(true);
+        }
+        catch
         {
             try
             {
-                if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
-                foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-                {
-                    var rel = Path.GetRelativePath(sourceDir, file);
-                    var dest = Path.Combine(destDir, rel);
-                    var d = Path.GetDirectoryName(dest);
-                    if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
-                    File.Copy(file, dest, true);
-                }
-                return Task.FromResult(true);
+                var ok = CopyDirectoryAsync(sourceDir, destDir).GetAwaiter().GetResult();
+                if (ok) Directory.Delete(sourceDir, true);
+                return Task.FromResult(ok);
             }
             catch
             {
                 return Task.FromResult(false);
-            }
-        }
-
-        public Task<bool> CopyFileAsync(string sourceFile, string destFile)
-        {
-            try
-            {
-                var d = Path.GetDirectoryName(destFile);
-                if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
-                File.Copy(sourceFile, destFile, true);
-                return Task.FromResult(true);
-            }
-            catch
-            {
-                return Task.FromResult(false);
-            }
-        }
-
-        public Task<bool> MoveDirectoryAsync(string sourceDir, string destDir)
-        {
-            try
-            {
-                if (Directory.Exists(destDir))
-                {
-                    // fallback: copy contents then delete
-                    var ok = CopyDirectoryAsync(sourceDir, destDir).GetAwaiter().GetResult();
-                    if (ok) Directory.Delete(sourceDir, true);
-                    return Task.FromResult(ok);
-                }
-
-                Directory.Move(sourceDir, destDir);
-                return Task.FromResult(true);
-            }
-            catch
-            {
-                try
-                {
-                    var ok = CopyDirectoryAsync(sourceDir, destDir).GetAwaiter().GetResult();
-                    if (ok) Directory.Delete(sourceDir, true);
-                    return Task.FromResult(ok);
-                }
-                catch
-                {
-                    return Task.FromResult(false);
-                }
-            }
-        }
-
-        public Task<bool> MoveFileAsync(string sourceFile, string destFile)
-        {
-            try
-            {
-                var d = Path.GetDirectoryName(destFile);
-                if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
-                File.Move(sourceFile, destFile);
-                return Task.FromResult(true);
-            }
-            catch
-            {
-                try
-                {
-                    File.Copy(sourceFile, destFile, true);
-                    File.Delete(sourceFile);
-                    return Task.FromResult(true);
-                }
-                catch
-                {
-                    return Task.FromResult(false);
-                }
             }
         }
     }
+
+    public Task<bool> MoveFileAsync(string sourceFile, string destFile)
+    {
+        try
+        {
+            var d = Path.GetDirectoryName(destFile);
+            if (!string.IsNullOrEmpty(d) && !Directory.Exists(d)) Directory.CreateDirectory(d);
+            File.Move(sourceFile, destFile);
+            return Task.FromResult(true);
+        }
+        catch
+        {
+            try
+            {
+                File.Copy(sourceFile, destFile, true);
+                File.Delete(sourceFile);
+                return Task.FromResult(true);
+            }
+            catch
+            {
+                return Task.FromResult(false);
+            }
+        }
+    }
+}

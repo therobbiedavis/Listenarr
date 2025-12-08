@@ -19,9 +19,9 @@ namespace Listenarr.Api.Services
         /// Apply the configured file naming pattern to generate the final file path
         /// </summary>
         public async Task<string> GenerateFilePathAsync(
-            AudioMetadata metadata, 
-            int? diskNumber = null, 
-            int? chapterNumber = null, 
+            AudioMetadata metadata,
+            int? diskNumber = null,
+            int? chapterNumber = null,
             string originalExtension = ".m4b")
         {
             var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
@@ -94,7 +94,7 @@ namespace Listenarr.Api.Services
 
             // Apply the naming pattern
             var relativePath = ApplyNamingPattern(pattern, variables);
-            
+
             // Ensure it has the correct extension
             if (!relativePath.EndsWith(originalExtension, StringComparison.OrdinalIgnoreCase))
             {
@@ -102,8 +102,8 @@ namespace Listenarr.Api.Services
             }
 
             // Combine with output path if configured
-            var fullPath = string.IsNullOrWhiteSpace(outputPath) 
-                ? relativePath 
+            var fullPath = string.IsNullOrWhiteSpace(outputPath)
+                ? relativePath
                 : Path.Combine(outputPath, relativePath);
 
             _logger.LogInformation("Generated file path: {FilePath}", fullPath);
@@ -114,10 +114,10 @@ namespace Listenarr.Api.Services
         /// Apply the configured file naming pattern to generate the final file path with a specific output path
         /// </summary>
         public async Task<string> GenerateFilePathAsync(
-            AudioMetadata metadata, 
+            AudioMetadata metadata,
             string outputPath,
-            int? diskNumber = null, 
-            int? chapterNumber = null, 
+            int? diskNumber = null,
+            int? chapterNumber = null,
             string originalExtension = ".m4b")
         {
             var settings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
@@ -184,7 +184,7 @@ namespace Listenarr.Api.Services
 
             // Apply the naming pattern
             var relativePath = ApplyNamingPattern(pattern, variables);
-            
+
             // Ensure it has the correct extension
             if (!relativePath.EndsWith(originalExtension, StringComparison.OrdinalIgnoreCase))
             {
@@ -192,8 +192,8 @@ namespace Listenarr.Api.Services
             }
 
             // Combine with the provided output path
-            var fullPath = string.IsNullOrWhiteSpace(outputPath) 
-                ? relativePath 
+            var fullPath = string.IsNullOrWhiteSpace(outputPath)
+                ? relativePath
                 : Path.Combine(outputPath, relativePath);
 
             _logger.LogInformation("Generated file path with custom output path: {FilePath}", fullPath);
@@ -214,7 +214,7 @@ namespace Listenarr.Api.Services
 
             // Regex to match variables: {VariableName} or {VariableName:Format}
             var variableRegex = new Regex(@"\{(\w+)(?::([^}]+))?\}", RegexOptions.IgnoreCase);
-            
+
             // Replace variables. If a variable is empty, emit a sentinel so we can clean up surrounding
             // punctuation and separators (for example: remove "{Series}/" when Series is empty).
             const string EmptySentinel = "__EMPTY_VAR__";
@@ -319,7 +319,7 @@ namespace Listenarr.Api.Services
 
             // Get invalid filename characters
             var invalidChars = Path.GetInvalidFileNameChars();
-            
+
             // Replace invalid characters with underscore
             var sanitized = new StringBuilder();
             foreach (var c in pathComponent)
@@ -336,7 +336,7 @@ namespace Listenarr.Api.Services
 
             // Trim and handle edge cases
             var result = sanitized.ToString().Trim();
-            
+
             // Ensure it's not empty after sanitization
             if (string.IsNullOrWhiteSpace(result))
             {

@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
 
@@ -41,7 +42,7 @@ namespace Listenarr.Api.Services
         public async Task<Audiobook?> FindBestAudiobookMatchAsync(Download download, double minimumConfidence = 0.8)
         {
             var audiobooks = await _dbContext.Audiobooks.ToListAsync();
-            
+
             var bestMatch = audiobooks
                 .Select(ab => new { Audiobook = ab, Confidence = CalculateMatchConfidence(download, ab) })
                 .Where(match => match.Confidence >= minimumConfidence)
@@ -50,7 +51,7 @@ namespace Listenarr.Api.Services
 
             if (bestMatch != null)
             {
-                _logger.LogInformation("Found audiobook match for download '{Title}': {AudiobookTitle} (confidence: {Confidence:P1})", 
+                _logger.LogInformation("Found audiobook match for download '{Title}': {AudiobookTitle} (confidence: {Confidence:P1})",
                     download.Title, bestMatch.Audiobook.Title, bestMatch.Confidence);
             }
 
@@ -60,7 +61,7 @@ namespace Listenarr.Api.Services
         public async Task<Audiobook?> FindBestAudiobookMatchAsync(SearchResult searchResult, double minimumConfidence = 0.8)
         {
             var audiobooks = await _dbContext.Audiobooks.ToListAsync();
-            
+
             var bestMatch = audiobooks
                 .Select(ab => new { Audiobook = ab, Confidence = CalculateMatchConfidence(searchResult, ab) })
                 .Where(match => match.Confidence >= minimumConfidence)
@@ -69,7 +70,7 @@ namespace Listenarr.Api.Services
 
             if (bestMatch != null)
             {
-                _logger.LogInformation("Found audiobook match for search result '{Title}': {AudiobookTitle} (confidence: {Confidence:P1})", 
+                _logger.LogInformation("Found audiobook match for search result '{Title}': {AudiobookTitle} (confidence: {Confidence:P1})",
                     searchResult.Title, bestMatch.Audiobook.Title, bestMatch.Confidence);
             }
 
@@ -111,11 +112,11 @@ namespace Listenarr.Api.Services
             // Author/Artist match (10% weight)
             if (!string.IsNullOrEmpty(download.Artist) && audiobook.Authors?.Any() == true)
             {
-                var authorMatch = audiobook.Authors.Any(author => 
+                var authorMatch = audiobook.Authors.Any(author =>
                     string.Equals(download.Artist, author, StringComparison.OrdinalIgnoreCase) ||
                     download.Artist.Contains(author, StringComparison.OrdinalIgnoreCase) ||
                     author.Contains(download.Artist, StringComparison.OrdinalIgnoreCase));
-                
+
                 if (authorMatch)
                 {
                     confidence += 0.1;
@@ -128,7 +129,7 @@ namespace Listenarr.Api.Services
             {
                 var seriesMatch = CalculateTitleSimilarity(download.Series, audiobook.Series);
                 confidence += seriesMatch * 0.07;
-                
+
                 // Series number match (3% additional weight)
                 if (!string.IsNullOrEmpty(download.SeriesNumber) && !string.IsNullOrEmpty(audiobook.SeriesNumber))
                 {
@@ -203,11 +204,11 @@ namespace Listenarr.Api.Services
             // Author/Artist match (15% weight)
             if (!string.IsNullOrEmpty(searchResult.Artist) && audiobook.Authors?.Any() == true)
             {
-                var authorMatch = audiobook.Authors.Any(author => 
+                var authorMatch = audiobook.Authors.Any(author =>
                     string.Equals(searchResult.Artist, author, StringComparison.OrdinalIgnoreCase) ||
                     searchResult.Artist.Contains(author, StringComparison.OrdinalIgnoreCase) ||
                     author.Contains(searchResult.Artist, StringComparison.OrdinalIgnoreCase));
-                
+
                 if (authorMatch)
                 {
                     confidence += 0.15;
@@ -220,7 +221,7 @@ namespace Listenarr.Api.Services
             {
                 var seriesMatch = CalculateTitleSimilarity(searchResult.Series, audiobook.Series);
                 confidence += seriesMatch * 0.07;
-                
+
                 if (!string.IsNullOrEmpty(searchResult.SeriesNumber) && !string.IsNullOrEmpty(audiobook.SeriesNumber))
                 {
                     if (string.Equals(searchResult.SeriesNumber, audiobook.SeriesNumber, StringComparison.OrdinalIgnoreCase))
@@ -288,23 +289,23 @@ namespace Listenarr.Api.Services
         {
             var normalized1 = NormalizeTitle(title1);
             var normalized2 = NormalizeTitle(title2);
-            
+
             // Exact match
             if (string.Equals(normalized1, normalized2, StringComparison.OrdinalIgnoreCase))
                 return 1.0;
-                
+
             // Bidirectional contains
             if (normalized1.Contains(normalized2, StringComparison.OrdinalIgnoreCase) ||
                 normalized2.Contains(normalized1, StringComparison.OrdinalIgnoreCase))
                 return 0.8;
-                
+
             // Partial word matching
             var words1 = normalized1.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             var words2 = normalized2.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            
+
             var commonWords = words1.Intersect(words2, StringComparer.OrdinalIgnoreCase).Count();
             var totalWords = Math.Max(words1.Length, words2.Length);
-            
+
             return totalWords > 0 ? (double)commonWords / totalWords : 0.0;
         }
 
@@ -315,25 +316,25 @@ namespace Listenarr.Api.Services
 
             // Remove ALL bracketed content [anything] 
             var result = Regex.Replace(title, @"\[.*?\]", "", RegexOptions.IgnoreCase);
-            
+
             // Remove ALL parentheses content (anything)
             result = Regex.Replace(result, @"\(.*?\)", "", RegexOptions.IgnoreCase);
-            
+
             // Remove curly braces content {anything}
             result = Regex.Replace(result, @"\{.*?\}", "", RegexOptions.IgnoreCase);
-            
+
             // Remove common separators and replace with spaces
             result = Regex.Replace(result, @"[\-_\.]+", " ", RegexOptions.IgnoreCase);
-            
+
             // Remove common quality/format indicators
             result = Regex.Replace(result, @"\b(mp3|m4a|m4b|flac|aac|ogg|opus|320|256|128|v0|v2|audiobook|unabridged|abridged)\b", "", RegexOptions.IgnoreCase);
-            
+
             // Normalize multiple spaces to single spaces
             result = Regex.Replace(result, @"\s+", " ");
-            
+
             // Remove trailing/leading spaces, dashes, etc.
             result = result.Trim(' ', '-', '.', ',');
-            
+
             return result;
         }
     }

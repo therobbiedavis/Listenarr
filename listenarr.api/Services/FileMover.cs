@@ -66,12 +66,12 @@ namespace Listenarr.Api.Services
             }
 
             // Fallback to copy+delete
-                try
-                {
-                    CopyDirRecursive(sourceDir, destDir);
-                    try { Directory.Delete(sourceDir, true); } catch { }
-                    return true;
-                }
+            try
+            {
+                CopyDirRecursive(sourceDir, destDir);
+                try { Directory.Delete(sourceDir, true); } catch { }
+                return true;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Copy+delete fallback failed for directory {Source} -> {Dest}", sourceDir, destDir);
@@ -154,12 +154,12 @@ namespace Listenarr.Api.Services
             }
 
             // Fallback copy+delete
-                try
-                {
-                    File.Copy(sourceFile, destFile, true);
-                    try { File.Delete(sourceFile); } catch { }
-                    return true;
-                }
+            try
+            {
+                File.Copy(sourceFile, destFile, true);
+                try { File.Delete(sourceFile); } catch { }
+                return true;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Copy+delete fallback failed for file {Source} -> {Dest}", sourceFile, destFile);

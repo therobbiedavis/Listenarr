@@ -30,21 +30,21 @@ namespace Listenarr.Api.Services
     /// </summary>
     public class SignalRLogSink : ILogEventSink
     {
-        private IServiceProvider? _serviceProvider;
+        private IHubContext<LogHub>? _hubContext;
 
         public SignalRLogSink()
         {
         }
 
-        public void Initialize(IServiceProvider serviceProvider)
+        public void Initialize(IHubContext<LogHub> hubContext)
         {
-            _serviceProvider = serviceProvider;
+            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
         }
 
         public void Emit(LogEvent logEvent)
         {
-            // Don't try to broadcast if service provider not initialized yet
-            if (_serviceProvider == null)
+            // Don't try to broadcast if hub context not initialized yet
+            if (_hubContext == null)
             {
                 return;
             }
@@ -54,14 +54,7 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    // Create a scope to resolve the hub context
-                    using var scope = _serviceProvider.CreateScope();
-                    var hubContext = scope.ServiceProvider.GetService<IHubContext<LogHub>>();
-
-                    if (hubContext == null)
-                    {
-                        return;
-                    }
+                    var hubContext = _hubContext;
 
                     // Map Serilog log level to our log level string
                     var level = logEvent.Level switch

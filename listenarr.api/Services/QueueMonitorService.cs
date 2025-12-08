@@ -30,12 +30,12 @@ namespace Listenarr.Api.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly ILogger<QueueMonitorService> _logger;
-        
+
         // Adaptive polling intervals - conservative since SignalR provides real-time updates
         private readonly TimeSpan _fastPollingInterval = TimeSpan.FromSeconds(5);   // Active downloads (reduced from 2s)
         private readonly TimeSpan _normalPollingInterval = TimeSpan.FromSeconds(15); // Idle/seeding (increased from 10s)
         private readonly TimeSpan _slowPollingInterval = TimeSpan.FromSeconds(60);   // Only completed items (increased from 30s)
-        
+
         private List<QueueItem> _lastQueueState = new();
         private TimeSpan _currentInterval;
 
@@ -112,7 +112,7 @@ namespace Listenarr.Api.Services
                 // Check if queue has changed
                 if (HasQueueChanged(_lastQueueState, currentQueue))
                 {
-                    _logger.LogDebug("Queue changed, broadcasting update ({Count} items) [polling: {Interval}s]", 
+                    _logger.LogDebug("Queue changed, broadcasting update ({Count} items) [polling: {Interval}s]",
                         currentQueue.Count, _currentInterval.TotalSeconds);
 
                     // Broadcast queue update via SignalR
@@ -142,7 +142,7 @@ namespace Listenarr.Api.Services
             // Check for active downloads (downloading, queued, or paused with progress < 100)
             // Use HashSet for O(1) lookups instead of multiple string comparisons
             var activeStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "downloading", "queued" };
-            var hasActiveDownloads = queue.Any(q => 
+            var hasActiveDownloads = queue.Any(q =>
                 activeStatuses.Contains(q.Status) ||
                 (q.Status.Equals("paused", StringComparison.OrdinalIgnoreCase) && q.Progress < 100));
 

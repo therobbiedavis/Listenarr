@@ -103,7 +103,7 @@ namespace Listenarr.Api.Tests
             var services = new ServiceCollection();
             services.AddSingleton<ListenArrDbContext>(db);
             var configMock = new Mock<IConfigurationService>();
-            var settings = new ApplicationSettings { OutputPath = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString()), EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".m4b" } };
+            var settings = new ApplicationSettings { OutputPath = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString()), EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string> { ".m4b" } };
             configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settings);
             services.AddSingleton<IConfigurationService>(configMock.Object);
             var downloadServiceMock = new Mock<IDownloadService>();
@@ -176,7 +176,7 @@ namespace Listenarr.Api.Tests
             // Settings: move to output path
             var outDir = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString());
             Directory.CreateDirectory(outDir);
-            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".m4b" } };
+            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string> { ".m4b" } };
 
             var downloadServiceMock = new Mock<IDownloadService>();
             // We expect ProcessCompletedDownloadAsync not to be called because no file will be found
@@ -196,7 +196,7 @@ namespace Listenarr.Api.Tests
                 if (q.Contains("mode=history"))
                 {
                     // history 'storage' contains the remote path with the .4 suffix
-                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_9plcy_gj\",\"name\":\"William Faulkner - The Sound and the Fury\",\"status\":\"Completed\",\"storage\":\"{remotePath.Replace("\\","\\\\")}\",\"completed\":1600000000}}]}}}}";
+                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_9plcy_gj\",\"name\":\"William Faulkner - The Sound and the Fury\",\"status\":\"Completed\",\"storage\":\"{remotePath.Replace("\\", "\\\\")}\",\"completed\":1600000000}}]}}}}";
                     return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(historyJson) });
                 }
 
@@ -297,7 +297,7 @@ namespace Listenarr.Api.Tests
             // Settings: move to output path
             var outDir = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString());
             Directory.CreateDirectory(outDir);
-            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".m4b" } };
+            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string> { ".m4b" } };
 
             var downloadServiceMock = new Mock<IDownloadService>();
             // Use TaskCompletionSource so test waits deterministically for finalization instead of relying on fixed delays
@@ -371,7 +371,7 @@ namespace Listenarr.Api.Tests
                 if (q.Contains("mode=history"))
                 {
                     // Note: history 'storage' contains the remote path WITH the .1 suffix
-                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_9plcy_gj\",\"name\":\"William Faulkner - The Sound and the Fury\",\"status\":\"Completed\",\"storage\":\"{remotePath.Replace("\\","\\\\")}\",\"completed\":1600000000}}]}}}}";
+                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_9plcy_gj\",\"name\":\"William Faulkner - The Sound and the Fury\",\"status\":\"Completed\",\"storage\":\"{remotePath.Replace("\\", "\\\\")}\",\"completed\":1600000000}}]}}}}";
                     return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(historyJson) });
                 }
 
@@ -440,7 +440,7 @@ namespace Listenarr.Api.Tests
                 OutputPath = outDir,
                 EnableMetadataProcessing = false,
                 CompletedFileAction = "Move",
-                AllowedFileExtensions = new List<string>{ ".m4b" },
+                AllowedFileExtensions = new List<string> { ".m4b" },
                 MissingSourceRetryInitialDelaySeconds = 1,
                 MissingSourceMaxRetries = 3
             };
@@ -510,7 +510,7 @@ namespace Listenarr.Api.Tests
 
                 if (q.Contains("mode=history"))
                 {
-                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_retry\",\"name\":\"William Faulkner - The Sound and the Fury\",\"status\":\"Completed\",\"storage\":\"{remotePath.Replace("\\","\\\\")}\",\"completed\":1600000000}}]}}}}";
+                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_retry\",\"name\":\"William Faulkner - The Sound and the Fury\",\"status\":\"Completed\",\"storage\":\"{remotePath.Replace("\\", "\\\\")}\",\"completed\":1600000000}}]}}}}";
                     return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(historyJson) });
                 }
 
@@ -584,7 +584,7 @@ namespace Listenarr.Api.Tests
             var services = new ServiceCollection();
             services.AddSingleton<ListenArrDbContext>(db);
 
-            var settingsModel = new ApplicationSettings { OutputPath = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString()), EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".mp3" } };
+            var settingsModel = new ApplicationSettings { OutputPath = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString()), EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string> { ".mp3" } };
             var configMock = new Mock<IConfigurationService>();
             configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(settingsModel);
             services.AddSingleton<IConfigurationService>(configMock.Object);
@@ -675,7 +675,7 @@ namespace Listenarr.Api.Tests
             // Settings: move to output path
             var outDir = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString());
             Directory.CreateDirectory(outDir);
-            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".m4b" } };
+            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string> { ".m4b" } };
 
             var downloadServiceMock = new Mock<IDownloadService>();
             downloadServiceMock.Setup(d => d.ProcessCompletedDownloadAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask).Verifiable();
@@ -775,7 +775,7 @@ namespace Listenarr.Api.Tests
             // Settings: move to output path
             var outDir = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString());
             Directory.CreateDirectory(outDir);
-            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string>{ ".m4b" } };
+            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new List<string> { ".m4b" } };
 
             var downloadServiceMock = new Mock<IDownloadService>();
             downloadServiceMock.Setup(d => d.ProcessCompletedDownloadAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask).Verifiable();
@@ -801,7 +801,7 @@ namespace Listenarr.Api.Tests
 
                 if (q.Contains("mode=history"))
                 {
-                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_abc123\",\"name\":\"Test NZO\",\"status\":\"Completed\",\"storage\":\"{sourceFile.Replace("\\","\\\\")}\",\"completed\":1600000000}}]}}}}";
+                    var historyJson = $"{{\"history\":{{\"slots\":[{{\"nzo_id\":\"SABnzbd_nzo_abc123\",\"name\":\"Test NZO\",\"status\":\"Completed\",\"storage\":\"{sourceFile.Replace("\\", "\\\\")}\",\"completed\":1600000000}}]}}}}";
                     return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(historyJson) });
                 }
 
@@ -868,7 +868,7 @@ namespace Listenarr.Api.Tests
             }
         }
 
-        
+
 
         [Fact]
         public async Task FinalizeDownload_CopiesFile_WhenSettingIsCopy()
@@ -977,7 +977,7 @@ namespace Listenarr.Api.Tests
             var outDir = Path.Combine(Path.GetTempPath(), "listenarr-out", Guid.NewGuid().ToString());
             Directory.CreateDirectory(outDir);
 
-            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new System.Collections.Generic.List<string>{ ".m4b" } };
+            var settings = new ApplicationSettings { OutputPath = outDir, EnableMetadataProcessing = false, CompletedFileAction = "Move", AllowedFileExtensions = new System.Collections.Generic.List<string> { ".m4b" } };
 
             var downloadServiceMock = new Mock<IDownloadService>();
             var loggerMock = new Mock<ILogger<DownloadMonitorService>>();

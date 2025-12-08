@@ -282,7 +282,7 @@ namespace Listenarr.Api.Tests
             await File.WriteAllTextAsync(src, "content");
 
             // Create an existing destination file to cause collision
-            var dest = Path.Combine(basePath, "Manual Book (2025)" );
+            var dest = Path.Combine(basePath, "Manual Book (2025)");
             Directory.CreateDirectory(dest);
             var destFile = Path.Combine(dest, "chapter.mp3");
             await File.WriteAllTextAsync(destFile, "existing");

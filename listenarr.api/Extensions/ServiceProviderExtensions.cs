@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Extensions
 {

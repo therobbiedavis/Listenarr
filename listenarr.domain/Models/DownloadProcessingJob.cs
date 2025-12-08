@@ -169,11 +169,11 @@ namespace Listenarr.Domain.Models
 
             RetryCount++;
             Status = ProcessingJobStatus.Retry;
-            
+
             // Exponential backoff: 30s, 2m, 8m, etc.
             var backoffMinutes = Math.Pow(2, RetryCount) * 0.5; // 0.5, 1, 2, 4, 8 minutes
             NextRetryAt = DateTime.UtcNow.AddMinutes(backoffMinutes);
-            
+
             AddLogEntry($"Scheduled for retry #{RetryCount} at {NextRetryAt}");
         }
     }

@@ -26,6 +26,7 @@
  */
 
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Application.Repositories;
 
@@ -158,11 +159,11 @@ namespace Listenarr.Api.Services
                 {
                     // Add missing quality
                     var isAllowed = qualityName != "MP3 64kbps"; // Only MP3 64kbps is disabled by default
-                    profile.Qualities.Add(new QualityDefinition 
-                    { 
-                        Quality = qualityName, 
-                        Allowed = isAllowed, 
-                        Priority = priority 
+                    profile.Qualities.Add(new QualityDefinition
+                    {
+                        Quality = qualityName,
+                        Allowed = isAllowed,
+                        Priority = priority
                     });
                     updated = true;
                     _logger.LogInformation("Added missing quality '{Quality}' to profile '{ProfileName}'", qualityName, profile.Name);
@@ -273,9 +274,9 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrEmpty(forbidden) &&
                     searchResult.Title.Contains(forbidden, StringComparison.OrdinalIgnoreCase))
                 {
-                        score.RejectionReasons.Add($"Contains forbidden word: '{forbidden}'");
-                        score.TotalScore = -1; // negative value to indicate rejection (lowest)
-                        return Task.FromResult(score);
+                    score.RejectionReasons.Add($"Contains forbidden word: '{forbidden}'");
+                    score.TotalScore = -1; // negative value to indicate rejection (lowest)
+                    return Task.FromResult(score);
                 }
             }
 
@@ -467,51 +468,51 @@ namespace Listenarr.Api.Services
             // For NZB/Usenet indexers we intentionally ignore quality as it is often not provided by indexers
             // For NZB/Usenet indexers we intentionally ignore quality as it is often not provided by indexers
             if (!isNzb)
-            if (string.IsNullOrEmpty(searchResult.Quality))
-            {
-                var missingQualityPenalty = -25;
-                score.TotalScore += missingQualityPenalty;
-                score.ScoreBreakdown["QualityMissing"] = missingQualityPenalty;
-            }
-            else
-            {
-                int qualityScore = GetQualityScore(searchResult.Quality);
-                var qualityDeduction = 100 - qualityScore; // how far from perfect
-                score.TotalScore -= qualityDeduction;
-                // Record the raw quality score (positive) so callers can reason about "what quality was detected"
-                score.ScoreBreakdown["Quality"] = qualityScore;
-                _logger.LogDebug("Quality scored using GetQualityScore: SearchResult.Quality='{SearchQuality}' => {Score}", searchResult.Quality, qualityScore);
-
-                // If quality not allowed by profile, add a deduction note (but don't auto-reject here)
-                if (profile.Qualities != null && profile.Qualities.Count > 0)
+                if (string.IsNullOrEmpty(searchResult.Quality))
                 {
-                    // Build allowed qualities from explicit Quality definitions
-                    var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => (q.Quality ?? string.Empty).ToLower()).ToList();
+                    var missingQualityPenalty = -25;
+                    score.TotalScore += missingQualityPenalty;
+                    score.ScoreBreakdown["QualityMissing"] = missingQualityPenalty;
+                }
+                else
+                {
+                    int qualityScore = GetQualityScore(searchResult.Quality);
+                    var qualityDeduction = 100 - qualityScore; // how far from perfect
+                    score.TotalScore -= qualityDeduction;
+                    // Record the raw quality score (positive) so callers can reason about "what quality was detected"
+                    score.ScoreBreakdown["Quality"] = qualityScore;
+                    _logger.LogDebug("Quality scored using GetQualityScore: SearchResult.Quality='{SearchQuality}' => {Score}", searchResult.Quality, qualityScore);
 
-                    // Also include any PreferredFormats (e.g., "m4b") as allowed tokens so formats configured
-                    // in PreferredFormats are not incorrectly rejected when they aren't present in Qualities.
-                    if (profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
+                    // If quality not allowed by profile, add a deduction note (but don't auto-reject here)
+                    if (profile.Qualities != null && profile.Qualities.Count > 0)
                     {
-                        foreach (var fmt in profile.PreferredFormats)
+                        // Build allowed qualities from explicit Quality definitions
+                        var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => (q.Quality ?? string.Empty).ToLower()).ToList();
+
+                        // Also include any PreferredFormats (e.g., "m4b") as allowed tokens so formats configured
+                        // in PreferredFormats are not incorrectly rejected when they aren't present in Qualities.
+                        if (profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
                         {
-                            var f = (fmt ?? string.Empty).Trim().ToLower();
-                            if (!string.IsNullOrEmpty(f) && !allowedQualities.Contains(f))
-                                allowedQualities.Add(f);
+                            foreach (var fmt in profile.PreferredFormats)
+                            {
+                                var f = (fmt ?? string.Empty).Trim().ToLower();
+                                if (!string.IsNullOrEmpty(f) && !allowedQualities.Contains(f))
+                                    allowedQualities.Add(f);
+                            }
+                        }
+
+                        // Match allowed qualities robustly: either the search quality contains a known allowed token
+                        // or an allowed quality string contains the detected quality token (handles numeric-only tokens like "320").
+                        var detectedQualityLower = (searchResult.Quality ?? string.Empty).ToLower();
+                        if (!allowedQualities.Any(q => detectedQualityLower.Contains(q) || q.Contains(detectedQualityLower)))
+                        {
+                            var notAllowedPenalty = -20;
+                            score.TotalScore += notAllowedPenalty; // deduct further
+                            score.ScoreBreakdown["QualityNotAllowed"] = notAllowedPenalty;
+                            score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
                         }
                     }
-
-                    // Match allowed qualities robustly: either the search quality contains a known allowed token
-                    // or an allowed quality string contains the detected quality token (handles numeric-only tokens like "320").
-                    var detectedQualityLower = (searchResult.Quality ?? string.Empty).ToLower();
-                    if (!allowedQualities.Any(q => detectedQualityLower.Contains(q) || q.Contains(detectedQualityLower)))
-                    {
-                        var notAllowedPenalty = -20;
-                        score.TotalScore += notAllowedPenalty; // deduct further
-                        score.ScoreBreakdown["QualityNotAllowed"] = notAllowedPenalty;
-                        score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
-                    }
                 }
-            }
 
             // Preferred words: small bonus per preferred word found
             if (profile.PreferredWords != null && profile.PreferredWords.Count > 0)
@@ -574,7 +575,7 @@ namespace Listenarr.Api.Services
             return Task.FromResult(score);
         }
 
-    // Manual search scoring logic for quality
+        // Manual search scoring logic for quality
         private int GetQualityScore(string? quality)
         {
             if (string.IsNullOrEmpty(quality))
@@ -643,7 +644,7 @@ namespace Listenarr.Api.Services
         public async Task<List<QualityScore>> ScoreSearchResults(List<SearchResult> searchResults, QualityProfile profile)
         {
             var scores = new List<QualityScore>();
-            
+
             foreach (var result in searchResults)
             {
                 var score = await ScoreSearchResult(result, profile);
@@ -662,8 +663,8 @@ namespace Listenarr.Api.Services
         /// </summary>
         private static bool ContainsVbrPreset(string qualityLower, string preset)
         {
-            return qualityLower.Contains(preset) || 
-                   qualityLower.Contains($"-{preset}") || 
+            return qualityLower.Contains(preset) ||
+                   qualityLower.Contains($"-{preset}") ||
                    qualityLower.Contains($" {preset}");
         }
 
@@ -730,7 +731,7 @@ namespace Listenarr.Api.Services
                 var token = lang.ToLower().Trim();
 
                 // Basic match for language name or common short forms
-                if (titleLower.Contains(token) || titleLower.Contains("[" + token + "]") || titleLower.Contains("(" + token + ")") || titleLower.Contains(" " + token + " ") )
+                if (titleLower.Contains(token) || titleLower.Contains("[" + token + "]") || titleLower.Contains("(" + token + ")") || titleLower.Contains(" " + token + " "))
                 {
                     return lang; // return original (possibly capitalised) profile language value
                 }
@@ -761,67 +762,67 @@ namespace Listenarr.Api.Services
     // NOTE: defensive JSON deserialization helpers live in Listenarr.Infrastructure.Persistence.Converters.JsonConverterHelpers
 }
 
-    // Internal lightweight implementation of IQualityProfileRepository used
-    // only for backwards compatibility in tests or hosts that construct the
-    // service directly without DI. This avoids adding a hard dependency on
-    // the infrastructure project from the API assembly.
-    internal class ApiLocalQualityProfileRepository : Listenarr.Application.Repositories.IQualityProfileRepository
+// Internal lightweight implementation of IQualityProfileRepository used
+// only for backwards compatibility in tests or hosts that construct the
+// service directly without DI. This avoids adding a hard dependency on
+// the infrastructure project from the API assembly.
+internal class ApiLocalQualityProfileRepository : Listenarr.Application.Repositories.IQualityProfileRepository
+{
+    private readonly Listenarr.Infrastructure.Models.ListenArrDbContext? _db;
+
+    public ApiLocalQualityProfileRepository(Listenarr.Infrastructure.Models.ListenArrDbContext? db)
     {
-        private readonly Listenarr.Infrastructure.Models.ListenArrDbContext? _db;
-
-        public ApiLocalQualityProfileRepository(Listenarr.Infrastructure.Models.ListenArrDbContext? db)
-        {
-            _db = db;
-        }
-
-        public async Task<List<QualityProfile>> GetAllAsync()
-        {
-            if (_db == null) return new List<QualityProfile>();
-            return await _db.QualityProfiles.ToListAsync();
-        }
-
-        public async Task<QualityProfile?> FindByIdAsync(int id)
-        {
-            if (_db == null) return null;
-            return await _db.QualityProfiles.FindAsync(id);
-        }
-
-        public async Task<QualityProfile?> GetDefaultAsync()
-        {
-            if (_db == null) return null;
-            return await _db.QualityProfiles.FirstOrDefaultAsync(p => p.IsDefault);
-        }
-
-        public async Task<QualityProfile> AddAsync(QualityProfile profile)
-        {
-            if (_db == null) throw new InvalidOperationException("No DbContext available");
-            _db.QualityProfiles.Add(profile);
-            await _db.SaveChangesAsync();
-            return profile;
-        }
-
-        public async Task<QualityProfile> UpdateAsync(QualityProfile profile)
-        {
-            if (_db == null) throw new InvalidOperationException("No DbContext available");
-            _db.QualityProfiles.Update(profile);
-            await _db.SaveChangesAsync();
-            return profile;
-        }
-
-        public async Task<bool> DeleteAsync(int id)
-        {
-            if (_db == null) return false;
-            var existing = await _db.QualityProfiles.FindAsync(id);
-            if (existing == null) return false;
-            _db.QualityProfiles.Remove(existing);
-            await _db.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task<int> CountAudiobooksUsingProfileAsync(int profileId)
-        {
-            if (_db == null) return 0;
-            return await _db.Audiobooks.CountAsync(a => a.QualityProfileId == profileId);
-        }
+        _db = db;
     }
+
+    public async Task<List<QualityProfile>> GetAllAsync()
+    {
+        if (_db == null) return new List<QualityProfile>();
+        return await _db.QualityProfiles.ToListAsync();
+    }
+
+    public async Task<QualityProfile?> FindByIdAsync(int id)
+    {
+        if (_db == null) return null;
+        return await _db.QualityProfiles.FindAsync(id);
+    }
+
+    public async Task<QualityProfile?> GetDefaultAsync()
+    {
+        if (_db == null) return null;
+        return await _db.QualityProfiles.FirstOrDefaultAsync(p => p.IsDefault);
+    }
+
+    public async Task<QualityProfile> AddAsync(QualityProfile profile)
+    {
+        if (_db == null) throw new InvalidOperationException("No DbContext available");
+        _db.QualityProfiles.Add(profile);
+        await _db.SaveChangesAsync();
+        return profile;
+    }
+
+    public async Task<QualityProfile> UpdateAsync(QualityProfile profile)
+    {
+        if (_db == null) throw new InvalidOperationException("No DbContext available");
+        _db.QualityProfiles.Update(profile);
+        await _db.SaveChangesAsync();
+        return profile;
+    }
+
+    public async Task<bool> DeleteAsync(int id)
+    {
+        if (_db == null) return false;
+        var existing = await _db.QualityProfiles.FindAsync(id);
+        if (existing == null) return false;
+        _db.QualityProfiles.Remove(existing);
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<int> CountAudiobooksUsingProfileAsync(int profileId)
+    {
+        if (_db == null) return 0;
+        return await _db.Audiobooks.CountAsync(a => a.QualityProfileId == profileId);
+    }
+}
 

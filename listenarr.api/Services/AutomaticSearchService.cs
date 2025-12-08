@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using System.IO;
 
@@ -157,29 +158,30 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
-                try
+            try
+            {
+                // Build a concise summary of up to 10 raw results
+                var rawSummaries = searchResults.Take(10).Select(r => new
                 {
-                    // Build a concise summary of up to 10 raw results
-                    var rawSummaries = searchResults.Take(10).Select(r => new {
-                        title = r.Title,
-                        asin = r.Asin,
-                        source = r.Source,
-                        sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
-                        seeders = r.Seeders,
-                        format = r.Format,
-                        downloadType = r.DownloadType
-                    }).ToList();
+                    title = r.Title,
+                    asin = r.Asin,
+                    source = r.Source,
+                    sizeMB = r.Size > 0 ? (r.Size / 1024 / 1024) : -1,
+                    seeders = r.Seeders,
+                    format = r.Format,
+                    downloadType = r.DownloadType
+                }).ToList();
 
-                    using var scope = _serviceScopeFactory.CreateScope();
-                    var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
-                    // Send structured payload with type and audiobookId so the UI can ignore automatic messages by default
-                    await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "automatic", audiobookId = audiobook.Id } });
-                }
+                using var scope = _serviceScopeFactory.CreateScope();
+                var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                // Send structured payload with type and audiobookId so the UI can ignore automatic messages by default
+                await hub.Clients.All.SendCoreAsync("SearchProgress", new object[] { new { message = $"Automatic search query: {searchQuery}", details = new { rawCount = searchResults.Count, rawSamples = rawSummaries }, type = "automatic", audiobookId = audiobook.Id } });
+            }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
             }
-            
+
             if (!searchResults.Any())
             {
                 _logger.LogInformation("No search results found for audiobook '{Title}'", audiobook.Title);
@@ -188,14 +190,15 @@ namespace Listenarr.Api.Services
 
             // Score results against quality profile
             var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
-            
+
             // Log all scored results for debugging
             _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
-            
+
             // Broadcast scored result summaries (score + rejection reasons) to aid debugging
             try
             {
-                var scoredSummaries = scoredResults.Select(s => new {
+                var scoredSummaries = scoredResults.Select(s => new
+                {
                     title = s.SearchResult.Title,
                     asin = s.SearchResult.Asin,
                     totalScore = s.TotalScore,
@@ -219,15 +222,15 @@ namespace Listenarr.Api.Services
             {
                 var status = scoredResult.IsRejected ? "REJECTED" : (scoredResult.TotalScore > 0 ? "ACCEPTABLE" : "LOW SCORE");
                 _logger.LogInformation("  [{Status}] Score: {Score} | Title: {Title} | Source: {Source} | Size: {Size}MB | Seeders: {Seeders} | Quality: {Quality}",
-                    status, scoredResult.TotalScore, scoredResult.SearchResult.Title, scoredResult.SearchResult.Source, 
+                    status, scoredResult.TotalScore, scoredResult.SearchResult.Title, scoredResult.SearchResult.Source,
                     scoredResult.SearchResult.Size / 1024 / 1024, scoredResult.SearchResult.Seeders, scoredResult.SearchResult.Quality);
-                
+
                 if (scoredResult.IsRejected && scoredResult.RejectionReasons.Any())
                 {
                     _logger.LogInformation("    Rejection reasons: {Reasons}", string.Join(", ", scoredResult.RejectionReasons));
                 }
             }
-            
+
             var topResult = scoredResults
                 .Where(s => !s.IsRejected && s.TotalScore > 0) // Only results that pass quality filters and are not rejected
                 .OrderByDescending(s => s.TotalScore)

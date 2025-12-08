@@ -14,7 +14,7 @@ namespace Listenarr.Domain.Models
                 {
                     sqliteConn.Open();
                 }
-                
+
                 using var cmd = sqliteConn.CreateCommand();
                 cmd.CommandText = @"PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA journal_size_limit=6144000;";
                 cmd.ExecuteNonQuery();

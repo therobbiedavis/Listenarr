@@ -18,35 +18,35 @@ namespace Listenarr.Infrastructure.Migrations
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordApplicationId"" TEXT NULL;
                 -- Ignore error if column already exists
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordBotAvatar"" TEXT NULL;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordBotEnabled"" INTEGER NOT NULL DEFAULT 0;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordBotToken"" TEXT NULL;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordBotUsername"" TEXT NULL;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordChannelId"" TEXT NULL;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordCommandGroupName"" TEXT NULL;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordCommandSubcommandName"" TEXT NULL;
             ", suppressTransaction: true);
-            
+
             migrationBuilder.Sql(@"
                 ALTER TABLE ""ApplicationSettings"" ADD COLUMN ""DiscordGuildId"" TEXT NULL;
             ", suppressTransaction: true);

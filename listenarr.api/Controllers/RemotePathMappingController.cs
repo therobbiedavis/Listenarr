@@ -189,7 +189,7 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogInformation("Deleting remote path mapping {Id}", id);
                 var deleted = await _pathMappingService.DeleteAsync(id);
-                
+
                 if (!deleted)
                 {
                     return NotFound(new { error = $"Path mapping with ID {id} not found" });

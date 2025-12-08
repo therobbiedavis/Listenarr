@@ -19,8 +19,10 @@
 using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
 using Listenarr.Api.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Middleware;
 using System.Net;
+using Listenarr.Infrastructure.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -162,7 +164,7 @@ builder.Services.AddHttpClient("DownloadClient")
             }
         ));
 
- // Bind download client definitions from configuration and expose via IOptions
+// Bind download client definitions from configuration and expose via IOptions
 builder.Services.Configure<Listenarr.Api.Services.Adapters.DownloadClientsOptions>(builder.Configuration.GetSection("DownloadClients"));
 
 // Validate download client configuration at startup, surface errors early
@@ -244,25 +246,14 @@ builder.Services.AddHttpClient("nzbget")
     .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
         .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-// Factory to resolve adapters by logical id/type from DI (returns first registered adapter when none matches).
-builder.Services.AddSingleton<Func<string, Listenarr.Api.Services.Adapters.IDownloadClientAdapter>>(sp => id =>
-{
-    var adapters = sp.GetServices<Listenarr.Api.Services.Adapters.IDownloadClientAdapter>().ToList();
-    // Try to find by ClientId first, then by ClientType, else return first registered adapter as fallback.
-    var byId = adapters.FirstOrDefault(a => string.Equals(a.ClientId, id, StringComparison.OrdinalIgnoreCase));
-    if (byId != null) return byId;
-    var byType = adapters.FirstOrDefault(a => string.Equals(a.ClientType, id, StringComparison.OrdinalIgnoreCase));
-    if (byType != null) return byType;
-    if (adapters.Count > 0) return adapters[0];
-    throw new InvalidOperationException("No IDownloadClientAdapter implementations are registered.");
-});
+// Adapter factory resolution is provided by `IDownloadClientAdapterFactory`.
 
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")
     .ConfigureHttpClient(client =>
     {
-            
-                    
+
+
         // Allow up to 2 hours for large file downloads
         client.Timeout = TimeSpan.FromHours(2);
     })
@@ -306,20 +297,20 @@ if (!string.IsNullOrEmpty(sqliteDbDir) && !Directory.Exists(sqliteDbDir))
     Directory.CreateDirectory(sqliteDbDir);
 }
 
- // Register persistence (DbContextFactory + compatibility DbContext + repositories) via extension
+// Register persistence (DbContextFactory + compatibility DbContext + repositories) via extension
 builder.Services.AddListenarrPersistence(builder.Configuration, sqliteDbPath);
 
 // Register consolidated HttpClient policies and common typed clients
 builder.Services.AddListenarrHttpClients(builder.Configuration);
 
- // Register adapters and related options/validators
+// Register adapters and related options/validators
 builder.Services.AddListenarrAdapters(builder.Configuration);
- 
- // Register infrastructure implementations (repositories live in the Infrastructure project)
+
+// Register infrastructure implementations (repositories live in the Infrastructure project)
 builder.Services.AddListenarrInfrastructure();
- // Register application-level services (moved from Program.cs to keep startup focused)
+// Register application-level services (moved from Program.cs to keep startup focused)
 builder.Services.AddListenarrAppServices(builder.Configuration);
- // Register hosted/background services (moved from Program.cs)
+// Register hosted/background services (moved from Program.cs)
 builder.Services.AddListenarrHostedServices(builder.Configuration);
 
 // Typed HttpClients with automatic decompression for scraping services
@@ -417,8 +408,8 @@ builder.Services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() =>
             }
         }
     }
-    catch (Exception ex) 
-    { 
+    catch (Exception ex)
+    {
         Log.Logger.Warning("[WARNING] Failed to configure proxy settings: {Message}", ex.Message);
     }
 
@@ -480,8 +471,8 @@ builder.Services.AddSwaggerGen(options =>
             options.IncludeXmlComments(xmlPath);
         }
     }
-    catch (Exception ex) 
-    { 
+    catch (Exception ex)
+    {
         Log.Logger.Warning("[WARNING] Failed to include XML comments in Swagger: {Message}", ex.Message);
     }
     // Use full type names for schema Ids (replace '+' from nested types with '.') to
@@ -499,7 +490,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     // Only forward the essential headers needed for proper operation
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    
+
     // Trust any proxy since this app runs in a controlled Docker/reverse proxy environment
     // Users are responsible for configuring their reverse proxy securely
     options.KnownNetworks.Clear();
@@ -522,13 +513,13 @@ if (builder.Environment.IsDevelopment())
         options.HeaderName = "X-XSRF-TOKEN";
         // Allow the antiforgery cookie to be sent over plain HTTP during local dev
         options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
-    // During local development the frontend often runs on a different origin
-    // (Vite dev server). Use SameSite=Lax so the browser will accept the
-    // cookie for same-site requests to the Vite dev server while avoiding
-    // the requirement to set Secure (which would require HTTPS). In our
-    // setup the dev server proxies /api requests, so Lax is sufficient and
-    // more compatible with local HTTP development.
-    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+        // During local development the frontend often runs on a different origin
+        // (Vite dev server). Use SameSite=Lax so the browser will accept the
+        // cookie for same-site requests to the Vite dev server while avoiding
+        // the requirement to set Secure (which would require HTTPS). In our
+        // setup the dev server proxies /api requests, so Lax is sufficient and
+        // more compatible with local HTTP development.
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     });
 }
 
@@ -551,7 +542,7 @@ using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    
+
     // Ensure the database directory exists (use the absolute path computed above)
     string dbFullPath = sqliteDbPath;
     string? dbDirectory = Path.GetDirectoryName(dbFullPath);
@@ -559,18 +550,49 @@ using (var scope = app.Services.CreateScope())
     {
         Directory.CreateDirectory(dbDirectory);
     }
-    
+
     try
     {
+        logger.LogInformation("Checking EF Core migrations (available/applied/pending)...");
+
+        try
+        {
+            var available = context.Database.GetMigrations().ToList();
+            var applied = context.Database.GetAppliedMigrations().ToList();
+            var pending = context.Database.GetPendingMigrations().ToList();
+
+            logger.LogInformation("Available migrations: {Count}", available.Count);
+            foreach (var m in available)
+            {
+                logger.LogInformation("  - {Migration}", m);
+            }
+
+            logger.LogInformation("Applied migrations: {Count}", applied.Count);
+            foreach (var m in applied)
+            {
+                logger.LogInformation("  - {Migration}", m);
+            }
+
+            logger.LogInformation("Pending migrations: {Count}", pending.Count);
+            foreach (var m in pending)
+            {
+                logger.LogInformation("  - {Migration}", m);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to enumerate EF Core migrations before migrating");
+        }
+
         logger.LogInformation("Applying database migrations...");
         // Apply any pending migrations (including AddDefaultMetadataSources which adds Audimeta and Audnexus)
         context.Database.Migrate();
         logger.LogInformation("Database migrations applied successfully");
-        
+
         // Apply SQLite PRAGMA settings after database is created
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
-        
+
         // NOTE: Automatic schema ALTERs were intentionally removed from startup.
         // Schema changes should be applied by EF migrations. See Migration:
         // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
@@ -612,8 +634,8 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Initialize the SignalR sink now that the service provider is available
-signalRSink.Initialize(app.Services);
+// Initialize the SignalR sink now that the hub context is available
+signalRSink.Initialize(app.Services.GetRequiredService<IHubContext<LogHub>>());
 
 // Attempt to install Playwright browser binaries on startup (blocking with timeout).
 // This reduces repeated missing-executable warnings during runtime by ensuring
@@ -806,51 +828,51 @@ try
             }
 
             // Fallback: try npx playwright install (requires Node.js available on PATH)
-                try
+            try
+            {
+                // Install only Chromium to reduce download size and time. Give a much larger
+                // timeout (10 minutes) because browser artifacts are large and may take time
+                // on slow networks. Use the IProcessRunner when available so output is
+                // captured and timeouts are enforced consistently.
+                logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
+                var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    // Install only Chromium to reduce download size and time. Give a much larger
-                    // timeout (10 minutes) because browser artifacts are large and may take time
-                    // on slow networks. Use the IProcessRunner when available so output is
-                    // captured and timeouts are enforced consistently.
-                    logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "npx",
-                        Arguments = "playwright install chromium",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
+                    FileName = "npx",
+                    Arguments = "playwright install chromium",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
 
-                    var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
-                    if (processRunner != null)
+                var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                if (processRunner != null)
+                {
+                    var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                    logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(result.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    if (result.TimedOut)
                     {
-                        var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                        logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(result.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                        if (result.TimedOut)
-                        {
-                            logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
-                        }
-                        else if (result.ExitCode == 0)
-                        {
-                            logger.LogInformation("'npx playwright install chromium' completed successfully");
-                            return true;
-                        }
-                        else
-                        {
-                            logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", result.ExitCode);
-                        }
+                        logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
+                    }
+                    else if (result.ExitCode == 0)
+                    {
+                        logger.LogInformation("'npx playwright install chromium' completed successfully");
+                        return true;
                     }
                     else
                     {
-                        logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
+                        logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", result.ExitCode);
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    logger.LogDebug(ex, "'npx playwright install chromium' attempt failed or npx not available");
+                    logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
                 }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "'npx playwright install chromium' attempt failed or npx not available");
+            }
 
             // As a last resort, ask the PlaywrightPageFetcher to ensure browsers are initialized.
             // Use the explicit TryEnsureInitializedAsync method so we can reliably detect whether
@@ -925,21 +947,21 @@ app.UseForwardedHeaders();
 
 // Note: HTTPS redirection is handled by the reverse proxy, not by this application
 
-    // Serve frontend static files from wwwroot (index.html + assets)
-    // DefaultFiles enables serving index.html when requesting '/'
-    app.UseDefaultFiles();
-    app.UseStaticFiles();
+// Serve frontend static files from wwwroot (index.html + assets)
+// DefaultFiles enables serving index.html when requesting '/'
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
-    // Serve cached images from config/cache/images directory
-    var cacheImagesPath = Path.Combine(app.Environment.ContentRootPath, "config", "cache", "images");
-    if (Directory.Exists(cacheImagesPath))
+// Serve cached images from config/cache/images directory
+var cacheImagesPath = Path.Combine(app.Environment.ContentRootPath, "config", "cache", "images");
+if (Directory.Exists(cacheImagesPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
     {
-        app.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(cacheImagesPath),
-            RequestPath = "/config/cache/images"
-        });
-    }
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(cacheImagesPath),
+        RequestPath = "/config/cache/images"
+    });
+}
 
 // Ensure routing middleware is enabled so endpoint routing features (CORS, Authorization)
 // can be applied by subsequent middleware. This must run before UseCors()/UseAuthorization().
@@ -950,15 +972,15 @@ if (app.Environment.IsDevelopment())
 {
     app.UseCors("DevOnly");
 }
-    // Session-based authentication middleware
-    app.UseMiddleware<Listenarr.Api.Middleware.SessionAuthenticationMiddleware>();
-    // API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
-    app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
-    // Enforce authentication based on startup config
-    app.UseMiddleware<AuthenticationEnforcerMiddleware>();
-    // Validate antiforgery tokens for unsafe methods
-    app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
-    app.UseAuthorization();
+// Session-based authentication middleware
+app.UseMiddleware<Listenarr.Api.Middleware.SessionAuthenticationMiddleware>();
+// API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
+app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
+// Enforce authentication based on startup config
+app.UseMiddleware<AuthenticationEnforcerMiddleware>();
+// Validate antiforgery tokens for unsafe methods
+app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
+app.UseAuthorization();
 
 app.MapControllers();
 
@@ -979,7 +1001,7 @@ else
     app.MapHub<SettingsHub>("/hubs/settings");
 }
 
-    // SPA fallback: serve index.html for non-API routes so client-side routing works
-    app.MapFallbackToFile("index.html");
+// SPA fallback: serve index.html for non-API routes so client-side routing works
+app.MapFallbackToFile("index.html");
 
 app.Run();

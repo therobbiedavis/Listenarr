@@ -29,22 +29,22 @@ namespace Listenarr.Api.Services
         /// Find the most likely audiobook match for a download using multiple criteria
         /// </summary>
         Task<Audiobook?> FindBestAudiobookMatchAsync(Download download, double minimumConfidence = 0.8);
-        
+
         /// <summary>
         /// Find the most likely audiobook match for a search result using multiple criteria
         /// </summary>
         Task<Audiobook?> FindBestAudiobookMatchAsync(SearchResult searchResult, double minimumConfidence = 0.8);
-        
+
         /// <summary>
         /// Calculate confidence score between a download and audiobook (0.0 to 1.0)
         /// </summary>
         double CalculateMatchConfidence(Download download, Audiobook audiobook);
-        
+
         /// <summary>
         /// Calculate confidence score between a search result and audiobook (0.0 to 1.0)
         /// </summary>
         double CalculateMatchConfidence(SearchResult searchResult, Audiobook audiobook);
-        
+
         /// <summary>
         /// Populate download metadata from search result for better matching
         /// </summary>

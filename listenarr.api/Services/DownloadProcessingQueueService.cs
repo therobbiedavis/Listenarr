@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
@@ -49,7 +50,7 @@ namespace Listenarr.Api.Services
             var recentCompletedCutoff = now.AddSeconds(-300); // 5 minute cooldown
 
             var existingActive = await _context.DownloadProcessingJobs
-                .Where(j => j.DownloadId == downloadId && 
+                .Where(j => j.DownloadId == downloadId &&
                            (j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
                 .OrderBy(j => j.CreatedAt)
                 .FirstOrDefaultAsync();
@@ -121,8 +122,8 @@ namespace Listenarr.Api.Services
         {
             var now = DateTime.UtcNow;
             return await _context.DownloadProcessingJobs
-                .Where(j => j.Status == ProcessingJobStatus.Retry && 
-                           j.NextRetryAt.HasValue && 
+                .Where(j => j.Status == ProcessingJobStatus.Retry &&
+                           j.NextRetryAt.HasValue &&
                            j.NextRetryAt <= now)
                 .OrderByDescending(j => j.Priority)
                 .ThenBy(j => j.NextRetryAt)
@@ -195,7 +196,7 @@ namespace Listenarr.Api.Services
         public async Task CleanupOldJobsAsync(int retentionDays = 7)
         {
             var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
-            
+
             var oldJobs = await _context.DownloadProcessingJobs
                 .Where(j => (j.Status == ProcessingJobStatus.Completed || j.Status == ProcessingJobStatus.Failed) &&
                            j.CompletedAt.HasValue && j.CompletedAt < cutoffDate)
@@ -205,8 +206,8 @@ namespace Listenarr.Api.Services
             {
                 _context.DownloadProcessingJobs.RemoveRange(oldJobs);
                 await _context.SaveChangesAsync();
-                
-                _logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days", 
+
+                _logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days",
                     oldJobs.Count, retentionDays);
             }
         }

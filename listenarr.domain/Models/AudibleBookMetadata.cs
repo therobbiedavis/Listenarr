@@ -37,7 +37,7 @@ namespace Listenarr.Domain.Models
         public string? Isbn { get; set; }
         // OpenLibrary identifier when metadata originates from OpenLibrary
         public string? OpenLibraryId { get; set; }
-    // (Asin moved to top to be the canonical ASIN property)
+        // (Asin moved to top to be the canonical ASIN property)
         public string? Publisher { get; set; }
         public string? Language { get; set; }
         public int? Runtime { get; set; }

@@ -8,6 +8,7 @@ using Listenarr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Controllers
 {
@@ -82,14 +83,14 @@ namespace Listenarr.Api.Controllers
                             if (colName == "Qualities")
                             {
                                 // Try pipe-delimited -> create list of QualityDefinition-like objects
-                                var parts = raw.Split(new[] {'|',','}, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length>0).ToList();
+                                var parts = raw.Split(new[] { '|', ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
                                 var qualityObjs = parts.Select(p => new { Quality = p, Allowed = true, Priority = 0 }).ToList();
                                 normalized = JsonSerializer.Serialize(qualityObjs);
                             }
                             else
                             {
                                 // Treat as list of strings: either pipe/comma-separated or single token -> wrap into JSON array
-                                var parts = raw.Split(new[] {'|',','}, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length>0).ToList();
+                                var parts = raw.Split(new[] { '|', ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
                                 normalized = JsonSerializer.Serialize(parts);
                             }
 

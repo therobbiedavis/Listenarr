@@ -53,22 +53,22 @@ namespace Listenarr.Api.Controllers
             try
             {
                 _logger.LogInformation("Received request for ASIN: {Asin}", asin);
-                
+
                 // First, scrape the product page metadata
                 var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
-                
+
                 // Then try to enrich with search result data (runtime, series, etc.)
                 try
                 {
                     // Search by ASIN to get the search result with metadata
                     var searchResults = await _audibleSearchService.SearchAudiobooksAsync(asin);
-                    var matchingResult = searchResults.FirstOrDefault(r => 
+                    var matchingResult = searchResults.FirstOrDefault(r =>
                         r.Asin?.Equals(asin, System.StringComparison.OrdinalIgnoreCase) == true);
-                    
+
                     if (matchingResult != null)
                     {
                         _logger.LogInformation("Found search result for ASIN {Asin}, enriching with search metadata", asin);
-                        
+
                         // Enrich with search result data
                         if (!string.IsNullOrEmpty(matchingResult.Duration))
                         {
@@ -81,14 +81,14 @@ namespace Listenarr.Api.Controllers
                                 _logger.LogInformation("Enriched runtime: {Runtime} minutes", metadata.Runtime);
                             }
                         }
-                        
+
                         if (!string.IsNullOrEmpty(matchingResult.Series))
                         {
                             metadata.Series = matchingResult.Series;
                             metadata.SeriesNumber = matchingResult.SeriesNumber;
                             _logger.LogInformation("Enriched series: {Series} #{SeriesNumber}", metadata.Series, metadata.SeriesNumber);
                         }
-                        
+
                         if (!string.IsNullOrEmpty(matchingResult.ReleaseDate))
                         {
                             var yearMatch = Regex.Match(matchingResult.ReleaseDate, @"(\d{2})-(\d{2})-(\d{2})");
@@ -109,7 +109,7 @@ namespace Listenarr.Api.Controllers
                 {
                     _logger.LogWarning(searchEx, "Failed to enrich metadata with search results for ASIN {Asin}, continuing with product page data only", asin);
                 }
-                
+
                 _logger.LogInformation("Successfully returned metadata for ASIN: {Asin}", asin);
                 return Ok(metadata);
             }

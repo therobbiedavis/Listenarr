@@ -12,28 +12,28 @@ namespace Listenarr.Domain.Models
         public string Type { get; set; } = string.Empty; // "torrent" or "nzb"
         public bool IsEnabled { get; set; } = true;
         public int Priority { get; set; } = 1;
-        
+
         // Store as JSON string in database
         public string HeadersJson { get; set; } = "{}";
         public string ParametersJson { get; set; } = "{}";
-        
+
         public string? RateLimitPerMinute { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LastUsed { get; set; }
-        
+
         // Not mapped - for JSON serialization in API responses
         public Dictionary<string, string> Headers
         {
-            get => string.IsNullOrWhiteSpace(HeadersJson) 
-                ? new Dictionary<string, string>() 
+            get => string.IsNullOrWhiteSpace(HeadersJson)
+                ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(HeadersJson) ?? new Dictionary<string, string>();
             set => HeadersJson = JsonSerializer.Serialize(value);
         }
-        
+
         public Dictionary<string, string> Parameters
         {
-            get => string.IsNullOrWhiteSpace(ParametersJson) 
-                ? new Dictionary<string, string>() 
+            get => string.IsNullOrWhiteSpace(ParametersJson)
+                ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(ParametersJson) ?? new Dictionary<string, string>();
             set => ParametersJson = JsonSerializer.Serialize(value);
         }
@@ -51,16 +51,16 @@ namespace Listenarr.Domain.Models
         public string DownloadPath { get; set; } = string.Empty;
         public bool UseSSL { get; set; } = false;
         public bool IsEnabled { get; set; } = true;
-        
+
         // Store as JSON string in database
         public string SettingsJson { get; set; } = "{}";
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
+
         // Not mapped - for JSON serialization in API responses
         public Dictionary<string, object> Settings
         {
-            get => string.IsNullOrWhiteSpace(SettingsJson) 
-                ? new Dictionary<string, object>() 
+            get => string.IsNullOrWhiteSpace(SettingsJson)
+                ? new Dictionary<string, object>()
                 : JsonSerializer.Deserialize<Dictionary<string, object>>(SettingsJson) ?? new Dictionary<string, object>();
             set => SettingsJson = JsonSerializer.Serialize(value);
         }
@@ -110,16 +110,16 @@ namespace Listenarr.Domain.Models
         public int MissingSourceRetryInitialDelaySeconds { get; set; } = 30;
         public int MissingSourceMaxRetries { get; set; } = 3;
 
-    // External request settings: control retry behavior for US-domain preference and optional HTTP proxy
-    public bool PreferUsDomain { get; set; } = true;
-    public bool UseUsProxy { get; set; } = false;
-    public string? UsProxyHost { get; set; }
-    public int UsProxyPort { get; set; } = 0;
-    public string? UsProxyUsername { get; set; }
-    public string? UsProxyPassword { get; set; }
+        // External request settings: control retry behavior for US-domain preference and optional HTTP proxy
+        public bool PreferUsDomain { get; set; } = true;
+        public bool UseUsProxy { get; set; } = false;
+        public string? UsProxyHost { get; set; }
+        public int UsProxyPort { get; set; } = 0;
+        public string? UsProxyUsername { get; set; }
+        public string? UsProxyPassword { get; set; }
 
-    // Action to take when a download completes: "Move" or "Copy"
-    public string CompletedFileAction { get; set; } = "Move";
+        // Action to take when a download completes: "Move" or "Copy"
+        public string CompletedFileAction { get; set; } = "Move";
 
         // Whether to show completed downloads from external clients in the Activity view
         public bool ShowCompletedExternalDownloads { get; set; } = false;
@@ -150,87 +150,87 @@ namespace Listenarr.Domain.Models
 
         [NotMapped]
         public string? AdminPassword { get; set; }
-        
-    // Discord bot integration settings (used by external Discord bot or interactions)
-    /// <summary>
-    /// Enable (persisted) Discord bot integration settings. The bot process may read these settings to
-    /// automatically login / register commands.
-    /// </summary>
-    public bool DiscordBotEnabled { get; set; } = false;
 
-    /// <summary>
-    /// Discord Application (Client) ID for registering application commands.
-    /// </summary>
-    public string? DiscordApplicationId { get; set; }
+        // Discord bot integration settings (used by external Discord bot or interactions)
+        /// <summary>
+        /// Enable (persisted) Discord bot integration settings. The bot process may read these settings to
+        /// automatically login / register commands.
+        /// </summary>
+        public bool DiscordBotEnabled { get; set; } = false;
 
-    /// <summary>
-    /// Optional Guild ID to register commands in a single guild for faster deployment during testing.
-    /// </summary>
-    public string? DiscordGuildId { get; set; }
+        /// <summary>
+        /// Discord Application (Client) ID for registering application commands.
+        /// </summary>
+        public string? DiscordApplicationId { get; set; }
 
-    /// <summary>
-    /// Optional Channel ID to restrict bot interactions to a single channel. If set, the bot
-    /// will ignore interactions from other channels unless the bot configuration allows it.
-    /// </summary>
-    public string? DiscordChannelId { get; set; }
+        /// <summary>
+        /// Optional Guild ID to register commands in a single guild for faster deployment during testing.
+        /// </summary>
+        public string? DiscordGuildId { get; set; }
 
-    /// <summary>
-    /// Bot token used by an external bot process to authenticate to Discord.
-    /// NOTE: Storing tokens in the database has security implications. Consider using a secrets manager
-    /// for production deployments.
-    /// </summary>
-    public string? DiscordBotToken { get; set; }
+        /// <summary>
+        /// Optional Channel ID to restrict bot interactions to a single channel. If set, the bot
+        /// will ignore interactions from other channels unless the bot configuration allows it.
+        /// </summary>
+        public string? DiscordChannelId { get; set; }
 
-    /// <summary>
-    /// Primary command group name (e.g. "request"). We'll create a slash command with this group and
-    /// a subcommand for specific request types (e.g. "audiobook").
-    /// </summary>
-    public string? DiscordCommandGroupName { get; set; } = "request";
+        /// <summary>
+        /// Bot token used by an external bot process to authenticate to Discord.
+        /// NOTE: Storing tokens in the database has security implications. Consider using a secrets manager
+        /// for production deployments.
+        /// </summary>
+        public string? DiscordBotToken { get; set; }
 
-    /// <summary>
-    /// Subcommand name for audiobooks (e.g. "audiobook"). Combined with the group this yields "/request audiobook".
-    /// </summary>
-    public string? DiscordCommandSubcommandName { get; set; } = "audiobook";
+        /// <summary>
+        /// Primary command group name (e.g. "request"). We'll create a slash command with this group and
+        /// a subcommand for specific request types (e.g. "audiobook").
+        /// </summary>
+        public string? DiscordCommandGroupName { get; set; } = "request";
 
-    /// <summary>
-    /// Optional custom username for the Discord bot. If set, the bot will attempt to change its username.
-    /// </summary>
-    public string? DiscordBotUsername { get; set; }
+        /// <summary>
+        /// Subcommand name for audiobooks (e.g. "audiobook"). Combined with the group this yields "/request audiobook".
+        /// </summary>
+        public string? DiscordCommandSubcommandName { get; set; } = "audiobook";
 
-    /// <summary>
-    /// Optional avatar URL for the Discord bot. If set, the bot will attempt to change its avatar.
-    /// </summary>
-    public string? DiscordBotAvatar { get; set; }
+        /// <summary>
+        /// Optional custom username for the Discord bot. If set, the bot will attempt to change its username.
+        /// </summary>
+        public string? DiscordBotUsername { get; set; }
 
-    // Search settings
-    /// <summary>
-    /// Enable searching Amazon as part of intelligent searches.
-    /// </summary>
-    public bool EnableAmazonSearch { get; set; } = true;
+        /// <summary>
+        /// Optional avatar URL for the Discord bot. If set, the bot will attempt to change its avatar.
+        /// </summary>
+        public string? DiscordBotAvatar { get; set; }
 
-    /// <summary>
-    /// Enable searching Audible as part of intelligent searches.
-    /// </summary>
-    public bool EnableAudibleSearch { get; set; } = true;
+        // Search settings
+        /// <summary>
+        /// Enable searching Amazon as part of intelligent searches.
+        /// </summary>
+        public bool EnableAmazonSearch { get; set; } = true;
 
-    /// <summary>
-    /// Enable using OpenLibrary augmentation during intelligent searches.
-    /// </summary>
-    public bool EnableOpenLibrarySearch { get; set; } = true;
+        /// <summary>
+        /// Enable searching Audible as part of intelligent searches.
+        /// </summary>
+        public bool EnableAudibleSearch { get; set; } = true;
 
-    /// <summary>
-    /// Maximum number of unified candidate ASINs to consider when performing intelligent search.
-    /// </summary>
-    public int SearchCandidateCap { get; set; } = 100;
+        /// <summary>
+        /// Enable using OpenLibrary augmentation during intelligent searches.
+        /// </summary>
+        public bool EnableOpenLibrarySearch { get; set; } = true;
 
-    /// <summary>
-    /// Maximum number of results to return from intelligent search.
-    /// </summary>
-    public int SearchResultCap { get; set; } = 100;
+        /// <summary>
+        /// Maximum number of unified candidate ASINs to consider when performing intelligent search.
+        /// </summary>
+        public int SearchCandidateCap { get; set; } = 100;
 
-    /// <summary>
-    /// Fuzzy similarity threshold used in relaxed containment mode (0.0 - 1.0).
-    /// </summary>
-    public double SearchFuzzyThreshold { get; set; } = 0.2;
+        /// <summary>
+        /// Maximum number of results to return from intelligent search.
+        /// </summary>
+        public int SearchResultCap { get; set; } = 100;
+
+        /// <summary>
+        /// Fuzzy similarity threshold used in relaxed containment mode (0.0 - 1.0).
+        /// </summary>
+        public double SearchFuzzyThreshold { get; set; } = 0.2;
     }
 }

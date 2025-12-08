@@ -24,8 +24,8 @@ namespace Listenarr.Api.Services
         private readonly object _processLock = new object();
 
         public DiscordBotService(
-            ILogger<DiscordBotService> logger, 
-            IStartupConfigService startupConfigService, 
+            ILogger<DiscordBotService> logger,
+            IStartupConfigService startupConfigService,
             IHostEnvironment hostEnvironment,
             IHttpContextAccessor httpContextAccessor,
             IProcessRunner? processRunner = null)
@@ -82,7 +82,7 @@ namespace Listenarr.Api.Services
 
                 // Determine the Listenarr API URL with proper fallbacks for Docker
                 var listenarrUrl = GetListenarrUrl();
-                
+
                 _logger.LogInformation("Starting Discord bot with LISTENARR_URL: {Url}", listenarrUrl);
                 startInfo.EnvironmentVariables["LISTENARR_URL"] = listenarrUrl;
 
@@ -246,7 +246,7 @@ namespace Listenarr.Api.Services
                     var request = httpContext.Request;
                     var scheme = request.Scheme;
                     var host = request.Host.Value;
-                    
+
                     // Check if we're behind a reverse proxy (X-Forwarded headers)
                     if (request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto))
                     {
@@ -276,12 +276,12 @@ namespace Listenarr.Api.Services
                     var protocol = (config.EnableSsl ?? false) ? "https" : "http";
                     var port = config.Port ?? 5000;
                     var urlBase = config.UrlBase?.TrimEnd('/') ?? "";
-                    
+
                     // In Docker, use host.docker.internal instead of localhost for better compatibility
-                    var host = Environment.GetEnvironmentVariable("DOCKER_ENV") != null 
-                        ? "host.docker.internal" 
+                    var host = Environment.GetEnvironmentVariable("DOCKER_ENV") != null
+                        ? "host.docker.internal"
                         : "localhost";
-                    
+
                     var url = $"{protocol}://{host}:{port}{urlBase}";
                     _logger.LogInformation("Constructed URL from startup config: {Url}", url);
                     return url;
@@ -293,10 +293,10 @@ namespace Listenarr.Api.Services
             }
 
             // Priority 4: Final fallback - try host.docker.internal first in Docker, then localhost
-            var fallbackHost = Environment.GetEnvironmentVariable("DOCKER_ENV") != null 
-                ? "host.docker.internal" 
+            var fallbackHost = Environment.GetEnvironmentVariable("DOCKER_ENV") != null
+                ? "host.docker.internal"
                 : "localhost";
-            
+
             var fallbackUrl = $"http://{fallbackHost}:5000";
             _logger.LogWarning("Using fallback URL: {Url}", fallbackUrl);
             return fallbackUrl;
@@ -429,6 +429,6 @@ namespace Listenarr.Api.Services
             }
         }
 
-        
+
     }
 }

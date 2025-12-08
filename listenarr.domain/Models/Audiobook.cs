@@ -38,32 +38,32 @@ namespace Listenarr.Domain.Models
         public List<string>? Narrators { get; set; }
         public string? Isbn { get; set; }
         public string? Asin { get; set; }
-            // OpenLibrary identifier (OLID) when the audiobook originates from OpenLibrary
-            public string? OpenLibraryId { get; set; }
+        // OpenLibrary identifier (OLID) when the audiobook originates from OpenLibrary
+        public string? OpenLibraryId { get; set; }
         public string? Publisher { get; set; }
         public string? Language { get; set; }
         public int? Runtime { get; set; }
         public string? Version { get; set; }
         public bool Explicit { get; set; }
         public bool Abridged { get; set; }
-        
-    // Monitoring and file management
-    public bool Monitored { get; set; } = true;
-    // NOTE: single-file properties are deprecated in favor of Files collection
-    public string? FilePath { get; set; }
-    public long? FileSize { get; set; }
 
-    // Base path for multi-file audiobooks (common root directory)
-    public string? BasePath { get; set; }
+        // Monitoring and file management
+        public bool Monitored { get; set; } = true;
+        // NOTE: single-file properties are deprecated in favor of Files collection
+        public string? FilePath { get; set; }
+        public long? FileSize { get; set; }
 
-    // Multi-file support: store zero or more file records for this audiobook
-    public List<AudiobookFile>? Files { get; set; }
+        // Base path for multi-file audiobooks (common root directory)
+        public string? BasePath { get; set; }
+
+        // Multi-file support: store zero or more file records for this audiobook
+        public List<AudiobookFile>? Files { get; set; }
         public string? Quality { get; set; }
-        
+
         // Quality Profile for automatic downloads
         public int? QualityProfileId { get; set; }
         public QualityProfile? QualityProfile { get; set; }
-        
+
         // Automatic search tracking
         public DateTime? LastSearchTime { get; set; }
     }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
 using System.IO;

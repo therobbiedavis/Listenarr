@@ -32,7 +32,7 @@ namespace Listenarr.Api.Tests
 
             var result = FileUtils.GetUniqueDestinationPath(file);
             Assert.NotEqual(file, result);
-            Assert.StartsWith(Path.Combine(dir, "file (") , result);
+            Assert.StartsWith(Path.Combine(dir, "file ("), result);
 
             // cleanup
             try { Directory.Delete(dir, true); } catch { }

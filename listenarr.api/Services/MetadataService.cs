@@ -58,7 +58,7 @@ namespace Listenarr.Api.Services
                     var queryParams = new List<string>();
                     if (!string.IsNullOrEmpty(title)) queryParams.Add($"title={Uri.EscapeDataString(title)}");
                     if (!string.IsNullOrEmpty(artist)) queryParams.Add($"author={Uri.EscapeDataString(artist)}");
-                    
+
                     searchQuery = $"{audnexusUrl}/search?" + string.Join("&", queryParams);
                 }
 
@@ -72,11 +72,11 @@ namespace Listenarr.Api.Services
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync();
-                
+
                 // Parse Audnexus response and convert to AudioMetadata
                 // This is a simplified implementation - you would need to adapt based on actual Audnexus API structure
                 var audnexusData = JsonSerializer.Deserialize<JsonElement>(jsonContent);
-                
+
                 return ParseAudnexusResponse(audnexusData);
             }
             catch (Exception ex)
@@ -86,7 +86,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-    public async Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
+        public async Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
         {
             try
             {

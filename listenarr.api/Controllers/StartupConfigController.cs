@@ -18,9 +18,9 @@ namespace Listenarr.Api.Controllers
             _logger = logger;
         }
 
-    [HttpGet]
-    [AllowAnonymous]
-    public ActionResult<StartupConfig> Get()
+        [HttpGet]
+        [AllowAnonymous]
+        public ActionResult<StartupConfig> Get()
         {
             try
             {

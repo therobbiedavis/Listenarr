@@ -24,6 +24,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Generic;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Controllers
 {
@@ -34,7 +35,7 @@ namespace Listenarr.Api.Controllers
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<IndexersController> _logger;
         private readonly HttpClient _httpClient;
-        
+
         public IndexersController(ListenArrDbContext dbContext, ILogger<IndexersController> logger, HttpClient httpClient)
         {
             _dbContext = dbContext;
@@ -83,7 +84,7 @@ namespace Listenarr.Api.Controllers
             _dbContext.Indexers.Add(indexer);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Created indexer '{Name}' (ID: {Id}, Type: {Type})", 
+            _logger.LogInformation("Created indexer '{Name}' (ID: {Id}, Type: {Type})",
                 indexer.Name, indexer.Id, indexer.Type);
 
             return CreatedAtAction(nameof(GetById), new { id = indexer.Id }, indexer);
@@ -163,7 +164,7 @@ namespace Listenarr.Api.Controllers
 
             try
             {
-                _logger.LogInformation("Testing indexer '{Name}' (Type: {Type}, Implementation: {Implementation})", 
+                _logger.LogInformation("Testing indexer '{Name}' (Type: {Type}, Implementation: {Implementation})",
                     indexer.Name, indexer.Type, indexer.Implementation);
 
                 // Validate basic fields
@@ -202,7 +203,7 @@ namespace Listenarr.Api.Controllers
                 };
 
                 var queryParams = new List<string> { "t=caps" };
-                
+
                 if (!string.IsNullOrEmpty(indexer.ApiKey))
                 {
                     queryParams.Add($"apikey={Uri.EscapeDataString(indexer.ApiKey)}");
@@ -256,9 +257,9 @@ namespace Listenarr.Api.Controllers
                 }
                 catch (System.Xml.XmlException xmlEx)
                 {
-                    _logger.LogError(xmlEx, "XML parsing error at Line {Line}, Position {Position}", 
+                    _logger.LogError(xmlEx, "XML parsing error at Line {Line}, Position {Position}",
                         xmlEx.LineNumber, xmlEx.LinePosition);
-                    
+
                     // Log context around the error
                     var lines = content.Split('\n');
                     if (xmlEx.LineNumber > 0 && xmlEx.LineNumber <= lines.Length)
@@ -268,13 +269,13 @@ namespace Listenarr.Api.Controllers
                         var context = string.Join("\n", lines[startLine..(endLine + 1)]);
                         _logger.LogError("XML context:\n{Context}", context);
                     }
-                    
+
                     throw new Exception($"Invalid XML response: {xmlEx.Message}");
                 }
-                
+
                 // The root element should be 'caps' for Torznab/Newznab
                 var capsElement = doc.Root;
-                
+
                 if (capsElement == null || capsElement.Name.LocalName != "caps")
                 {
                     _logger.LogWarning("Unexpected root element: {RootElement}", capsElement?.Name.LocalName ?? "null");
@@ -291,14 +292,16 @@ namespace Listenarr.Api.Controllers
                 indexer.LastTestError = null;
                 await _dbContext.SaveChangesAsync();
 
-                _logger.LogInformation("Indexer '{Name}' test succeeded - {Categories} categories, {SearchModes} search modes", 
+                _logger.LogInformation("Indexer '{Name}' test succeeded - {Categories} categories, {SearchModes} search modes",
                     indexer.Name, categories, searchModes);
 
-                return Ok(new { 
-                    success = true, 
+                return Ok(new
+                {
+                    success = true,
                     message = $"Indexer test successful - {categories} categories available",
                     indexer,
-                    capabilities = new {
+                    capabilities = new
+                    {
                         categories,
                         searchModes
                     }
@@ -313,11 +316,12 @@ namespace Listenarr.Api.Controllers
 
                 _logger.LogWarning(ex, "Indexer '{Name}' test failed", indexer.Name);
 
-                return BadRequest(new { 
-                    success = false, 
-                    message = "Indexer test failed", 
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Indexer test failed",
                     error = ex.Message,
-                    indexer 
+                    indexer
                 });
             }
         }
@@ -350,7 +354,7 @@ namespace Listenarr.Api.Controllers
                 // Build test URL with minimal query
                 var testUrl = $"https://archive.org/advancedsearch.php?q=collection:{collection}&rows=1&output=json";
 
-                _logger.LogInformation("Testing Internet Archive indexer '{Name}' with collection '{Collection}'", 
+                _logger.LogInformation("Testing Internet Archive indexer '{Name}' with collection '{Collection}'",
                     indexer.Name, collection);
 
                 // Make HTTP request
@@ -360,7 +364,7 @@ namespace Listenarr.Api.Controllers
                 // Parse JSON response
                 var content = await response.Content.ReadAsStringAsync();
                 using var jsonDoc = JsonDocument.Parse(content);
-                
+
                 // Validate response structure
                 if (!jsonDoc.RootElement.TryGetProperty("response", out var responseProperty))
                 {
@@ -378,14 +382,15 @@ namespace Listenarr.Api.Controllers
                 indexer.LastTestError = null;
                 await _dbContext.SaveChangesAsync();
 
-                _logger.LogInformation("Internet Archive indexer '{Name}' test succeeded for collection '{Collection}'", 
+                _logger.LogInformation("Internet Archive indexer '{Name}' test succeeded for collection '{Collection}'",
                     indexer.Name, collection);
 
-                return Ok(new { 
-                    success = true, 
+                return Ok(new
+                {
+                    success = true,
                     message = $"Internet Archive connection successful for collection '{collection}'",
                     collection = collection,
-                    indexer 
+                    indexer
                 });
             }
             catch (Exception ex)
@@ -397,11 +402,12 @@ namespace Listenarr.Api.Controllers
 
                 _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", indexer.Name);
 
-                return BadRequest(new { 
-                    success = false, 
-                    message = "Internet Archive test failed", 
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Internet Archive test failed",
                     error = ex.Message,
-                    indexer 
+                    indexer
                 });
             }
         }
@@ -415,7 +421,7 @@ namespace Listenarr.Api.Controllers
             {
                 // Parse mam_id from AdditionalSettings
                 string mamId = string.Empty;
-                
+
                 if (!string.IsNullOrEmpty(indexer.AdditionalSettings))
                 {
                     try
@@ -440,18 +446,18 @@ namespace Listenarr.Api.Controllers
                 // Build test URL (mam_id is sent as a cookie)
                 var testUrl = $"https://www.myanonamouse.net/tor/js/loadSearchJSONbasic.php";
 
-                _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' with MAM ID '{MamId}'", 
+                _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' with MAM ID '{MamId}'",
                     indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
 
                 // Create request with mam_id as cookie
                 var request = new HttpRequestMessage(HttpMethod.Post, testUrl);
-                
+
                 // Add browser-like headers to avoid "invalid request" errors
                 request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
                 request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
                 request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
                 request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-                
+
                 // Create form data (without mam_id since it's now in the cookie)
                 var formData = new Dictionary<string, string>
                 {
@@ -490,14 +496,14 @@ namespace Listenarr.Api.Controllers
                     }
                 }
                 catch { }
-                
+
                 // Create HttpClientHandler with cookies
                 var handler = new HttpClientHandler
                 {
                     CookieContainer = cookieContainer,
                     UseCookies = true
                 };
-                
+
                 using var cookieClient = new HttpClient(handler);
                 cookieClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
                 cookieClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
@@ -511,7 +517,7 @@ namespace Listenarr.Api.Controllers
                 // Parse JSON response
                 var content = await response.Content.ReadAsStringAsync();
                 using var jsonDoc = JsonDocument.Parse(content);
-                
+
                 // Validate response (MyAnonamouse returns JSON with data array)
                 if (!jsonDoc.RootElement.TryGetProperty("data", out _))
                 {
@@ -524,14 +530,15 @@ namespace Listenarr.Api.Controllers
                 indexer.LastTestError = null;
                 await _dbContext.SaveChangesAsync();
 
-                _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'", 
+                _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'",
                     indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
 
-                return Ok(new { 
-                    success = true, 
+                return Ok(new
+                {
+                    success = true,
                     message = $"MyAnonamouse authentication successful with MAM ID '{mamId}'",
                     mam_id = mamId,
-                    indexer 
+                    indexer
                 });
             }
             catch (Exception ex)
@@ -543,11 +550,12 @@ namespace Listenarr.Api.Controllers
 
                 _logger.LogWarning(ex, "MyAnonamouse indexer '{Name}' test failed", indexer.Name);
 
-                return BadRequest(new { 
-                    success = false, 
-                    message = "MyAnonamouse test failed", 
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "MyAnonamouse test failed",
                     error = ex.Message,
-                    indexer 
+                    indexer
                 });
             }
         }
@@ -686,7 +694,7 @@ namespace Listenarr.Api.Controllers
             indexer.UpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Toggled indexer '{Name}' to {State}", 
+            _logger.LogInformation("Toggled indexer '{Name}' to {State}",
                 indexer.Name, indexer.IsEnabled ? "enabled" : "disabled");
 
             return Ok(indexer);

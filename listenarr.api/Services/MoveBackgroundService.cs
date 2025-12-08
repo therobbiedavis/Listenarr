@@ -7,6 +7,7 @@ using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Listenarr.Api.Services
@@ -14,14 +15,14 @@ namespace Listenarr.Api.Services
     public class MoveBackgroundService : BackgroundService
     {
         private readonly IMoveQueueService _moveQueue;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<MoveBackgroundService> _logger;
 
-        public MoveBackgroundService(IMoveQueueService moveQueue, IServiceProvider serviceProvider, ILogger<MoveBackgroundService> logger)
+        public MoveBackgroundService(IMoveQueueService moveQueue, IServiceScopeFactory scopeFactory, ILogger<MoveBackgroundService> logger)
         {
-            _moveQueue = moveQueue;
-            _serviceProvider = serviceProvider;
-            _logger = logger;
+            _moveQueue = moveQueue ?? throw new ArgumentNullException(nameof(moveQueue));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -35,7 +36,7 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, job.RequestedPath);
                     _moveQueue.UpdateJobStatus(job.Id, "Processing");
 
-                    using var scope = _serviceProvider.CreateScope();
+                    using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
 
                     var audiobook = await db.Audiobooks.FindAsync(new object[] { job.AudiobookId }, stoppingToken);
@@ -165,7 +166,7 @@ namespace Listenarr.Api.Services
                         // Broadcast via SignalR
                         try
                         {
-                            using var hubScope = _serviceProvider.CreateScope();
+                            using var hubScope = _scopeFactory.CreateScope();
                             var hub = hubScope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
                             var payload = new { jobId = job.Id.ToString(), audiobookId = job.AudiobookId, status = "Completed", target = target };
                             await hub.Clients.All.SendAsync("MoveJobUpdate", payload, stoppingToken);

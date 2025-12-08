@@ -58,7 +58,7 @@ namespace Listenarr.Api.Tests
                     return pattern;
                 });
 
-            var serviceProvider = new Mock<IServiceProvider>();
+            var scopeFactory = new Mock<IServiceScopeFactory>();
 
             // Create controller instance
             var controller = new LibraryController(
@@ -66,7 +66,7 @@ namespace Listenarr.Api.Tests
                 mockImageCache.Object,
                 mockLogger.Object,
                 dbContext,
-                serviceProvider.Object,
+                scopeFactory.Object,
                 mockFileNamingService.Object,
                 mockScanQueue.Object);
 
@@ -124,7 +124,7 @@ namespace Listenarr.Api.Tests
                     return pattern;
                 });
 
-            var serviceProvider = new Mock<IServiceProvider>();
+            var scopeFactory = new Mock<IServiceScopeFactory>();
 
             // Create controller instance
             var controller = new LibraryController(
@@ -132,7 +132,7 @@ namespace Listenarr.Api.Tests
                 mockImageCache.Object,
                 mockLogger.Object,
                 dbContext,
-                serviceProvider.Object,
+                scopeFactory.Object,
                 mockFileNamingService.Object,
                 mockScanQueue.Object);
 

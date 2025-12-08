@@ -20,38 +20,35 @@ namespace Listenarr.Infrastructure.Models.Configurations
 
         public void Configure(EntityTypeBuilder<Audiobook> builder)
         {
-            // Simple list-of-string -> pipe-delimited conversion for Authors, Genres, Tags, Narrators
-            builder.Property(e => e.Authors)
-                .HasConversion(
-                    v => string.Join("|", v ?? new List<string>()),
-                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
-                );
-            builder.Property(e => e.Authors)
-                .Metadata.SetValueComparer(StringListComparer());
+            // Map list-of-string properties as JSON TEXT columns so EF will properly
+            // deserialize the JSON arrays that migrations now produce (e.g. ["Name"]).
+            var authorsConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
+            var authorsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var authorsProp = builder.Property(e => e.Authors)
+                .HasConversion(authorsConverter)
+                .HasColumnType("TEXT");
+            authorsProp.Metadata.SetValueComparer(authorsComparer);
 
-            builder.Property(e => e.Genres)
-                .HasConversion(
-                    v => string.Join("|", v ?? new List<string>()),
-                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
-                );
-            builder.Property(e => e.Genres)
-                .Metadata.SetValueComparer(StringListComparer());
+            var genresConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
+            var genresComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var genresProp = builder.Property(e => e.Genres)
+                .HasConversion(genresConverter)
+                .HasColumnType("TEXT");
+            genresProp.Metadata.SetValueComparer(genresComparer);
 
-            builder.Property(e => e.Tags)
-                .HasConversion(
-                    v => string.Join("|", v ?? new List<string>()),
-                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
-                );
-            builder.Property(e => e.Tags)
-                .Metadata.SetValueComparer(StringListComparer());
+            var tagsConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
+            var tagsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var tagsProp = builder.Property(e => e.Tags)
+                .HasConversion(tagsConverter)
+                .HasColumnType("TEXT");
+            tagsProp.Metadata.SetValueComparer(tagsComparer);
 
-            builder.Property(e => e.Narrators)
-                .HasConversion(
-                    v => string.Join("|", v ?? new List<string>()),
-                    v => string.IsNullOrWhiteSpace(v) ? new List<string>() : v.Split('|', System.StringSplitOptions.RemoveEmptyEntries).ToList()
-                );
-            builder.Property(e => e.Narrators)
-                .Metadata.SetValueComparer(StringListComparer());
+            var narratorsConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
+            var narratorsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var narratorsProp = builder.Property(e => e.Narrators)
+                .HasConversion(narratorsConverter)
+                .HasColumnType("TEXT");
+            narratorsProp.Metadata.SetValueComparer(narratorsComparer);
 
             // One-to-many: Audiobook -> AudiobookFiles
             builder.HasMany(a => a.Files)

@@ -18,6 +18,7 @@
 
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Infrastructure.Models;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Runtime.InteropServices;
@@ -40,12 +41,12 @@ namespace Listenarr.Api.Services
         private readonly IAppMetricsService _metrics;
         private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
         private readonly Dictionary<string, Download> _lastDownloadStates = new();
-    // Tracks downloads that appear complete and the time they were first observed complete
-    private readonly Dictionary<string, DateTime> _completionCandidates = new();
-    private readonly TimeSpan _completionStableWindow = TimeSpan.FromSeconds(10);
-    // Track missing-source retry attempts and scheduled retries to avoid duplicate scheduling
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _missingSourceRetryAttempts = new();
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _missingSourceRetryScheduled = new();
+        // Tracks downloads that appear complete and the time they were first observed complete
+        private readonly Dictionary<string, DateTime> _completionCandidates = new();
+        private readonly TimeSpan _completionStableWindow = TimeSpan.FromSeconds(10);
+        // Track missing-source retry attempts and scheduled retries to avoid duplicate scheduling
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _missingSourceRetryAttempts = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _missingSourceRetryScheduled = new();
 
         // Backward-compatible constructor to avoid breaking existing tests that instantiate
         // DownloadMonitorService without providing an IDbContextFactory. This resolves the
@@ -147,25 +148,25 @@ namespace Listenarr.Api.Services
 
             // Remove ALL bracketed content [anything] - more robust than specific patterns
             var result = System.Text.RegularExpressions.Regex.Replace(title, @"\[.*?\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Remove ALL parentheses content (anything) - handles unknown quality/group indicators
             result = System.Text.RegularExpressions.Regex.Replace(result, @"\(.*?\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Remove curly braces content {anything}
             result = System.Text.RegularExpressions.Regex.Replace(result, @"\{.*?\}", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Remove common separators and replace with spaces
             result = System.Text.RegularExpressions.Regex.Replace(result, @"[\-_\.]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Remove common quality/format indicators that might not be in brackets
             result = System.Text.RegularExpressions.Regex.Replace(result, @"\b(mp3|m4a|m4b|flac|aac|ogg|opus|320|256|128|v0|v2|audiobook|unabridged|abridged)\b", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Normalize multiple spaces to single spaces
             result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ");
-            
+
             // Remove trailing/leading spaces, dashes, etc.
             result = result.Trim(' ', '-', '.', ',');
-            
+
             return result;
         }
 
@@ -176,16 +177,16 @@ namespace Listenarr.Api.Services
         {
             var norm1 = NormalizeTitle(title1);
             var norm2 = NormalizeTitle(title2);
-            
+
             // Exact match after normalization
             if (string.Equals(norm1, norm2, StringComparison.OrdinalIgnoreCase))
                 return true;
-                
+
             // Bidirectional contains
-            if (norm1.Contains(norm2, StringComparison.OrdinalIgnoreCase) || 
+            if (norm1.Contains(norm2, StringComparison.OrdinalIgnoreCase) ||
                 norm2.Contains(norm1, StringComparison.OrdinalIgnoreCase))
                 return true;
-                
+
             // First 50 chars (for very long titles)
             if (norm1.Length > 20 && norm2.Length > 20)
             {
@@ -193,7 +194,7 @@ namespace Listenarr.Api.Services
                 if (norm1.Substring(0, len).Equals(norm2.Substring(0, len), StringComparison.OrdinalIgnoreCase))
                     return true;
             }
-            
+
             return false;
         }
 
@@ -346,7 +347,7 @@ namespace Listenarr.Api.Services
 
             return false;
         }
-        
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Download Monitor Service starting");
@@ -388,7 +389,7 @@ namespace Listenarr.Api.Services
             _logger.LogDebug("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
             foreach (var dl in activeDownloads)
             {
-                _logger.LogDebug("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}", 
+                _logger.LogDebug("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}",
                     dl.Id, dl.Title, dl.Status, dl.DownloadClientId);
             }
 
@@ -463,7 +464,7 @@ namespace Listenarr.Api.Services
         }
 
         private async Task PollDownloadClientsAsync(
-            List<Download> downloads, 
+            List<Download> downloads,
             IConfigurationService configService,
             ListenArrDbContext dbContext,
             CancellationToken cancellationToken)
@@ -569,26 +570,26 @@ namespace Listenarr.Api.Services
                         try
                         {
                             _logger.LogDebug("Looking for qBittorrent match for download {DownloadId}: {Title}", dl.Id, dl.Title);
-                            
+
                             // Try hash-based matching first (most reliable for qBittorrent)
                             var matched = (Hash: "", Name: "", SavePath: "", ContentPath: "", Progress: 0.0, AmountLeft: 0L, State: "", Size: 0L, Category: "");
-                            
+
                             // Check if we have a stored torrent hash for this download
                             if (dl.Metadata != null && dl.Metadata.TryGetValue("TorrentHash", out var hashObj))
                             {
                                 var storedHash = hashObj?.ToString();
                                 if (!string.IsNullOrEmpty(storedHash))
                                 {
-                                    matched = torrentLookup.FirstOrDefault(t => 
+                                    matched = torrentLookup.FirstOrDefault(t =>
                                         string.Equals(t.Hash, storedHash, StringComparison.OrdinalIgnoreCase));
-                                    
+
                                     if (!string.IsNullOrEmpty(matched.Hash))
                                     {
                                         _logger.LogDebug("Found qBittorrent torrent by hash match: {Hash} for download {DownloadId}", storedHash, dl.Id);
                                     }
                                 }
                             }
-                            
+
                             // Fallback to title/name matching if hash matching failed
                             if (string.IsNullOrEmpty(matched.Hash))
                             {
@@ -598,7 +599,7 @@ namespace Listenarr.Api.Services
                                     // Exact name match
                                     if (string.Equals(t.Name, dl.Title, StringComparison.OrdinalIgnoreCase))
                                         return true;
-                                    
+
                                     // Enhanced title matching with robust normalization
                                     if (AreTitlesSimilar(dl.Title, t.Name))
                                     {
@@ -606,13 +607,13 @@ namespace Listenarr.Api.Services
                                             dl.Title, t.Name, NormalizeTitle(dl.Title), NormalizeTitle(t.Name));
                                         return true;
                                     }
-                                    
+
                                     // Path-based matching
-                                    if (!string.IsNullOrEmpty(dl.DownloadPath) && !string.IsNullOrEmpty(t.SavePath) && 
-                                        (t.SavePath.Contains(dl.DownloadPath, StringComparison.OrdinalIgnoreCase) || 
+                                    if (!string.IsNullOrEmpty(dl.DownloadPath) && !string.IsNullOrEmpty(t.SavePath) &&
+                                        (t.SavePath.Contains(dl.DownloadPath, StringComparison.OrdinalIgnoreCase) ||
                                          dl.DownloadPath.Contains(t.SavePath, StringComparison.OrdinalIgnoreCase)))
                                         return true;
-                                    
+
                                     return false;
                                 });
                             }
@@ -623,7 +624,7 @@ namespace Listenarr.Api.Services
                                 continue;
                             }
 
-                            _logger.LogDebug("Found matching qBittorrent torrent for {DownloadId}: {TorrentName} (Hash: {Hash}, State: {State}, Progress: {Progress:P2}, SavePath: {SavePath}, ContentPath: {ContentPath})", 
+                            _logger.LogDebug("Found matching qBittorrent torrent for {DownloadId}: {TorrentName} (Hash: {Hash}, State: {State}, Progress: {Progress:P2}, SavePath: {SavePath}, ContentPath: {ContentPath})",
                                 dl.Id, matched.Name, matched.Hash, matched.State, matched.Progress, matched.SavePath, matched.ContentPath);
 
                             // Persist client's save/content path to the download as a fallback so FinalizeDownloadAsync
@@ -668,13 +669,13 @@ namespace Listenarr.Api.Services
                             // A torrent is complete when:
                             // 1. Progress >= 100% (1.0) AND
                             // 2. In an uploading/seeding state OR amount left is 0
-                            var isComplete = (matched.Progress >= 1.0 && 
-                                            (matched.State == "uploading" || matched.State == "stalledUP" || 
-                                             matched.State == "checkingUP" || matched.State == "forcedUP" || 
+                            var isComplete = (matched.Progress >= 1.0 &&
+                                            (matched.State == "uploading" || matched.State == "stalledUP" ||
+                                             matched.State == "checkingUP" || matched.State == "forcedUP" ||
                                              matched.State == "stoppedUP" || matched.State == "queuedUP")) ||
                                             matched.AmountLeft == 0;
 
-                            _logger.LogDebug("Completion check for {DownloadId}: IsComplete={IsComplete}, Progress={Progress:P2}, AmountLeft={AmountLeft}, State={State}", 
+                            _logger.LogDebug("Completion check for {DownloadId}: IsComplete={IsComplete}, Progress={Progress:P2}, AmountLeft={AmountLeft}, State={State}",
                                 dl.Id, isComplete, matched.Progress, matched.AmountLeft, matched.State);
 
                             if (isComplete)
@@ -682,15 +683,15 @@ namespace Listenarr.Api.Services
                                 // Determine the best path to use for file discovery
                                 // Priority: content_path (actual file/folder) > save_path (download directory)
                                 var completionPath = !string.IsNullOrEmpty(matched.ContentPath) ? matched.ContentPath : matched.SavePath;
-                                
-                                _logger.LogInformation("qBittorrent torrent {TorrentName} detected as complete. Using path: {CompletionPath}", 
+
+                                _logger.LogInformation("qBittorrent torrent {TorrentName} detected as complete. Using path: {CompletionPath}",
                                     matched.Name, completionPath);
-                                
+
                                 // Candidate for completion
                                 if (!_completionCandidates.ContainsKey(dl.Id))
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
-                                    _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.", 
+                                    _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.",
                                         dl.Id, matched.Name, completionPath);
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
@@ -721,7 +722,7 @@ namespace Listenarr.Api.Services
                                 if (DateTime.UtcNow - firstSeen >= stableWindow)
                                 {
                                     // Finalize: attempt to move/copy files and mark complete
-                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (qBittorrent). Torrent: {TorrentName}, Size: {Size:N0} bytes. Finalizing from path: {Path}", 
+                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (qBittorrent). Torrent: {TorrentName}, Size: {Size:N0} bytes. Finalizing from path: {Path}",
                                         dl.Id, matched.Name, matched.Size, completionPath);
                                     await FinalizeDownloadAsync(dl, completionPath, client, cancellationToken);
                                     _completionCandidates.Remove(dl.Id);
@@ -729,20 +730,20 @@ namespace Listenarr.Api.Services
                                 else
                                 {
                                     var remainingTime = _completionStableWindow - (DateTime.UtcNow - firstSeen);
-                                    _logger.LogDebug("Download {DownloadId} still in stability window, {RemainingSeconds:F1} seconds remaining", 
+                                    _logger.LogDebug("Download {DownloadId} still in stability window, {RemainingSeconds:F1} seconds remaining",
                                         dl.Id, remainingTime.TotalSeconds);
                                 }
                             }
-                                else
+                            else
+                            {
+                                // Not complete anymore - remove candidate if present
+                                if (_completionCandidates.ContainsKey(dl.Id))
                                 {
-                                    // Not complete anymore - remove candidate if present
-                                    if (_completionCandidates.ContainsKey(dl.Id))
-                                    {
-                                        _completionCandidates.Remove(dl.Id);
-                                        _logger.LogDebug("Download {DownloadId} no longer appears complete in qBittorrent, removed from candidates", dl.Id);
-                                        _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
-                                    }
+                                    _completionCandidates.Remove(dl.Id);
+                                    _logger.LogDebug("Download {DownloadId} no longer appears complete in qBittorrent, removed from candidates", dl.Id);
+                                    _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -849,14 +850,14 @@ namespace Listenarr.Api.Services
                                     _completionCandidates.Remove(dl.Id);
                                 }
                             }
-                                else
-                                {
+                            else
+                            {
                                 if (_completionCandidates.ContainsKey(dl.Id))
                                 {
                                     _completionCandidates.Remove(dl.Id);
                                     _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
                                 }
-                                }
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -881,7 +882,7 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                _logger.LogInformation("Starting download finalization for {DownloadId}: {Title} from client {ClientName}", 
+                _logger.LogInformation("Starting download finalization for {DownloadId}: {Title} from client {ClientName}",
                     download.Id, download.Title, client.Name);
                 _logger.LogDebug("Initial client path: {ClientPath}", clientPath);
 
@@ -896,17 +897,17 @@ namespace Listenarr.Api.Services
                 if (queueService != null)
                 {
                     var existingJobs = await queueService.GetJobsForDownloadAsync(download.Id);
-                    var activeJobs = existingJobs?.Where(j => j.Status == ProcessingJobStatus.Pending || 
-                                                             j.Status == ProcessingJobStatus.Processing || 
+                    var activeJobs = existingJobs?.Where(j => j.Status == ProcessingJobStatus.Pending ||
+                                                             j.Status == ProcessingJobStatus.Processing ||
                                                              j.Status == ProcessingJobStatus.Retry).ToList();
-                    
+
                     if (activeJobs != null && activeJobs.Any())
                     {
-                        _logger.LogInformation("Download {DownloadId} is already being processed by background service (job {JobId}), skipping duplicate finalization", 
+                        _logger.LogInformation("Download {DownloadId} is already being processed by background service (job {JobId}), skipping duplicate finalization",
                             download.Id, activeJobs.First().Id);
                         return;
                     }
-                    
+
                     // Also check if download has already been moved/processed
                     if (download.Status == DownloadStatus.Moved)
                     {
@@ -916,13 +917,13 @@ namespace Listenarr.Api.Services
                 }
 
                 var settings = await configService.GetApplicationSettingsAsync();
-                _logger.LogDebug("Application settings: OutputPath='{OutputPath}', EnableMetadataProcessing={EnableMetadata}, CompletedFileAction={Action}", 
+                _logger.LogDebug("Application settings: OutputPath='{OutputPath}', EnableMetadataProcessing={EnableMetadata}, CompletedFileAction={Action}",
                     settings.OutputPath, settings.EnableMetadataProcessing, settings.CompletedFileAction);
 
                 // Determine localPath (apply remote path mapping if needed)
                 string localPath = clientPath;
                 _logger.LogDebug("Original client path: {ClientPath}", clientPath);
-                
+
                 if (!string.IsNullOrEmpty(clientPath))
                 {
                     try
@@ -934,7 +935,7 @@ namespace Listenarr.Api.Services
                             if (!string.Equals(mappedPath, clientPath, StringComparison.OrdinalIgnoreCase))
                             {
                                 localPath = mappedPath;
-                                _logger.LogInformation("Applied path mapping for client {ClientId}: {RemotePath} -> {LocalPath}", 
+                                _logger.LogInformation("Applied path mapping for client {ClientId}: {RemotePath} -> {LocalPath}",
                                     client.Id, clientPath, localPath);
                             }
                             else
@@ -972,7 +973,7 @@ namespace Listenarr.Api.Services
                     else if (Directory.Exists(localPath))
                     {
                         _logger.LogDebug("Scanning directory for audio files: {Directory}", localPath);
-                        
+
                         try
                         {
                             // Find all audio files in the directory and subdirectories
@@ -992,14 +993,15 @@ namespace Listenarr.Api.Services
                             {
                                 // Smart file selection logic
                                 var titleWords = download.Title?.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries) ?? new string[0];
-                                
+
                                 // Try to find file with most title words in the filename
                                 var bestMatch = foundFiles
-                                    .Select(f => new { 
-                                        Path = f, 
+                                    .Select(f => new
+                                    {
+                                        Path = f,
                                         FileName = Path.GetFileNameWithoutExtension(f),
                                         Size = new FileInfo(f).Length,
-                                        MatchScore = titleWords.Count(word => 
+                                        MatchScore = titleWords.Count(word =>
                                             Path.GetFileNameWithoutExtension(f).Contains(word, StringComparison.OrdinalIgnoreCase))
                                     })
                                     .OrderByDescending(x => x.MatchScore)
@@ -1022,7 +1024,7 @@ namespace Listenarr.Api.Services
                                     else
                                     {
                                         sourceFile = bestMatch.Path;
-                                        _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)", 
+                                        _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)",
                                             Path.GetFileName(sourceFile), bestMatch.MatchScore, bestMatch.Size);
                                         try { _metrics.Increment("finalize.file.selected_from_dir"); } catch { }
                                     }
@@ -1126,13 +1128,13 @@ namespace Listenarr.Api.Services
                 if (string.IsNullOrEmpty(sourceFile))
                 {
                     _logger.LogDebug("No file found in client path, trying fallback paths from download record");
-                    
+
                     var fallbackPaths = new[] { download.FinalPath, download.DownloadPath }.Where(p => !string.IsNullOrEmpty(p));
-                    
+
                     foreach (var fallbackPath in fallbackPaths)
                     {
                         _logger.LogDebug("Checking fallback path: {Path}", fallbackPath);
-                        
+
                         if (File.Exists(fallbackPath!))
                         {
                             sourceFile = fallbackPath!;
@@ -1142,7 +1144,7 @@ namespace Listenarr.Api.Services
                         else if (Directory.Exists(fallbackPath!))
                         {
                             _logger.LogDebug("Fallback path is a directory, scanning: {Directory}", fallbackPath);
-                            
+
                             try
                             {
                                 var dirFiles = Directory.GetFiles(fallbackPath!, "*.*", SearchOption.AllDirectories)
@@ -1167,14 +1169,14 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
-                
+
                 // Fallback 2: Try common Docker volume paths if still not found
                 if (string.IsNullOrEmpty(sourceFile) && !string.IsNullOrEmpty(clientPath))
                 {
                     _logger.LogDebug("Trying Docker volume path variations for: {ClientPath}", clientPath);
-                    
+
                     var dockerPaths = new List<string>();
-                    
+
                     // Common Docker path variations
                     var variations = new List<string> { clientPath };
 
@@ -1201,11 +1203,11 @@ namespace Listenarr.Api.Services
                     }
 
                     var pathVariations = variations.Distinct().ToArray();
-                    
+
                     foreach (var variation in pathVariations.Distinct())
                     {
                         _logger.LogDebug("Trying Docker path variation: {Path}", variation);
-                        
+
                         if (Directory.Exists(variation))
                         {
                             try
@@ -1217,12 +1219,13 @@ namespace Listenarr.Api.Services
                                 if (dockerFiles.Any())
                                 {
                                     var titleWords = download.Title?.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries) ?? new string[0];
-                                    
+
                                     var bestDockerMatch = dockerFiles
-                                        .Select(f => new {
+                                        .Select(f => new
+                                        {
                                             Path = f,
                                             Size = new FileInfo(f).Length,
-                                            MatchScore = titleWords.Count(word => 
+                                            MatchScore = titleWords.Count(word =>
                                                 Path.GetFileNameWithoutExtension(f).Contains(word, StringComparison.OrdinalIgnoreCase))
                                         })
                                         .OrderByDescending(x => x.MatchScore)
@@ -1230,7 +1233,7 @@ namespace Listenarr.Api.Services
                                         .First();
 
                                     sourceFile = bestDockerMatch.Path;
-                                    _logger.LogInformation("Found file using Docker path variation: {FilePath} (match score: {Score})", 
+                                    _logger.LogInformation("Found file using Docker path variation: {FilePath} (match score: {Score})",
                                         sourceFile, bestDockerMatch.MatchScore);
                                     break;
                                 }
@@ -1242,14 +1245,14 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
-                
+
                 // Fallback 3: Try to find files in client's base download directory
                 if (string.IsNullOrEmpty(sourceFile) && !string.IsNullOrEmpty(client.DownloadPath))
                 {
                     _logger.LogDebug("Trying client base download directory: {DownloadPath}", client.DownloadPath);
-                    
+
                     var searchPaths = new[] { client.DownloadPath };
-                    
+
                     // Apply path mapping to client download path
                     try
                     {
@@ -1268,18 +1271,18 @@ namespace Listenarr.Api.Services
                     {
                         _logger.LogWarning(ex, "Error applying path mapping to client download path");
                     }
-                    
+
                     foreach (var searchPath in searchPaths)
                     {
                         if (Directory.Exists(searchPath))
                         {
                             _logger.LogDebug("Searching in client directory: {SearchPath}", searchPath);
-                            
+
                             try
                             {
                                 var clientFiles = Directory.GetFiles(searchPath, "*.*", SearchOption.AllDirectories)
                                     .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .Where(f => !string.IsNullOrEmpty(download.Title) && 
+                                    .Where(f => !string.IsNullOrEmpty(download.Title) &&
                                                Path.GetFileName(f).Contains(download.Title.Split(' ')[0], StringComparison.OrdinalIgnoreCase))
                                     .ToList();
 
@@ -1470,10 +1473,10 @@ namespace Listenarr.Api.Services
                     else if (fileNaming != null)
                     {
                         _logger.LogDebug("Using file naming service to generate destination path");
-                        
+
                         // Always use file naming service for consistent naming
                         AudioMetadata metadata = new AudioMetadata { Title = download.Title ?? "Unknown Title" };
-                        
+
                         if (settings.EnableMetadataProcessing)
                         {
                             // TEMPORARY: Skip ffprobe/ffmpeg metadata extraction during finalization/import.
@@ -1486,10 +1489,10 @@ namespace Listenarr.Api.Services
                         {
                             _logger.LogDebug("Metadata processing disabled, using download info for naming");
                         }
-                        
+
                         var ext = Path.GetExtension(sourceFile);
                         var generatedPath = await fileNaming.GenerateFilePathAsync(metadata, null, null, ext);
-                        
+
                         // Ensure the file goes directly to OutputPath (root folder) without subdirectories
                         var outRoot = settings.OutputPath;
                         if (string.IsNullOrWhiteSpace(outRoot))
@@ -1497,24 +1500,24 @@ namespace Listenarr.Api.Services
                             outRoot = "./completed";
                             _logger.LogDebug("No output path configured, using default: {OutputRoot}", outRoot);
                         }
-                        
+
                         // Extract just the filename from the generated path (ignore any directories)
                         var generatedFileName = Path.GetFileName(generatedPath);
                         destinationPath = Path.Combine(outRoot, generatedFileName);
-                        
+
                         _logger.LogInformation("Generated destination path: {DestinationPath}", destinationPath);
                     }
                     else
                     {
                         _logger.LogWarning("File naming service not available, using simple naming");
-                        
+
                         var outRoot = settings.OutputPath;
                         if (string.IsNullOrWhiteSpace(outRoot))
                         {
                             outRoot = "./completed";
                             _logger.LogDebug("No output path configured, using default: {OutputRoot}", outRoot);
                         }
-                        
+
                         var fileName = Path.GetFileName(sourceFile);
                         destinationPath = Path.Combine(outRoot, fileName);
                         _logger.LogInformation("Generated simple destination path: {DestinationPath}", destinationPath);
@@ -1523,14 +1526,14 @@ namespace Listenarr.Api.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to generate destination path for download {DownloadId}", download.Id);
-                    
+
                     // Fallback to simple path in output directory
                     var outRoot = settings.OutputPath;
                     if (string.IsNullOrWhiteSpace(outRoot))
                     {
                         outRoot = "./completed";
                     }
-                    
+
                     var fallbackFileName = Path.GetFileName(sourceFile);
                     destinationPath = Path.Combine(outRoot, fallbackFileName);
                     _logger.LogWarning("Using fallback destination path: {DestinationPath}", destinationPath);
@@ -1742,14 +1745,14 @@ namespace Listenarr.Api.Services
                     // Build a lookup of completed items for faster matching
                     // Include nzo_id when available so we can match downloads by ID as well
                     var completedItems = new List<(string Name, string Status, string Path, DateTime CompletedTime, string NzoId)>();
-                    
+
                     foreach (var slot in slots.EnumerateArray())
                     {
                         var name = slot.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
                         var status = slot.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
                         var path = slot.TryGetProperty("storage", out var pathProp) ? pathProp.GetString() ?? "" : "";
                         var nzoId = slot.TryGetProperty("nzo_id", out var nzoIdProp) ? nzoIdProp.GetString() ?? "" : "";
-                        
+
                         // Parse completion time
                         var completedTime = DateTime.MinValue;
                         if (slot.TryGetProperty("completed", out var completedProp))
@@ -1757,18 +1760,18 @@ namespace Listenarr.Api.Services
                             var completedTimestamp = completedProp.GetInt64();
                             completedTime = DateTimeOffset.FromUnixTimeSeconds(completedTimestamp).DateTime;
                         }
-                        
-                        if (!string.IsNullOrEmpty(name) && 
+
+                        if (!string.IsNullOrEmpty(name) &&
                             (status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
                              status.Equals("Complete", StringComparison.OrdinalIgnoreCase)))
                         {
                             _logger.LogInformation("SABnzbd history slot parsed: nzo_id={NzoId}, name={Name}, status={Status}, path={Path}, completed={Completed}", nzoId, name, status, path, completedTime);
-                            
+
                             completedItems.Add((name, status, path, completedTime, nzoId));
                         }
                     }
 
-                    _logger.LogDebug("Found {CompletedCount} completed items in SABnzbd history for client {ClientName}", 
+                    _logger.LogDebug("Found {CompletedCount} completed items in SABnzbd history for client {ClientName}",
                         completedItems.Count, client.Name);
 
                     // Check each download against completed items
@@ -1804,7 +1807,7 @@ namespace Listenarr.Api.Services
                                     }
                                 }
                                 catch { }
-                                _logger.LogInformation("Found completed SABnzbd download: {DownloadTitle} -> {CompletedName} at {Path}", 
+                                _logger.LogInformation("Found completed SABnzbd download: {DownloadTitle} -> {CompletedName} at {Path}",
                                     dl.Title, matchingItem.Name, matchingItem.Path);
 
                                 // Check stability window
@@ -1839,7 +1842,7 @@ namespace Listenarr.Api.Services
                                 var firstSeen = _completionCandidates[dl.Id];
                                 if (DateTime.UtcNow - firstSeen >= stableWindow)
                                 {
-                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (SABnzbd). Finalizing from path: {Path}", 
+                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (SABnzbd). Finalizing from path: {Path}",
                                         dl.Id, matchingItem.Path);
                                     await FinalizeDownloadAsync(dl, matchingItem.Path, client, cancellationToken);
                                     _completionCandidates.Remove(dl.Id);
@@ -2024,7 +2027,7 @@ namespace Listenarr.Api.Services
                         var name = item.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? "" : "";
                         var status = item.TryGetProperty("Status", out var statusProp) ? statusProp.GetString() ?? "" : "";
                         var destDir = item.TryGetProperty("DestDir", out var destProp) ? destProp.GetString() ?? "" : "";
-                        
+
                         // Parse completion time
                         var completedTime = DateTime.MinValue;
                         if (item.TryGetProperty("HistoryTime", out var timeProp))
@@ -2034,7 +2037,7 @@ namespace Listenarr.Api.Services
                         }
 
                         // NZBGet status values for successful completion
-                        if (!string.IsNullOrEmpty(name) && 
+                        if (!string.IsNullOrEmpty(name) &&
                             (status.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase) ||
                              status.Equals("SUCCESS/UNPACK", StringComparison.OrdinalIgnoreCase) ||
                              status.Equals("SUCCESS/SCRIPT", StringComparison.OrdinalIgnoreCase)))
@@ -2043,7 +2046,7 @@ namespace Listenarr.Api.Services
                         }
                     }
 
-                    _logger.LogDebug("Found {CompletedCount} completed items in NZBGet history for client {ClientName}", 
+                    _logger.LogDebug("Found {CompletedCount} completed items in NZBGet history for client {ClientName}",
                         completedItems.Count, client.Name);
 
                     // Check each download against completed items
@@ -2059,7 +2062,7 @@ namespace Listenarr.Api.Services
 
                             if (!string.IsNullOrEmpty(matchingItem.Name))
                             {
-                                _logger.LogInformation("Found completed NZBGet download: {DownloadTitle} -> {CompletedName} at {Path}", 
+                                _logger.LogInformation("Found completed NZBGet download: {DownloadTitle} -> {CompletedName} at {Path}",
                                     dl.Title, matchingItem.Name, matchingItem.DestDir);
 
                                 // Check stability window
@@ -2075,7 +2078,7 @@ namespace Listenarr.Api.Services
                                 var firstSeen = _completionCandidates[dl.Id];
                                 if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
                                 {
-                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (NZBGet). Finalizing from path: {Path}", 
+                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (NZBGet). Finalizing from path: {Path}",
                                         dl.Id, matchingItem.DestDir);
                                     await FinalizeDownloadAsync(dl, matchingItem.DestDir, client, cancellationToken);
                                     _completionCandidates.Remove(dl.Id);
@@ -2191,7 +2194,7 @@ namespace Listenarr.Api.Services
                 dbContext.Downloads.Update(download);
                 await dbContext.SaveChangesAsync(cancellationToken);
 
-                _logger.LogDebug("Updated download {DownloadId} progress: {Progress:F1}%, Status: {Status}, Downloaded: {Downloaded:N0} bytes", 
+                _logger.LogDebug("Updated download {DownloadId} progress: {Progress:F1}%, Status: {Status}, Downloaded: {Downloaded:N0} bytes",
                     downloadId, progress, mappedStatus, downloadedSize);
             }
             catch (Exception ex)
@@ -2201,7 +2204,7 @@ namespace Listenarr.Api.Services
         }
 
         private async Task BroadcastDownloadUpdatesAsync(
-            List<Download> currentDownloads, 
+            List<Download> currentDownloads,
             CancellationToken cancellationToken)
         {
             var changedDownloads = new List<Download>();
@@ -2261,7 +2264,8 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Broadcasting {Count} download updates", changedDownloads.Count);
 
                 // Sanitize each Download before broadcasting to clients (remove DownloadPath and client-local metadata)
-                var sanitized = changedDownloads.Select(d => new {
+                var sanitized = changedDownloads.Select(d => new
+                {
                     id = d.Id,
                     audiobookId = d.AudiobookId,
                     title = d.Title,
@@ -2290,7 +2294,8 @@ namespace Listenarr.Api.Services
             if (DateTime.UtcNow.Second % 30 == 0)
             {
                 // Broadcast a sanitized full list (remove DownloadPath and client-local metadata)
-                var sanitizedList = currentDownloads.Select(d => new {
+                var sanitizedList = currentDownloads.Select(d => new
+                {
                     id = d.Id,
                     audiobookId = d.AudiobookId,
                     title = d.Title,

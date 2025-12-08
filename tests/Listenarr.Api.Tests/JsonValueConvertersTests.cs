@@ -27,11 +27,11 @@ namespace Listenarr.Api.Tests
         [Fact]
         public void JsonValueConverter_RoundTripsDictionary()
         {
-            var conv = new JsonValueConverter<Dictionary<string,int>>();
+            var conv = new JsonValueConverter<Dictionary<string, int>>();
             var toProvider = conv.ConvertToProviderExpression.Compile();
             var fromProvider = conv.ConvertFromProviderExpression.Compile();
 
-            var original = new Dictionary<string,int>
+            var original = new Dictionary<string, int>
             {
                 ["one"] = 1,
                 ["two"] = 2
