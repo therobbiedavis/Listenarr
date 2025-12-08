@@ -43,6 +43,183 @@ namespace Listenarr.Api.Controllers
             _httpClient = httpClient;
         }
 
+        private async Task SaveTestResultAsync(Indexer indexer, bool persist, bool success, string? error)
+        {
+            // Update the passed indexer instance
+            indexer.LastTestedAt = DateTime.UtcNow;
+            indexer.LastTestSuccessful = success;
+            indexer.LastTestError = error;
+
+            if (persist && indexer.Id != 0)
+            {
+                // Persist test result back to the database for the stored indexer
+                var existing = await _dbContext.Indexers.FindAsync(indexer.Id);
+                if (existing != null)
+                {
+                    existing.LastTestedAt = indexer.LastTestedAt;
+                    existing.LastTestSuccessful = success;
+                    existing.LastTestError = error;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                    await _dbContext.SaveChangesAsync();
+                }
+            }
+        }
+
+        private async Task<IActionResult> ExecuteIndexerTestAsync(Indexer indexer, bool persist)
+        {
+            // Normalize URL first
+            indexer.Url = NormalizeIndexerUrl(indexer.Url);
+
+            var impl = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
+
+            try
+            {
+                return impl switch
+                {
+                    var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
+                    var s when s == "myanonamouse" => await TestMyAnonamouse(indexer, persist),
+                    // For Newznab/Torznab/Custom fall back to a generic connectivity check
+                    _ => await TestGenericIndexer(indexer, persist)
+                };
+            }
+            catch (Exception ex)
+            {
+                await SaveTestResultAsync(indexer, persist, false, ex.Message);
+                _logger.LogWarning(ex, "Indexer '{Name}' test failed", indexer.Name);
+                return BadRequest(new { success = false, message = "Indexer test failed", error = ex.Message, indexer });
+            }
+        }
+
+        private async Task<IActionResult> TestGenericIndexer(Indexer indexer, bool persist)
+        {
+            // Minimal connectivity check: attempt to hit base URL or indexer 'api' endpoint
+            try
+            {
+                var target = indexer.Url?.TrimEnd('/') ?? string.Empty;
+                // Prefer /api endpoint if present, otherwise base URL
+                var testUrl = target.EndsWith("/api", StringComparison.OrdinalIgnoreCase) ? target : target + "/api";
+
+                // If this is a Newznab/Torznab style indexer, append the apikey query parameter and add capabilities query to test auth
+                var implName = (indexer.Implementation ?? string.Empty).Trim().ToLowerInvariant();
+                var isNewznabStyle = implName == "newznab" || implName == "torznab";
+                
+                if (isNewznabStyle)
+                {
+                    // Newznab/Torznab indexers REQUIRE an API key for authentication
+                    if (string.IsNullOrWhiteSpace(indexer.ApiKey))
+                    {
+                        await SaveTestResultAsync(indexer, persist, false, "API key is required for Newznab/Torznab indexers");
+                        return BadRequest(new { success = false, message = "API key is required for Newznab/Torznab indexers", indexer });
+                    }
+                    
+                    // Use search endpoint (t=search) instead of capabilities (t=caps) because
+                    // many indexers expose t=caps publicly without authentication.
+                    // t=search reliably enforces authentication.
+                    var separator = testUrl.Contains('?') ? '&' : '?';
+                    testUrl = testUrl + separator + "t=search&limit=1&offset=0";
+                    testUrl = testUrl + "&apikey=" + System.Net.WebUtility.UrlEncode(indexer.ApiKey);
+                }
+
+                var request = new HttpRequestMessage(HttpMethod.Get, testUrl);
+                // For Newznab/Torznab, also add API key as header (some servers support both)
+                // For other indexers, add header if API key is provided
+                if (!string.IsNullOrEmpty(indexer.ApiKey))
+                {
+                    request.Headers.Add("X-Api-Key", indexer.ApiKey);
+                }
+
+                var response = await _httpClient.SendAsync(request);
+                
+                // Check for HTTP-level authentication failures
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
+                    response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    await SaveTestResultAsync(indexer, persist, false, $"Authentication failed: HTTP {(int)response.StatusCode}");
+                    return BadRequest(new { success = false, message = "Authentication failed", status = (int)response.StatusCode, indexer });
+                }
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    await SaveTestResultAsync(indexer, persist, false, $"HTTP {(int)response.StatusCode}");
+                    return BadRequest(new { success = false, message = "Generic indexer test failed", status = (int)response.StatusCode, indexer });
+                }
+
+                // For Newznab/Torznab, parse XML response to check for error elements
+                if (isNewznabStyle)
+                {
+                    var xmlContent = await response.Content.ReadAsStringAsync();
+                    var errorMessage = ParseNewznabError(xmlContent);
+                    
+                    if (errorMessage != null)
+                    {
+                        var isAuthError = errorMessage.Contains("api", StringComparison.OrdinalIgnoreCase) ||
+                                         errorMessage.Contains("key", StringComparison.OrdinalIgnoreCase) ||
+                                         errorMessage.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                                         errorMessage.Contains("invalid", StringComparison.OrdinalIgnoreCase) ||
+                                         errorMessage.Contains("authentication", StringComparison.OrdinalIgnoreCase);
+                        
+                        var failureMessage = isAuthError ? $"Authentication failed: {errorMessage}" : errorMessage;
+                        await SaveTestResultAsync(indexer, persist, false, failureMessage);
+                        return BadRequest(new { success = false, message = failureMessage, indexer });
+                    }
+                }
+
+                await SaveTestResultAsync(indexer, persist, true, null);
+                return Ok(new { success = true, message = "Indexer authentication successful", indexer });
+            }
+            catch (Exception ex)
+            {
+                await SaveTestResultAsync(indexer, persist, false, ex.Message);
+                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", indexer.Name);
+                return BadRequest(new { success = false, message = "Indexer test failed", error = ex.Message, indexer });
+            }
+        }
+
+        private string? ParseNewznabError(string xmlContent)
+        {
+            try
+            {
+                // Parse XML response to check for error element
+                // Newznab spec: <error code="XXX" description="..." />
+                var settings = new System.Xml.XmlReaderSettings
+                {
+                    DtdProcessing = System.Xml.DtdProcessing.Ignore,
+                    XmlResolver = null
+                };
+
+                using var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlContent), settings);
+                var doc = System.Xml.Linq.XDocument.Load(reader);
+                
+                // Check for error element (can be at root, under rss, or as a descendant)
+                System.Xml.Linq.XElement? errorElement = null;
+                
+                // Case 1: Root element is <error>
+                if (doc.Root?.Name.LocalName.Equals("error", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    errorElement = doc.Root;
+                }
+                // Case 2: Error is a child or descendant
+                else
+                {
+                    errorElement = doc.Root?.Descendants().FirstOrDefault(e => e.Name.LocalName.Equals("error", StringComparison.OrdinalIgnoreCase));
+                }
+                
+                if (errorElement != null)
+                {
+                    var code = errorElement.Attribute("code")?.Value;
+                    var description = errorElement.Attribute("description")?.Value ?? errorElement.Value;
+                    return string.IsNullOrEmpty(description) ? $"Error code: {code}" : description;
+                }
+                
+                return null;
+            }
+            catch
+            {
+                // If we can't parse the XML, assume no error element
+                return null;
+            }
+        }
+
         /// <summary>
         /// Get all indexers
         /// </summary>
@@ -162,174 +339,24 @@ namespace Listenarr.Api.Controllers
                 return NotFound(new { message = "Indexer not found" });
             }
 
-            try
+            return await ExecuteIndexerTestAsync(indexer, persist: true);
+        }
+
+        [HttpPost("test")]
+        public async Task<IActionResult> TestDraft([FromBody] Indexer indexer)
+        {
+            if (indexer == null)
             {
-                _logger.LogInformation("Testing indexer '{Name}' (Type: {Type}, Implementation: {Implementation})",
-                    indexer.Name, indexer.Type, indexer.Implementation);
-
-                // Validate basic fields
-                if (string.IsNullOrEmpty(indexer.Url))
-                {
-                    throw new Exception("URL is required");
-                }
-
-                // Handle different implementations
-                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
-                {
-                    return await TestInternetArchive(indexer);
-                }
-                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
-                {
-                    return await TestMyAnonamouse(indexer);
-                }
-
-                // Normalize and persist the indexer URL to avoid common misconfigurations
-                var normalized = NormalizeIndexerUrl(indexer.Url);
-                if (!string.Equals(normalized, indexer.Url, StringComparison.Ordinal))
-                {
-                    _logger.LogInformation("Normalizing indexer URL from '{Old}' to '{New}'", indexer.Url, normalized);
-                    indexer.Url = normalized;
-                    indexer.UpdatedAt = DateTime.UtcNow;
-                    await _dbContext.SaveChangesAsync();
-                }
-
-                // Build test URL (caps endpoint for capabilities) - for Torznab/Newznab
-                var url = indexer.Url.TrimEnd('/');
-                var apiPath = indexer.Implementation.ToLower() switch
-                {
-                    "torznab" => "/api",
-                    "newznab" => "/api",
-                    _ => "/api"
-                };
-
-                var queryParams = new List<string> { "t=caps" };
-
-                if (!string.IsNullOrEmpty(indexer.ApiKey))
-                {
-                    queryParams.Add($"apikey={Uri.EscapeDataString(indexer.ApiKey)}");
-                }
-
-                var testUrl = $"{url}{apiPath}?{string.Join("&", queryParams)}";
-                _logger.LogDebug("Testing indexer URL: {Url}", LogRedaction.RedactText(testUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-
-                // Make test request
-                var response = await _httpClient.GetAsync(testUrl);
-                var content = await response.Content.ReadAsStringAsync();
-
-                // Defensive checks: redirects or HTML login pages are common misconfigurations
-                if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
-                {
-                    var location = response.Headers.Location?.ToString() ?? "(none)";
-                    throw new Exception($"Unexpected redirect (HTTP {(int)response.StatusCode}) to '{location}'. The indexer URL may point to a UI/login page instead of the API endpoint.");
-                }
-
-                // If the server returned text/html, it's likely an HTML login or error page rather than Torznab XML
-                if (response.Content.Headers.ContentType != null && response.Content.Headers.ContentType.MediaType != null
-                    && response.Content.Headers.ContentType.MediaType.Contains("html", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Truncate content for the error message
-                    var snippet = content?.Length > 512 ? content.Substring(0, 512) + "..." : content;
-                    throw new Exception($"Indexer returned HTML (Content-Type: {response.Content.Headers.ContentType}). Likely a login page or UI. Sample: {snippet}");
-                }
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw new Exception($"HTTP {response.StatusCode}: {content}");
-                }
-
-                // Try to parse as XML to verify it's a valid Torznab/Newznab response
-                System.Xml.Linq.XDocument doc;
-                try
-                {
-                    // Parse XML with more lenient settings
-                    var settings = new System.Xml.XmlReaderSettings
-                    {
-                        DtdProcessing = System.Xml.DtdProcessing.Ignore,
-                        XmlResolver = null,
-                        IgnoreWhitespace = true,
-                        IgnoreComments = true
-                    };
-
-                    using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(content), settings))
-                    {
-                        doc = System.Xml.Linq.XDocument.Load(reader);
-                    }
-                }
-                catch (System.Xml.XmlException xmlEx)
-                {
-                    _logger.LogError(xmlEx, "XML parsing error at Line {Line}, Position {Position}",
-                        xmlEx.LineNumber, xmlEx.LinePosition);
-
-                    // Log context around the error
-                    var lines = content.Split('\n');
-                    if (xmlEx.LineNumber > 0 && xmlEx.LineNumber <= lines.Length)
-                    {
-                        var startLine = Math.Max(0, xmlEx.LineNumber - 3);
-                        var endLine = Math.Min(lines.Length - 1, xmlEx.LineNumber + 2);
-                        var context = string.Join("\n", lines[startLine..(endLine + 1)]);
-                        _logger.LogError("XML context:\n{Context}", context);
-                    }
-
-                    throw new Exception($"Invalid XML response: {xmlEx.Message}");
-                }
-
-                // The root element should be 'caps' for Torznab/Newznab
-                var capsElement = doc.Root;
-
-                if (capsElement == null || capsElement.Name.LocalName != "caps")
-                {
-                    _logger.LogWarning("Unexpected root element: {RootElement}", capsElement?.Name.LocalName ?? "null");
-                    throw new Exception($"Invalid response: expected 'caps' root element, got '{capsElement?.Name.LocalName ?? "null"}'");
-                }
-
-                // Extract capabilities info
-                var categories = capsElement.Element("categories")?.Elements("category").Count() ?? 0;
-                var searchModes = capsElement.Element("searching")?.Elements().Count() ?? 0;
-
-                // Update test result
-                indexer.LastTestedAt = DateTime.UtcNow;
-                indexer.LastTestSuccessful = true;
-                indexer.LastTestError = null;
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogInformation("Indexer '{Name}' test succeeded - {Categories} categories, {SearchModes} search modes",
-                    indexer.Name, categories, searchModes);
-
-                return Ok(new
-                {
-                    success = true,
-                    message = $"Indexer test successful - {categories} categories available",
-                    indexer,
-                    capabilities = new
-                    {
-                        categories,
-                        searchModes
-                    }
-                });
+                return BadRequest(new { message = "Index data is required" });
             }
-            catch (Exception ex)
-            {
-                indexer.LastTestedAt = DateTime.UtcNow;
-                indexer.LastTestSuccessful = false;
-                indexer.LastTestError = ex.Message;
-                await _dbContext.SaveChangesAsync();
 
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", indexer.Name);
-
-                return BadRequest(new
-                {
-                    success = false,
-                    message = "Indexer test failed",
-                    error = ex.Message,
-                    indexer
-                });
-            }
+            return await ExecuteIndexerTestAsync(indexer, persist: false);
         }
 
         /// <summary>
         /// Test Internet Archive indexer connection
         /// </summary>
-        private async Task<IActionResult> TestInternetArchive(Indexer indexer)
+        private async Task<IActionResult> TestInternetArchive(Indexer indexer, bool persist)
         {
             try
             {
@@ -377,10 +404,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // Update indexer with success
-                indexer.LastTestedAt = DateTime.UtcNow;
-                indexer.LastTestSuccessful = true;
-                indexer.LastTestError = null;
-                await _dbContext.SaveChangesAsync();
+                await SaveTestResultAsync(indexer, persist, true, null);
 
                 _logger.LogInformation("Internet Archive indexer '{Name}' test succeeded for collection '{Collection}'",
                     indexer.Name, collection);
@@ -395,10 +419,7 @@ namespace Listenarr.Api.Controllers
             }
             catch (Exception ex)
             {
-                indexer.LastTestedAt = DateTime.UtcNow;
-                indexer.LastTestSuccessful = false;
-                indexer.LastTestError = ex.Message;
-                await _dbContext.SaveChangesAsync();
+                await SaveTestResultAsync(indexer, persist, false, ex.Message);
 
                 _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", indexer.Name);
 
@@ -415,7 +436,7 @@ namespace Listenarr.Api.Controllers
         /// <summary>
         /// Test MyAnonamouse indexer connection
         /// </summary>
-        private async Task<IActionResult> TestMyAnonamouse(Indexer indexer)
+        private async Task<IActionResult> TestMyAnonamouse(Indexer indexer, bool persist)
         {
             try
             {
@@ -525,10 +546,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // Update indexer with success
-                indexer.LastTestedAt = DateTime.UtcNow;
-                indexer.LastTestSuccessful = true;
-                indexer.LastTestError = null;
-                await _dbContext.SaveChangesAsync();
+                await SaveTestResultAsync(indexer, persist, true, null);
 
                 _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'",
                     indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
@@ -543,10 +561,7 @@ namespace Listenarr.Api.Controllers
             }
             catch (Exception ex)
             {
-                indexer.LastTestedAt = DateTime.UtcNow;
-                indexer.LastTestSuccessful = false;
-                indexer.LastTestError = ex.Message;
-                await _dbContext.SaveChangesAsync();
+                await SaveTestResultAsync(indexer, persist, false, ex.Message);
 
                 _logger.LogWarning(ex, "MyAnonamouse indexer '{Name}' test failed", indexer.Name);
 

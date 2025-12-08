@@ -771,6 +771,13 @@ class ApiService {
     })
   }
 
+  async testIndexerDraft(indexer: Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>): Promise<{ success: boolean; message: string; error?: string; indexer: Indexer }> {
+    return this.request<{ success: boolean; message: string; error?: string; indexer: Indexer }>('/indexers/test', {
+      method: 'POST',
+      body: JSON.stringify(indexer)
+    })
+  }
+
   async toggleIndexer(id: number): Promise<Indexer> {
     return this.request<Indexer>(`/indexers/${id}/toggle`, {
       method: 'PUT'
@@ -1041,6 +1048,7 @@ export const createIndexer = (indexer: Omit<Indexer, 'id' | 'createdAt' | 'updat
 export const updateIndexer = (id: number, indexer: Partial<Indexer>) => apiService.updateIndexer(id, indexer)
 export const deleteIndexer = (id: number) => apiService.deleteIndexer(id)
 export const testIndexer = (id: number) => apiService.testIndexer(id)
+export const testIndexerDraft = (indexer: Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>) => apiService.testIndexerDraft(indexer)
 export const toggleIndexer = (id: number) => apiService.toggleIndexer(id)
 export const getEnabledIndexers = () => apiService.getEnabledIndexers()
 

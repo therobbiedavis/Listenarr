@@ -25,48 +25,26 @@
               />
             </div>
 
-            <div class="form-row">
-              <div class="form-group">
-                <label for="type">Type *</label>
-                <select 
-                  id="type" 
-                  v-model="formData.type" 
-                  required
-                  :disabled="formData.implementation === 'InternetArchive' || formData.implementation === 'MyAnonamouse'"
-                >
-                  <option value="Torrent">Torrent</option>
-                  <option value="Usenet">{{ formData.implementation === 'InternetArchive' ? 'DDL' : 'Usenet' }}</option>
-                </select>
-                <small v-if="formData.implementation === 'InternetArchive'" class="info-text">
-                  Internet Archive uses direct downloads (DDL)
-                </small>
-                <small v-else-if="formData.implementation === 'MyAnonamouse'" class="info-text">
-                  MyAnonamouse is a torrent tracker
-                </small>
-              </div>
-
-              <div class="form-group">
-                <label for="implementation">Implementation *</label>
-                <select id="implementation" v-model="formData.implementation" required>
-                  <option value="Newznab">Newznab</option>
-                  <option value="Torznab">Torznab</option>
-                  <option value="MyAnonamouse">MyAnonamouse</option>
-                  <option value="InternetArchive">Internet Archive</option>
-                  <option value="Custom">Custom</option>
-                </select>
-              </div>
+            <div class="form-group">
+              <label for="implementation">Implementation *</label>
+              <select id="implementation" v-model="formData.implementation" required>
+                <option value="Newznab">Newznab</option>
+                <option value="Torznab">Torznab</option>
+                <option value="MyAnonamouse">MyAnonamouse</option>
+                <option value="InternetArchive">Internet Archive</option>
+                <option value="Custom">Custom</option>
+              </select>
             </div>
 
-            <div class="form-group">
+            <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
               <label for="url">URL *</label>
               <input 
                 id="url" 
                 v-model="formData.url" 
                 type="url" 
-                required 
+                required
                 :placeholder="
                   formData.implementation === 'MyAnonamouse' ? 'https://www.myanonamouse.net' :
-                  formData.implementation === 'InternetArchive' ? 'https://archive.org' :
                   'https://indexer.example.com'
                 "
               />
@@ -122,7 +100,7 @@
               />
             </div>
 
-            <div class="form-group">
+            <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
               <label for="categories">Categories</label>
               <input 
                 id="categories" 
@@ -138,7 +116,7 @@
           <div class="form-section">
             <h3>Features</h3>
             
-            <div class="checkbox-group">
+            <div v-if="formData.implementation !== 'InternetArchive'" class="checkbox-group">
               <label>
                 <input type="checkbox" v-model="formData.enableRss" />
                 <span>
@@ -186,7 +164,7 @@
                 <small>Higher priority indexers are searched first (1-100)</small>
               </div>
 
-              <div class="form-group">
+              <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
                 <label for="minimumAge">Minimum Age (minutes)</label>
                 <input 
                   id="minimumAge" 
@@ -198,7 +176,7 @@
               </div>
             </div>
 
-            <div class="form-row" v-if="formData.type === 'Usenet'">
+            <div class="form-row" v-if="formData.implementation === 'Newznab'">
               <div class="form-group">
                 <label for="retention">Retention (days)</label>
                 <input 
@@ -246,7 +224,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { Indexer } from '@/types'
-import { createIndexer, updateIndexer, testIndexer as apiTestIndexer } from '@/services/api'
+import { createIndexer, updateIndexer, testIndexerDraft as apiTestIndexerDraft } from '@/services/api'
 import { useToast } from '@/services/toastService'
 
 interface Props {
@@ -292,6 +270,29 @@ const defaultFormData = {
 }
 
 const formData = ref({ ...defaultFormData })
+
+type IndexerPayload = Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>
+
+const buildIndexerPayload = (): IndexerPayload => {
+  const payload = { ...formData.value } as IndexerPayload
+  payload.additionalSettings = payload.additionalSettings || ''
+
+  if (payload.implementation === 'MyAnonamouse') {
+    payload.additionalSettings = JSON.stringify({ mam_id: mamId.value })
+    payload.apiKey = ''
+  } else if (payload.implementation === 'InternetArchive') {
+    payload.additionalSettings = JSON.stringify({ collection: iaCollection.value })
+    payload.apiKey = ''
+    // Always set to archive.org since backend hardcodes this URL
+    payload.url = 'https://archive.org'
+    // Set sensible defaults for hidden fields
+    payload.categories = ''
+    payload.enableRss = false
+    payload.minimumAge = 0
+  }
+
+  return payload
+}
 
 // Watch for editing indexer changes
 watch(() => props.editingIndexer, (newIndexer) => {
@@ -369,22 +370,34 @@ const closeModal = () => {
 }
 
 const testConnection = async () => {
-  if (!props.editingIndexer) {
-    toast.error('Save required', 'Please save the indexer first before testing')
-    return
-  }
-
   testing.value = true
   try {
-    const result = await apiTestIndexer(props.editingIndexer.id)
+    const result = await apiTestIndexerDraft(buildIndexerPayload())
     if (result.success) {
       toast.success('Test successful', result.message || '')
     } else {
       toast.error('Test failed', result.error || result.message || '')
     }
-    } catch (error) {
+  } catch (error: any) {
     console.error('Failed to test indexer:', error)
-    toast.error('Test failed', 'Failed to test indexer connection')
+    
+    // Try to parse error response body for detailed message
+    let errorMessage = 'Failed to test indexer connection'
+    if (error?.body) {
+      try {
+        const errorData = JSON.parse(error.body)
+        errorMessage = errorData.message || errorData.error || errorMessage
+      } catch {
+        // If body isn't JSON, use it as-is if it's a string
+        if (typeof error.body === 'string' && error.body.length > 0) {
+          errorMessage = error.body
+        }
+      }
+    } else if (error?.message) {
+      errorMessage = error.message
+    }
+    
+    toast.error('Test failed', errorMessage)
   } finally {
     testing.value = false
   }
@@ -393,25 +406,7 @@ const testConnection = async () => {
 const handleSubmit = async () => {
   saving.value = true
   try {
-    // Serialize MyAnonamouse credentials to additionalSettings
-    const submitData = { ...formData.value }
-    if (submitData.implementation === 'MyAnonamouse') {
-      submitData.additionalSettings = JSON.stringify({
-        mam_id: mamId.value
-      })
-      // Clear API key field for MyAnonamouse
-      submitData.apiKey = ''
-    } else if (submitData.implementation === 'InternetArchive') {
-      submitData.additionalSettings = JSON.stringify({
-        collection: iaCollection.value
-      })
-      // Clear API key field for Internet Archive (no auth needed)
-      submitData.apiKey = ''
-      // Set default URL for Internet Archive
-      if (!submitData.url || submitData.url === '') {
-        submitData.url = 'https://archive.org'
-      }
-    }
+    const submitData = buildIndexerPayload()
     
     if (props.editingIndexer) {
       // Update existing indexer

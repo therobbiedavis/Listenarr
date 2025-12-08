@@ -22,29 +22,29 @@ namespace Listenarr.Infrastructure.Models.Configurations
         {
             // Map list-of-string properties as JSON TEXT columns so EF will properly
             // deserialize the JSON arrays that migrations now produce (e.g. ["Name"]).
-            var authorsConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
-            var authorsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var authorsConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
+            var authorsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
             var authorsProp = builder.Property(e => e.Authors)
                 .HasConversion(authorsConverter)
                 .HasColumnType("TEXT");
             authorsProp.Metadata.SetValueComparer(authorsComparer);
 
-            var genresConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
-            var genresComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var genresConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
+            var genresComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
             var genresProp = builder.Property(e => e.Genres)
                 .HasConversion(genresConverter)
                 .HasColumnType("TEXT");
             genresProp.Metadata.SetValueComparer(genresComparer);
 
-            var tagsConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
-            var tagsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var tagsConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
+            var tagsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
             var tagsProp = builder.Property(e => e.Tags)
                 .HasConversion(tagsConverter)
                 .HasColumnType("TEXT");
             tagsProp.Metadata.SetValueComparer(tagsComparer);
 
-            var narratorsConverter = new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>>();
-            var narratorsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>>();
+            var narratorsConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
+            var narratorsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
             var narratorsProp = builder.Property(e => e.Narrators)
                 .HasConversion(narratorsConverter)
                 .HasColumnType("TEXT");
