@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Listenarr.Api.Services;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -18,12 +19,18 @@ namespace Listenarr.Api.Services.Adapters
 
         private readonly IHttpClientFactory _httpFactory;
         private readonly IRemotePathMappingService _pathMappingService;
+        private readonly INzbUrlResolver _nzbUrlResolver;
         private readonly ILogger<SabnzbdAdapter> _logger;
 
-        public SabnzbdAdapter(IHttpClientFactory httpFactory, IRemotePathMappingService pathMappingService, ILogger<SabnzbdAdapter> logger)
+        public SabnzbdAdapter(
+            IHttpClientFactory httpFactory,
+            IRemotePathMappingService pathMappingService,
+            INzbUrlResolver nzbUrlResolver,
+            ILogger<SabnzbdAdapter> logger)
         {
             _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
             _pathMappingService = pathMappingService ?? throw new ArgumentNullException(nameof(pathMappingService));
+            _nzbUrlResolver = nzbUrlResolver ?? throw new ArgumentNullException(nameof(nzbUrlResolver));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -79,11 +86,14 @@ namespace Listenarr.Api.Services.Adapters
                 if (string.IsNullOrEmpty(apiKey))
                     throw new Exception("SABnzbd API key not configured");
 
-                var nzbUrl = result.NzbUrl;
+                var (nzbUrl, indexerApiKey) = await _nzbUrlResolver.ResolveAsync(result, ct);
                 if (string.IsNullOrEmpty(nzbUrl))
                     throw new Exception("No NZB URL found in search result");
 
                 _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", result.Title, result.Source);
+
+                var sensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey }).ToList();
+                if (!string.IsNullOrEmpty(indexerApiKey)) sensitiveValues.Add(indexerApiKey);
 
                 var queryParams = new Dictionary<string, string>
                 {
@@ -122,7 +132,7 @@ namespace Listenarr.Api.Services.Adapters
                 var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
                 var requestUrl = $"{baseUrl}?{queryString}";
 
-                _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+                _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));
 
                 var http = _httpFactory.CreateClient("DownloadClient");
                 var response = await http.GetAsync(requestUrl, ct);
@@ -130,14 +140,14 @@ namespace Listenarr.Api.Services.Adapters
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey }));
+                    var redacted = LogRedaction.RedactText(responseContent, sensitiveValues);
                     _logger.LogError("SABnzbd returned error status {Status}: {Content}", response.StatusCode, redacted);
                     throw new Exception($"SABnzbd returned status {response.StatusCode}: {redacted}");
                 }
 
                 if (string.IsNullOrWhiteSpace(responseContent))
                 {
-                    _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+                    _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", LogRedaction.RedactText(requestUrl, sensitiveValues));
                     return null;
                 }
 

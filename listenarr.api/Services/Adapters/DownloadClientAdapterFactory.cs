@@ -14,7 +14,6 @@ namespace Listenarr.Api.Services.Adapters
     {
         private readonly Dictionary<string, IDownloadClientAdapter> _byId;
         private readonly Dictionary<string, IDownloadClientAdapter> _byType;
-        private readonly IDownloadClientAdapter? _default;
 
         public DownloadClientAdapterFactory(IEnumerable<IDownloadClientAdapter> adapters)
         {
@@ -28,23 +27,18 @@ namespace Listenarr.Api.Services.Adapters
                 .Where(a => !string.IsNullOrWhiteSpace(a.ClientType))
                 .GroupBy(a => a.ClientType!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-            _default = list.FirstOrDefault();
         }
 
         public IDownloadClientAdapter GetByIdOrType(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
             {
-                if (_default != null) return _default;
-                throw new InvalidOperationException("No IDownloadClientAdapter implementations are registered.");
+                throw new InvalidOperationException("Adapter key not provided.");
             }
 
             if (_byId.TryGetValue(id, out var byId)) return byId;
             if (_byType.TryGetValue(id, out var byType)) return byType;
-            if (_default != null) return _default;
-
-            throw new InvalidOperationException("No IDownloadClientAdapter implementations are registered.");
+            throw new InvalidOperationException($"No adapter registered for key '{id}'.");
         }
     }
 }

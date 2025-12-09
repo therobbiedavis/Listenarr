@@ -378,23 +378,24 @@ const testConnection = async () => {
     } else {
       toast.error('Test failed', result.error || result.message || '')
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to test indexer:', error)
     
     // Try to parse error response body for detailed message
     let errorMessage = 'Failed to test indexer connection'
-    if (error?.body) {
+    const err = error as { body?: unknown; message?: string }
+    if (err?.body) {
       try {
-        const errorData = JSON.parse(error.body)
-        errorMessage = errorData.message || errorData.error || errorMessage
+        const errorData = typeof err.body === 'string' ? JSON.parse(err.body) : err.body as Record<string, unknown>
+        errorMessage = (errorData as { message?: string; error?: string }).message || (errorData as { message?: string; error?: string }).error || errorMessage
       } catch {
         // If body isn't JSON, use it as-is if it's a string
-        if (typeof error.body === 'string' && error.body.length > 0) {
-          errorMessage = error.body
+        if (typeof err.body === 'string' && err.body.length > 0) {
+          errorMessage = err.body
         }
       }
-    } else if (error?.message) {
-      errorMessage = error.message
+    } else if (err?.message) {
+      errorMessage = err.message
     }
     
     toast.error('Test failed', errorMessage)

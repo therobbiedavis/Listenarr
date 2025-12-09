@@ -21,6 +21,7 @@ using Listenarr.Infrastructure.Models;
 using Listenarr.Application.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using System.Text;
@@ -395,107 +396,25 @@ namespace Listenarr.Api.Services
 
         public async Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client)
         {
+            if (client == null)
+            {
+                return (false, "Download client configuration not provided", null);
+            }
+
+            if (_clientGateway == null)
+            {
+                _logger.LogWarning("TestDownloadClientAsync invoked but no download client gateway is registered");
+                return (false, "Download client gateway unavailable", client);
+            }
+
             try
             {
-                var type = client.Type?.ToLowerInvariant();
-                switch (type)
-                {
-                    case "qbittorrent":
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
-                            var cookieJar = new CookieContainer();
-                            var handler = new HttpClientHandler { CookieContainer = cookieJar, UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
-                            var httpClient = _httpClientFactory.CreateClient("DownloadClient");
-                            using var testClient = new HttpClient(handler);
-                            using var loginData = new FormUrlEncodedContent(new[] {
-                                new KeyValuePair<string,string>("username", client.Username ?? string.Empty),
-                                new KeyValuePair<string,string>("password", client.Password ?? string.Empty)
-                            });
-                            var resp = await testClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData);
-                            if (resp.IsSuccessStatusCode)
-                                return (true, "qBittorrent: authentication successful", client);
-
-                            if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                            {
-                                var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version");
-                                if (testResp.IsSuccessStatusCode)
-                                    return (true, "qBittorrent: authentication disabled, proceeding without credentials", client);
-                                else
-                                    return (false, "qBittorrent: authentication enabled but credentials are incorrect", client);
-                            }
-
-                            var body = await resp.Content.ReadAsStringAsync();
-                            return (false, $"qBittorrent login failed: {resp.StatusCode} - {body}", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "qBittorrent test failed");
-                            return (false, "qBittorrent test failed: " + ex.Message, client);
-                        }
-
-                    case "transmission":
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
-                            var sessionId = await GetTransmissionSessionId(baseUrl, client.Username, client.Password);
-                            return (true, "Transmission: session established", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Transmission test failed");
-                            return (false, "Transmission test failed: " + ex.Message, client);
-                        }
-
-                    case "sabnzbd":
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
-                            var apiKey = "";
-                            if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
-                                apiKey = apiKeyObj?.ToString() ?? "";
-                            if (string.IsNullOrEmpty(apiKey))
-                                return (false, "SABnzbd API key not configured in client settings", client);
-
-                            var url = $"{baseUrl}?mode=version&output=json&apikey={Uri.EscapeDataString(apiKey)}";
-                            var resp = await _httpClient.GetAsync(url);
-                            var txt = await resp.Content.ReadAsStringAsync();
-                            if (!resp.IsSuccessStatusCode)
-                                return (false, $"SABnzbd returned {resp.StatusCode}: {txt}", client);
-
-                            return (true, "SABnzbd: API reachable and key validated", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "SABnzbd test failed");
-                            return (false, "SABnzbd test failed: " + ex.Message, client);
-                        }
-
-                    case "nzbget":
-                        try
-                        {
-                            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
-                            var pingReq = new { method = "version", @params = new object[] { }, id = 1 };
-                            using var content = new StringContent(JsonSerializer.Serialize(pingReq), Encoding.UTF8, "application/json");
-                            var resp = await _httpClient.PostAsync(baseUrl, content);
-                            var txt = await resp.Content.ReadAsStringAsync();
-                            if (!resp.IsSuccessStatusCode)
-                                return (false, $"NZBGet returned {resp.StatusCode}: {txt}", client);
-                            return (true, "NZBGet: RPC reachable", client);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "NZBGet test failed");
-                            return (false, "NZBGet test failed: " + ex.Message, client);
-                        }
-
-                    default:
-                        return (false, $"Unsupported client type: {client.Type}", client);
-                }
+                var (success, message) = await _clientGateway.TestConnectionAsync(client);
+                return (success, message, client);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during TestDownloadClientAsync");
+                _logger.LogError(ex, "Error during TestDownloadClientAsync for client {ClientId}", client.Id ?? client.Name ?? client.Type);
                 return (false, ex.Message, client);
             }
         }
@@ -734,25 +653,13 @@ namespace Listenarr.Api.Services
             // Attempt to cache MyAnonamouse torrents ahead of handing off to qBittorrent
             await TryPrepareMyAnonamouseTorrentAsync(searchResult);
 
-            // Route to appropriate client handler and capture client-specific IDs
-            string? clientSpecificId = null;
-            switch (downloadClient.Type.ToLower())
+            if (_clientGateway == null)
             {
-                case "qbittorrent":
-                    clientSpecificId = await SendToQBittorrent(downloadClient, searchResult);
-                    break;
-                case "transmission":
-                    await SendToTransmission(downloadClient, searchResult);
-                    break;
-                case "sabnzbd":
-                    await SendToSABnzbd(downloadClient, searchResult);
-                    break;
-                case "nzbget":
-                    await SendToNZBGet(downloadClient, searchResult);
-                    break;
-                default:
-                    throw new Exception($"Unsupported download client type: {downloadClient.Type}");
+                throw new InvalidOperationException("Download client gateway is not registered. Ensure AddListenarrAdapters() is invoked during startup.");
             }
+
+            // Route to appropriate client handler via adapter and capture client-specific IDs when provided
+            string? clientSpecificId = await _clientGateway.AddAsync(downloadClient, searchResult);
 
             // Update download record with client-specific ID if available
             if (!string.IsNullOrEmpty(clientSpecificId))
@@ -1510,8 +1417,8 @@ namespace Listenarr.Api.Services
                     return;
                 }
 
-                // Get NZB URL
-                var nzbUrl = result.NzbUrl;
+                // Get NZB URL (append indexer API key when required)
+                var (nzbUrl, indexerApiKey) = await EnsureIndexerApiKeyOnNzbUrlAsync(result);
                 if (string.IsNullOrEmpty(nzbUrl))
                 {
                     _logger.LogError("No NZB URL found in search result");
@@ -1519,7 +1426,11 @@ namespace Listenarr.Api.Services
                 }
 
                 _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", result.Title, result.Source);
-                _logger.LogDebug("NZB URL: {Url}", nzbUrl);
+                var sabSensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().ToList();
+                sabSensitiveValues.Add(apiKey);
+                if (!string.IsNullOrEmpty(client.Password)) sabSensitiveValues.Add(client.Password);
+                if (!string.IsNullOrEmpty(indexerApiKey)) sabSensitiveValues.Add(indexerApiKey);
+                _logger.LogDebug("NZB URL: {Url}", LogRedaction.RedactText(nzbUrl, sabSensitiveValues));
 
                 // Build SABnzbd addurl API request
                 var queryParams = new Dictionary<string, string>
@@ -1564,14 +1475,14 @@ namespace Listenarr.Api.Services
                 var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
                 var requestUrl = $"{baseUrl}?{queryString}";
 
-                _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+                _logger.LogDebug("SABnzbd request URL: {Url}", LogRedaction.RedactText(requestUrl, sabSensitiveValues));
 
                 var response = await _httpClient.GetAsync(requestUrl);
                 var responseContent = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    var redacted = LogRedaction.RedactText(responseContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey }));
+                    var redacted = LogRedaction.RedactText(responseContent, sabSensitiveValues);
                     _logger.LogError("SABnzbd returned error status {Status}: {Content}", response.StatusCode, redacted);
                     throw new Exception($"SABnzbd returned status {response.StatusCode}: {redacted}");
                 }
@@ -1579,7 +1490,7 @@ namespace Listenarr.Api.Services
                 // Defensive: ensure response body is valid JSON
                 if (string.IsNullOrWhiteSpace(responseContent))
                 {
-                    _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", LogRedaction.RedactText(requestUrl, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey })));
+                    _logger.LogWarning("SABnzbd returned empty response body when adding NZB: {Url}", LogRedaction.RedactText(requestUrl, sabSensitiveValues));
                     return; // Treat as no-op (we still created a DB record earlier)
                 }
 
@@ -1624,8 +1535,8 @@ namespace Listenarr.Api.Services
 
             try
             {
-                // Get NZB URL
-                var nzbUrl = result.NzbUrl;
+                // Get NZB URL (append indexer API key when required)
+                var (nzbUrl, indexerApiKey) = await EnsureIndexerApiKeyOnNzbUrlAsync(result);
                 if (string.IsNullOrEmpty(nzbUrl))
                 {
                     _logger.LogError("No NZB URL found in search result");
@@ -1633,7 +1544,10 @@ namespace Listenarr.Api.Services
                 }
 
                 _logger.LogInformation("Sending NZB to NZBGet: {Title} from {Source}", result.Title, result.Source);
-                _logger.LogDebug("NZB URL: {Url}", nzbUrl);
+                var nzbGetSensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().ToList();
+                if (!string.IsNullOrEmpty(client.Password)) nzbGetSensitiveValues.Add(client.Password);
+                if (!string.IsNullOrEmpty(indexerApiKey)) nzbGetSensitiveValues.Add(indexerApiKey);
+                _logger.LogDebug("NZB URL: {Url}", LogRedaction.RedactText(nzbUrl, nzbGetSensitiveValues));
 
                 // Get category if configured
                 var category = "audiobooks"; // default fallback
@@ -1665,14 +1579,14 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                // Create JSON-RPC request for append method
+                // Create JSON-RPC request for appendurl method (NZBGet fetches the URL directly)
                 var rpcRequest = new
                 {
-                    method = "append",
+                    method = "appendurl",
                     @params = new object[]
                     {
                         result.Title,        // NZBFilename
-                        nzbUrl,             // NZBContent (URL in this case)
+                        nzbUrl,             // NZB URL to fetch
                         category,           // Category
                         priority,           // Priority
                         false,              // AddToTop
@@ -1732,9 +1646,17 @@ namespace Listenarr.Api.Services
 
                 // Get the NZB ID from the result
                 string nzbId = Guid.NewGuid().ToString(); // Default fallback
-                if (rpcResponse.TryGetProperty("result", out var resultProp) && resultProp.ValueKind == JsonValueKind.Number)
+                if (rpcResponse.TryGetProperty("result", out var resultProp))
                 {
-                    nzbId = resultProp.GetInt32().ToString();
+                    if (resultProp.ValueKind == JsonValueKind.Number)
+                    {
+                        nzbId = resultProp.GetInt32().ToString();
+                    }
+                    else if (resultProp.ValueKind == JsonValueKind.True || resultProp.ValueKind == JsonValueKind.False)
+                    {
+                        var success = resultProp.GetBoolean();
+                        nzbId = success ? result.Title : Guid.NewGuid().ToString();
+                    }
                 }
 
                 _logger.LogInformation("Successfully added NZB to NZBGet with ID: {NzbId}", nzbId);
@@ -1744,6 +1666,61 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Failed to send NZB to NZBGet");
                 throw;
             }
+        }
+
+        private async Task<(string Url, string? IndexerApiKey)> EnsureIndexerApiKeyOnNzbUrlAsync(SearchResult result)
+        {
+            var nzbUrl = result.NzbUrl ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(nzbUrl))
+            {
+                return (nzbUrl, null);
+            }
+
+            try
+            {
+                var hasApiKey = false;
+                if (Uri.TryCreate(nzbUrl, UriKind.Absolute, out var parsed))
+                {
+                    var query = QueryHelpers.ParseQuery(parsed.Query);
+                    hasApiKey = query.Keys.Any(k => string.Equals(k, "apikey", StringComparison.OrdinalIgnoreCase));
+                }
+                else if (nzbUrl.Contains("apikey=", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasApiKey = true;
+                }
+
+                if (hasApiKey)
+                {
+                    return (nzbUrl, null);
+                }
+
+                Indexer? indexer = null;
+                await using var dbContext = await _dbContextFactory.CreateDbContextAsync();
+                if (result.IndexerId.HasValue)
+                {
+                    indexer = await dbContext.Indexers
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(i => i.Id == result.IndexerId.Value);
+                }
+                else if (!string.IsNullOrWhiteSpace(result.Source))
+                {
+                    indexer = await dbContext.Indexers
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(i => i.Name == result.Source);
+                }
+
+                if (indexer != null && !string.IsNullOrWhiteSpace(indexer.ApiKey))
+                {
+                    var updatedUrl = QueryHelpers.AddQueryString(nzbUrl, "apikey", indexer.ApiKey);
+                    return (updatedUrl, indexer.ApiKey);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to append indexer API key to NZB URL for {Title}", result.Title);
+            }
+
+            return (nzbUrl, null);
         }
 
         public async Task<List<QueueItem>> GetQueueAsync()
@@ -1860,14 +1837,23 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    var clientQueue = client.Type?.ToLowerInvariant() switch
+                    List<QueueItem> clientQueue;
+                    if (_clientGateway != null)
                     {
-                        "qbittorrent" => await GetQBittorrentQueueSyncAsync(client),      // ✅ Incremental sync API
-                        "transmission" => await GetTransmissionQueueOptimizedAsync(client), // ✅ Recently-active filter
-                        "sabnzbd" => await GetSABnzbdQueueOptimizedAsync(client),         // ⚠️ Limited optimization
-                        "nzbget" => await GetNZBGetQueueOptimizedAsync(client),           // ⚠️ Limited optimization
-                        _ => new List<QueueItem>()
-                    };
+                        try
+                        {
+                            clientQueue = await _clientGateway.GetQueueAsync(client);
+                        }
+                        catch (Exception gwEx)
+                        {
+                            _logger.LogWarning(gwEx, "Client gateway failed to retrieve queue for {ClientName}, falling back to legacy implementation", client.Name ?? client.Id);
+                            clientQueue = await GetQueueFallbackAsync(client);
+                        }
+                    }
+                    else
+                    {
+                        clientQueue = await GetQueueFallbackAsync(client);
+                    }
 
                     // Filter to only include items that Listenarr initiated
                     _logger.LogInformation("Before filtering - Client {ClientName} has {TotalItems} queue items", client.Name ?? client.Id, clientQueue.Count);
@@ -2659,6 +2645,28 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogWarning(ex, "RemoveFromClientAsync fallback failed for client {Client}", client?.Name ?? client?.Id);
                 return false;
+            }
+        }
+
+        private Task<List<QueueItem>> GetQueueFallbackAsync(DownloadClientConfiguration client)
+        {
+            if (client == null || string.IsNullOrWhiteSpace(client.Type))
+            {
+                return Task.FromResult(new List<QueueItem>());
+            }
+
+            switch (client.Type.ToLowerInvariant())
+            {
+                case "qbittorrent":
+                    return GetQBittorrentQueueSyncAsync(client);
+                case "transmission":
+                    return GetTransmissionQueueOptimizedAsync(client);
+                case "sabnzbd":
+                    return GetSABnzbdQueueOptimizedAsync(client);
+                case "nzbget":
+                    return GetNZBGetQueueOptimizedAsync(client);
+                default:
+                    return Task.FromResult(new List<QueueItem>());
             }
         }
 

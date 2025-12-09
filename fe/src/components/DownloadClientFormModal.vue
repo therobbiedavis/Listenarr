@@ -114,7 +114,9 @@
                   v-model="formData.username" 
                   type="text" 
                   placeholder="admin"
+                  :required="formData.type === 'nzbget'"
                 />
+                <small v-if="formData.type === 'nzbget'">Required when NZBGet authentication is enabled.</small>
               </div>
 
               <div class="form-group">
@@ -124,7 +126,9 @@
                   v-model="formData.password" 
                   type="password" 
                   placeholder="********"
+                  :required="formData.type === 'nzbget'"
                 />
+                <small v-if="formData.type === 'nzbget'">Use the NZBGet RPC password (default: nzbget).</small>
               </div>
             </div>
           </div>
@@ -362,7 +366,7 @@ const requiresAuth = computed(() => {
 })
 
 const requiresApiKey = computed(() => {
-  return formData.value.type === 'sabnzbd' || formData.value.type === 'nzbget'
+  return formData.value.type === 'sabnzbd'
 })
 
 const getHostPlaceholder = () => {
@@ -401,6 +405,13 @@ const onTypeChange = () => {
     nzbget: 6789
   }
   formData.value.port = defaultPorts[formData.value.type] || 8080
+
+  if (formData.value.type === 'sabnzbd') {
+    formData.value.username = ''
+    formData.value.password = ''
+  } else {
+    formData.value.apiKey = ''
+  }
 }
 
 // Watch for editing client changes
@@ -477,7 +488,7 @@ const handleSubmit = async () => {
       useSSL: formData.value.useSSL,
       isEnabled: formData.value.isEnabled,
       settings: {
-        ...(formData.value.apiKey && { apiKey: formData.value.apiKey }),
+        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey ? { apiKey: formData.value.apiKey } : {}),
         ...(formData.value.category && { category: formData.value.category }),
         ...(formData.value.tags && { tags: formData.value.tags }),
         recentPriority: formData.value.recentPriority,

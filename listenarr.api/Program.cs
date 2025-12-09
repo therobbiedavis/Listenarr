@@ -17,13 +17,11 @@
  */
 
 using Listenarr.Api.Services;
-using Listenarr.Domain.Models;
 using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Middleware;
 using System.Net;
 using Listenarr.Infrastructure.Models;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.DataProtection;

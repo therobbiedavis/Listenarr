@@ -21,16 +21,37 @@ namespace Listenarr.Api.Services
 
         private IDownloadClientAdapter ResolveAdapter(DownloadClientConfiguration client)
         {
-            var key = client?.Id ?? client?.Type ?? string.Empty;
-            try
+            if (client == null)
             {
-                return _factory.GetByIdOrType(key);
+                throw new ArgumentNullException(nameof(client));
             }
-            catch (Exception ex)
+
+            var attemptedKeys = new List<string?> { client.Id, client.Type };
+            foreach (var key in attemptedKeys)
             {
-                _logger.LogError(ex, "Failed to resolve download client adapter for key '{Key}'", key);
-                throw;
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    return _factory.GetByIdOrType(key);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Try the next key.
+                    continue;
+                }
             }
+
+            var descriptor = !string.IsNullOrWhiteSpace(client.Name)
+                ? $"{client.Name} ({client.Type ?? "unknown"})"
+                : client.Type ?? client.Id ?? "unknown";
+
+            var message = $"No download client adapter registered for {descriptor}.";
+            _logger.LogError(message);
+            throw new InvalidOperationException(message);
         }
 
         public Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)

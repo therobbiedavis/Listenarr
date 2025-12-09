@@ -2548,8 +2548,13 @@ namespace Listenarr.Api.Services
                 var url = BuildTorznabUrl(indexer, query, category);
                 _logger.LogDebug("Indexer API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
 
-                // Make HTTP request
-                var response = await _httpClient.GetAsync(url);
+                // Make HTTP request with User-Agent header
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                var version = typeof(SearchService).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+                var userAgent = $"Listenarr/{version} (+https://github.com/therobbiedavis/listenarr)";
+                request.Headers.UserAgent.ParseAdd(userAgent);
+                
+                var response = await _httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Indexer {Name} returned status {Status}", indexer.Name, response.StatusCode);
@@ -4077,20 +4082,25 @@ namespace Listenarr.Api.Services
             if (long.TryParse(sizeStr, out var bytes))
                 return bytes;
 
-            // Handle formats like "500 MB", "1.2 GB", "1024 KB", etc.
-            var match = System.Text.RegularExpressions.Regex.Match(sizeStr, @"^([\d\.]+)\s*(KB|MB|GB|TB|B)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            // Handle formats like "500 MB", "1.2 GB", "1024 KB", "3.7 GiB", "279.0 MiB", etc.
+            // Support both decimal (KB/MB/GB/TB) and binary (KiB/MiB/GiB/TiB) units
+            var match = System.Text.RegularExpressions.Regex.Match(sizeStr, @"^([\d\.]+)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             if (match.Success)
             {
-                if (double.TryParse(match.Groups[1].Value, out var value))
+                if (double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
                 {
                     var unit = match.Groups[2].Value.ToUpper();
                     return unit switch
                     {
                         "B" => (long)value,
-                        "KB" => (long)(value * 1024),
-                        "MB" => (long)(value * 1024 * 1024),
-                        "GB" => (long)(value * 1024 * 1024 * 1024),
-                        "TB" => (long)(value * 1024 * 1024 * 1024 * 1024),
+                        "KB" => (long)(value * 1000),
+                        "MB" => (long)(value * 1000 * 1000),
+                        "GB" => (long)(value * 1000 * 1000 * 1000),
+                        "TB" => (long)(value * 1000 * 1000 * 1000 * 1000),
+                        "KIB" => (long)(value * 1024),
+                        "MIB" => (long)(value * 1024 * 1024),
+                        "GIB" => (long)(value * 1024 * 1024 * 1024),
+                        "TIB" => (long)(value * 1024 * 1024 * 1024 * 1024),
                         _ => (long)value
                     };
                 }

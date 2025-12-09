@@ -232,15 +232,17 @@ namespace Listenarr.Api.Extensions
             // Validate download client configuration at startup, surface errors early
             services.AddSingleton<IValidateOptions<DownloadClientsOptions>, DownloadClientsOptionsValidator>();
 
-            // Register default adapter implementations (can be extended). Use concrete types from Adapters namespace.
-            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.QbittorrentAdapter>();
-
             // Title matching service extracted from DownloadService for easier testing
             services.AddScoped<ITitleMatchingService, Listenarr.Api.Services.Adapters.TitleMatchingService>();
 
+            // Shared helpers
+            services.AddScoped<INzbUrlResolver, NzbUrlResolver>();
+
             // Register available adapter implementations. Keep adapters scoped because they may depend on scoped services.
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.QbittorrentAdapter>();
+            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.TransmissionAdapter>();
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.SabnzbdAdapter>();
+            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.NzbgetAdapter>();
 
             // Register the concrete factory as scoped so it can safely resolve scoped adapters via DI.
             services.AddScoped<IDownloadClientAdapterFactory, Listenarr.Api.Services.Adapters.DownloadClientAdapterFactory>();

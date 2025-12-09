@@ -281,6 +281,48 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
+                if (config == null)
+                {
+                    return BadRequest(new { success = false, message = "Missing download client configuration" });
+                }
+
+                if (!string.IsNullOrWhiteSpace(config.Id))
+                {
+                    var existing = await _configurationService.GetDownloadClientConfigurationAsync(config.Id);
+                    if (existing != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(existing.Username))
+                        {
+                            config.Username = existing.Username;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(config.Password) && !string.IsNullOrWhiteSpace(existing.Password))
+                        {
+                            config.Password = existing.Password;
+                        }
+
+                        try
+                        {
+                            if (existing.Settings != null)
+                            {
+                                config.Settings ??= new System.Collections.Generic.Dictionary<string, object>();
+
+                                foreach (var kvp in existing.Settings)
+                                {
+                                    if (!config.Settings.ContainsKey(kvp.Key))
+                                    {
+                                        config.Settings[kvp.Key] = kvp.Value;
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Non-fatal; continue with whatever settings were provided.
+                        }
+                    }
+                }
+
                 // Delegate to download service to perform protocol-specific lightweight tests
                 var (Success, Message, Client) = await _downloadService.TestDownloadClientAsync(config);
                 return Ok(new { success = Success, message = Message, client = Client });

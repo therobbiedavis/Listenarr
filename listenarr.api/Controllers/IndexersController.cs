@@ -74,6 +74,7 @@ namespace Listenarr.Api.Controllers
 
             try
             {
+                _logger.LogInformation("[IndexerTest] Testing indexer {Name} (impl={Impl}, url={Url})", indexer.Name, indexer.Implementation, indexer.Url);
                 return impl switch
                 {
                     var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
@@ -121,6 +122,10 @@ namespace Listenarr.Api.Controllers
                 }
 
                 var request = new HttpRequestMessage(HttpMethod.Get, testUrl);
+                // Ensure User-Agent is present even if the injected HttpClient was created without defaults
+                var version = typeof(IndexersController).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+                var userAgent = $"Listenarr/{version} (+https://github.com/therobbiedavis/listenarr)";
+                request.Headers.UserAgent.ParseAdd(userAgent);
                 // For Newznab/Torznab, also add API key as header (some servers support both)
                 // For other indexers, add header if API key is provided
                 if (!string.IsNullOrEmpty(indexer.ApiKey))
@@ -128,7 +133,11 @@ namespace Listenarr.Api.Controllers
                     request.Headers.Add("X-Api-Key", indexer.ApiKey);
                 }
 
+                _logger.LogInformation("[IndexerTest] GET {Url} UA={UserAgent}", testUrl, userAgent);
+
                 var response = await _httpClient.SendAsync(request);
+
+                _logger.LogInformation("[IndexerTest] {Name} responded {StatusCode}", indexer.Name, (int)response.StatusCode);
                 
                 // Check for HTTP-level authentication failures
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
