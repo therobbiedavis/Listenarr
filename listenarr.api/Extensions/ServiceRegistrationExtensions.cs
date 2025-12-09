@@ -55,6 +55,10 @@ namespace Listenarr.Api.Extensions
 
             // Per-adapter named clients (qbittorrent, transmission, sabnzbd, nzbget)
             services.AddHttpClient("qbittorrent")
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,
@@ -65,6 +69,10 @@ namespace Listenarr.Api.Extensions
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient("transmission")
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,
@@ -75,6 +83,10 @@ namespace Listenarr.Api.Extensions
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient("sabnzbd")
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,
@@ -85,6 +97,10 @@ namespace Listenarr.Api.Extensions
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient("nzbget")
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     AutomaticDecompression = DecompressionMethods.All,

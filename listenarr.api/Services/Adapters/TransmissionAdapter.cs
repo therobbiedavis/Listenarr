@@ -35,7 +35,14 @@ namespace Listenarr.Api.Services.Adapters
         {
             try
             {
-                await InvokeRpcAsync(client, new { method = "session-get", tag = 0 }, ct);
+                // Use old format for compatibility with Transmission < 4.1.0
+                var payload = new
+                {
+                    method = "session-get",
+                    arguments = new { },
+                    tag = 1
+                };
+                await InvokeRpcAsync(client, payload, ct);
                 return (true, "Transmission: session established");
             }
             catch (Exception ex)
@@ -50,17 +57,32 @@ namespace Listenarr.Api.Services.Adapters
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (result == null) throw new ArgumentNullException(nameof(result));
 
-            var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) ? result.MagnetLink : result.TorrentUrl;
-            if (string.IsNullOrEmpty(torrentUrl))
+            var arguments = new Dictionary<string, object>();
+
+            // Prefer cached torrent file data over URL (required for private trackers with authentication)
+            if (result.TorrentFileContent != null && result.TorrentFileContent.Length > 0)
             {
-                throw new ArgumentException("No magnet link or torrent URL provided", nameof(result));
+                // Use metainfo field for torrent file data (base64 encoded)
+                arguments["metainfo"] = Convert.ToBase64String(result.TorrentFileContent);
+                _logger.LogDebug("Using cached torrent file data ({Bytes} bytes) for '{Title}'", result.TorrentFileContent.Length, result.Title);
+            }
+            else
+            {
+                // Fall back to filename field for URLs/magnet links
+                var torrentUrl = !string.IsNullOrEmpty(result.MagnetLink) ? result.MagnetLink : result.TorrentUrl;
+                if (string.IsNullOrEmpty(torrentUrl))
+                {
+                    throw new ArgumentException("No magnet link, torrent URL, or cached torrent file provided", nameof(result));
+                }
+                arguments["filename"] = torrentUrl;
+                _logger.LogDebug("Using torrent URL for '{Title}': {Url}", result.Title, torrentUrl);
             }
 
-            var arguments = new Dictionary<string, object>
+            // Only include download-dir if it's not empty (Transmission requires absolute path or omit)
+            if (!string.IsNullOrWhiteSpace(client.DownloadPath))
             {
-                ["filename"] = torrentUrl,
-                ["download-dir"] = client.DownloadPath ?? string.Empty
-            };
+                arguments["download-dir"] = client.DownloadPath;
+            }
 
             var labels = CollectLabels(client);
             if (labels.Count > 0)
@@ -68,6 +90,7 @@ namespace Listenarr.Api.Services.Adapters
                 arguments["labels"] = labels.ToArray();
             }
 
+            // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
             {
                 method = "torrent-add",
@@ -78,7 +101,11 @@ namespace Listenarr.Api.Services.Adapters
             try
             {
                 var response = await InvokeRpcAsync(client, payload, ct);
+                
+                // Log the full response for debugging
+                _logger.LogDebug("Transmission add torrent response: {Response}", response.GetRawText());
 
+                // Check result field
                 if (!response.TryGetProperty("result", out var resultProp) || !string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
                 {
                     var errorMsg = resultProp.ValueKind == JsonValueKind.String ? resultProp.GetString() : "Unknown error";
@@ -89,7 +116,9 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     if (args.TryGetProperty("torrent-added", out var added) && added.ValueKind == JsonValueKind.Object)
                     {
-                        return ExtractTorrentIdentifier(added);
+                        var torrentId = ExtractTorrentIdentifier(added);
+                        _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", result.Title, torrentId);
+                        return torrentId;
                     }
 
                     if (args.TryGetProperty("torrent-duplicate", out var duplicate) && duplicate.ValueKind == JsonValueKind.Object)
@@ -100,6 +129,7 @@ namespace Listenarr.Api.Services.Adapters
                     }
                 }
 
+                _logger.LogWarning("Transmission AddAsync returning null - torrent may not have been added");
                 return null;
             }
             catch (Exception ex)
@@ -121,6 +151,7 @@ namespace Listenarr.Api.Services.Adapters
                 ["delete-local-data"] = deleteFiles
             };
 
+            // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
             {
                 method = "torrent-remove",
@@ -153,6 +184,7 @@ namespace Listenarr.Api.Services.Adapters
             var items = new List<QueueItem>();
             if (client == null) return items;
 
+            // Use old format for compatibility with Transmission < 4.1.0
             var payload = new
             {
                 method = "torrent-get",
@@ -204,22 +236,31 @@ namespace Listenarr.Api.Services.Adapters
 
         private async Task<QueueItem> MapTorrentAsync(DownloadClientConfiguration client, JsonElement torrent, CancellationToken ct)
         {
-            var id = torrent.TryGetProperty("hashString", out var hashProp) ? hashProp.GetString() ?? string.Empty : string.Empty;
+            // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase for backwards compatibility
+            var id = torrent.TryGetProperty("hash_string", out var hashProp) || torrent.TryGetProperty("hashString", out hashProp) 
+                ? hashProp.GetString() ?? string.Empty : string.Empty;
             if (string.IsNullOrEmpty(id) && torrent.TryGetProperty("id", out var numericId))
             {
                 id = numericId.GetInt32().ToString(CultureInfo.InvariantCulture);
             }
 
             var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty;
-            var percentDone = torrent.TryGetProperty("percentDone", out var percentProp) ? percentProp.GetDouble() * 100 : 0d;
-            var totalSize = torrent.TryGetProperty("totalSize", out var sizeProp) ? sizeProp.GetInt64() : 0L;
-            var leftUntilDone = torrent.TryGetProperty("leftUntilDone", out var leftProp) ? leftProp.GetInt64() : 0L;
-            var rateDownload = torrent.TryGetProperty("rateDownload", out var rateProp) ? rateProp.GetDouble() : 0d;
+            var percentDone = (torrent.TryGetProperty("percent_done", out var percentProp) || torrent.TryGetProperty("percentDone", out percentProp))
+                ? percentProp.GetDouble() * 100 : 0d;
+            var totalSize = (torrent.TryGetProperty("total_size", out var sizeProp) || torrent.TryGetProperty("totalSize", out sizeProp))
+                ? sizeProp.GetInt64() : 0L;
+            var leftUntilDone = (torrent.TryGetProperty("left_until_done", out var leftProp) || torrent.TryGetProperty("leftUntilDone", out leftProp))
+                ? leftProp.GetInt64() : 0L;
+            var rateDownload = (torrent.TryGetProperty("rate_download", out var rateProp) || torrent.TryGetProperty("rateDownload", out rateProp))
+                ? rateProp.GetDouble() : 0d;
             var eta = torrent.TryGetProperty("eta", out var etaProp) ? etaProp.GetInt32() : -1;
-            var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() ?? string.Empty : string.Empty;
+            var downloadDir = (torrent.TryGetProperty("download_dir", out var dirProp) || torrent.TryGetProperty("downloadDir", out dirProp))
+                ? dirProp.GetString() ?? string.Empty : string.Empty;
             var statusCode = torrent.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
-            var addedDate = torrent.TryGetProperty("addedDate", out var addedProp) ? addedProp.GetInt64() : 0L;
-            var uploadRatio = torrent.TryGetProperty("uploadRatio", out var ratioProp) ? ratioProp.GetDouble() : 0d;
+            var addedDate = (torrent.TryGetProperty("added_date", out var addedProp) || torrent.TryGetProperty("addedDate", out addedProp))
+                ? addedProp.GetInt64() : 0L;
+            var uploadRatio = (torrent.TryGetProperty("upload_ratio", out var ratioProp) || torrent.TryGetProperty("uploadRatio", out ratioProp))
+                ? ratioProp.GetDouble() : 0d;
 
             var downloaded = Math.Max(0, totalSize - leftUntilDone);
 
@@ -325,6 +366,8 @@ namespace Listenarr.Api.Services.Adapters
             var baseUrl = BuildBaseUrl(client);
             var serializedPayload = JsonSerializer.Serialize(payload);
             string? sessionId = null;
+            
+            _logger.LogDebug("Transmission RPC request to {Url}: {Payload}", baseUrl, serializedPayload);
 
             for (var attempt = 0; attempt < 2; attempt++)
             {
@@ -336,6 +379,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (!string.IsNullOrEmpty(sessionId))
                 {
                     request.Headers.Add("X-Transmission-Session-Id", sessionId);
+                    _logger.LogDebug("Using X-Transmission-Session-Id: {SessionId}", sessionId);
                 }
 
                 var authHeader = BuildAuthHeader(client);
@@ -350,6 +394,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (response.StatusCode == HttpStatusCode.Conflict && attempt == 0 && response.Headers.TryGetValues("X-Transmission-Session-Id", out var values))
                 {
                     sessionId = values.FirstOrDefault();
+                    _logger.LogDebug("Received 409 Conflict, retrying with session ID: {SessionId}", sessionId);
                     continue;
                 }
 
@@ -357,11 +402,15 @@ namespace Listenarr.Api.Services.Adapters
                 {
                     var sensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty });
                     var redacted = LogRedaction.RedactText(body, sensitiveValues);
+                    _logger.LogWarning("Transmission returned {StatusCode}: {Body}", response.StatusCode, redacted);
                     throw new HttpRequestException($"Transmission returned {response.StatusCode}: {redacted}");
                 }
 
+                _logger.LogDebug("Transmission RPC response ({StatusCode}): {Body}", response.StatusCode, body);
+
                 if (string.IsNullOrWhiteSpace(body))
                 {
+                    _logger.LogWarning("Transmission returned empty response body");
                     using var emptyDoc = JsonDocument.Parse("{}");
                     return emptyDoc.RootElement.Clone();
                 }
@@ -397,7 +446,8 @@ namespace Listenarr.Api.Services.Adapters
                 return null;
             }
 
-            if (element.TryGetProperty("hashString", out var hashProp))
+            // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase
+            if ((element.TryGetProperty("hash_string", out var hashProp) || element.TryGetProperty("hashString", out hashProp)))
             {
                 var hash = hashProp.GetString();
                 if (!string.IsNullOrWhiteSpace(hash))
