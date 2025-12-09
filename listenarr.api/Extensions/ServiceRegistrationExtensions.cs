@@ -57,7 +57,7 @@ namespace Listenarr.Api.Extensions
             services.AddHttpClient("qbittorrent")
                 .ConfigureHttpClient(client =>
                 {
-                    client.Timeout = TimeSpan.FromSeconds(10);
+                    client.Timeout = TimeSpan.FromSeconds(30);
                 })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
@@ -71,7 +71,7 @@ namespace Listenarr.Api.Extensions
             services.AddHttpClient("transmission")
                 .ConfigureHttpClient(client =>
                 {
-                    client.Timeout = TimeSpan.FromSeconds(10);
+                    client.Timeout = TimeSpan.FromSeconds(30);
                 })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
@@ -85,7 +85,7 @@ namespace Listenarr.Api.Extensions
             services.AddHttpClient("sabnzbd")
                 .ConfigureHttpClient(client =>
                 {
-                    client.Timeout = TimeSpan.FromSeconds(10);
+                    client.Timeout = TimeSpan.FromSeconds(30);
                 })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
@@ -99,7 +99,7 @@ namespace Listenarr.Api.Extensions
             services.AddHttpClient("nzbget")
                 .ConfigureHttpClient(client =>
                 {
-                    client.Timeout = TimeSpan.FromSeconds(10);
+                    client.Timeout = TimeSpan.FromSeconds(30);
                 })
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {

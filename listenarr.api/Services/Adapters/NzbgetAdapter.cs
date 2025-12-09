@@ -369,7 +369,7 @@ namespace Listenarr.Api.Services.Adapters
             var members = structElement.Elements("member").ToDictionary(
                 m => m.Element("name")?.Value ?? string.Empty,
                 m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
-            );
+            ) as IReadOnlyDictionary<string, string?>;
             
             var id = members.GetValueOrDefault("GroupID", null)
                 ?? members.GetValueOrDefault("LastID", null)
@@ -394,7 +394,7 @@ namespace Listenarr.Api.Services.Adapters
                 etaSeconds = (int)Math.Max(0, remainingBytes / downloadRate);
             }
 
-            string status = statusRaw.ToUpperInvariant() switch
+            string status = (statusRaw ?? "QUEUED").ToUpperInvariant() switch
             {
                 "QUEUED" => "queued",
                 "DOWNLOADING" => "downloading",
@@ -426,8 +426,8 @@ namespace Listenarr.Api.Services.Adapters
             return new QueueItem
             {
                 Id = id,
-                Title = title,
-                Quality = category,
+                Title = title ?? string.Empty,
+                Quality = category ?? string.Empty,
                 Status = status,
                 Progress = sizeMb > 0 ? Math.Clamp(downloadedMb / sizeMb * 100, 0, 100) : 0,
                 Size = sizeBytes,

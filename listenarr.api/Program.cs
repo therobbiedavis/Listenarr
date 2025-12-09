@@ -208,7 +208,7 @@ builder.Services.AddHttpClient("qbittorrent")
 builder.Services.AddHttpClient("transmission")
     .ConfigureHttpClient(client =>
     {
-        client.Timeout = TimeSpan.FromSeconds(10);
+        client.Timeout = TimeSpan.FromSeconds(30);
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
     {
@@ -226,7 +226,7 @@ builder.Services.AddHttpClient("transmission")
 builder.Services.AddHttpClient("sabnzbd")
     .ConfigureHttpClient(client =>
     {
-        client.Timeout = TimeSpan.FromSeconds(10);
+        client.Timeout = TimeSpan.FromSeconds(30);
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
     {
@@ -244,7 +244,7 @@ builder.Services.AddHttpClient("sabnzbd")
 builder.Services.AddHttpClient("nzbget")
     .ConfigureHttpClient(client =>
     {
-        client.Timeout = TimeSpan.FromSeconds(10);
+        client.Timeout = TimeSpan.FromSeconds(30);
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
     {

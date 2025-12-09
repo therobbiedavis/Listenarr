@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.41] - 2025-12-09
+
+### Fixed
+- **Download Client Timeouts**: Added 30-second timeout to all download client HTTP requests (Transmission, qBittorrent, SABnzbd, NZBGet) to prevent indefinite hangs on unresponsive clients
+- **Transmission RPC Compatibility**: Fixed Transmission v4.0.6+ compatibility by using legacy bespoke RPC format with kebab-case method names (`torrent-add`, `torrent-get`, `session-get`) instead of JSON-RPC 2.0
+- **Private Tracker Support**: Implemented proper torrent file caching and base64-encoded `metainfo` transmission for MyAnonamouse and other private trackers requiring authentication
+- **Download Directory Handling**: Fixed Transmission rejecting empty `download-dir` parameter; now omits field when not specified to use Transmission's default path
+- **CSRF Protection**: Proper X-Transmission-Session-Id header management for Transmission authentication with automatic retry on 409 Conflict
+
+### Changed
+- **TransmissionAdapter**: Now prefers cached torrent file data over URLs for authenticated downloads, falling back to URLs/magnet links for public torrents
+- **Improved Logging**: Added comprehensive debug logging for download client operations including request/response details
+- **Program Structure Refactor**: Major architectural improvement with complete separation of concerns:
+  - Split `Program.cs` into three distinct files for better maintainability:
+    - `Program.cs` - Main production application entry point with standard ASP.NET Core configuration
+    - `Program.Testing.cs` - Isolated testing environment setup with dedicated WebApplicationFactory support
+    - `Program.TestingHook.cs` - Testing integration hooks and utilities for dependency injection testing
+  - Improved code organization with clear boundaries between production and testing code paths
+  - Enhanced testability through modular architecture allowing independent testing of application components
+  - Better separation of concerns with testing infrastructure completely isolated from production runtime
+  - Enables cleaner dependency injection testing and integration test scenarios
+
 ## [0.2.40] - 2025-11-21
 
 ### Added
