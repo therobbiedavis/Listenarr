@@ -80,7 +80,7 @@ namespace Listenarr.Api.Controllers
                 }
                 else
                 {
-                    _logger.LogWarning("IProcessRunner is not available; cannot run ffprobe for {File}", filePath);
+                    _logger.LogWarning("IProcessRunner is not available; cannot run ffprobe for {File}", LogRedaction.SanitizeFilePath(filePath));
                     return StatusCode(500, new { message = "IProcessRunner service is not available to run external processes" });
                 }
             }

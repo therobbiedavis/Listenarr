@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Applied to Download Client Adapters: NzbgetAdapter, QbittorrentAdapter, TransmissionAdapter, and SabnzbdAdapter
   - Prevents log injection attacks via newlines, log forging, path traversal disclosure, and credential leakage in all log outputs
   - All user-controllable data is now sanitized before being written to logs throughout the application
+  - Added CodeQL configuration to recognize custom sanitization methods in static analysis
 
 ### Changed
 - **TransmissionAdapter**: Now prefers cached torrent file data over URLs for authenticated downloads, falling back to URLs/magnet links for public torrents

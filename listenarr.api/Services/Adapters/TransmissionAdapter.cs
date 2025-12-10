@@ -164,7 +164,7 @@ namespace Listenarr.Api.Services.Adapters
                 var response = await InvokeRpcAsync(client, payload, ct);
                 if (response.TryGetProperty("result", out var resultProp) && string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogInformation("Removed torrent {Id} from Transmission (deleteFiles={DeleteFiles})", id, deleteFiles);
+                    _logger.LogInformation("Removed torrent {Id} from Transmission (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
                     return true;
                 }
 
