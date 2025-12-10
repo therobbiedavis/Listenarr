@@ -108,15 +108,6 @@
   
   
   <ItemGroup>
-    <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-  </ItemGroup>
-
-  
-  
-  <ItemGroup>
     <ProjectReference Include="..\listenarr.domain\Listenarr.Domain.csproj" />
     <ProjectReference Include="..\listenarr.application\Listenarr.Application.csproj" />
     <ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />

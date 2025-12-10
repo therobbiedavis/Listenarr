@@ -727,8 +727,8 @@ try
             // Fallback: try running the platform-specific Playwright install script (no Node.js required)
             try
             {
-                var assemblyLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                var assemblyDir = Path.GetDirectoryName(assemblyLocation);
+                // Use AppContext.BaseDirectory instead of Assembly.Location for single-file publish compatibility
+                var assemblyDir = AppContext.BaseDirectory;
                 if (!string.IsNullOrEmpty(assemblyDir))
                 {
                     string? scriptPath = null;

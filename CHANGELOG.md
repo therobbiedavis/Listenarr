@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.42] - 2025-12-10
+
+### Changed
+- **Frontend Dependencies**: Updated multiple dependencies to their latest versions for improved performance, features, and security
+  - Upgraded `vue` from 3.5.22 to 3.5.24 for latest Vue.js features and bug fixes
+  - Updated `@tsconfig/node22` from 22.0.2 to 22.0.5 for improved TypeScript Node.js configuration
+  - Upgraded `eslint-plugin-vue` from 10.4.0 to 10.6.0 with new linting rules and Vue 3 support enhancements
+  - Updated `vite-plugin-vue-devtools` from 8.0.2 to 8.0.5 for better development experience
+  - Major upgrade: `vitest` from 3.2.4 to 4.0.13 including all related @vitest/* packages for improved testing capabilities
+  - Updated `chai` to 6.2.1 and `tinyrainbow` to 3.0.3 for testing library compatibility
+  - Updated `postcss-selector-parser` to 7.1.0 for improved CSS selector parsing
+
+### Removed
+- **Dependency Cleanup**: Removed deprecated and unused packages from frontend lock file to reduce bloat and potential security risks
+  - Removed `cac`, `check-error`, `deep-eql`, `loupe`, `pathval`, `strip-literal`, `tinypool`, `tinyspy`, and `vite-node` (internalized by Vitest v4)
+
 ## [0.2.41] - 2025-12-09
 
 ### Fixed
