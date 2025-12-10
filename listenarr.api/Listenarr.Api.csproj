@@ -108,6 +108,15 @@
   
   
   <ItemGroup>
+    <!-- Include tools for build output but exclude from publish (custom targets handle publish) -->
+    <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+  
+  
+  <ItemGroup>
     <ProjectReference Include="..\listenarr.domain\Listenarr.Domain.csproj" />
     <ProjectReference Include="..\listenarr.application\Listenarr.Application.csproj" />
     <ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />

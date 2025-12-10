@@ -267,8 +267,11 @@ namespace Listenarr.Api.Controllers
                     var diagAction = await Diagnostics();
                     if (diagAction is OkObjectResult okObj && okObj.Value != null)
                     {
-                        // Serialize the diagnostics value and inspect key fields
-                        var serialized = JsonSerializer.Serialize(okObj.Value);
+                        // Use the diagnostics value directly instead of parsing to avoid JsonDocument disposal issues
+                        var diagnosticsValue = okObj.Value;
+                        
+                        // Serialize and parse to inspect key fields
+                        var serialized = JsonSerializer.Serialize(diagnosticsValue);
                         using var doc = JsonDocument.Parse(serialized);
                         var root = doc.RootElement;
 
@@ -278,7 +281,8 @@ namespace Listenarr.Api.Controllers
 
                         if (!botDirExists || !indexExists)
                         {
-                            return BadRequest(new { success = false, message = "Discord bot files are missing", diagnostics = root });
+                            // Return the original object, not the JsonElement from disposed document
+                            return BadRequest(new { success = false, message = "Discord bot files are missing", diagnostics = diagnosticsValue });
                         }
 
                         if (!string.IsNullOrWhiteSpace(nodeError))
