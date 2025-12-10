@@ -108,12 +108,12 @@
   
   
   <ItemGroup>
+    <!-- Include tools for build output but exclude from publish (custom targets handle publish) -->
     <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
-
   
   
   <ItemGroup>
