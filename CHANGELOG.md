@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents log injection attacks via newlines, log forging, path traversal disclosure, and credential leakage in all log outputs
   - All user-controllable data is now sanitized before being written to logs throughout the application
   - Added CodeQL workflow configuration to exclude `cs/log-forging` query (comprehensive custom sanitization implemented)
-- **Authorization Bypass Prevention**: Fixed user-controlled bypass in MyAnonamouse torrent caching with dual validation:
+- **Authorization Bypass Prevention**: Fixed user-controlled bypass in MyAnonamouse torrent caching with triple validation:
+  - Requires valid database-backed IndexerId (no arbitrary search result processing)
   - Validates indexer implementation against database configuration instead of user-provided search results
   - Validates torrent download URLs match the configured indexer's domain to prevent SSRF attacks
 

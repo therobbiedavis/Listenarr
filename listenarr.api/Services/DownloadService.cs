@@ -787,9 +787,11 @@ namespace Listenarr.Api.Services
 
         private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult)
         {
+            // Defensive null check - method is private and called internally
             if (searchResult == null)
                 return;
 
+            // Early exit conditions to avoid unnecessary processing
             if (string.IsNullOrEmpty(searchResult.TorrentUrl))
             {
                 _logger.LogDebug("Skipping MyAnonamouse cache: no TorrentUrl for '{Title}'", LogRedaction.SanitizeText(searchResult.Title));
@@ -805,20 +807,18 @@ namespace Listenarr.Api.Services
             try
             {
                 var dbContext = await _dbContextFactory.CreateDbContextAsync();
-                Listenarr.Domain.Models.Indexer? indexer = null;
-
-                if (searchResult.IndexerId.HasValue)
+                
+                // Security: Only proceed if we have a valid IndexerId from the database
+                // This prevents processing arbitrary search results without proper validation
+                if (!searchResult.IndexerId.HasValue)
                 {
-                    indexer = await dbContext.Indexers.FindAsync(searchResult.IndexerId.Value);
+                    _logger.LogDebug("Skipping MyAnonamouse cache: no IndexerId for '{Title}'", LogRedaction.SanitizeText(searchResult.Title));
+                    return;
                 }
 
-                if (indexer == null)
-                {
-                    indexer = await dbContext.Indexers
-                        .Where(i => i.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
-                        .FirstOrDefaultAsync(i => i.Name.Equals(searchResult.Source ?? string.Empty, StringComparison.OrdinalIgnoreCase));
-                }
+                Listenarr.Domain.Models.Indexer? indexer = await dbContext.Indexers.FindAsync(searchResult.IndexerId.Value);
 
+                // Security: Indexer must exist in database - reject if not found
                 if (indexer == null)
                 {
                     _logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': indexer configuration not found", searchResult.Title);
