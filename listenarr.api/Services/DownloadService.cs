@@ -787,11 +787,16 @@ namespace Listenarr.Api.Services
 
         private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult)
         {
-            // Defensive null check - method is private and called internally
-            if (searchResult == null)
+            // Security: Validate all preconditions before performing sensitive operations
+            // This method downloads content using authenticated HTTP clients, so we must
+            // ensure the request is legitimate and comes from a trusted, configured source.
+            
+            if (searchResult?.IndexerId == null)
+            {
+                // Reject: No database-backed indexer ID provided
                 return;
+            }
 
-            // Early exit conditions to avoid unnecessary processing
             if (string.IsNullOrEmpty(searchResult.TorrentUrl))
             {
                 _logger.LogDebug("Skipping MyAnonamouse cache: no TorrentUrl for '{Title}'", LogRedaction.SanitizeText(searchResult.Title));
@@ -808,15 +813,9 @@ namespace Listenarr.Api.Services
             {
                 var dbContext = await _dbContextFactory.CreateDbContextAsync();
                 
-                // Security: Only proceed if we have a valid IndexerId from the database
-                // This prevents processing arbitrary search results without proper validation
-                if (!searchResult.IndexerId.HasValue)
-                {
-                    _logger.LogDebug("Skipping MyAnonamouse cache: no IndexerId for '{Title}'", LogRedaction.SanitizeText(searchResult.Title));
-                    return;
-                }
-
-                Listenarr.Domain.Models.Indexer? indexer = await dbContext.Indexers.FindAsync(searchResult.IndexerId.Value);
+                // Security: Fetch indexer from database using the validated ID
+                // Only trusted, administrator-configured indexers can trigger authenticated requests
+                var indexer = await dbContext.Indexers.FindAsync(searchResult.IndexerId.Value);
 
                 // Security: Indexer must exist in database - reject if not found
                 if (indexer == null)
