@@ -56,8 +56,10 @@ public class FileSystemController : ControllerBase
 
             try
             {
-                // Get directories in the current path
+                // Get directories and files in the current path
                 var dirInfo = new DirectoryInfo(normalizedPath);
+                
+                // Add directories
                 foreach (var dir in dirInfo.GetDirectories())
                 {
                     // Skip hidden and system directories
@@ -75,6 +77,25 @@ public class FileSystemController : ControllerBase
                         LastModified = dir.LastWriteTime
                     });
                 }
+
+                // Add files
+                foreach (var file in dirInfo.GetFiles())
+                {
+                    // Skip hidden and system files
+                    if ((file.Attributes & FileAttributes.Hidden) != 0 ||
+                        (file.Attributes & FileAttributes.System) != 0)
+                    {
+                        continue;
+                    }
+
+                    directories.Add(new FileSystemItem
+                    {
+                        Name = file.Name,
+                        Path = file.FullName,
+                        IsDirectory = false,
+                        LastModified = file.LastWriteTime
+                    });
+                }
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -85,7 +106,7 @@ public class FileSystemController : ControllerBase
             {
                 CurrentPath = normalizedPath,
                 ParentPath = parent?.FullName,
-                Items = directories.OrderBy(d => d.Name).ToList()
+                Items = directories.OrderByDescending(d => d.IsDirectory).ThenBy(d => d.Name).ToList()
             };
         }
         catch (Exception ex)
