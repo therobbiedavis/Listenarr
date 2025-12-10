@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -21,7 +21,8 @@ using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Generic;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Controllers
 {
@@ -31,7 +32,7 @@ namespace Listenarr.Api.Controllers
     {
         private readonly ListenArrDbContext _dbContext;
         private readonly ILogger<HistoryController> _logger;
-        
+
         public HistoryController(ListenArrDbContext dbContext, ILogger<HistoryController> logger)
         {
             _dbContext = dbContext;
@@ -61,9 +62,9 @@ namespace Listenarr.Api.Controllers
             var history = await query.ToListAsync();
             var total = await _dbContext.History.CountAsync();
 
-            return Ok(new 
-            { 
-                history, 
+            return Ok(new
+            {
+                history,
                 total,
                 limit = limit ?? total,
                 offset = offset ?? 0
@@ -81,7 +82,7 @@ namespace Listenarr.Api.Controllers
                 .OrderByDescending(h => h.Timestamp)
                 .ToListAsync();
 
-            _logger.LogInformation("Retrieved {Count} history entries for audiobook ID {AudiobookId}", 
+            _logger.LogInformation("Retrieved {Count} history entries for audiobook ID {AudiobookId}",
                 history.Count, audiobookId);
 
             return Ok(history);
@@ -192,14 +193,15 @@ namespace Listenarr.Api.Controllers
             _dbContext.History.RemoveRange(oldEntries);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Cleaned up {Count} history entries older than {Days} days", 
+            _logger.LogInformation("Cleaned up {Count} history entries older than {Days} days",
                 oldEntries.Count, days);
 
-            return Ok(new 
-            { 
-                message = $"Cleaned up history entries older than {days} days", 
-                deletedCount = oldEntries.Count 
+            return Ok(new
+            {
+                message = $"Cleaned up history entries older than {days} days",
+                deletedCount = oldEntries.Count
             });
         }
     }
 }
+

@@ -7,34 +7,34 @@ namespace Listenarr.Api.Services
     {
         [JsonPropertyName("key")]
         public string? Key { get; set; }
-        
+
         [JsonPropertyName("title")]
         public string? Title { get; set; }
-        
+
         [JsonPropertyName("author_name")]
         public List<string>? AuthorName { get; set; }
-        
+
         [JsonPropertyName("author_key")]
         public List<string>? AuthorKey { get; set; }
-        
+
         [JsonPropertyName("first_publish_year")]
         public int? FirstPublishYear { get; set; }
-        
+
         [JsonPropertyName("isbn")]
         public List<string>? Isbn { get; set; }
-        
+
         [JsonPropertyName("publisher")]
         public List<string>? Publisher { get; set; }
-        
+
         [JsonPropertyName("cover_i")]
         public int? CoverId { get; set; }
-        
+
         [JsonPropertyName("edition_count")]
         public int? EditionCount { get; set; }
-        
+
         [JsonPropertyName("language")]
         public List<string>? Language { get; set; }
-        
+
         [JsonPropertyName("subject")]
         public List<string>? Subject { get; set; }
     }
@@ -43,10 +43,10 @@ namespace Listenarr.Api.Services
     {
         [JsonPropertyName("start")]
         public int Start { get; set; }
-        
+
         [JsonPropertyName("num_found")]
         public int NumFound { get; set; }
-        
+
         [JsonPropertyName("docs")]
         public List<OpenLibraryBook> Docs { get; set; } = new();
     }
@@ -139,20 +139,20 @@ namespace Listenarr.Api.Services
 
                 var queryString = string.Join("&", searchParams);
                 var url = $"{BaseUrl}/search.json?{queryString}";
-                
-                _logger.LogInformation("Searching OpenLibrary: {Url}", url);
-                
+
+                _logger.LogInformation("Searching OpenLibrary: {Url}", LogRedaction.SanitizeUrl(url));
+
                 var response = await _httpClient.GetAsync(url);
                 response.EnsureSuccessStatusCode();
-                
+
                 var jsonContent = await response.Content.ReadAsStringAsync();
                 var searchResponse = JsonSerializer.Deserialize<OpenLibrarySearchResponse>(jsonContent);
-                
+
                 return searchResponse ?? new OpenLibrarySearchResponse();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching OpenLibrary for title: {Title}, author: {Author}", title, author);
+                _logger.LogError(ex, "Error searching OpenLibrary for title: {Title}, author: {Author}", LogRedaction.SanitizeText(title), LogRedaction.SanitizeText(author));
                 return new OpenLibrarySearchResponse();
             }
         }

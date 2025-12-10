@@ -1,4 +1,5 @@
 using System;
+using Serilog;
 using Microsoft.Data.Sqlite;
 using System.IO;
 
@@ -14,11 +15,11 @@ static class DeleteDownloadsProgram
             string dbPath = Path.Combine(Directory.GetCurrentDirectory(), "config", "database", "listenarr.db");
             if (!File.Exists(dbPath))
             {
-                Console.WriteLine($"Database file not found at: {dbPath}");
+                Log.Logger.Warning("Database file not found at: {DbPath}", dbPath);
                 return 2;
             }
 
-            Console.WriteLine($"Opening database: {dbPath}");
+            Log.Logger.Information("Opening database: {DbPath}", dbPath);
 
             using var connection = new SqliteConnection($"Data Source={dbPath}");
             connection.Open();
@@ -29,7 +30,7 @@ static class DeleteDownloadsProgram
             {
                 cmd.CommandText = "DELETE FROM \"Downloads\";";
                 cmd.ExecuteNonQuery();
-                Console.WriteLine("Deleted rows from Downloads table.");
+                Log.Logger.Information("Deleted rows from Downloads table.");
             }
 
             // Reset sqlite_sequence for Downloads if present
@@ -39,20 +40,19 @@ static class DeleteDownloadsProgram
                 try
                 {
                     cmd2.ExecuteNonQuery();
-                    Console.WriteLine("Reset sqlite_sequence for Downloads (if it existed).");
+                    Log.Logger.Information("Reset sqlite_sequence for Downloads (if it existed).");
                 }
                 catch { }
             }
 
             tx.Commit();
             connection.Close();
-            Console.WriteLine("Done.");
+            Log.Logger.Information("Done.");
             return 0;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error: {ex.Message}");
-            Console.WriteLine(ex.StackTrace);
+            Log.Logger.Error(ex, "Error while deleting downloads");
             return 1;
         }
     }

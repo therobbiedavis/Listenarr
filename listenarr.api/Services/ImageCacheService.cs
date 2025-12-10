@@ -43,12 +43,12 @@ namespace Listenarr.Api.Services
         {
             _logger = logger;
             _httpClient = httpClientFactory.CreateClient();
-            
+
             // Set up cache directories
             var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config");
             _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
             _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
-            
+
             // Ensure directories exist
             Directory.CreateDirectory(_tempCachePath);
             Directory.CreateDirectory(_libraryImagePath);
@@ -84,7 +84,7 @@ namespace Listenarr.Api.Services
                 }
 
                 _logger.LogInformation("Downloading image from {Url} for {Identifier}", imageUrl, identifier);
-                
+
                 // Download image
                 var response = await _httpClient.GetAsync(imageUrl);
                 response.EnsureSuccessStatusCode();
@@ -162,7 +162,7 @@ namespace Listenarr.Api.Services
                 // Move to library storage
                 Directory.CreateDirectory(_libraryImagePath);
                 File.Move(tempPath, libraryPath, overwrite: true);
-                
+
                 _logger.LogInformation("Image moved to library storage: {Identifier}", identifier);
                 return GetRelativePath(libraryPath);
             }
@@ -202,7 +202,7 @@ namespace Listenarr.Api.Services
             try
             {
                 _logger.LogInformation("Clearing temp image cache");
-                
+
                 if (Directory.Exists(_tempCachePath))
                 {
                     var files = Directory.GetFiles(_tempCachePath);
@@ -233,7 +233,7 @@ namespace Listenarr.Api.Services
             // Try to find existing file with any extension
             var sanitized = SanitizeFileName(identifier);
             var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
-            
+
             foreach (var ext in extensions)
             {
                 var path = Path.Combine(basePath, sanitized + ext);

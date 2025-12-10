@@ -1,82 +1,87 @@
-name: CI - Build & Artifacts
+name: CI
 
 on:
   push:
-    branches: [ develop, main, canary ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ develop, main, canary ]
+    branches: [ main, master ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        dotnet: [8.0]
-        node: [20]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ matrix.dotnet }}
+          dotnet-version: 8.0.x
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 18
           cache: 'npm'
 
-      - name: Restore .NET
+      - name: Restore .NET packages
         run: dotnet restore listenarr.sln
 
-      - name: Build solution
-        run: dotnet build listenarr.sln -c Release --no-restore
-
-      - name: Publish API (linux-x64) (runs frontend build via MSBuild target)
-        working-directory: ./listenarr.api
-        run: dotnet publish Listenarr.Api.csproj -c Release -r linux-x64 --no-self-contained -o ./publish/linux-x64
-
-      - name: Fail if tools missing in publish (quick fail)
+      - name: Enforce layering rules
         run: |
-          echo "Checking publish locations for tools folder"
-          # CI publishes into listenarr.api/publish/linux-x64 (relative to repo root)
-          if [ -d "listenarr.api/publish/linux-x64/tools" ]; then
-            echo "Found tools in listenarr.api/publish/linux-x64/tools"
-            ls -la listenarr.api/publish/linux-x64/tools || true
-          elif [ -d "listenarr.api/publish/tools" ]; then
-            echo "Found tools in listenarr.api/publish/tools"
-            ls -la listenarr.api/publish/tools || true
-          elif [ -d "listenarr.api/publish/linux-x64/publish/tools" ]; then
-            echo "Found tools in nested listenarr.api/publish/linux-x64/publish/tools"
-            ls -la listenarr.api/publish/linux-x64/publish/tools || true
+          # Fail CI if listenarr.api source files reference listenarr.infrastructure namespaces.
+          # This is a lightweight safeguard; for stricter checks consider adding a Roslyn analyzer.
+          echo "Checking for layering violations (api -> infrastructure)..."
+          set -e
+          # Search only C# source files under listenarr.api for references to the infrastructure namespace.
+          if git grep -n --no-color "listenarr.infrastructure" -- "listenarr.api/**/*.cs" || git grep -n --no-color "Listenarr.Infrastructure" -- "listenarr.api/**/*.cs"; then
+            echo "Layering violation: listenarr.api references listenarr.infrastructure namespaces or symbols." >&2
+            echo "Move contracts to listenarr.application / listenarr.domain and implementations to listenarr.infrastructure." >&2
+            exit 1
+          fi
+          echo "No api->infrastructure references found."
+
+      - name: Install frontend deps
+        working-directory: fe
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: fe
+        run: npm run build --if-present
+
+      - name: Frontend lint
+        working-directory: fe
+        run: |
+          echo "Running frontend linter (if configured)..."
+          # If a lint script exists it will run; --if-present prevents error when absent.
+          if npm run lint --silent --if-present; then
+            echo "Frontend lint passed (or no lint script present)."
           else
-            echo "ERROR: tools folder not found in publish outputs. Listing publish directories for debugging:"
-            ls -la listenarr.api/publish || true
-            ls -la listenarr.api/publish/linux-x64 || true
+            echo "Frontend lint failed." >&2
             exit 1
           fi
 
-      - name: Upload API artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-publish-linux-x64
-          path: listenarr.api/publish/linux-x64
+      - name: Run DI assertions
+        run: dotnet test tests/Listenarr.Api.Tests/Listenarr.Api.Tests.csproj --no-build --filter FullyQualifiedName~DependencyInjectionTests --verbosity minimal
 
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: listenarr.api/wwwroot
+      - name: Build solution
+        run: dotnet build listenarr.sln --no-restore --configuration Release
 
-      - name: Build Docker images from publish output
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: listenarr.api/Dockerfile.runtime
-          build-args: |
-            PUBLISH_DIR=listenarr.api/publish/linux-x64
-          push: false
-          tags: |
-            ${{ github.repository_owner }}/listenarr:ci-publish
+      - name: Run backend tests
+        run: dotnet test listenarr.sln --no-build --verbosity normal
+
+      - name: Run frontend tests
+        working-directory: fe
+        run: |
+          echo "Running frontend tests (if configured)..."
+          # Runs tests if test script exists. --if-present makes npm exit 0 when script is absent.
+          if npm run test --silent --if-present; then
+            echo "Frontend tests ran successfully."
+          else
+            echo "Frontend tests failed." >&2
+            exit 1
+          fi

@@ -1,8 +1,9 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Controllers
 {
@@ -12,15 +13,17 @@ namespace Listenarr.Api.Controllers
     {
         private readonly ListenArrDbContext _db;
         private readonly IAudioFileService _audioFileService;
+        private readonly IServiceScopeFactory _scopeFactory;
 
-    private readonly IStartupConfigService _startupConfigService;
-    private readonly Microsoft.AspNetCore.Antiforgery.IAntiforgery _antiforgery;
-    private readonly IMetadataService _metadataService;
+        private readonly IStartupConfigService _startupConfigService;
+        private readonly Microsoft.AspNetCore.Antiforgery.IAntiforgery _antiforgery;
+        private readonly IMetadataService _metadataService;
 
-        public AdminMetadataController(ListenArrDbContext db, IAudioFileService audioFileService, IStartupConfigService startupConfigService, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, IMetadataService metadataService)
+        public AdminMetadataController(ListenArrDbContext db, IAudioFileService audioFileService, IServiceScopeFactory scopeFactory, IStartupConfigService startupConfigService, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, IMetadataService metadataService)
         {
             _db = db;
             _audioFileService = audioFileService;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _startupConfigService = startupConfigService;
             _antiforgery = antiforgery;
             _metadataService = metadataService;
@@ -89,7 +92,7 @@ namespace Listenarr.Api.Controllers
                 return BadRequest(new { message = "Invalid or missing CSRF token", detail = ex.Message });
             }
 
-            using var scope = HttpContext.RequestServices.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
             var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
 
@@ -129,3 +132,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

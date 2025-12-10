@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -18,9 +18,10 @@
 
 using Serilog.Core;
 using Serilog.Events;
+using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -29,21 +30,21 @@ namespace Listenarr.Api.Services
     /// </summary>
     public class SignalRLogSink : ILogEventSink
     {
-        private IServiceProvider? _serviceProvider;
+        private IHubContext<LogHub>? _hubContext;
 
         public SignalRLogSink()
         {
         }
 
-        public void Initialize(IServiceProvider serviceProvider)
+        public void Initialize(IHubContext<LogHub> hubContext)
         {
-            _serviceProvider = serviceProvider;
+            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
         }
 
         public void Emit(LogEvent logEvent)
         {
-            // Don't try to broadcast if service provider not initialized yet
-            if (_serviceProvider == null)
+            // Don't try to broadcast if hub context not initialized yet
+            if (_hubContext == null)
             {
                 return;
             }
@@ -53,14 +54,7 @@ namespace Listenarr.Api.Services
             {
                 try
                 {
-                    // Create a scope to resolve the hub context
-                    using var scope = _serviceProvider.CreateScope();
-                    var hubContext = scope.ServiceProvider.GetService<IHubContext<LogHub>>();
-
-                    if (hubContext == null)
-                    {
-                        return;
-                    }
+                    var hubContext = _hubContext;
 
                     // Map Serilog log level to our log level string
                     var level = logEvent.Level switch
@@ -103,11 +97,44 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception ex)
                 {
-                    // Don't log errors from the log sink to avoid infinite loops
-                    // Just write to console as a fallback
-                    Console.WriteLine($"[SignalRLogSink] Error broadcasting log: {ex.Message}");
+                    // If the host is shutting down the service provider may be disposed.
+                    // Swallow disposal-related exceptions (including when wrapped in AggregateException
+                    // or InnerExceptions) to avoid noisy CI logs during shutdown.
+                    static bool IsOrContainsObjectDisposed(Exception? e)
+                    {
+                        while (e != null)
+                        {
+                            if (e is ObjectDisposedException)
+                                return true;
+
+                            if (e is AggregateException agg)
+                            {
+                                foreach (var ie in agg.InnerExceptions)
+                                {
+                                    if (IsOrContainsObjectDisposed(ie))
+                                        return true;
+                                }
+
+                                return false;
+                            }
+
+                            e = e.InnerException;
+                        }
+
+                        return false;
+                    }
+
+                    if (IsOrContainsObjectDisposed(ex))
+                    {
+                        return;
+                    }
+
+                    // Don't log errors from the log sink to avoid infinite loops.
+                    // Use Trace so output is still available for diagnostics without feeding back into Serilog.
+                    Trace.TraceError($"[SignalRLogSink] Error broadcasting log: {ex.Message}");
                 }
             });
         }
     }
 }
+

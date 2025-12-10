@@ -7,14 +7,14 @@ namespace Listenarr.Api.Services
     /// </summary>
     public class TempFileCleanupService : BackgroundService
     {
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<TempFileCleanupService> _logger;
         private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(6); // Run every 6 hours
 
-        public TempFileCleanupService(IServiceProvider serviceProvider, ILogger<TempFileCleanupService> logger)
+        public TempFileCleanupService(IServiceScopeFactory scopeFactory, ILogger<TempFileCleanupService> logger)
         {
-            _serviceProvider = serviceProvider;
-            _logger = logger;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,18 +26,18 @@ namespace Listenarr.Api.Services
                 try
                 {
                     _logger.LogInformation("Running temp file cleanup at {Time}", DateTime.Now);
-                    
+
                     // Create a scope to resolve scoped services
-                    using (var scope = _serviceProvider.CreateScope())
+                    using (var scope = _scopeFactory.CreateScope())
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
-                        
+
                         // Clean up temp files older than 24 hours
                         if (downloadService is DownloadService ds)
                         {
                             ds.CleanupOldTempFiles(24);
                         }
-                        
+
                         _logger.LogInformation("Temp file cleanup completed successfully");
                     }
                 }

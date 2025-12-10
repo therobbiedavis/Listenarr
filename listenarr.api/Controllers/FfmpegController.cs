@@ -17,11 +17,13 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IFfmpegService _ffmpegService;
         private readonly ILogger<FfmpegController> _logger;
+        private readonly IProcessRunner? _processRunner;
 
-        public FfmpegController(IFfmpegService ffmpegService, ILogger<FfmpegController> logger)
+        public FfmpegController(IFfmpegService ffmpegService, ILogger<FfmpegController> logger, IProcessRunner? processRunner = null)
         {
             _ffmpegService = ffmpegService;
             _logger = logger;
+            _processRunner = processRunner;
         }
 
         [HttpGet("info")]
@@ -62,36 +64,34 @@ namespace Listenarr.Api.Controllers
                     CreateNoWindow = true
                 };
 
-                using var proc = Process.Start(startInfo);
-                if (proc == null)
+                if (_processRunner != null)
                 {
-                    _logger.LogWarning("Failed to start ffprobe process for {File}", filePath);
-                    return StatusCode(500, new { message = "Failed to start ffprobe process" });
+                    var pr = await _processRunner.RunAsync(startInfo, 10000);
+                    _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}", pr.ExitCode, LogRedaction.SanitizeFilePath(filePath), pr.Stderr?.Length ?? 0);
+
+                    object? parsed = null;
+                    if (!string.IsNullOrEmpty(pr.Stdout))
+                    {
+                        try { parsed = JsonSerializer.Deserialize<JsonElement>(pr.Stdout); }
+                        catch (Exception jex) { _logger.LogDebug(jex, "Failed to parse ffprobe JSON output for {File}", LogRedaction.SanitizeFilePath(filePath)); }
+                    }
+
+                    return Ok(new { ffprobePath, exitCode = pr.ExitCode, stdout = pr.Stdout, stderr = pr.Stderr, parsed });
                 }
-
-                var stdout = await proc.StandardOutput.ReadToEndAsync();
-                var stderr = await proc.StandardError.ReadToEndAsync();
-                proc.WaitForExit(10000);
-
-                _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}", proc.ExitCode, filePath, stderr?.Length ?? 0);
-
-                object? parsed = null;
-                if (!string.IsNullOrEmpty(stdout))
+                else
                 {
-                    try { parsed = JsonSerializer.Deserialize<JsonElement>(stdout); }
-                    catch (Exception jex) { _logger.LogDebug(jex, "Failed to parse ffprobe JSON output for {File}", filePath); }
+                    _logger.LogWarning("IProcessRunner is not available; cannot run ffprobe for {File}", LogRedaction.SanitizeFilePath(filePath));
+                    return StatusCode(500, new { message = "IProcessRunner service is not available to run external processes" });
                 }
-
-                return Ok(new { ffprobePath, exitCode = proc.ExitCode, stdout, stderr, parsed });
             }
             catch (System.ComponentModel.Win32Exception wex)
             {
-                _logger.LogWarning(wex, "ffprobe execution failed for {File}", filePath);
+                _logger.LogWarning(wex, "ffprobe execution failed for {File}", LogRedaction.SanitizeFilePath(filePath));
                 return StatusCode(500, new { message = "ffprobe execution failed", error = wex.Message });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error running ffprobe for {File}", filePath);
+                _logger.LogError(ex, "Error running ffprobe for {File}", LogRedaction.SanitizeFilePath(filePath));
                 return StatusCode(500, new { message = "Error running ffprobe", error = ex.Message });
             }
         }

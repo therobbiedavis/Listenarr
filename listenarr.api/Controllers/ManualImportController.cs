@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using System.Text.RegularExpressions;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations;
 
@@ -46,7 +46,8 @@ public class ManualImportController : ControllerBase
 
             var files = Directory.EnumerateFiles(normalized, "*.*", SearchOption.AllDirectories)
                 .Where(f => !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
-                .Select(f => new {
+                .Select(f => new
+                {
                     relativePath = Path.GetRelativePath(normalized, f),
                     fullPath = f,
                     size = new FileInfo(f).Length,
@@ -60,7 +61,8 @@ public class ManualImportController : ControllerBase
                 })
                 .ToList();
 
-            var items = files.Select(f => new {
+            var items = files.Select(f => new
+            {
                 relativePath = f.relativePath,
                 fullPath = f.fullPath,
                 size = FormatSize(f.size),
@@ -86,11 +88,11 @@ public class ManualImportController : ControllerBase
     {
         try
         {
-            if (request == null || string.IsNullOrWhiteSpace(request.Path)) 
+            if (request == null || string.IsNullOrWhiteSpace(request.Path))
                 return BadRequest(new { error = "Invalid request" });
-            
+
             var normalized = Path.GetFullPath(request.Path);
-            if (!Directory.Exists(normalized)) 
+            if (!Directory.Exists(normalized))
                 return NotFound(new { error = "Directory not found" });
 
             if (request.Mode == "automatic")
@@ -108,10 +110,11 @@ public class ManualImportController : ControllerBase
                     var result = await ImportFileAsync(item, request.InputMode ?? "copy", usedDestinations);
                     results.Add(result);
                 }
-                
+
                 var successCount = results.Count(r => r.Success);
-                return Ok(new { 
-                    importedCount = successCount, 
+                return Ok(new
+                {
+                    importedCount = successCount,
                     totalCount = results.Count,
                     results = results
                 });
@@ -133,11 +136,11 @@ public class ManualImportController : ControllerBase
             // Validate FullPath
             if (string.IsNullOrWhiteSpace(item.FullPath))
             {
-                return new ManualImportResult 
-                { 
-                    Success = false, 
+                return new ManualImportResult
+                {
+                    Success = false,
                     Error = "FullPath is required",
-                    FilePath = item.FullPath 
+                    FilePath = item.FullPath
                 };
             }
 
@@ -145,22 +148,22 @@ public class ManualImportController : ControllerBase
             var audiobook = await _audiobookRepository.GetByIdAsync(item.MatchedAudiobookId);
             if (audiobook == null)
             {
-                return new ManualImportResult 
-                { 
-                    Success = false, 
+                return new ManualImportResult
+                {
+                    Success = false,
                     Error = $"Audiobook with ID {item.MatchedAudiobookId} not found",
-                    FilePath = item.FullPath 
+                    FilePath = item.FullPath
                 };
             }
 
             // Check if source file exists
             if (!System.IO.File.Exists(item.FullPath))
             {
-                return new ManualImportResult 
-                { 
-                    Success = false, 
+                return new ManualImportResult
+                {
+                    Success = false,
                     Error = "Source file not found",
-                    FilePath = item.FullPath 
+                    FilePath = item.FullPath
                 };
             }
 
@@ -169,17 +172,17 @@ public class ManualImportController : ControllerBase
             {
                 var appSettings = await _configService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
                 var fallbackPath = appSettings.OutputPath;
-                
+
                 if (string.IsNullOrWhiteSpace(fallbackPath))
                 {
-                    return new ManualImportResult 
-                    { 
-                        Success = false, 
+                    return new ManualImportResult
+                    {
+                        Success = false,
                         Error = "No base path configured for audiobook and no default output path set",
-                        FilePath = item.FullPath 
+                        FilePath = item.FullPath
                     };
                 }
-                
+
                 // Use fallback path
                 audiobook.BasePath = fallbackPath;
             }
@@ -188,17 +191,17 @@ public class ManualImportController : ControllerBase
             var metadata = await _metadataService.ExtractFileMetadataAsync(item.FullPath);
             if (metadata == null)
             {
-                return new ManualImportResult 
-                { 
-                    Success = false, 
+                return new ManualImportResult
+                {
+                    Success = false,
                     Error = "Failed to extract metadata from file",
-                    FilePath = item.FullPath 
+                    FilePath = item.FullPath
                 };
             }
 
             // Generate destination path using only disc/chapter components
             var destinationPath = await GenerateManualImportPathAsync(audiobook, metadata, item.FullPath);
-            
+
             // Ensure destination directory exists
             var destinationDir = Path.GetDirectoryName(destinationPath);
             if (!string.IsNullOrEmpty(destinationDir))
@@ -206,37 +209,37 @@ public class ManualImportController : ControllerBase
                 Directory.CreateDirectory(destinationDir);
             }
 
-                // If destination file exists, create a unique filename (append " (1)", " (2)", ...)
-                try
-                {
-                    _logger.LogDebug("Resolving unique destination for manual import: {Dest}", destinationPath);
-                    destinationPath = FileUtils.GetUniqueDestinationPath(destinationPath, System.IO.File.Exists, usedDestinations);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to generate unique destination filename for manual import: {Destination}", destinationPath);
-                }
+            // If destination file exists, create a unique filename (append " (1)", " (2)", ...)
+            try
+            {
+                _logger.LogDebug("Resolving unique destination for manual import: {Dest}", destinationPath);
+                destinationPath = FileUtils.GetUniqueDestinationPath(destinationPath, System.IO.File.Exists, usedDestinations);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate unique destination filename for manual import: {Destination}", destinationPath);
+            }
 
-                // Move or copy the file
-                if (inputMode == "move")
+            // Move or copy the file
+            if (inputMode == "move")
+            {
+                System.IO.File.Move(item.FullPath, destinationPath);
+                _logger.LogInformation("Moved file {Source} to {Destination}", item.FullPath, destinationPath);
+            }
+            else
+            {
+                System.IO.File.Copy(item.FullPath, destinationPath);
+                _logger.LogInformation("Copied file {Source} to {Destination}", item.FullPath, destinationPath);
+            }
+            // Record the destination to avoid collisions with subsequent items in this batch
+            try
+            {
+                if (usedDestinations != null)
                 {
-                    System.IO.File.Move(item.FullPath, destinationPath);
-                    _logger.LogInformation("Moved file {Source} to {Destination}", item.FullPath, destinationPath);
+                    usedDestinations.Add(destinationPath);
                 }
-                else
-                {
-                    System.IO.File.Copy(item.FullPath, destinationPath);
-                    _logger.LogInformation("Copied file {Source} to {Destination}", item.FullPath, destinationPath);
-                }
-                // Record the destination to avoid collisions with subsequent items in this batch
-                try
-                {
-                    if (usedDestinations != null)
-                    {
-                        usedDestinations.Add(destinationPath);
-                    }
-                }
-                catch { }
+            }
+            catch { }
             // After a successful move/copy, enqueue a focused scan for the matched audiobook
             try
             {
@@ -255,9 +258,9 @@ public class ManualImportController : ControllerBase
                 _logger.LogWarning(ex, "Failed to enqueue scan for audiobook {AudiobookId} after manual import", audiobook.Id);
             }
 
-            return new ManualImportResult 
-            { 
-                Success = true, 
+            return new ManualImportResult
+            {
+                Success = true,
                 FilePath = item.FullPath,
                 DestinationPath = destinationPath,
                 AudiobookId = audiobook.Id,
@@ -267,11 +270,11 @@ public class ManualImportController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error importing file {FilePath}", item.FullPath);
-            return new ManualImportResult 
-            { 
-                Success = false, 
+            return new ManualImportResult
+            {
+                Success = false,
                 Error = ex.Message,
-                FilePath = item.FullPath 
+                FilePath = item.FullPath
             };
         }
     }
@@ -280,7 +283,7 @@ public class ManualImportController : ControllerBase
     {
         // For manual import, create folder structure within the audiobook's base path
         // Since basePath already represents the author's folder, we use a pattern without {Author}
-        
+
         // Get the file extension from the source file (preserve original extension)
         var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
         if (string.IsNullOrEmpty(extension))
@@ -296,7 +299,7 @@ public class ManualImportController : ControllerBase
         }
 
         // Use a manual import specific pattern: {Series}/{Title} or just {Title} if no series
-        var pattern = string.IsNullOrWhiteSpace(audiobook.Series) 
+        var pattern = string.IsNullOrWhiteSpace(audiobook.Series)
             ? "{Title}"  // No series, just create title folder
             : "{Series}/{Title}";  // Series folder, then title folder
 
@@ -311,7 +314,7 @@ public class ManualImportController : ControllerBase
 
         // Apply the pattern to get relative path
         var relativePath = _fileNamingService.ApplyNamingPattern(pattern, variables);
-        
+
         // Ensure it has the correct extension
         if (!relativePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
         {
@@ -320,8 +323,8 @@ public class ManualImportController : ControllerBase
 
         // Combine with audiobook's base path
         var basePath = audiobook.BasePath ?? string.Empty;
-        var fullPath = string.IsNullOrWhiteSpace(basePath) 
-            ? relativePath 
+        var fullPath = string.IsNullOrWhiteSpace(basePath)
+            ? relativePath
             : Path.Combine(basePath, relativePath);
 
         return Task.FromResult(fullPath);
@@ -346,13 +349,13 @@ public class ManualImportRequest
 {
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
-    
+
     [JsonPropertyName("mode")]
     public string Mode { get; set; } = "interactive";
-    
+
     [JsonPropertyName("inputMode")]
     public string? InputMode { get; set; } // "move" or "copy"
-    
+
     [JsonPropertyName("items")]
     public List<ManualImportItem>? Items { get; set; }
 }
@@ -361,23 +364,23 @@ public class ManualImportItem
 {
     [JsonPropertyName("relativePath")]
     public string RelativePath { get; set; } = string.Empty;
-    
+
     [JsonPropertyName("fullPath")]
     [Required]
     public string? FullPath { get; set; }
-    
+
     [JsonPropertyName("matchedAudiobookId")]
     public int MatchedAudiobookId { get; set; }
-    
+
     [JsonPropertyName("releaseGroup")]
     public string? ReleaseGroup { get; set; }
-    
+
     [JsonPropertyName("qualityProfileId")]
     public int? QualityProfileId { get; set; }
-    
+
     [JsonPropertyName("language")]
     public string? Language { get; set; }
-    
+
     [JsonPropertyName("size")]
     public string? Size { get; set; }
 }
@@ -391,3 +394,4 @@ public class ManualImportResult
     public string? AudiobookTitle { get; set; }
     public string? Error { get; set; }
 }
+

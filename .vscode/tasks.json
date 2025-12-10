@@ -9,7 +9,7 @@
                 "build",
                 "${workspaceFolder}/listenarr.sln",
                 "/property:GenerateFullPaths=true",
-                "/consoleloggerparameters:NoSummary;ForceNoAlign"
+                "\"/consoleloggerparameters:NoSummary;ForceNoAlign\""
             ],
             "problemMatcher": "$msCompile"
         },
@@ -21,7 +21,7 @@
                 "publish",
                 "${workspaceFolder}/listenarr.sln",
                 "/property:GenerateFullPaths=true",
-                "/consoleloggerparameters:NoSummary;ForceNoAlign"
+                "\"/consoleloggerparameters:NoSummary;ForceNoAlign\""
             ],
             "problemMatcher": "$msCompile"
         },
@@ -36,6 +36,17 @@
                 "${workspaceFolder}/listenarr.sln"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "type": "npm",
+            "script": "build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "label": "npm: build",
+            "detail": "npm run build:api && npm run build:web"
         }
     ]
 }

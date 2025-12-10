@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.IO;
@@ -29,13 +29,15 @@ namespace Listenarr.Api.Services
         private readonly IConfigurationService _configurationService;
         private readonly IFfmpegService _ffmpegService;
         private readonly ILogger<MetadataService> _logger;
+        private readonly IProcessRunner? _processRunner;
 
-        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService)
+        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IProcessRunner? processRunner = null)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
             _ffmpegService = ffmpegService;
             _logger = logger;
+            _processRunner = processRunner;
         }
 
         public async Task<AudioMetadata?> GetMetadataAsync(string title, string? artist = null, string? isbn = null)
@@ -56,7 +58,7 @@ namespace Listenarr.Api.Services
                     var queryParams = new List<string>();
                     if (!string.IsNullOrEmpty(title)) queryParams.Add($"title={Uri.EscapeDataString(title)}");
                     if (!string.IsNullOrEmpty(artist)) queryParams.Add($"author={Uri.EscapeDataString(artist)}");
-                    
+
                     searchQuery = $"{audnexusUrl}/search?" + string.Join("&", queryParams);
                 }
 
@@ -70,11 +72,11 @@ namespace Listenarr.Api.Services
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync();
-                
+
                 // Parse Audnexus response and convert to AudioMetadata
                 // This is a simplified implementation - you would need to adapt based on actual Audnexus API structure
                 var audnexusData = JsonSerializer.Deserialize<JsonElement>(jsonContent);
-                
+
                 return ParseAudnexusResponse(audnexusData);
             }
             catch (Exception ex)
@@ -84,22 +86,38 @@ namespace Listenarr.Api.Services
             }
         }
 
-    public async Task<AudioMetadata> ExtractFileMetadataAsync(string filePath)
+        public async Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
         {
             try
             {
-                // Run the blocking ffprobe invocation off the calling thread
-                var ffprobeResult = await Task.Run(() =>
+                // If the file doesn't exist, skip running ffprobe and return basic metadata from filename
+                if (!File.Exists(filePath))
+                {
+                    _logger.LogWarning("File not found when attempting metadata extraction: {File}", filePath);
+                    var fallbackMissingFile = new AudioMetadata
+                    {
+                        Title = Path.GetFileNameWithoutExtension(filePath),
+                        Format = Path.GetExtension(filePath).TrimStart('.').ToUpper()
+                    };
+                    _logger.LogInformation($"Extracted basic metadata from (missing) file: {filePath}");
+                    return fallbackMissingFile;
+                }
+
+                // Ask the ffmpeg installer/service for the bundled ffprobe path
+                var ffprobePathService = await _ffmpegService.GetFfprobePathAsync();
+                if (string.IsNullOrEmpty(ffprobePathService) || !File.Exists(ffprobePathService))
+                {
+                    _logger.LogInformation("No bundled ffprobe available at configured location; skipping ffprobe for file: {File}", filePath);
+                    // Let the outer method fall back to filename-based metadata
+                    return null;
+                }
+
+                var ffprobeResult = await Task.Run(async () =>
                 {
                     try
                     {
-                        // Use the known bundled ffprobe path under the application's config directory.
-                        // On Windows the binary is ffprobe.exe, otherwise ffprobe.
-                        var ffprobeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffprobe.exe" : "ffprobe";
-                        var ffprobePath = Path.Combine(Directory.GetCurrentDirectory(), "config", "ffmpeg", ffprobeName);
-                        var ffprobeCmd = ffprobePath; // use explicit bundled path
-
-                        _logger.LogDebug("Attempting to run bundled ffprobe at '{Path}' for file {File}", ffprobePath, filePath);
+                        var ffprobeCmd = ffprobePathService;
+                        _logger.LogDebug("Attempting to run bundled ffprobe at '{Path}' for file {File}", ffprobeCmd, filePath);
 
                         var startInfo = new System.Diagnostics.ProcessStartInfo
                         {
@@ -110,19 +128,17 @@ namespace Listenarr.Api.Services
                             UseShellExecute = false,
                             CreateNoWindow = true
                         };
-                        using var proc = System.Diagnostics.Process.Start(startInfo);
-                        if (proc != null)
+
+                        if (_processRunner != null)
                         {
-                            var output = proc.StandardOutput.ReadToEnd();
-                            var err = proc.StandardError.ReadToEnd();
-                            proc.WaitForExit(5000);
-                            _logger.LogDebug("ffprobe finished for {File} with ExitCode={Exit} StdErrLength={ErrLen}", filePath, proc.ExitCode, err?.Length ?? 0);
-                            if (!string.IsNullOrEmpty(err)) _logger.LogDebug("ffprobe stderr for {File}: {Err}", filePath, err);
-                            if (!string.IsNullOrEmpty(output))
+                            var pr = await _processRunner.RunAsync(startInfo, timeoutMs: 5000).ConfigureAwait(false);
+                            _logger.LogDebug("ffprobe finished for {File} with ExitCode={Exit} StdErrLength={ErrLen}", filePath, pr.ExitCode, pr.Stderr?.Length ?? 0);
+                            if (!string.IsNullOrEmpty(pr.Stderr)) _logger.LogDebug("ffprobe stderr for {File}: {Err}", filePath, pr.Stderr);
+                            if (!string.IsNullOrEmpty(pr.Stdout))
                             {
                                 try
                                 {
-                                    var doc = JsonSerializer.Deserialize<JsonElement>(output);
+                                    var doc = JsonSerializer.Deserialize<JsonElement>(pr.Stdout);
                                     var metadata = new AudioMetadata();
 
                                     // Try to get format info
@@ -134,19 +150,12 @@ namespace Listenarr.Api.Services
                                         }
                                         if (fmt.TryGetProperty("format_name", out var fmtName) && fmtName.ValueKind == JsonValueKind.String)
                                         {
-                                            // ffprobe's format_name can be a comma-separated list (e.g. "mov,mp4,m4a,3gp,3g2,mj2").
-                                            // Normalize to a single, sensible value. Prefer the file extension when it better represents
-                                            // the actual container (for example .m4b should be reported as M4B rather than "mov").
                                             var rawFmt = fmtName.GetString() ?? string.Empty;
                                             var primary = rawFmt.Split(',')[0];
 
-                                            // Determine extension from file path (without leading dot)
                                             var ext = Path.GetExtension(filePath)?.TrimStart('.')?.ToLowerInvariant();
-
                                             if (!string.IsNullOrEmpty(ext))
                                             {
-                                                // If the extension is a more specific container (m4b) or differs from primary token,
-                                                // prefer reporting the extension for clarity. Otherwise use the primary token.
                                                 if (ext == "m4b")
                                                 {
                                                     metadata.Format = ext.ToUpperInvariant();
@@ -189,7 +198,6 @@ namespace Listenarr.Api.Services
                                                 {
                                                     metadata.Bitrate = metadata.Bitrate == 0 ? sbit : metadata.Bitrate;
                                                 }
-                                                // codec_name is the audio codec used by the stream (e.g., aac, opus, mp3)
                                                 if (s.TryGetProperty("codec_name", out var codecName) && codecName.ValueKind == JsonValueKind.String)
                                                 {
                                                     metadata.Codec = codecName.GetString();
@@ -199,7 +207,6 @@ namespace Listenarr.Api.Services
                                         }
                                     }
 
-                                    // Fallback: set title and format from filename if missing
                                     var fileName = Path.GetFileNameWithoutExtension(filePath);
                                     if (string.IsNullOrEmpty(metadata.Title)) metadata.Title = fileName;
                                     if (string.IsNullOrEmpty(metadata.Format)) metadata.Format = Path.GetExtension(filePath).TrimStart('.').ToUpper();
@@ -221,7 +228,6 @@ namespace Listenarr.Api.Services
                     }
                     catch (Exception ex)
                     {
-                        // Swallow inside Task.Run and return null so the outer method handles fallback
                         _logger.LogInformation(ex, "ffprobe not available or failed for file: {File}", filePath);
                         return null;
                     }
@@ -282,7 +288,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private AudioMetadata ParseAudnexusResponse(JsonElement audnexusData)
+        private AudioMetadata? ParseAudnexusResponse(JsonElement audnexusData)
         {
             // This is a simplified parser - adapt based on actual Audnexus API response structure
             var metadata = new AudioMetadata();

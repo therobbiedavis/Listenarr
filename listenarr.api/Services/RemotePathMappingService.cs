@@ -1,4 +1,5 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -61,7 +62,7 @@ public class RemotePathMappingService : IRemotePathMappingService
     {
         // Normalize paths before saving
         mapping.NormalizePaths();
-        
+
         mapping.CreatedAt = DateTime.UtcNow;
         mapping.UpdatedAt = DateTime.UtcNow;
 
@@ -143,7 +144,7 @@ public class RemotePathMappingService : IRemotePathMappingService
         foreach (var mapping in mappings)
         {
             var normalizedMappingPath = NormalizePath(mapping.RemotePath);
-            
+
             // Check if the remote path starts with this mapping's remote path
             if (normalizedRemotePath.StartsWith(normalizedMappingPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -203,7 +204,7 @@ public class RemotePathMappingService : IRemotePathMappingService
         }
 
         path = path.Trim().Replace('\\', '/');
-        
+
         // Ensure trailing slash for directory paths
         if (!path.EndsWith('/'))
         {
@@ -213,3 +214,4 @@ public class RemotePathMappingService : IRemotePathMappingService
         return path;
     }
 }
+

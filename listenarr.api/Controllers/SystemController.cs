@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -138,7 +138,7 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var logFilePath = _systemService.GetLogFilePath();
-                
+
                 // If log file exists, return it
                 if (System.IO.File.Exists(logFilePath))
                 {
@@ -146,15 +146,15 @@ namespace Listenarr.Api.Controllers
                     var fileName = $"listenarr-logs-{DateTime.UtcNow:yyyy-MM-dd-HHmmss}.log";
                     return File(fileBytes, "text/plain", fileName);
                 }
-                
+
                 // If no log file exists, generate one from current logs
                 var logs = _systemService.GetRecentLogs(1000); // Get up to 1000 logs
                 var logContent = new System.Text.StringBuilder();
-                
+
                 logContent.AppendLine($"Listenarr Log Export - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
                 logContent.AppendLine("==========================================");
                 logContent.AppendLine();
-                
+
                 foreach (var log in logs)
                 {
                     var timestamp = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
@@ -169,10 +169,10 @@ namespace Listenarr.Api.Controllers
                     }
                     logContent.AppendLine();
                 }
-                
+
                 var generatedBytes = System.Text.Encoding.UTF8.GetBytes(logContent.ToString());
                 var generatedFileName = $"listenarr-logs-{DateTime.UtcNow:yyyy-MM-dd-HHmmss}.log";
-                
+
                 return File(generatedBytes, "text/plain", generatedFileName);
             }
             catch (Exception ex)

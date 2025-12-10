@@ -2,15 +2,15 @@ version: '3.8'
 
 services:
   listenarr:
-    image: ghcr.io/therobbiedavis/listenarr:latest  # preferred image; change to docker.io/therobbiedavis/listenarr if you must use Docker Hub instead. Or use :stable for releases, :nightly for pre-releases
-    container_name: listenarr
+    image: ghcr.io/therobbiedavis/listenarr:canary ## For Docker Hub, replace the image with docker.io/therobbiedavis/listenarr:canary
+    user: "1001:1001"  ## Replace with your desired UID and GID
     ports:
-      - "5000:5000"  # Map host port 5000 to container port 5000 (standard ASP.NET Core port)
+      - "5000:5000"
     environment:
-      - LISTENARR_PUBLIC_URL=https://your-domain.com  # Replace with your actual domain/IP
+      - LISTENARR_PUBLIC_URL=https://your-domain.com ## OPTIONAL: Used by Discord Bot
     volumes:
-      - listenarr_data:/app/config  # Mount for SQLite database (listenarr.db) and any config
+      - listenarr_data:/app/config
     restart: unless-stopped
 
 volumes:
-  listenarr_data:  # Persistent volume for database and app data
+  listenarr_data:

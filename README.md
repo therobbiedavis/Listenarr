@@ -53,9 +53,11 @@ The easiest way to get started is to use Docker (recommended for production), pr
 
 ```bash
 docker run -d \
+  ## Replace with your desired UID and GID
+  --user 1001:1001 \
   --name listenarr \
   -p 5000:5000 \
-  ##OPTIONAL: Used by Discord Bot
+  ## OPTIONAL: Used by Discord Bot
   -e LISTENARR_PUBLIC_URL=https://your-domain.com \
   -v listenarr_data:/app/config \
   ghcr.io/therobbiedavis/listenarr:canary
@@ -77,10 +79,11 @@ version: '3.8'
 services:
   listenarr:
     image: ghcr.io/therobbiedavis/listenarr:canary
+    user: "1001:1001"  ## Replace with your desired UID and GID
     ports:
       - "5000:5000"
     environment:
-      - LISTENARR_PUBLIC_URL=https://your-domain.com ##OPTIONAL: Used by Discord Bot
+      - LISTENARR_PUBLIC_URL=https://your-domain.com ## OPTIONAL: Used by Discord Bot
     volumes:
       - listenarr_data:/app/config
     restart: unless-stopped

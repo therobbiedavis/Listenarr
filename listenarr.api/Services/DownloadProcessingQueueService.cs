@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
@@ -28,17 +29,51 @@ namespace Listenarr.Api.Services
     {
         private readonly ListenArrDbContext _context;
         private readonly ILogger<DownloadProcessingQueueService> _logger;
+        private readonly DownloadProcessingChannel? _channel;
 
         public DownloadProcessingQueueService(
             ListenArrDbContext context,
-            ILogger<DownloadProcessingQueueService> logger)
+            ILogger<DownloadProcessingQueueService> logger,
+            DownloadProcessingChannel? channel = null)
         {
             _context = context;
             _logger = logger;
+            _channel = channel;
         }
 
         public async Task<string> QueueDownloadProcessingAsync(string downloadId, string sourcePath, string? downloadClientId = null)
         {
+            // Prevent duplicate active jobs for the same download by returning
+            // an existing active job if present. Also avoid rapid requeueing
+            // by honoring recently completed jobs (small cooldown window).
+            var now = DateTime.UtcNow;
+            var recentCompletedCutoff = now.AddSeconds(-300); // 5 minute cooldown
+
+            var existingActive = await _context.DownloadProcessingJobs
+                .Where(j => j.DownloadId == downloadId &&
+                           (j.Status == ProcessingJobStatus.Pending || j.Status == ProcessingJobStatus.Processing || j.Status == ProcessingJobStatus.Retry))
+                .OrderBy(j => j.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (existingActive != null)
+            {
+                _logger.LogInformation("Duplicate enqueue prevented - returning existing active job {JobId} for download {DownloadId}", existingActive.Id, downloadId);
+                return existingActive.Id;
+            }
+
+            // If we have a recently completed job for the same download, avoid
+            // requeuing immediately â€” return the most recent completed job id.
+            var recentCompleted = await _context.DownloadProcessingJobs
+                .Where(j => j.DownloadId == downloadId && j.Status == ProcessingJobStatus.Completed && j.CompletedAt.HasValue && j.CompletedAt >= recentCompletedCutoff)
+                .OrderByDescending(j => j.CompletedAt)
+                .FirstOrDefaultAsync();
+
+            if (recentCompleted != null)
+            {
+                _logger.LogInformation("Download {DownloadId} has a recent completed job {JobId} (within cooldown), not queuing new job", downloadId, recentCompleted.Id);
+                return recentCompleted.Id;
+            }
+
             var job = new DownloadProcessingJob
             {
                 DownloadId = downloadId,
@@ -56,6 +91,21 @@ namespace Listenarr.Api.Services
 
             _logger.LogInformation("Queued download {DownloadId} for post-processing: {JobId}", downloadId, job.Id);
 
+            // If a channel is available, publish the newly queued job for in-memory consumers.
+            try
+            {
+                if (_channel != null)
+                {
+                    await _channel.EnqueueJobAsync(job.Id);
+                    _logger.LogDebug("Published job {JobId} to in-memory processing channel", job.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Do not fail the enqueue operation if the channel publish fails; log for diagnostics.
+                _logger.LogWarning(ex, "Failed to publish job {JobId} to processing channel", job.Id);
+            }
+
             return job.Id;
         }
 
@@ -72,8 +122,8 @@ namespace Listenarr.Api.Services
         {
             var now = DateTime.UtcNow;
             return await _context.DownloadProcessingJobs
-                .Where(j => j.Status == ProcessingJobStatus.Retry && 
-                           j.NextRetryAt.HasValue && 
+                .Where(j => j.Status == ProcessingJobStatus.Retry &&
+                           j.NextRetryAt.HasValue &&
                            j.NextRetryAt <= now)
                 .OrderByDescending(j => j.Priority)
                 .ThenBy(j => j.NextRetryAt)
@@ -146,7 +196,7 @@ namespace Listenarr.Api.Services
         public async Task CleanupOldJobsAsync(int retentionDays = 7)
         {
             var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
-            
+
             var oldJobs = await _context.DownloadProcessingJobs
                 .Where(j => (j.Status == ProcessingJobStatus.Completed || j.Status == ProcessingJobStatus.Failed) &&
                            j.CompletedAt.HasValue && j.CompletedAt < cutoffDate)
@@ -156,8 +206,8 @@ namespace Listenarr.Api.Services
             {
                 _context.DownloadProcessingJobs.RemoveRange(oldJobs);
                 await _context.SaveChangesAsync();
-                
-                _logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days", 
+
+                _logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days",
                     oldJobs.Count, retentionDays);
             }
         }
