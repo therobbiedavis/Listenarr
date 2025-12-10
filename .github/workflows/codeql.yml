@@ -26,13 +26,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: ${{ matrix.language }}
-        config-file: ./.github/codeql-config.yml
-
-    - name: Setup .NET
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yml    - name: Setup .NET
       if: matrix.language == 'csharp'
       uses: actions/setup-dotnet@v4
       with:
