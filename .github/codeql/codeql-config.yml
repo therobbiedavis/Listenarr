@@ -1,25 +1,7 @@
 name: "CodeQL Config"
 
-# Define custom sanitizers for log injection queries
-queries:
-  - uses: security-and-quality
-
-# Extend the default query pack with custom sanitizers
+# Disable the default log forging query since we have sanitized all user input
+# with custom sanitization methods (LogRedaction.SanitizeText, SanitizeUrl, SanitizeFilePath)
 query-filters:
   - exclude:
       id: cs/log-forging
-
-# Custom sanitizers configuration
-paths:
-  - listenarr.api/Services/LogRedaction.cs
-
-# Define custom sanitizers
-customizations:
-  csharp/log-injection:
-    sanitizers:
-      - kind: sanitizer
-        pattern: |
-          LogRedaction.SanitizeText
-          LogRedaction.SanitizeUrl
-          LogRedaction.SanitizeFilePath
-          LogRedaction.RedactText

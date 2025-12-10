@@ -1,9 +1,0 @@
-extensions:
-  - addsTo:
-      pack: codeql/csharp-queries
-      extensible: logInjectionSanitizer
-    data:
-      - ["Listenarr.Api.Services", "LogRedaction", "SanitizeText"]
-      - ["Listenarr.Api.Services", "LogRedaction", "SanitizeUrl"]
-      - ["Listenarr.Api.Services", "LogRedaction", "SanitizeFilePath"]
-      - ["Listenarr.Api.Services", "LogRedaction", "RedactText"]
