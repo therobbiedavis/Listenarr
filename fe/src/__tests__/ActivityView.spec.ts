@@ -82,7 +82,7 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     // All tab should not include these completed external items by default (unless user pref set)
     const allCount = (wrapper.vm as any).filterTabs.find((t: any) => t.value === 'all').count
     expect(allCount).toBeGreaterThanOrEqual(0)
-  }, { timeout: 20000 })
+  }, 20000)
 
   it('removes an item from client when it exists in queue', async () => {
     vi.resetModules()
@@ -154,7 +154,7 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     await (wrapper.vm as any).confirmRemove()
 
     expect(removeFromQueueMock).toHaveBeenCalledWith('q1', 'qbittorrent')
-  }, { timeout: 20000 })
+  }, 20000)
 
   it('offers Listenarr-only removal when item is not in client queue', async () => {
     vi.resetModules()
@@ -225,7 +225,7 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     await (wrapper.vm as any).confirmRemove()
     expect(cancelDownloadMock).toHaveBeenCalledWith('ext-1')
     expect(loadDownloadsMock).toHaveBeenCalled()
-  }, { timeout: 20000 })
+  }, 20000)
 
   it('removes an external item from client when it exists in the remote queue', async () => {
     vi.resetModules()

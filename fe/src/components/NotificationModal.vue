@@ -58,7 +58,7 @@ const emit = defineEmits<{
   close: []
 }>()
 
-let autoCloseTimer: number | null = null
+let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 const handleClose = () => {
   if (autoCloseTimer) {

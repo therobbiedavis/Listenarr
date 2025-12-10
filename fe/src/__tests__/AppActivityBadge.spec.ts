@@ -91,7 +91,7 @@ describe('App.vue activity badge', () => {
     await new Promise((r) => setTimeout(r, 20))
 
     // The badge should reflect the single active DDL download
-    expect(wrapper.vm.activityCount).toBe(1)
+    expect((wrapper.vm as any).activityCount).toBe(1)
   })
 
   it('prefers queue count when there are no downloads', async () => {
@@ -132,6 +132,6 @@ describe('App.vue activity badge', () => {
     await new Promise((r) => setTimeout(r, 20))
 
     // With zero active downloads and two queue items, activityCount should reflect the queue
-    expect(wrapper.vm.activityCount).toBe(2)
+    expect((wrapper.vm as any).activityCount).toBe(2)
   })
 })
