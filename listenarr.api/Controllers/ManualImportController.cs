@@ -279,10 +279,11 @@ public class ManualImportController : ControllerBase
         }
     }
 
-    private Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
+    private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
     {
-        // For manual import, create folder structure within the audiobook's base path
-        // Since basePath already represents the author's folder, we use a pattern without {Author}
+        // Get the configured file naming pattern from settings
+        var settings = await _configService.GetSettingsAsync();
+        var pattern = settings.FileNamingPattern ?? "{Author}/{Title}/{Title}";
 
         // Get the file extension from the source file (preserve original extension)
         var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
@@ -291,29 +292,31 @@ public class ManualImportController : ControllerBase
             extension = ".m4b"; // Fallback if no extension
         }
 
-        // Create the title with year: "Title (Year)"
-        var titleWithYear = audiobook.Title ?? "Unknown Title";
+        // Build variables for the pattern - only include non-empty values
+        var variables = new Dictionary<string, object>();
+        
+        if (!string.IsNullOrWhiteSpace(audiobook.Author))
+            variables["Author"] = audiobook.Author;
+        
+        if (!string.IsNullOrWhiteSpace(audiobook.Title))
+            variables["Title"] = audiobook.Title;
+        else
+            variables["Title"] = "Unknown Title"; // Title is required as fallback
+        
+        if (!string.IsNullOrWhiteSpace(audiobook.Series))
+            variables["Series"] = audiobook.Series;
+        
         if (!string.IsNullOrWhiteSpace(audiobook.PublishYear))
-        {
-            titleWithYear += $" ({audiobook.PublishYear})";
-        }
+            variables["Year"] = audiobook.PublishYear;
+        
+        if (metadata.DiscNumber.HasValue && metadata.DiscNumber.Value > 0)
+            variables["DiskNumber"] = metadata.DiscNumber.Value.ToString("00");
+        
+        if (metadata.TrackNumber.HasValue && metadata.TrackNumber.Value > 0)
+            variables["ChapterNumber"] = metadata.TrackNumber.Value.ToString();
 
-        // Use a manual import specific pattern: {Series}/{Title} or just {Title} if no series
-        var pattern = string.IsNullOrWhiteSpace(audiobook.Series)
-            ? "{Title}"  // No series, just create title folder
-            : "{Series}/{Title}";  // Series folder, then title folder
-
-        // Build variables for the pattern
-        var variables = new Dictionary<string, object>
-        {
-            { "Series", string.IsNullOrWhiteSpace(audiobook.Series) ? string.Empty : _fileNamingService.ApplyNamingPattern(audiobook.Series, new Dictionary<string, object>()) },
-            { "Title", titleWithYear },
-            { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
-            { "ChapterNumber", metadata.TrackNumber?.ToString() ?? string.Empty }
-        };
-
-        // Apply the pattern to get relative path
-        var relativePath = _fileNamingService.ApplyNamingPattern(pattern, variables);
+        // Apply the pattern to get relative path (don't treat as filename to allow subfolders)
+        var relativePath = _fileNamingService.ApplyNamingPattern(pattern, variables, treatAsFilename: false);
 
         // Ensure it has the correct extension
         if (!relativePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
@@ -327,7 +330,7 @@ public class ManualImportController : ControllerBase
             ? relativePath
             : Path.Combine(basePath, relativePath);
 
-        return Task.FromResult(fullPath);
+        return fullPath;
     }
 
     private static string FormatSize(long bytes)

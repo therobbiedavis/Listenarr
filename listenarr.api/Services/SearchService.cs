@@ -381,13 +381,42 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Starting intelligent search for: {Query}", query);
 
+                // Parse search prefixes to force specific search types
+                string? searchType = null;
+                string actualQuery = query;
+                
+                if (query.StartsWith("ASIN:", StringComparison.OrdinalIgnoreCase))
+                {
+                    searchType = "ASIN";
+                    actualQuery = query.Substring(5).Trim();
+                    _logger.LogInformation("Detected ASIN search: {ASIN}", actualQuery);
+                }
+                else if (query.StartsWith("ISBN:", StringComparison.OrdinalIgnoreCase))
+                {
+                    searchType = "ISBN";
+                    actualQuery = query.Substring(5).Trim();
+                    _logger.LogInformation("Detected ISBN search: {ISBN}", actualQuery);
+                }
+                else if (query.StartsWith("AUTHOR:", StringComparison.OrdinalIgnoreCase))
+                {
+                    searchType = "AUTHOR";
+                    actualQuery = query.Substring(7).Trim();
+                    _logger.LogInformation("Detected AUTHOR search: {Author}", actualQuery);
+                }
+                else if (query.StartsWith("TITLE:", StringComparison.OrdinalIgnoreCase))
+                {
+                    searchType = "TITLE";
+                    actualQuery = query.Substring(6).Trim();
+                    _logger.LogInformation("Detected TITLE search: {Title}", actualQuery);
+                }
+
                 // Step 1: Parallel search Amazon & Audible
-                _logger.LogInformation("Searching for: {Query}", query);
-                await BroadcastSearchProgressAsync($"Searching for {query}", null);
+                _logger.LogInformation("Searching for: {Query}", actualQuery);
+                await BroadcastSearchProgressAsync($"Searching for {actualQuery}", null);
 
                 // Detect if the query is an ISBN (digits only after cleaning). If so, skip Audible
-                var digitsOnly = new string((query ?? string.Empty).Where(char.IsDigit).ToArray());
-                var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13;
+                var digitsOnly = new string((actualQuery ?? string.Empty).Where(char.IsDigit).ToArray());
+                var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13 || searchType == "ISBN";
 
                 List<AmazonSearchResult> amazonResults = new();
                 List<AudibleSearchResult> audibleResults = new();
@@ -429,18 +458,52 @@ namespace Listenarr.Api.Services
                 }
 
                 // Always attempt Audible; Amazon is conditional on skipAmazon
-                if (!string.IsNullOrEmpty(query))
+                if (!string.IsNullOrEmpty(actualQuery))
                 {
                     Task<List<AmazonSearchResult>>? amazonTask = null;
-                    if (!skipAmazon)
-                    {
-                        amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
-                    }
-
                     Task<List<AudibleSearchResult>>? audibleTask = null;
-                    if (!skipAudible)
+                    
+                    // Handle specific search types
+                    if (searchType == "ASIN")
                     {
-                        audibleTask = _audibleSearchService.SearchAudiobooksAsync(query!);
+                        // For ASIN search, skip Amazon/Audible search and go directly to metadata fetch
+                        if (!skipAudible)
+                        {
+                            _logger.LogInformation("ASIN search: directly fetching metadata for {ASIN}", actualQuery);
+                            asinCandidates.Add(actualQuery);
+                        }
+                    }
+                    else if (searchType == "ISBN")
+                    {
+                        // For ISBN, only search Amazon (Audible doesn't support ISBN well)
+                        if (!skipAmazon)
+                        {
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!);
+                        }
+                    }
+                    else if (searchType == "AUTHOR" || searchType == "TITLE")
+                    {
+                        // For AUTHOR or TITLE, search both but the query is already parsed
+                        if (!skipAmazon)
+                        {
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!);
+                        }
+                        if (!skipAudible)
+                        {
+                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!);
+                        }
+                    }
+                    else
+                    {
+                        // Normal search (no prefix)
+                        if (!skipAmazon)
+                        {
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!);
+                        }
+                        if (!skipAudible)
+                        {
+                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!);
+                        }
                     }
 
                     if (amazonTask != null)
