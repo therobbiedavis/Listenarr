@@ -796,11 +796,6 @@ namespace Listenarr.Api.Services
                 return;
             }
 
-            if (!string.Equals(searchResult.IndexerImplementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
             if (searchResult.TorrentFileContent != null && searchResult.TorrentFileContent.Length > 0)
             {
                 _logger.LogDebug("MyAnonamouse torrent already cached for '{Title}'", searchResult.Title);
@@ -827,6 +822,14 @@ namespace Listenarr.Api.Services
                 if (indexer == null)
                 {
                     _logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': indexer configuration not found", searchResult.Title);
+                    return;
+                }
+
+                // Security: Validate against database-stored indexer configuration, not user-provided search result
+                if (!string.Equals(indexer.Implementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("Skipping MyAnonamouse cache: indexer {IndexerName} is not MyAnonamouse (is {Implementation})", 
+                        indexer.Name, indexer.Implementation);
                     return;
                 }
 
