@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.43] - 2025-12-10
+
+### Fixed
+- **Discord Bot JsonDocument Disposal Issue**: Fixed `ObjectDisposedException` when starting Discord bot by returning original diagnostics object instead of disposed `JsonElement`
+- **Tools Directory in Development Builds**: Fixed missing Discord bot files in development builds by properly configuring tools directory to copy to build output while avoiding publish conflicts
+- **Single-File Publish Compatibility**: Replaced `Assembly.Location` with `AppContext.BaseDirectory` for Playwright script path resolution to support single-file published applications
+
+### Changed
+- **Build Configuration**: Updated `.csproj` to properly handle tools directory for both development and production scenarios
+  - Tools now copy to `bin/Debug` and `bin/Release` during development builds
+  - Publish operations use custom targets to avoid file duplication conflicts
+
 ## [0.2.42] - 2025-12-10
 
 ### Changed
