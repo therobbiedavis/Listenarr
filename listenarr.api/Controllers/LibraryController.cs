@@ -285,21 +285,21 @@ namespace Listenarr.Api.Controllers
                                 if (!Directory.Exists(request.DestinationPath))
                                 {
                                     Directory.CreateDirectory(request.DestinationPath);
-                                    _logger.LogInformation("Created directory for new audiobook '{Title}' (explicit DestinationPath): {Path}", audiobook.Title, request.DestinationPath);
+                                    _logger.LogInformation("Created directory for new audiobook '{Title}' (explicit DestinationPath): {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(request.DestinationPath));
                                 }
                                 else
                                 {
-                                    _logger.LogInformation("Directory already exists for new audiobook '{Title}' (explicit DestinationPath): {Path}", audiobook.Title, request.DestinationPath);
+                                    _logger.LogInformation("Directory already exists for new audiobook '{Title}' (explicit DestinationPath): {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(request.DestinationPath));
                                 }
 
                                 audiobook.BasePath = request.DestinationPath;
                                 _dbContext.Audiobooks.Update(audiobook);
                                 await _dbContext.SaveChangesAsync();
-                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' to explicit DestinationPath: {BasePath}", audiobook.Title, request.DestinationPath);
+                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' to explicit DestinationPath: {BasePath}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(request.DestinationPath));
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to persist explicit DestinationPath for new audiobook '{Title}'", audiobook.Title);
+                                _logger.LogWarning(ex, "Failed to persist explicit DestinationPath for new audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
                             }
                         }
                         else
@@ -325,11 +325,11 @@ namespace Listenarr.Api.Controllers
                             if (!Directory.Exists(directoryPath))
                             {
                                 Directory.CreateDirectory(directoryPath);
-                                _logger.LogInformation("Created directory for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                                _logger.LogInformation("Created directory for new audiobook '{Title}': {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(directoryPath));
                             }
                             else
                             {
-                                _logger.LogInformation("Directory already exists for new audiobook '{Title}': {Path}", audiobook.Title, directoryPath);
+                                _logger.LogInformation("Directory already exists for new audiobook '{Title}': {Path}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(directoryPath));
                             }
 
                             // Persist a sensible BasePath for this audiobook so the UI can display
@@ -339,11 +339,11 @@ namespace Listenarr.Api.Controllers
                                 audiobook.BasePath = directoryPath;
                                 _dbContext.Audiobooks.Update(audiobook);
                                 await _dbContext.SaveChangesAsync();
-                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' using naming pattern: {BasePath}", audiobook.Title, directoryPath);
+                                _logger.LogInformation("Set BasePath for new audiobook '{Title}' using naming pattern: {BasePath}", LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeFilePath(directoryPath));
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to persist BasePath for new audiobook '{Title}'", audiobook.Title);
+                                _logger.LogWarning(ex, "Failed to persist BasePath for new audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
                             }
                         }
                     }
@@ -721,7 +721,7 @@ namespace Listenarr.Api.Controllers
             if (updatedAudiobook.BasePath != null)
             {
                 existingAudiobook.BasePath = updatedAudiobook.BasePath;
-                _logger.LogInformation("Updated BasePath for audiobook '{Title}' to: {BasePath}", existingAudiobook.Title, updatedAudiobook.BasePath);
+                _logger.LogInformation("Updated BasePath for audiobook '{Title}' to: {BasePath}", LogRedaction.SanitizeText(existingAudiobook.Title), LogRedaction.SanitizeFilePath(updatedAudiobook.BasePath));
             }
 
             await _repo.UpdateAsync(existingAudiobook);

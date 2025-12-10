@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CSRF Protection**: Proper X-Transmission-Session-Id header management for Transmission authentication with automatic retry on 409 Conflict
 
 ### Security
-- **Log Injection Prevention**: Added sanitization for user-provided input in log statements to prevent log injection attacks across all services
+- **Log Injection Prevention**: Comprehensive sanitization for user-provided input in log statements to prevent log injection attacks across all services and controllers
   - Enhanced `LogRedaction` class with `SanitizeUrl()`, `SanitizeText()`, and `SanitizeFilePath()` methods
-  - Sanitized URLs, search queries, file paths, and user-provided text in 50+ log statements
-  - Applied to AmazonSearchService, AudibleSearchService, AudibleMetadataService, DownloadService, DownloadClientGateway, NotificationService, MoveQueueService, and OpenLibraryService
+  - Sanitized URLs, search queries, file paths, user-provided text, and indexer names in 75+ log statements
+  - Applied to Services: AmazonSearchService, AudibleSearchService, AudibleMetadataService, DownloadService, DownloadClientGateway, NotificationService, MoveQueueService, and OpenLibraryService
+  - Applied to Controllers: FfmpegController, IndexersController, LibraryController, and SearchController
+  - Prevents log injection attacks via newlines, path traversal, and malicious user input in all API endpoints
 
 ### Changed
 - **TransmissionAdapter**: Now prefers cached torrent file data over URLs for authenticated downloads, falling back to URLs/magnet links for public torrents

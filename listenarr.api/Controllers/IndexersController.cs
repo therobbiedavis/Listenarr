@@ -74,7 +74,7 @@ namespace Listenarr.Api.Controllers
 
             try
             {
-                _logger.LogInformation("[IndexerTest] Testing indexer {Name} (impl={Impl}, url={Url})", indexer.Name, indexer.Implementation, indexer.Url);
+                _logger.LogInformation("[IndexerTest] Testing indexer {Name} (impl={Impl}, url={Url})", LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(indexer.Implementation), LogRedaction.SanitizeUrl(indexer.Url));
                 return impl switch
                 {
                     var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
@@ -86,7 +86,7 @@ namespace Listenarr.Api.Controllers
             catch (Exception ex)
             {
                 await SaveTestResultAsync(indexer, persist, false, ex.Message);
-                _logger.LogWarning(ex, "Indexer '{Name}' test failed", indexer.Name);
+                _logger.LogWarning(ex, "Indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
                 return BadRequest(new { success = false, message = "Indexer test failed", error = ex.Message, indexer });
             }
         }
@@ -133,11 +133,11 @@ namespace Listenarr.Api.Controllers
                     request.Headers.Add("X-Api-Key", indexer.ApiKey);
                 }
 
-                _logger.LogInformation("[IndexerTest] GET {Url} UA={UserAgent}", testUrl, userAgent);
+                _logger.LogInformation("[IndexerTest] GET {Url} UA={UserAgent}", LogRedaction.SanitizeUrl(testUrl), LogRedaction.SanitizeText(userAgent));
 
                 var response = await _httpClient.SendAsync(request);
 
-                _logger.LogInformation("[IndexerTest] {Name} responded {StatusCode}", indexer.Name, (int)response.StatusCode);
+                _logger.LogInformation("[IndexerTest] {Name} responded {StatusCode}", LogRedaction.SanitizeText(indexer.Name), (int)response.StatusCode);
                 
                 // Check for HTTP-level authentication failures
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
@@ -179,7 +179,7 @@ namespace Listenarr.Api.Controllers
             catch (Exception ex)
             {
                 await SaveTestResultAsync(indexer, persist, false, ex.Message);
-                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", indexer.Name);
+                _logger.LogWarning(ex, "Generic indexer test failed for {Name}", LogRedaction.SanitizeText(indexer.Name));
                 return BadRequest(new { success = false, message = "Indexer test failed", error = ex.Message, indexer });
             }
         }
@@ -391,7 +391,7 @@ namespace Listenarr.Api.Controllers
                 var testUrl = $"https://archive.org/advancedsearch.php?q=collection:{collection}&rows=1&output=json";
 
                 _logger.LogInformation("Testing Internet Archive indexer '{Name}' with collection '{Collection}'",
-                    indexer.Name, collection);
+                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(collection));
 
                 // Make HTTP request
                 var response = await _httpClient.GetAsync(testUrl);
@@ -416,7 +416,7 @@ namespace Listenarr.Api.Controllers
                 await SaveTestResultAsync(indexer, persist, true, null);
 
                 _logger.LogInformation("Internet Archive indexer '{Name}' test succeeded for collection '{Collection}'",
-                    indexer.Name, collection);
+                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.SanitizeText(collection));
 
                 return Ok(new
                 {
@@ -430,7 +430,7 @@ namespace Listenarr.Api.Controllers
             {
                 await SaveTestResultAsync(indexer, persist, false, ex.Message);
 
-                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", indexer.Name);
+                _logger.LogWarning(ex, "Internet Archive indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
 
                 return BadRequest(new
                 {
@@ -477,7 +477,7 @@ namespace Listenarr.Api.Controllers
                 var testUrl = $"https://www.myanonamouse.net/tor/js/loadSearchJSONbasic.php";
 
                 _logger.LogInformation("Testing MyAnonamouse indexer '{Name}' with MAM ID '{MamId}'",
-                    indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
+                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
 
                 // Create request with mam_id as cookie
                 var request = new HttpRequestMessage(HttpMethod.Post, testUrl);
@@ -558,7 +558,7 @@ namespace Listenarr.Api.Controllers
                 await SaveTestResultAsync(indexer, persist, true, null);
 
                 _logger.LogInformation("MyAnonamouse indexer '{Name}' test succeeded with MAM ID '{MamId}'",
-                    indexer.Name, LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
+                    LogRedaction.SanitizeText(indexer.Name), LogRedaction.RedactText(mamId, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { mamId ?? string.Empty })));
 
                 return Ok(new
                 {
@@ -572,7 +572,7 @@ namespace Listenarr.Api.Controllers
             {
                 await SaveTestResultAsync(indexer, persist, false, ex.Message);
 
-                _logger.LogWarning(ex, "MyAnonamouse indexer '{Name}' test failed", indexer.Name);
+                _logger.LogWarning(ex, "MyAnonamouse indexer '{Name}' test failed", LogRedaction.SanitizeText(indexer.Name));
 
                 return BadRequest(new
                 {

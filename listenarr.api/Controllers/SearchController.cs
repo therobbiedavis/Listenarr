@@ -90,14 +90,14 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("Query parameter is required");
                 }
 
-                _logger.LogInformation("IntelligentSearch called for query: {Query}", query);
+                _logger.LogInformation("IntelligentSearch called for query: {Query}", LogRedaction.SanitizeText(query));
                 var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold);
-                _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results.Count, query);
+                _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return Ok(results);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error performing intelligent search for query: {Query}", query);
+                _logger.LogError(ex, "Error performing intelligent search for query: {Query}", LogRedaction.SanitizeText(query));
                 return StatusCode(500, "Internal server error");
             }
         }
