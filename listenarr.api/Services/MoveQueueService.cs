@@ -42,7 +42,7 @@ namespace Listenarr.Api.Services
                 if (existingDb != null)
                 {
                     _jobs[existingDb.Id] = existingDb;
-                    _logger.LogInformation("Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id", existingDb.Id, audiobookId, requestedPath);
+                    _logger.LogInformation("Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id", existingDb.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
                     return existingDb.Id;
                 }
             }
@@ -66,7 +66,7 @@ namespace Listenarr.Api.Services
             }
 
             _jobs[job.Id] = job;
-            _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, requestedPath);
+            _logger.LogInformation("Enqueueing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, audiobookId, LogRedaction.SanitizeFilePath(requestedPath));
             await _channel.Writer.WriteAsync(job);
             return job.Id;
         }

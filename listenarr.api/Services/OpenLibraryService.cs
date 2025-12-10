@@ -140,7 +140,7 @@ namespace Listenarr.Api.Services
                 var queryString = string.Join("&", searchParams);
                 var url = $"{BaseUrl}/search.json?{queryString}";
 
-                _logger.LogInformation("Searching OpenLibrary: {Url}", url);
+                _logger.LogInformation("Searching OpenLibrary: {Url}", LogRedaction.SanitizeUrl(url));
 
                 var response = await _httpClient.GetAsync(url);
                 response.EnsureSuccessStatusCode();
@@ -152,7 +152,7 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching OpenLibrary for title: {Title}, author: {Author}", title, author);
+                _logger.LogError(ex, "Error searching OpenLibrary for title: {Title}, author: {Author}", LogRedaction.SanitizeText(title), LogRedaction.SanitizeText(author));
                 return new OpenLibrarySearchResponse();
             }
         }

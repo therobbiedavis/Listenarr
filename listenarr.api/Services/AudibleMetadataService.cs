@@ -426,7 +426,7 @@ namespace Listenarr.Api.Services
                     || (!string.IsNullOrEmpty(skipInstall) && skipInstall.Equals("true", StringComparison.OrdinalIgnoreCase)))
                 {
                     var pwLoggerSkip = _loggerFactory.CreateLogger("PlaywrightFallback");
-                    pwLoggerSkip.LogInformation("Skipping Playwright rendering for {Url} due to CI or PLAYWRIGHT_SKIP_INSTALL=true", url);
+                    pwLoggerSkip.LogInformation("Skipping Playwright rendering for {Url} due to CI or PLAYWRIGHT_SKIP_INSTALL=true", LogRedaction.SanitizeUrl(url));
                     return (null, 0);
                 }
 

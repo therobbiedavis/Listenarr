@@ -74,7 +74,7 @@ namespace Listenarr.Api.Services
                     if (!string.IsNullOrWhiteSpace(baseUrl) &&
                         !(baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
                     {
-                        _logger.LogWarning("Invalid base URL configured: {BaseUrl} - notifications will not include images", baseUrl);
+                        _logger.LogWarning("Invalid base URL configured: {BaseUrl} - notifications will not include images", LogRedaction.SanitizeUrl(baseUrl));
                         baseUrl = null;
                     }
 

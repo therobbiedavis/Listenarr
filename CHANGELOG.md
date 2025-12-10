@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Download Directory Handling**: Fixed Transmission rejecting empty `download-dir` parameter; now omits field when not specified to use Transmission's default path
 - **CSRF Protection**: Proper X-Transmission-Session-Id header management for Transmission authentication with automatic retry on 409 Conflict
 
+### Security
+- **Log Injection Prevention**: Added sanitization for user-provided input in log statements to prevent log injection attacks across all services
+  - Enhanced `LogRedaction` class with `SanitizeUrl()`, `SanitizeText()`, and `SanitizeFilePath()` methods
+  - Sanitized URLs, search queries, file paths, and user-provided text in 50+ log statements
+  - Applied to AmazonSearchService, AudibleSearchService, AudibleMetadataService, DownloadService, DownloadClientGateway, NotificationService, MoveQueueService, and OpenLibraryService
+
 ### Changed
 - **TransmissionAdapter**: Now prefers cached torrent file data over URLs for authenticated downloads, falling back to URLs/magnet links for public torrents
 - **Improved Logging**: Added comprehensive debug logging for download client operations including request/response details

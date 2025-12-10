@@ -90,5 +90,62 @@ namespace Listenarr.Api.Services
 
             return vals;
         }
+
+        // Sanitize URL for logging by removing query parameters and credentials
+        public static string SanitizeUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return "[empty-url]";
+
+            try
+            {
+                var uri = new Uri(url);
+                // Remove userinfo (username:password@) and query parameters
+                return $"{uri.Scheme}://{uri.Host}{uri.AbsolutePath}";
+            }
+            catch
+            {
+                // If URL parsing fails, return sanitized placeholder
+                return "[invalid-url]";
+            }
+        }
+
+        // Sanitize user-provided text for logging (prevent log injection)
+        public static string SanitizeText(string? text, int maxLength = 200)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "[empty]";
+
+            // Remove newlines and carriage returns to prevent log injection
+            var sanitized = text
+                .Replace('\n', ' ')
+                .Replace('\r', ' ')
+                .Replace('\t', ' ');
+
+            // Trim and truncate to prevent log flooding
+            sanitized = sanitized.Trim();
+            if (sanitized.Length > maxLength)
+            {
+                sanitized = sanitized.Substring(0, maxLength) + "...";
+            }
+
+            return sanitized;
+        }
+
+        // Sanitize file path for logging (show only filename, not full path)
+        public static string SanitizeFilePath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return "[empty-path]";
+
+            try
+            {
+                return System.IO.Path.GetFileName(path);
+            }
+            catch
+            {
+                return "[invalid-path]";
+            }
+        }
     }
 }

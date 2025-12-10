@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ develop, main, canary ]
 
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest

@@ -414,14 +414,14 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during TestDownloadClientAsync for client {ClientId}", client.Id ?? client.Name ?? client.Type);
+                _logger.LogError(ex, "Error during TestDownloadClientAsync for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
                 return (false, ex.Message, client);
             }
         }
 
         public async Task<string?> ReprocessDownloadAsync(string downloadId)
         {
-            _logger.LogInformation("ReprocessDownloadAsync called for {DownloadId}", downloadId);
+            _logger.LogInformation("ReprocessDownloadAsync called for {DownloadId}", LogRedaction.SanitizeText(downloadId));
 
             // Placeholder: return null to indicate no job was created.
             // Concrete implementation should enqueue a reprocess job and return its ID.
@@ -792,7 +792,7 @@ namespace Listenarr.Api.Services
 
             if (string.IsNullOrEmpty(searchResult.TorrentUrl))
             {
-                _logger.LogDebug("Skipping MyAnonamouse cache: no TorrentUrl for '{Title}'", searchResult.Title);
+                _logger.LogDebug("Skipping MyAnonamouse cache: no TorrentUrl for '{Title}'", LogRedaction.SanitizeText(searchResult.Title));
                 return;
             }
 
@@ -2633,7 +2633,7 @@ namespace Listenarr.Api.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug(ex, "RemoveFromClientAsync: client gateway failed to remove {DownloadId} from {Client}", downloadId, client.Name ?? client.Id);
+                        _logger.LogDebug(ex, "RemoveFromClientAsync: client gateway failed to remove {DownloadId} from {Client}", LogRedaction.SanitizeText(downloadId), LogRedaction.SanitizeText(client.Name ?? client.Id));
                         return false;
                     }
                 }

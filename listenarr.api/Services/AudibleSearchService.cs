@@ -241,12 +241,12 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                _logger.LogInformation("Found {Count} Audible search results for query: {Query}", results.Count, query);
+                _logger.LogInformation("Found {Count} Audible search results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return results;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching Audible for query: {Query}", query);
+                _logger.LogError(ex, "Error searching Audible for query: {Query}", LogRedaction.SanitizeText(query));
                 return results;
             }
         }

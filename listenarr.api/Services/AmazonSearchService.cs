@@ -464,7 +464,7 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error parsing Amazon search results for query: {Query}", query);
+                _logger.LogError(ex, "Error parsing Amazon search results for query: {Query}", LogRedaction.SanitizeText(query));
                 return results;
             }
         }
@@ -690,7 +690,7 @@ namespace Listenarr.Api.Services
                     response.StatusCode == HttpStatusCode.ServiceUnavailable ||
                     (body != null && (body.Contains("captcha", StringComparison.OrdinalIgnoreCase) || body.Contains("To discuss automated access to Amazon data please contact", StringComparison.OrdinalIgnoreCase))))
                 {
-                    _logger.LogInformation("HttpClient fetch returned status {Status} or challenge; falling back to Playwright for {Url}", (int)response.StatusCode, url);
+                    _logger.LogInformation("HttpClient fetch returned status {Status} or challenge; falling back to Playwright for {Url}", (int)response.StatusCode, LogRedaction.SanitizeUrl(url));
                     try
                     {
                         var pw = await _playwrightFetcher.FetchAsync(url);
@@ -698,7 +698,7 @@ namespace Listenarr.Api.Services
                     }
                     catch (Exception pex)
                     {
-                        _logger.LogDebug(pex, "Playwright fallback failed for {Url}", url);
+                        _logger.LogDebug(pex, "Playwright fallback failed for {Url}", LogRedaction.SanitizeUrl(url));
                     }
                 }
 
@@ -712,7 +712,7 @@ namespace Listenarr.Api.Services
             catch (Polly.CircuitBreaker.BrokenCircuitException<System.Net.Http.HttpResponseMessage> ex)
             {
                 // Circuit breaker is open - try Playwright fallback
-                _logger.LogWarning(ex, "Amazon search circuit open; attempting Playwright fallback for {Url}", url);
+                _logger.LogWarning(ex, "Amazon search circuit open; attempting Playwright fallback for {Url}", LogRedaction.SanitizeUrl(url));
                 try
                 {
                     var pw = await _playwrightFetcher.FetchAsync(url);
@@ -720,13 +720,13 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception pex)
                 {
-                    _logger.LogWarning(pex, "Playwright fallback also failed for {Url}", url);
+                    _logger.LogWarning(pex, "Playwright fallback also failed for {Url}", LogRedaction.SanitizeUrl(url));
                     return null;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching HTML from URL: {Url}", url);
+                _logger.LogError(ex, "Error fetching HTML from URL: {Url}", LogRedaction.SanitizeUrl(url));
                 // Try Playwright as a last resort
                 try
                 {
@@ -735,7 +735,7 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception pex)
                 {
-                    _logger.LogDebug(pex, "Playwright fallback failed for {Url}", url);
+                    _logger.LogDebug(pex, "Playwright fallback failed for {Url}", LogRedaction.SanitizeUrl(url));
                     return null;
                 }
             }

@@ -49,7 +49,7 @@ namespace Listenarr.Api.Services
                 ? $"{client.Name} ({client.Type ?? "unknown"})"
                 : client.Type ?? client.Id ?? "unknown";
 
-            var message = $"No download client adapter registered for {descriptor}.";
+            var message = $"No download client adapter registered for {LogRedaction.SanitizeText(descriptor)}.";
             _logger.LogError(message);
             throw new InvalidOperationException(message);
         }
