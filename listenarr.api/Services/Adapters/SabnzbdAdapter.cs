@@ -90,7 +90,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (string.IsNullOrEmpty(nzbUrl))
                     throw new Exception("No NZB URL found in search result");
 
-                _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", result.Title, result.Source);
+                _logger.LogInformation("Sending NZB to SABnzbd: {Title} from {Source}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(result.Source));
 
                 var sensitiveValues = LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { apiKey }).ToList();
                 if (!string.IsNullOrEmpty(indexerApiKey)) sensitiveValues.Add(indexerApiKey);
@@ -172,7 +172,7 @@ namespace Listenarr.Api.Services.Adapters
                     downloadId = Guid.NewGuid().ToString();
                 }
 
-                _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", downloadId);
+                _logger.LogInformation("Successfully added NZB to SABnzbd with ID: {DownloadId}", LogRedaction.SanitizeText(downloadId));
                 return downloadId;
             }
             catch (Exception ex)
@@ -221,7 +221,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (doc.RootElement.TryGetProperty("status", out var status))
                 {
                     var statusBool = status.GetBoolean();
-                    _logger.LogInformation("Removed {DownloadId} from SABnzbd: {Success}", id, statusBool);
+                    _logger.LogInformation("Removed {DownloadId} from SABnzbd: {Success}", LogRedaction.SanitizeText(id), statusBool);
                     return statusBool;
                 }
 
@@ -229,7 +229,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error removing from SABnzbd: {DownloadId}", id);
+                _logger.LogError(ex, "Error removing from SABnzbd: {DownloadId}", LogRedaction.SanitizeText(id));
                 return false;
             }
         }
@@ -268,7 +268,7 @@ namespace Listenarr.Api.Services.Adapters
                 var jsonContent = await response.Content.ReadAsStringAsync(ct);
                 if (string.IsNullOrWhiteSpace(jsonContent))
                 {
-                    _logger.LogWarning("SABnzbd returned empty response for client {ClientName}", client.Name);
+                    _logger.LogWarning("SABnzbd returned empty response for client {ClientName}", LogRedaction.SanitizeText(client.Name));
                     return items;
                 }
 

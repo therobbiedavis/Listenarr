@@ -47,7 +47,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Transmission test failed for client {ClientId}", client?.Id ?? client?.Name ?? client?.Type);
+                _logger.LogDebug(ex, "Transmission test failed for client {ClientId}", LogRedaction.SanitizeText(client?.Id ?? client?.Name ?? client?.Type));
                 return (false, ex.Message);
             }
         }
@@ -64,7 +64,7 @@ namespace Listenarr.Api.Services.Adapters
             {
                 // Use metainfo field for torrent file data (base64 encoded)
                 arguments["metainfo"] = Convert.ToBase64String(result.TorrentFileContent);
-                _logger.LogDebug("Using cached torrent file data ({Bytes} bytes) for '{Title}'", result.TorrentFileContent.Length, result.Title);
+                _logger.LogDebug("Using cached torrent file data ({Bytes} bytes) for '{Title}'", result.TorrentFileContent.Length, LogRedaction.SanitizeText(result.Title));
             }
             else
             {
@@ -75,7 +75,7 @@ namespace Listenarr.Api.Services.Adapters
                     throw new ArgumentException("No magnet link, torrent URL, or cached torrent file provided", nameof(result));
                 }
                 arguments["filename"] = torrentUrl;
-                _logger.LogDebug("Using torrent URL for '{Title}': {Url}", result.Title, torrentUrl);
+                _logger.LogDebug("Using torrent URL for '{Title}': {Url}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeUrl(torrentUrl));
             }
 
             // Only include download-dir if it's not empty (Transmission requires absolute path or omit)
@@ -117,14 +117,14 @@ namespace Listenarr.Api.Services.Adapters
                     if (args.TryGetProperty("torrent-added", out var added) && added.ValueKind == JsonValueKind.Object)
                     {
                         var torrentId = ExtractTorrentIdentifier(added);
-                        _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", result.Title, torrentId);
+                        _logger.LogInformation("Transmission successfully added torrent '{Title}' with id/hash: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(torrentId));
                         return torrentId;
                     }
 
                     if (args.TryGetProperty("torrent-duplicate", out var duplicate) && duplicate.ValueKind == JsonValueKind.Object)
                     {
                         var existingId = ExtractTorrentIdentifier(duplicate);
-                        _logger.LogInformation("Transmission reported duplicate torrent for '{Title}' with id/hash {Id}", result.Title, existingId);
+                        _logger.LogInformation("Transmission reported duplicate torrent for '{Title}' with id/hash {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(existingId));
                         return existingId;
                     }
                 }
@@ -134,7 +134,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to add torrent to Transmission for client {ClientName}", client.Name ?? client.Id);
+                _logger.LogError(ex, "Failed to add torrent to Transmission for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
                 throw;
             }
         }
@@ -169,12 +169,12 @@ namespace Listenarr.Api.Services.Adapters
                 }
 
                 var errorMsg = resultProp.ValueKind == JsonValueKind.String ? resultProp.GetString() ?? "Unknown error" : "Unknown error";
-                _logger.LogWarning("Transmission failed to remove torrent {Id}: {Message}", id, errorMsg);
+                _logger.LogWarning("Transmission failed to remove torrent {Id}: {Message}", LogRedaction.SanitizeText(id), LogRedaction.SanitizeText(errorMsg));
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error removing torrent {Id} from Transmission", id);
+                _logger.LogError(ex, "Error removing torrent {Id} from Transmission", LogRedaction.SanitizeText(id));
                 return false;
             }
         }
@@ -222,7 +222,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to retrieve Transmission queue for client {ClientName}", client.Name ?? client.Id);
+                _logger.LogWarning(ex, "Failed to retrieve Transmission queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
             }
 
             return items;
@@ -291,7 +291,7 @@ namespace Listenarr.Api.Services.Adapters
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Failed to translate Transmission path '{Path}' for client {ClientName}", downloadDir, client.Name ?? client.Id);
+                    _logger.LogDebug(ex, "Failed to translate Transmission path '{Path}' for client {ClientName}", LogRedaction.SanitizeFilePath(downloadDir), LogRedaction.SanitizeText(client.Name ?? client.Id));
                 }
             }
 
@@ -367,7 +367,7 @@ namespace Listenarr.Api.Services.Adapters
             var serializedPayload = JsonSerializer.Serialize(payload);
             string? sessionId = null;
             
-            _logger.LogDebug("Transmission RPC request to {Url}: {Payload}", baseUrl, serializedPayload);
+            _logger.LogDebug("Transmission RPC request to {Url}: {Payload}", LogRedaction.SanitizeUrl(baseUrl), LogRedaction.SanitizeText(serializedPayload, 500));
 
             for (var attempt = 0; attempt < 2; attempt++)
             {
@@ -379,7 +379,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (!string.IsNullOrEmpty(sessionId))
                 {
                     request.Headers.Add("X-Transmission-Session-Id", sessionId);
-                    _logger.LogDebug("Using X-Transmission-Session-Id: {SessionId}", sessionId);
+                    _logger.LogDebug("Using X-Transmission-Session-Id: {SessionId}", LogRedaction.SanitizeText(sessionId));
                 }
 
                 var authHeader = BuildAuthHeader(client);
@@ -394,7 +394,7 @@ namespace Listenarr.Api.Services.Adapters
                 if (response.StatusCode == HttpStatusCode.Conflict && attempt == 0 && response.Headers.TryGetValues("X-Transmission-Session-Id", out var values))
                 {
                     sessionId = values.FirstOrDefault();
-                    _logger.LogDebug("Received 409 Conflict, retrying with session ID: {SessionId}", sessionId);
+                    _logger.LogDebug("Received 409 Conflict, retrying with session ID: {SessionId}", LogRedaction.SanitizeText(sessionId));
                     continue;
                 }
 

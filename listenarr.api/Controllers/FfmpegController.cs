@@ -91,7 +91,7 @@ namespace Listenarr.Api.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error running ffprobe for {File}", filePath);
+                _logger.LogError(ex, "Error running ffprobe for {File}", LogRedaction.SanitizeFilePath(filePath));
                 return StatusCode(500, new { message = "Error running ffprobe", error = ex.Message });
             }
         }

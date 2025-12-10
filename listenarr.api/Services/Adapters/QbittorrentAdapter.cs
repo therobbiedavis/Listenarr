@@ -106,7 +106,7 @@ namespace Listenarr.Api.Services.Adapters
                         }
                         else
                         {
-                            _logger.LogInformation("qBittorrent authentication disabled; proceeding without credentials for client {ClientId}", client.Id);
+                            _logger.LogInformation("qBittorrent authentication disabled; proceeding without credentials for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                         }
                     }
                     else
@@ -116,7 +116,7 @@ namespace Listenarr.Api.Services.Adapters
                 }
                 else
                 {
-                    _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", client.Id);
+                    _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                 }
 
                 var beforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
@@ -240,12 +240,12 @@ namespace Listenarr.Api.Services.Adapters
                     return extractedHash;
                 }
 
-                _logger.LogWarning("Unable to determine torrent hash after adding to qBittorrent for client {ClientId}", client.Id);
+                _logger.LogWarning("Unable to determine torrent hash after adding to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                 return null;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "qBittorrent AddAsync failed for client {ClientId}", client?.Id);
+                _logger.LogError(ex, "qBittorrent AddAsync failed for client {ClientId}", LogRedaction.SanitizeText(client?.Id));
                 throw;
             }
         }
@@ -298,12 +298,12 @@ namespace Listenarr.Api.Services.Adapters
                     return false;
                 }
 
-                _logger.LogInformation("Removed torrent {Id} from qBittorrent (deleteFiles={DeleteFiles})", id, deleteFiles);
+                _logger.LogInformation("Removed torrent {Id} from qBittorrent (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error removing torrent from qBittorrent: {Id}", id);
+                _logger.LogError(ex, "Error removing torrent from qBittorrent: {Id}", LogRedaction.SanitizeText(id));
                 return false;
             }
         }
@@ -339,13 +339,13 @@ namespace Listenarr.Api.Services.Adapters
                     var testResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/version", ct);
                     if (!testResp.IsSuccessStatusCode)
                     {
-                        _logger.LogWarning("qBittorrent authentication appears to be enabled and credentials are invalid for client {ClientId}", client.Id);
+                        _logger.LogWarning("qBittorrent authentication appears to be enabled and credentials are invalid for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                         return items;
                     }
                 }
                 else if (!loginResp.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("qBittorrent login failed with status {Status} for client {ClientId}", loginResp.StatusCode, client.Id);
+                    _logger.LogWarning("qBittorrent login failed with status {Status} for client {ClientId}", loginResp.StatusCode, LogRedaction.SanitizeText(client.Id));
                     return items;
                 }
 

@@ -120,14 +120,14 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("Query parameter is required");
                 }
 
-                _logger.LogInformation("IndexersSearch called for query: {Query}, isAutomaticSearch={IsAutomatic}", query, isAutomaticSearch);
+                _logger.LogInformation("IndexersSearch called for query: {Query}, isAutomaticSearch={IsAutomatic}", LogRedaction.SanitizeText(query), isAutomaticSearch);
                 var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
-                _logger.LogInformation("IndexersSearch returning {Count} results for query: {Query}", results.Count, query);
+                _logger.LogInformation("IndexersSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return Ok(results);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
+                _logger.LogError(ex, "Error searching indexers for query: {Query}", LogRedaction.SanitizeText(query));
                 return StatusCode(500, "Internal server error");
             }
         }
@@ -393,7 +393,7 @@ namespace Listenarr.Api.Controllers
                 var metadataSources = await _searchService.GetEnabledMetadataSourcesAsync();
 
                 _logger.LogInformation("Found {Count} enabled metadata sources for ASIN {Asin}: {Sources}",
-                    metadataSources?.Count ?? 0, asin,
+                    metadataSources?.Count ?? 0, LogRedaction.SanitizeText(asin),
                     string.Join(", ", metadataSources?.Select(s => $"{s.Name} (Priority: {s.Priority}, Enabled: {s.IsEnabled})") ?? new List<string>()));
 
                 if (metadataSources == null || !metadataSources.Any())

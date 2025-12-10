@@ -68,12 +68,12 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
             {
-                _logger.LogDebug(httpEx, "NZBGet authentication failed for client {ClientId}", client.Id ?? client.Name ?? client.Type);
+                _logger.LogDebug(httpEx, "NZBGet authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
                 return (false, "NZBGet: Authentication failed (check username/password)");
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "NZBGet test failed for client {ClientId}", client.Id ?? client.Name ?? client.Type);
+                _logger.LogDebug(ex, "NZBGet test failed for client {ClientId}", LogRedaction.SanitizeText(client.Id ?? client.Name ?? client.Type));
                 return (false, ex.Message);
             }
         }
@@ -158,7 +158,7 @@ namespace Listenarr.Api.Services.Adapters
                 request.Headers.Authorization = authHeader;
             }
             
-            _logger.LogDebug("NZBGet REST API POST to {Url} with file {FileName}", uploadUrl, nzbFileName);
+            _logger.LogDebug("NZBGet REST API POST to {Url} with file {FileName}", LogRedaction.SanitizeUrl(uploadUrl), LogRedaction.SanitizeText(nzbFileName));
             
             var response = await httpClient.SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
@@ -174,7 +174,7 @@ namespace Listenarr.Api.Services.Adapters
             if (jsonResponse.TryGetProperty("nzbId", out var nzbIdProp))
             {
                 var queueId = nzbIdProp.GetInt32();
-                _logger.LogInformation("NZBGet REST API added '{Title}' with queue ID {QueueId}", result.Title, queueId);
+                _logger.LogInformation("NZBGet REST API added '{Title}' with queue ID {QueueId}", LogRedaction.SanitizeText(result.Title), queueId);
                 return queueId.ToString();
             }
             
@@ -211,7 +211,7 @@ namespace Listenarr.Api.Services.Adapters
             try
             {
                 // Call append via XML-RPC
-                _logger.LogInformation("Calling NZBGet append via XML-RPC for '{Title}'", result.Title);
+                _logger.LogInformation("Calling NZBGet append via XML-RPC for '{Title}'", LogRedaction.SanitizeText(result.Title));
                 var appendResult = await CallXmlRpcAsync(client, "append",
                     nzbFileName,
                     nzbContentBase64,
@@ -229,11 +229,11 @@ namespace Listenarr.Api.Services.Adapters
 
                 if (queueId <= 0)
                 {
-                    _logger.LogWarning("NZBGet rejected NZB '{Title}', returned ID: {QueueId}", result.Title, queueId);
+                    _logger.LogWarning("NZBGet rejected NZB '{Title}', returned ID: {QueueId}", LogRedaction.SanitizeText(result.Title), queueId);
                     return null;
                 }
 
-                _logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", result.Title, queueId, droneId);
+                _logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", LogRedaction.SanitizeText(result.Title), queueId, LogRedaction.SanitizeText(droneId));
                 return droneId;
             }
             catch (Exception ex)
@@ -252,7 +252,7 @@ namespace Listenarr.Api.Services.Adapters
             var numericId = TryParseId(id);
             if (!numericId.HasValue)
             {
-                _logger.LogWarning("Cannot remove NZB {Id} - invalid ID format", id);
+                _logger.LogWarning("Cannot remove NZB {Id} - invalid ID format", LogRedaction.SanitizeText(id));
                 return false;
             }
 
@@ -263,16 +263,16 @@ namespace Listenarr.Api.Services.Adapters
                 
                 if (success)
                 {
-                    _logger.LogInformation("Removed NZB {Id} from NZBGet (deleteFiles={DeleteFiles})", id, deleteFiles);
+                    _logger.LogInformation("Removed NZB {Id} from NZBGet (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
                     return true;
                 }
 
-                _logger.LogWarning("NZBGet reported failure when removing {Id}", id);
+                _logger.LogWarning("NZBGet reported failure when removing {Id}", LogRedaction.SanitizeText(id));
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error removing NZB {Id} from NZBGet", id);
+                _logger.LogError(ex, "Error removing NZB {Id} from NZBGet", LogRedaction.SanitizeText(id));
                 return false;
             }
         }
@@ -311,7 +311,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to retrieve NZBGet queue for client {ClientName}", client.Name ?? client.Id);
+                _logger.LogWarning(ex, "Failed to retrieve NZBGet queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
             }
 
             return items;
@@ -358,7 +358,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to fetch NZBGet history for client {ClientName}", client.Name ?? client.Id);
+                _logger.LogDebug(ex, "Failed to fetch NZBGet history for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
             }
 
             return history;
@@ -417,7 +417,7 @@ namespace Listenarr.Api.Services.Adapters
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Failed to translate NZBGet path '{Path}' for client {ClientName}", destDir, client.Name ?? client.Id);
+                    _logger.LogDebug(ex, "Failed to translate NZBGet path '{Path}' for client {ClientName}", LogRedaction.SanitizeFilePath(destDir), LogRedaction.SanitizeText(client.Name ?? client.Id));
                 }
             }
 
@@ -625,7 +625,7 @@ namespace Listenarr.Api.Services.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to download NZB content from {Url}", nzbUrl);
+                _logger.LogError(ex, "Failed to download NZB content from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
                 throw new InvalidOperationException($"Unable to retrieve NZB content from {nzbUrl}");
             }
         }
