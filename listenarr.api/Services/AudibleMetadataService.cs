@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -18,7 +18,7 @@
 
 using System.Net.Http;
 using System.Threading.Tasks;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using HtmlAgilityPack;
 using System.Text.Json;
 using System.Linq;
@@ -70,22 +70,22 @@ namespace Listenarr.Api.Services
                 try
                 {
                     var (html, statusCode) = await GetHtmlAsync(url);
-                    
+
                     // If Audible returns 404, immediately try Amazon
                     if (statusCode == 404 && url.Contains("audible.com"))
                     {
                         _logger.LogDebug("Audible returned 404 for ASIN {Asin}, trying Amazon fallback", asin);
                         continue;
                     }
-                    
+
                     if (string.IsNullOrEmpty(html)) continue;
-                    
+
                     var doc = new HtmlDocument();
                     doc.LoadHtml(html);
 
                     var metadata = new AudibleBookMetadata();
 
-                    // Attempt to pull structured JSON-LD first (if present) — often contains reliable data
+                    // Attempt to pull structured JSON-LD first (if present) â€” often contains reliable data
                     var jsonLd = ExtractFromJsonLd(doc);
                     if (jsonLd != null)
                     {
@@ -96,7 +96,7 @@ namespace Listenarr.Api.Services
                         if (!string.IsNullOrWhiteSpace(jsonLd.Language)) metadata.Language = jsonLd.Language;
                         if (!string.IsNullOrWhiteSpace(jsonLd.Publisher)) metadata.Publisher = jsonLd.Publisher;
                         if (jsonLd.Authors != null && jsonLd.Authors.Any()) metadata.Authors = jsonLd.Authors;
-                        if (jsonLd.Narrators != null && jsonLd.Narrators.Any()) 
+                        if (jsonLd.Narrators != null && jsonLd.Narrators.Any())
                         {
                             metadata.Narrators = jsonLd.Narrators;
                             _logger.LogInformation("Extracted {Count} narrator(s) from JSON-LD: {Narrators}", jsonLd.Narrators.Count, string.Join(", ", jsonLd.Narrators));
@@ -112,7 +112,7 @@ namespace Listenarr.Api.Services
 
                     // ASIN - set canonical property only
                     metadata.Asin = asin;
-                    
+
                     // Set source based on URL
                     if (url.Contains("audible.com"))
                     {
@@ -128,11 +128,11 @@ namespace Listenarr.Api.Services
                     {
                         // Try to extract from search result list item first (has clean structured data)
                         ExtractFromSearchResult(doc, metadata);
-                        
+
                         // Then extract from product details page (will fill in missing fields)
                         ExtractFromProductDetails(doc, metadata);
                     }
-                    
+
                     // Extract from Amazon's audibleproductdetails_feature_div section (requires Playwright rendering)
                     if (url.Contains("amazon.com"))
                     {
@@ -148,21 +148,21 @@ namespace Listenarr.Api.Services
                         {
                             // Normalize whitespace and clean up title
                             title = System.Text.RegularExpressions.Regex.Replace(title, "\\s+", " ").Trim();
-                            
+
                             // Remove common Amazon title suffixes for cleaner display
                             title = System.Text.RegularExpressions.Regex.Replace(title, @"\s*[:-]\s*(?:Audible Audio Edition|Audible Audiobook|Audio CD|MP3 CD|Kindle Edition|Paperback|Hardcover)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                            
+
                             metadata.Title = title;
                         }
                     }
-                    
+
                     // Parse series information from title (e.g., "Fourth Wing: Empyrean, Book 1")
                     // Only parse if series not already set
                     if (string.IsNullOrWhiteSpace(metadata.Series))
                     {
                         ParseSeriesFromTitle(metadata);
                     }
-                    
+
                     // Description - fallback to older selectors if not found in product-details
                     if (string.IsNullOrWhiteSpace(metadata.Description))
                     {
@@ -178,7 +178,7 @@ namespace Listenarr.Api.Services
                     {
                         metadata.PublishYear = ExtractPublishYear(doc);
                     }
-                    
+
                     // Clean language field - remove currency codes
                     if (!string.IsNullOrWhiteSpace(metadata.Language))
                     {
@@ -196,7 +196,7 @@ namespace Listenarr.Api.Services
                             ?? doc.DocumentNode.SelectSingleNode("//img[contains(@class,'a-dynamic-image')]")?.GetAttributeValue("src", null)
                             ?? doc.DocumentNode.SelectSingleNode("//meta[@property='og:image']")?.GetAttributeValue("content", null)
                             ?? doc.DocumentNode.SelectSingleNode("//img[contains(@class,'cover') or contains(@id,'main-image')]")?.GetAttributeValue("src", null);
-                        
+
                         // Handle data-a-dynamic-image JSON attribute
                         if (!string.IsNullOrWhiteSpace(img) && img.StartsWith("{"))
                         {
@@ -211,7 +211,7 @@ namespace Listenarr.Api.Services
                             }
                             catch { }
                         }
-                        
+
                         if (!string.IsNullOrWhiteSpace(img))
                         {
                             // Clean Amazon image URLs (remove social share overlays and logos)
@@ -263,14 +263,14 @@ namespace Listenarr.Api.Services
                                 .ToList();
                             if (narrators.Any()) metadata.Narrators = narrators!;
                         }
-                        
+
                         // Fallback: Try extracting narrators from description for Amazon pages
                         if ((metadata.Narrators == null || !metadata.Narrators.Any()) && !string.IsNullOrWhiteSpace(metadata.Description))
                         {
                             // Look for patterns like "read by Narrator Name" or "narrated by Narrator Name"
                             var narratorMatch = System.Text.RegularExpressions.Regex.Match(
-                                metadata.Description, 
-                                @"(?:read by|narrated by|narrator[s]?:)\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s+and\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)?)", 
+                                metadata.Description,
+                                @"(?:read by|narrated by|narrator[s]?:)\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s+and\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)?)",
                                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                             if (narratorMatch.Success)
                             {
@@ -283,7 +283,7 @@ namespace Listenarr.Api.Services
                             }
                         }
                     }
-                    
+
                     // Clean up authors list: remove narrators and publisher from authors if they snuck in
                     if (metadata.Authors != null && metadata.Authors.Any())
                     {
@@ -292,7 +292,7 @@ namespace Listenarr.Api.Services
                             .Where(a => !a.Contains("Publisher", StringComparison.OrdinalIgnoreCase))
                             .Where(a => metadata.Narrators == null || !metadata.Narrators.Any(n => a.Equals(n, StringComparison.OrdinalIgnoreCase)))
                             .ToList();
-                        
+
                         if (metadata.Authors.Count < originalAuthorCount)
                         {
                             _logger.LogInformation("Filtered authors from {Original} to {Filtered} (removed narrators/publisher)", originalAuthorCount, metadata.Authors.Count);
@@ -337,7 +337,7 @@ namespace Listenarr.Api.Services
                     {
                         _logger.LogInformation("Metadata extracted for ASIN {Asin} from {Source}: Title={Title}, Authors={AuthorCount}, Language={Language}, Publisher={Publisher}, HasDescription={HasDesc}",
                             asin, metadata.Source ?? "Unknown", metadata.Title, metadata.Authors?.Count ?? 0, metadata.Language, metadata.Publisher, !string.IsNullOrWhiteSpace(metadata.Description));
-                        
+
                         if (_cache != null)
                         {
                             _cache.Set(cacheKey, metadata, TimeSpan.FromHours(12));
@@ -367,14 +367,14 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("Using Playwright for Audible URL to render adbl-product-details component: {Url}", url);
                     return await GetHtmlWithPlaywrightAsync(url);
                 }
-                
+
                 // Also use Playwright for Amazon URLs to access audibleproductdetails_feature_div
                 if (url.Contains("amazon.com") && url.Contains("/dp/"))
                 {
                     _logger.LogInformation("Using Playwright for Amazon URL to render audibleproductdetails_feature_div: {Url}", url);
                     return await GetHtmlWithPlaywrightAsync(url);
                 }
-                
+
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
                 request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
@@ -382,13 +382,13 @@ namespace Listenarr.Api.Services
                 request.Headers.Add("Accept-Encoding", "gzip, deflate, br");
                 var response = await _httpClient.SendAsync(request);
                 var statusCode = (int)response.StatusCode;
-                
+
                 if (statusCode == 404)
                 {
                     _logger.LogDebug("404 Not Found for {Url}", url);
                     return (null, 404);
                 }
-                
+
                 if (response.IsSuccessStatusCode)
                 {
                     var html = await response.Content.ReadAsStringAsync();
@@ -417,11 +417,24 @@ namespace Listenarr.Api.Services
         {
             try
             {
+                // Allow CI or explicit opt-out to skip Playwright browser installation/usage.
+                // Some CI images do not have Node/npx or Playwright browsers available and
+                // attempting to install or run Playwright at test time produces noisy errors.
+                var ciEnv = Environment.GetEnvironmentVariable("CI");
+                var skipInstall = Environment.GetEnvironmentVariable("PLAYWRIGHT_SKIP_INSTALL");
+                if ((!string.IsNullOrEmpty(ciEnv) && ciEnv.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrEmpty(skipInstall) && skipInstall.Equals("true", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var pwLoggerSkip = _loggerFactory.CreateLogger("PlaywrightFallback");
+                    pwLoggerSkip.LogInformation("Skipping Playwright rendering for {Url} due to CI or PLAYWRIGHT_SKIP_INSTALL=true", LogRedaction.SanitizeUrl(url));
+                    return (null, 0);
+                }
+
                 var pwLogger = _loggerFactory.CreateLogger("PlaywrightFallback");
                 pwLogger.LogDebug("Starting Playwright rendering for {Url}", url);
                 System.Threading.Interlocked.Increment(ref _playwrightFallbackCount);
                 pwLogger.LogInformation("Playwright invocation count: {Count}", Interlocked.Read(ref _playwrightFallbackCount));
-                
+
                 using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
                 await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true, Args = new[] { "--no-sandbox" } });
                 await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" });
@@ -431,7 +444,7 @@ namespace Listenarr.Api.Services
                 // Increase timeout to 60 seconds for slow connections/CAPTCHA scenarios
                 var gotoOptions = new Microsoft.Playwright.PageGotoOptions { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = 60000 };
                 var pwResponse = await page.GotoAsync(url, gotoOptions);
-                
+
                 var responseStatus = pwResponse?.Status ?? 0;
                 if (responseStatus == 404)
                 {
@@ -472,7 +485,7 @@ namespace Listenarr.Api.Services
                     pwLogger.LogInformation("Playwright rendered {Length} chars for {Url} (selectorMatched={Matched})", content.Length, url, found);
                     return (content, responseStatus > 0 ? responseStatus : 200);
                 }
-                
+
                 return (null, 0);
             }
             catch (Exception ex)
@@ -604,10 +617,10 @@ namespace Listenarr.Api.Services
             // Remove common labels
             raw = System.Text.RegularExpressions.Regex.Replace(raw, "Narrated by:|Narrated by|Narrator:|By:", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             raw = raw.Replace("\n", ", ").Replace("\\r", ", ").Replace("\t", " ");
-            
+
             // Remove Amazon-specific suffixes like (Author), (Narrator), etc.
             raw = System.Text.RegularExpressions.Regex.Replace(raw, @",?\s*\((?:Author|Narrator|Reader|Performer|Contributor)\)", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Split on commas, 'and', '/', '&' and other separators
             var parts = System.Text.RegularExpressions.Regex.Split(raw, @",|\band\b|/|&|\\u0026");
             var names = parts.Select(p => p?.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList();
@@ -618,10 +631,10 @@ namespace Listenarr.Api.Services
         private string? CleanImageUrl(string? imgUrl)
         {
             if (string.IsNullOrWhiteSpace(imgUrl)) return null;
-            
+
             // Filter out logos, navigation images, and batch processing URLs
-            if (imgUrl.Contains("/navigation/") || 
-                imgUrl.Contains("logo") || 
+            if (imgUrl.Contains("/navigation/") ||
+                imgUrl.Contains("logo") ||
                 imgUrl.Contains("/batch/") ||
                 imgUrl.Contains("fls-na.amazon") ||
                 imgUrl.StartsWith("data:"))
@@ -629,7 +642,7 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Filtered out non-product image: {Url}", imgUrl);
                 return null;
             }
-            
+
             // Clean up social share overlay URLs - extract the base image ID
             // Example: https://m.media-amazon.com/images/I/61D7uTS7-TL._SL10_UR1600,800_CR200,50,1200,630_CLa|1200,630|61D7uTS7-TL.jpg|...
             // Should become: https://m.media-amazon.com/images/I/61D7uTS7-TL._SL500_.jpg
@@ -645,7 +658,7 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("Cleaned social share URL to: {CleanUrl}", cleanUrl);
                 }
             }
-            
+
             return cleanUrl;
         }
 
@@ -786,9 +799,9 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("audibleproductdetails_feature_div not found for ASIN {Asin}", metadata.Asin);
                 return;
             }
-            
+
             _logger.LogInformation("Found audibleproductdetails_feature_div for ASIN {Asin}", metadata.Asin);
-            
+
             // Parse the table rows - they contain label/value pairs
             var rows = audibleDetails.SelectNodes(".//tr");
             if (rows == null || !rows.Any())
@@ -796,21 +809,21 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("No rows found in audibleproductdetails_feature_div");
                 return;
             }
-            
+
             foreach (var row in rows)
             {
                 var labelCell = row.SelectSingleNode(".//td[@class='a-span3']|.//th");
                 var valueCell = row.SelectSingleNode(".//td[@class='a-span9']|.//td[not(@class='a-span3')]");
-                
+
                 if (labelCell == null || valueCell == null) continue;
-                
+
                 var label = labelCell.InnerText?.Trim().Replace(":", "").Trim();
                 var value = valueCell.InnerText?.Trim();
-                
+
                 if (string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(value)) continue;
-                
+
                 _logger.LogDebug("Amazon detail - {Label}: {Value}", label, value);
-                
+
                 switch (label.ToLower())
                 {
                     case "author":
@@ -828,7 +841,7 @@ namespace Listenarr.Api.Services
                             }
                         }
                         break;
-                        
+
                     case "narrator":
                     case "narrators":
                     case "narrated by":
@@ -845,7 +858,7 @@ namespace Listenarr.Api.Services
                             }
                         }
                         break;
-                        
+
                     case "listening length":
                     case "length":
                         if (metadata.Runtime == null)
@@ -863,7 +876,7 @@ namespace Listenarr.Api.Services
                             }
                         }
                         break;
-                        
+
                     case "publisher":
                         if (string.IsNullOrWhiteSpace(metadata.Publisher))
                         {
@@ -871,7 +884,7 @@ namespace Listenarr.Api.Services
                             _logger.LogInformation("Extracted publisher from Amazon details: {Publisher}", value);
                         }
                         break;
-                        
+
                     case "language":
                         if (string.IsNullOrWhiteSpace(metadata.Language))
                         {
@@ -879,7 +892,7 @@ namespace Listenarr.Api.Services
                             _logger.LogInformation("Extracted language from Amazon details: {Language}", metadata.Language);
                         }
                         break;
-                        
+
                     case "audible.com release date":
                     case "release date":
                         if (string.IsNullOrWhiteSpace(metadata.PublishYear))
@@ -893,7 +906,7 @@ namespace Listenarr.Api.Services
                             }
                         }
                         break;
-                        
+
                     case "version":
                         if (string.IsNullOrWhiteSpace(metadata.Version))
                         {
@@ -901,7 +914,7 @@ namespace Listenarr.Api.Services
                             _logger.LogInformation("Extracted version from Amazon details: {Version}", value);
                         }
                         break;
-                        
+
                     case "series":
                         if (string.IsNullOrWhiteSpace(metadata.Series))
                         {
@@ -934,20 +947,20 @@ namespace Listenarr.Api.Services
             try
             {
                 _logger.LogInformation("Starting ExtractFromSearchResult for ASIN {Asin}", metadata.Asin);
-                
+
                 // Find the product list item for this ASIN
                 var productItem = doc.DocumentNode.SelectSingleNode($"//li[@id='product-list-item-{metadata.Asin}'] | //li[contains(@class,'productListItem')][contains(@id,'{metadata.Asin}')]");
                 if (productItem == null)
                 {
                     _logger.LogInformation("No search result list item found for ASIN {Asin} - this is expected for product detail pages", metadata.Asin);
-                    
+
                     // Log if we have any list items with class containing "list-item" or "product"
                     var anyListItems = doc.DocumentNode.SelectNodes("//li[contains(@class,'list-item') or contains(@class,'product')]");
                     if (anyListItems != null && anyListItems.Any())
                     {
                         _logger.LogDebug("Found {Count} list items in page, but none matching ASIN", anyListItems.Count);
                     }
-                    
+
                     return;
                 }
 
@@ -960,15 +973,15 @@ namespace Listenarr.Api.Services
                     if (runtimeNode != null)
                     {
                         var runtimeText = runtimeNode.InnerText?.Trim() ?? string.Empty;
-                        var match = System.Text.RegularExpressions.Regex.Match(runtimeText, 
-                            @"(\d+)\s*hrs?\s+(?:and\s+)?(\d+)\s*mins?", 
+                        var match = System.Text.RegularExpressions.Regex.Match(runtimeText,
+                            @"(\d+)\s*hrs?\s+(?:and\s+)?(\d+)\s*mins?",
                             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         if (match.Success)
                         {
                             int hours = int.Parse(match.Groups[1].Value);
                             int minutes = int.Parse(match.Groups[2].Value);
                             metadata.Runtime = hours * 60 + minutes;
-                            _logger.LogInformation("Extracted runtime from search result: {Runtime} minutes ({Hours}h {Minutes}m)", 
+                            _logger.LogInformation("Extracted runtime from search result: {Runtime} minutes ({Hours}h {Minutes}m)",
                                 metadata.Runtime, hours, minutes);
                         }
                     }
@@ -983,14 +996,14 @@ namespace Listenarr.Api.Services
                         var seriesText = seriesNode.InnerText?.Trim() ?? string.Empty;
                         // Remove "Series:" prefix
                         seriesText = System.Text.RegularExpressions.Regex.Replace(seriesText, @"^\s*Series:\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                        
+
                         // Try to parse "SeriesName, Book N" format
                         var match = System.Text.RegularExpressions.Regex.Match(seriesText, @"^(.+?),\s*Book\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         if (match.Success)
                         {
                             metadata.Series = match.Groups[1].Value.Trim();
                             metadata.SeriesNumber = match.Groups[2].Value;
-                            _logger.LogInformation("Extracted series from search result: {Series}, Book {Number}", 
+                            _logger.LogInformation("Extracted series from search result: {Series}, Book {Number}",
                                 metadata.Series, metadata.SeriesNumber);
                         }
                         else
@@ -1065,7 +1078,7 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("adbl-product-details component not found in HTML for ASIN {Asin}", metadata.Asin);
                 return;
             }
-            
+
             // Log component structure to understand content
             var innerHtmlLength = productDetails.InnerHtml?.Length ?? 0;
             _logger.LogInformation("adbl-product-details found for ASIN {Asin}, inner HTML: {Length} chars", metadata.Asin, innerHtmlLength);
@@ -1152,27 +1165,27 @@ namespace Listenarr.Api.Services
 
             // Summary (description) - Extract BEFORE narrators so we can parse narrator from description if needed
             // The rendered Audible page uses custom web components
-            var summaryNode = productDetails.SelectSingleNode(".//adbl-text-block[@slot='summary']") 
+            var summaryNode = productDetails.SelectSingleNode(".//adbl-text-block[@slot='summary']")
                            ?? productDetails.SelectSingleNode(".//div[@slot='summary']")
-                           ?? productDetails.SelectSingleNode(".//span[@class='bc-text bc-publisher-summary-text']") 
+                           ?? productDetails.SelectSingleNode(".//span[@class='bc-text bc-publisher-summary-text']")
                            ?? doc.DocumentNode.SelectSingleNode("//adbl-text-block[@slot='summary']");
-            
+
             _logger.LogInformation("Summary node search result: {Found}", summaryNode != null ? "Found" : "Not found");
-            
+
             if (summaryNode != null && string.IsNullOrWhiteSpace(metadata.Description))
             {
                 var summary = summaryNode.InnerText?.Trim();
-                _logger.LogInformation("Summary text length: {Length}, starts with: {Start}", 
+                _logger.LogInformation("Summary text length: {Length}, starts with: {Start}",
                     summary?.Length ?? 0, summary?.Substring(0, Math.Min(100, summary?.Length ?? 0)));
-                    
+
                 // Filter out UI elements like "Close", "Show more", etc.
-                if (!string.IsNullOrWhiteSpace(summary) && summary.Length > 50 && 
+                if (!string.IsNullOrWhiteSpace(summary) && summary.Length > 50 &&
                     !summary.Equals("Close", StringComparison.OrdinalIgnoreCase) &&
                     !summary.Equals("Show more", StringComparison.OrdinalIgnoreCase))
                 {
                     metadata.Description = System.Text.RegularExpressions.Regex.Replace(summary, @"\s+", " ").Trim();
                     _logger.LogInformation("Extracted description from adbl-product-details: {Length} chars", metadata.Description.Length);
-                    
+
                     // Extract publisher from description - look for (P)YYYY Publisher pattern
                     if (string.IsNullOrWhiteSpace(metadata.Publisher))
                     {
@@ -1193,7 +1206,7 @@ namespace Listenarr.Api.Services
             // Narrators - Extract from productDetails after Playwright rendering (AFTER description extraction)
             // AGGRESSIVE HTML LOGGING: Search for narrator-related content
             _logger.LogInformation("=== NARRATOR HTML STRUCTURE ANALYSIS START ===");
-            
+
             // Log all text containing "narrat" (case-insensitive)
             var narratorTextNodes = doc.DocumentNode.SelectNodes("//*[contains(translate(text(), 'NARRATED', 'narrated'), 'narrat')]");
             if (narratorTextNodes != null && narratorTextNodes.Count > 0)
@@ -1206,7 +1219,7 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("  Node: {Name}, Text: {Text}, HTML: {Html}", node.Name, text?.Substring(0, Math.Min(100, text?.Length ?? 100)), html);
                 }
             }
-            
+
             // Log all <li> elements (narrator info often in list items)
             var allListItems = productDetails.SelectNodes(".//li") ?? doc.DocumentNode.SelectNodes("//li[not(ancestor::nav)]");
             if (allListItems != null && allListItems.Count > 0)
@@ -1222,7 +1235,7 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            
+
             // Log all <span> elements with class containing common narrator patterns
             var narratorSpans = doc.DocumentNode.SelectNodes("//span[contains(@class,'contributor') or contains(@class,'author') or contains(@class,'narrator') or contains(@class,'by-line')]");
             if (narratorSpans != null && narratorSpans.Count > 0)
@@ -1235,7 +1248,7 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("  <span class='{Class}'>: {Text}", className, text?.Substring(0, Math.Min(150, text?.Length ?? 0)));
                 }
             }
-            
+
             // Log all links (might contain narrator links we're missing)
             var allLinks = productDetails.SelectNodes(".//a") ?? doc.DocumentNode.SelectNodes("//a[not(ancestor::nav) and not(ancestor::footer)]");
             if (allLinks != null && allLinks.Count > 0)
@@ -1252,17 +1265,17 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            
+
             _logger.LogInformation("=== NARRATOR HTML STRUCTURE ANALYSIS END ===");
-            
+
             // First try to find narrator information using the bc-action-sheet-item structure
             // These are <li> elements that appear in action sheets/modals inside the component
             var allActionSheetItems = productDetails.SelectNodes(".//li[contains(@class,'bc-action-sheet-item') and contains(@class,'mosaic-action-sheet-item')]");
-            
+
             if (allActionSheetItems != null && allActionSheetItems.Count > 0)
             {
                 _logger.LogInformation("Found {Count} bc-action-sheet-item elements total", allActionSheetItems.Count);
-                
+
                 // The structure is: label <li> followed by data <li> elements
                 // Find "Narrated by:" label
                 var allLabels = doc.DocumentNode.SelectNodes("//li[contains(@class,'mosaic-action-sheet-label')]");
@@ -1275,16 +1288,16 @@ namespace Listenarr.Api.Services
                         _logger.LogInformation("  Label text: '{Text}'", labelText);
                     }
                 }
-                
+
                 // Try different approaches to find the narrator items
                 var narratorItems = new List<string>();
-                
+
                 // Approach 1: All action sheet items after checking if text looks like a name
                 foreach (var item in allActionSheetItems)
                 {
                     var text = item.InnerText?.Trim();
-                    if (!string.IsNullOrWhiteSpace(text) && 
-                        text.Length > 2 && 
+                    if (!string.IsNullOrWhiteSpace(text) &&
+                        text.Length > 2 &&
                         text.Length < 100 &&  // Names shouldn't be super long
                         !text.Contains("By:", StringComparison.OrdinalIgnoreCase) &&
                         !text.Contains("Narrated", StringComparison.OrdinalIgnoreCase) &&
@@ -1294,7 +1307,7 @@ namespace Listenarr.Api.Services
                         narratorItems.Add(text);
                     }
                 }
-                
+
                 if (narratorItems.Count == 2 || narratorItems.Count == 3)
                 {
                     // Filter out the author if present
@@ -1305,11 +1318,11 @@ namespace Listenarr.Api.Services
                             .ToList();
                         _logger.LogInformation("After filtering out authors, have {Count} narrators", narratorItems.Count);
                     }
-                    
+
                     if (narratorItems.Any())
                     {
                         metadata.Narrators = narratorItems;
-                        _logger.LogInformation("Extracted {Count} narrator(s) from action sheet items: {Narrators}", 
+                        _logger.LogInformation("Extracted {Count} narrator(s) from action sheet items: {Narrators}",
                             narratorItems.Count, string.Join(", ", narratorItems));
                     }
                 }
@@ -1319,7 +1332,7 @@ namespace Listenarr.Api.Services
                     metadata.Narrators = narratorItems;
                 }
             }
-            
+
             // If not found in component, try full page fallbacks (less preferred)
             if (metadata.Narrators == null || !metadata.Narrators.Any())
             {
@@ -1377,13 +1390,13 @@ namespace Listenarr.Api.Services
                     }
                 }
             }
-            
+
             // If no narrator links found, try parsing from description text as last resort
             if (metadata.Narrators == null || !metadata.Narrators.Any())
             {
                 var descText = metadata.Description ?? "";
                 _logger.LogInformation("Attempting to parse narrators from description text (length: {Length})", descText.Length);
-                
+
                 // Try multiple patterns:
                 // 1. "read by Name1 and Name2"
                 // 2. "Narrated by Name1, Name2"
@@ -1393,14 +1406,14 @@ namespace Listenarr.Api.Services
                     @"(?:read by|narrated by)\s+([^.!?]+?)(?:\s+and\s+([^.!?]+?))?(?:\.|Re-download|$)",
                     @"Narrated by:?\s*([^.!?\n]+)",
                 };
-                
+
                 foreach (var pattern in narratorPatterns)
                 {
                     var match = System.Text.RegularExpressions.Regex.Match(descText, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (match.Success)
                     {
                         var narratorList = new List<string>();
-                        
+
                         // Extract first narrator
                         if (match.Groups.Count > 1 && !string.IsNullOrWhiteSpace(match.Groups[1].Value))
                         {
@@ -1416,23 +1429,23 @@ namespace Listenarr.Api.Services
                                 narratorList.Add(name1);
                             }
                         }
-                        
+
                         // Extract second narrator if captured separately
                         if (match.Groups.Count > 2 && !string.IsNullOrWhiteSpace(match.Groups[2].Value))
                         {
                             narratorList.Add(match.Groups[2].Value.Trim());
                         }
-                        
+
                         if (narratorList.Any())
                         {
                             metadata.Narrators = narratorList.Distinct().ToList();
-                            _logger.LogInformation("Extracted {Count} narrator(s) from description text: {Narrators}", 
+                            _logger.LogInformation("Extracted {Count} narrator(s) from description text: {Narrators}",
                                 narratorList.Count, string.Join(", ", narratorList));
                             break;
                         }
                     }
                 }
-                
+
                 if (metadata.Narrators == null || !metadata.Narrators.Any())
                 {
                     _logger.LogWarning("No narrator links found and could not parse from description text");
@@ -1544,10 +1557,10 @@ namespace Listenarr.Api.Services
             else
             {
                 _logger.LogWarning("No detail rows found in adbl-product-details component");
-                
+
                 // Fallback: Try to extract from full page text
                 var fullPageText = doc.DocumentNode.InnerText;
-                
+
                 // Try to find runtime in page text
                 if (metadata.Runtime == null)
                 {
@@ -1560,7 +1573,7 @@ namespace Listenarr.Api.Services
                         _logger.LogInformation("Extracted runtime from full page text: {Runtime} minutes", metadata.Runtime);
                     }
                 }
-                
+
                 // Try to find version in page text
                 if (string.IsNullOrWhiteSpace(metadata.Version))
                 {
@@ -1614,7 +1627,7 @@ namespace Listenarr.Api.Services
             try
             {
                 _logger.LogInformation("Starting ExtractFromProductMetadata for adbl-product-metadata component");
-                
+
                 // Log all custom elements starting with "adbl-"
                 var allAdblElements = doc.DocumentNode.SelectNodes("//*[starts-with(local-name(), 'adbl-')]");
                 if (allAdblElements != null)
@@ -1622,7 +1635,7 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("Found {Count} adbl-* custom elements:", allAdblElements.Count);
                     foreach (var elem in allAdblElements.Take(20))
                     {
-                        _logger.LogInformation("  Element: {Name}, Text length: {Length}", 
+                        _logger.LogInformation("  Element: {Name}, Text length: {Length}",
                             elem.Name, elem.InnerText?.Length ?? 0);
                     }
                 }
@@ -1630,12 +1643,12 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogWarning("No adbl-* custom elements found in document");
                 }
-                
+
                 var productMetadata = doc.DocumentNode.SelectSingleNode("//adbl-product-metadata");
                 if (productMetadata == null)
                 {
                     _logger.LogWarning("No adbl-product-metadata component found");
-                    
+
                     // Try alternate selectors
                     productMetadata = doc.DocumentNode.SelectSingleNode("//*[local-name()='adbl-product-metadata']");
                     if (productMetadata != null)
@@ -1648,7 +1661,7 @@ namespace Listenarr.Api.Services
                         var bodyHtml = doc.DocumentNode.SelectSingleNode("//body")?.InnerHtml;
                         if (bodyHtml != null && bodyHtml.Length > 1000)
                         {
-                            _logger.LogInformation("Body HTML snippet (first 2000 chars): {Html}", 
+                            _logger.LogInformation("Body HTML snippet (first 2000 chars): {Html}",
                                 bodyHtml.Substring(0, Math.Min(2000, bodyHtml.Length)));
                         }
                         return;
@@ -1659,7 +1672,7 @@ namespace Listenarr.Api.Services
 
                 // Try to extract from structured list items (same format as search results but within the component)
                 // Look for list items with specific classes: runtimeLabel, seriesLabel, releaseDateLabel, languageLabel
-                
+
                 // Extract runtime from runtimeLabel
                 if (metadata.Runtime == null)
                 {
@@ -1668,8 +1681,8 @@ namespace Listenarr.Api.Services
                     {
                         var runtimeText = runtimeNode.InnerText?.Trim() ?? string.Empty;
                         _logger.LogInformation("Found runtime text: {Text}", runtimeText);
-                        var match = System.Text.RegularExpressions.Regex.Match(runtimeText, 
-                            @"(\d+)\s*hrs?\s+(?:and\s+)?(\d+)\s*mins?", 
+                        var match = System.Text.RegularExpressions.Regex.Match(runtimeText,
+                            @"(\d+)\s*hrs?\s+(?:and\s+)?(\d+)\s*mins?",
                             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         if (match.Success)
                         {
@@ -1694,13 +1707,13 @@ namespace Listenarr.Api.Services
                         var seriesText = seriesNode.InnerText?.Trim() ?? string.Empty;
                         _logger.LogInformation("Found series text: {Text}", seriesText);
                         seriesText = System.Text.RegularExpressions.Regex.Replace(seriesText, @"^\s*Series:\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                        
+
                         var match = System.Text.RegularExpressions.Regex.Match(seriesText, @"^(.+?),\s*Book\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                         if (match.Success)
                         {
                             metadata.Series = match.Groups[1].Value.Trim();
                             metadata.SeriesNumber = match.Groups[2].Value;
-                            _logger.LogInformation("Extracted series from product metadata: {Series}, Book {Number}", 
+                            _logger.LogInformation("Extracted series from product metadata: {Series}, Book {Number}",
                                 metadata.Series, metadata.SeriesNumber);
                         }
                     }
@@ -1736,7 +1749,7 @@ namespace Listenarr.Api.Services
 
                 var jsonText = scriptNode.InnerText?.Trim() ?? string.Empty;
                 _logger.LogInformation("Found JSON data in adbl-product-metadata: {Length} chars", jsonText.Length);
-                
+
                 if (string.IsNullOrEmpty(jsonText))
                 {
                     _logger.LogWarning("JSON script is empty");
@@ -1759,9 +1772,9 @@ namespace Listenarr.Api.Services
                 using (jsonDoc)
                 {
                     var root = jsonDoc.RootElement;
-                    
+
                     // Log all property names to understand JSON structure
-                    _logger.LogInformation("JSON properties in adbl-product-metadata: {Properties}", 
+                    _logger.LogInformation("JSON properties in adbl-product-metadata: {Properties}",
                         string.Join(", ", root.EnumerateObject().Select(p => p.Name)));
 
                     // The JSON only contains authors/narrators/rating, not the metadata fields
@@ -1771,7 +1784,7 @@ namespace Listenarr.Api.Services
 
                 // Extract from rendered/visible text on the page (Playwright renders the full page)
                 var pageText = doc.DocumentNode.InnerText;
-                
+
                 // Log a sample of the rendered text to understand its structure
                 var sampleLength = Math.Min(5000, pageText.Length);
                 var sampleText = pageText.Substring(0, sampleLength);
@@ -1784,10 +1797,10 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
-                    _logger.LogWarning("Could not find 'Release date' in page text. Sample (first 1000 chars): {Sample}", 
+                    _logger.LogWarning("Could not find 'Release date' in page text. Sample (first 1000 chars): {Sample}",
                         sampleText.Substring(0, Math.Min(1000, sampleText.Length)));
                 }
-                
+
                 // Extract Series (e.g., "Series Book 1,  The Empyrean" or "Series\nBook 1, \nThe Empyrean")
                 var seriesMatch = System.Text.RegularExpressions.Regex.Match(pageText,
                     @"Series[\s\n]+Book\s+(\d+)[,\s\n]+([^\n\r]+?)(?=[\s\n]*(?:Release date|Language|Format|Length|Publisher|Categories|$))",
@@ -1891,13 +1904,13 @@ namespace Listenarr.Api.Services
         private string CleanLanguage(string language)
         {
             if (string.IsNullOrWhiteSpace(language)) return language;
-            
+
             // Remove currency codes (e.g., "English - USD" -> "English")
             var cleaned = System.Text.RegularExpressions.Regex.Replace(language, @"\s*-\s*(USD|EUR|GBP|CAD|AUD|INR)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             // Remove other common noise
             cleaned = cleaned.Replace("Language:", "").Trim();
-            
+
             return cleaned;
         }
 
@@ -1909,19 +1922,19 @@ namespace Listenarr.Api.Services
             if (string.IsNullOrWhiteSpace(author)) return true;
             var a = author.Trim();
             if (a.Length < 2) return true;
-            
+
             // Filter out common Amazon/Audible navigation elements
-            var noisePhrases = new[] { 
-                "Shop By", "Shop by", "Authors", "By:", "Sort by", 
+            var noisePhrases = new[] {
+                "Shop By", "Shop by", "Authors", "By:", "Sort by",
                 "Written by", "See all", "Browse", "More by",
                 "Visit Amazon", "Visit", "Learn more"
             };
-            
+
             foreach (var noise in noisePhrases)
             {
                 if (a.Contains(noise, StringComparison.OrdinalIgnoreCase)) return true;
             }
-            
+
             return false;
         }
 
@@ -1934,13 +1947,13 @@ namespace Listenarr.Api.Services
             if (string.IsNullOrWhiteSpace(metadata.Title)) return;
 
             var title = metadata.Title;
-            
+
             // Pattern: "Title: Series, Book #" or "Title: Series Book #"
             // Examples: "Fourth Wing: Empyrean, Book 1", "The Hobbit: Middle-earth, Book 1"
             var match = System.Text.RegularExpressions.Regex.Match(title,
                 @"^(.+?):\s*([^,]+),?\s+Book\s+(\d+)$",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             if (match.Success)
             {
                 metadata.Title = match.Groups[1].Value.Trim();
@@ -1956,7 +1969,7 @@ namespace Listenarr.Api.Services
             match = System.Text.RegularExpressions.Regex.Match(title,
                 @"^(.+?)\s*\(([^,\)]+),?\s+Book\s+(\d+)\)$",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             if (match.Success)
             {
                 metadata.Title = match.Groups[1].Value.Trim();
@@ -1972,7 +1985,7 @@ namespace Listenarr.Api.Services
             match = System.Text.RegularExpressions.Regex.Match(title,
                 @"^(.+?)[,:]\s+Book\s+(\d+)\s+of\s+(.+)$",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
             if (match.Success)
             {
                 metadata.Title = match.Groups[1].Value.Trim();

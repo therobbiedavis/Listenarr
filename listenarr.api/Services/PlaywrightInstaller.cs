@@ -19,8 +19,9 @@ namespace Listenarr.Api.Services
         private readonly string? _nodePathOverride;
         private readonly string? _httpProxyOverride;
         private readonly string? _httpsProxyOverride;
+        private readonly IProcessRunner _processRunner;
 
-        public PlaywrightInstaller(ILogger<PlaywrightInstaller> logger, IPlaywrightPageFetcher fetcher, PlaywrightInstallStatus status, IConfiguration config)
+        public PlaywrightInstaller(ILogger<PlaywrightInstaller> logger, IPlaywrightPageFetcher fetcher, PlaywrightInstallStatus status, IConfiguration config, IProcessRunner processRunner)
         {
             _logger = logger;
             _fetcher = fetcher;
@@ -28,6 +29,7 @@ namespace Listenarr.Api.Services
             _nodePathOverride = config["Playwright:NodePath"] ?? Environment.GetEnvironmentVariable("PLAYWRIGHT_NODE_PATH");
             _httpProxyOverride = config["ExternalRequests:HttpProxy"] ?? config["Playwright:HttpProxy"] ?? Environment.GetEnvironmentVariable("HTTP_PROXY");
             _httpsProxyOverride = config["ExternalRequests:HttpsProxy"] ?? config["Playwright:HttpsProxy"] ?? Environment.GetEnvironmentVariable("HTTPS_PROXY");
+            _processRunner = processRunner;
         }
 
         public async Task<bool> EnsurePlaywrightInitializedAsync(CancellationToken ct = default)
@@ -148,28 +150,22 @@ namespace Listenarr.Api.Services
                 if (!string.IsNullOrWhiteSpace(httpProxy)) psi.Environment["HTTP_PROXY"] = httpProxy;
                 if (!string.IsNullOrWhiteSpace(httpsProxy)) psi.Environment["HTTPS_PROXY"] = httpsProxy;
 
-                using var proc = Process.Start(psi);
-                if (proc == null) return (false, string.Empty, "failed to start npx", -1);
-
-                var outTask = proc.StandardOutput.ReadToEndAsync();
-                var errTask = proc.StandardError.ReadToEndAsync();
-                var completed = await Task.Run(() => proc.WaitForExit(10 * 60 * 1000), ct).ConfigureAwait(false);
-                var outText = await outTask.ConfigureAwait(false);
-                var errText = await errTask.ConfigureAwait(false);
+                var pr = await _processRunner.RunAsync(psi, timeoutMs: 10 * 60 * 1000, cancellationToken: ct).ConfigureAwait(false);
+                var outText = pr.Stdout ?? string.Empty;
+                var errText = pr.Stderr ?? string.Empty;
 
                 _status.LastOutput = outText + "\n" + errText;
 
-                if (completed && proc.ExitCode == 0)
+                if (!pr.TimedOut && pr.ExitCode == 0)
                 {
-                    // Ask Playwright to initialize now that browsers may be present
                     var ok = await EnsurePlaywrightInitializedAsync(ct).ConfigureAwait(false);
                     _status.IsInstalled = ok;
                     if (!ok) _status.LastError = "Playwright failed to initialize after npx install";
-                    return (ok, outText, errText, proc.ExitCode);
+                    return (ok, outText, errText, pr.ExitCode);
                 }
 
                 _status.LastError = "npx install failed; check LastOutput";
-                return (false, outText, errText, proc.ExitCode);
+                return (false, outText, errText, pr.ExitCode);
             }
             catch (Exception ex)
             {

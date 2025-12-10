@@ -1,8 +1,9 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using System.Linq;
+using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Api.Controllers;
 
@@ -44,7 +45,7 @@ public class DownloadsController : ControllerBase
                 .ToListAsync();
 
             var enhancedDownloads = await EnhanceDownloadsWithClientNames(downloads);
-            
+
             _logger.LogInformation("Retrieved {Count} downloads", downloads.Count);
             return Ok(enhancedDownloads);
         }
@@ -109,14 +110,14 @@ public class DownloadsController : ControllerBase
         try
         {
             var activeDownloads = await _dbContext.Downloads
-                .Where(d => d.Status == DownloadStatus.Queued || 
+                .Where(d => d.Status == DownloadStatus.Queued ||
                            d.Status == DownloadStatus.Downloading ||
                            d.Status == DownloadStatus.Processing)
                 .OrderByDescending(d => d.StartedAt)
                 .ToListAsync();
 
             var enhancedActiveDownloads = await EnhanceDownloadsWithClientNames(activeDownloads);
-            
+
             _logger.LogInformation("Retrieved {Count} active downloads", activeDownloads.Count);
             return Ok(enhancedActiveDownloads);
         }
@@ -212,8 +213,9 @@ public class DownloadsController : ControllerBase
     {
         var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
         var clientLookup = downloadClients.ToDictionary(c => c.Id, c => c.Name);
-        
-        return downloads.Select(d => {
+
+        return downloads.Select(d =>
+        {
             // Remove any client-local content path information before returning to the frontend.
             // Server keeps `DownloadPath`/metadata internally for mapping/monitoring, but must not transmit
             // client-local paths (for example ClientContentPath) to user browsers.
@@ -248,10 +250,11 @@ public class DownloadsController : ControllerBase
                 completedAt = d.CompletedAt,
                 errorMessage = d.ErrorMessage,
                 downloadClientId = d.DownloadClientId,
-                downloadClientName = d.DownloadClientId == "DDL" ? "Direct Download" : 
+                downloadClientName = d.DownloadClientId == "DDL" ? "Direct Download" :
                                    clientLookup.TryGetValue(d.DownloadClientId, out var clientName) ? clientName : "Unknown Client",
                 metadata = sanitizedMetadata
             };
         }).Cast<object>().ToList();
     }
 }
+

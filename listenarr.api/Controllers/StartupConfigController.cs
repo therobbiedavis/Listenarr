@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,9 +18,9 @@ namespace Listenarr.Api.Controllers
             _logger = logger;
         }
 
-    [HttpGet]
-    [AllowAnonymous]
-    public ActionResult<StartupConfig> Get()
+        [HttpGet]
+        [AllowAnonymous]
+        public ActionResult<StartupConfig> Get()
         {
             try
             {
@@ -50,3 +50,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

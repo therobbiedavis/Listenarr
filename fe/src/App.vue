@@ -320,14 +320,17 @@ const systemIssues = ref(0)
 // Activity count: Optimized with memoized intermediate computations
 // Breaks down complex logic into cacheable steps for 3-5x performance improvement
 
-// Step 1: Filter truly active downloads (memoized)
-const activeDownloads = computed(() => 
-  downloadsStore.activeDownloads.filter(d => 
-    d.status === 'Downloading' || 
-    d.status === 'Queued' || 
-    d.status === 'Processing'
-  )
-)
+// Step 1: Use the downloads store's pre-filtered active downloads
+// The store already normalizes status casing and returns only active items
+// (queued, downloading, paused, processing) so re-filtering here led to
+// casing bugs (e.g. 'downloading' !== 'Downloading'). Reuse the store value
+// directly and make sure to unwrap the ref in case the store exposes a
+// computed/ref instead of a raw array.
+import { unref } from 'vue'
+const activeDownloads = computed(() => {
+  const raw = unref(downloadsStore.activeDownloads)
+  return Array.isArray(raw) ? raw : []
+})
 
 // Step 2: Count active queue items (memoized)
 const activeQueueCount = computed(() => 

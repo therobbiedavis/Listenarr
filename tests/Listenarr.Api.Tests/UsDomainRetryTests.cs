@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -104,3 +104,4 @@ namespace Listenarr.Api.Tests
         public Task SaveStartupConfigAsync(StartupConfig config) => Task.CompletedTask;
     }
 }
+

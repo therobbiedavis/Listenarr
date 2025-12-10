@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Tests
 {
@@ -77,3 +77,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+

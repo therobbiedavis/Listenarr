@@ -18,19 +18,23 @@ namespace Listenarr.Api.Services
         private readonly IStartupConfigService _startupConfigService;
         private readonly IHostEnvironment _hostEnvironment;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IProcessRunner? _processRunner;
+        private string? _botApiKey;
         private Process? _botProcess;
         private readonly object _processLock = new object();
 
         public DiscordBotService(
-            ILogger<DiscordBotService> logger, 
-            IStartupConfigService startupConfigService, 
+            ILogger<DiscordBotService> logger,
+            IStartupConfigService startupConfigService,
             IHostEnvironment hostEnvironment,
-            IHttpContextAccessor httpContextAccessor)
+            IHttpContextAccessor httpContextAccessor,
+            IProcessRunner? processRunner = null)
         {
             _logger = logger;
             _startupConfigService = startupConfigService;
             _hostEnvironment = hostEnvironment;
             _httpContextAccessor = httpContextAccessor;
+            _processRunner = processRunner;
         }
 
         public async Task<bool> StartBotAsync()
@@ -78,7 +82,7 @@ namespace Listenarr.Api.Services
 
                 // Determine the Listenarr API URL with proper fallbacks for Docker
                 var listenarrUrl = GetListenarrUrl();
-                
+
                 _logger.LogInformation("Starting Discord bot with LISTENARR_URL: {Url}", listenarrUrl);
                 startInfo.EnvironmentVariables["LISTENARR_URL"] = listenarrUrl;
 
@@ -91,8 +95,9 @@ namespace Listenarr.Api.Services
                     var cfg = _startupConfigService.GetConfig();
                     if (cfg != null && !string.IsNullOrWhiteSpace(cfg.ApiKey))
                     {
-                        startInfo.EnvironmentVariables["LISTENARR_API_KEY"] = cfg.ApiKey;
-                        _logger.LogInformation("Passing LISTENARR_API_KEY to bot process (length={Len})", cfg.ApiKey.Length);
+                        _botApiKey = cfg.ApiKey;
+                        startInfo.EnvironmentVariables["LISTENARR_API_KEY"] = _botApiKey;
+                        _logger.LogInformation("Passing LISTENARR_API_KEY to bot process (present=true)");
                     }
                 }
                 catch (Exception ex)
@@ -112,14 +117,83 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Starting Discord bot with command: {Command} {Args} in {WorkingDir}",
                     startInfo.FileName, startInfo.Arguments, startInfo.WorkingDirectory);
 
+                // If we have a process runner available, use it to perform a quick pre-flight
+                // check (e.g. `node --version`) so we can give a clearer diagnostic when Node
+                // is not available on the PATH. We still start the long-running bot process
+                // via Process.Start so we retain the ability to kill and inspect the child.
+                if (_processRunner != null)
+                {
+                    try
+                    {
+                        var checkPsi = new ProcessStartInfo
+                        {
+                            FileName = "node",
+                            Arguments = "--version",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WorkingDirectory = botDirectory
+                        };
+
+                        using var _reg_check = _processRunner.RegisterTransientSensitive(new[] { _botApiKey ?? string.Empty });
+                        var check = await _processRunner.RunAsync(checkPsi, 5000);
+                        if (check.TimedOut)
+                        {
+                            _logger.LogWarning("Pre-flight node --version check timed out");
+                        }
+                        else if (check.ExitCode != 0)
+                        {
+                            _logger.LogWarning("Pre-flight node --version returned non-zero (ExitCode={Code}). Stderr: {Err}", check.ExitCode, LogRedaction.RedactText(check.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty })));
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Detected node: {Out}", LogRedaction.RedactText(check.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty }))?.Trim());
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "node --version pre-flight check failed (node may not be available in PATH)");
+                    }
+                }
+
                 lock (_processLock)
                 {
-                    _botProcess = Process.Start(startInfo);
+                    // Start the long-running bot process via the process runner wrapper if available.
+                    if (_processRunner != null)
+                    {
+                        using var _reg_start = _processRunner.RegisterTransientSensitive(new[] { _botApiKey ?? string.Empty });
+                        _botProcess = _processRunner.StartProcess(startInfo);
+                    }
+                    else
+                    {
+                        // Fallback to directly starting the process when no runner is provided.
+                        _botProcess = Process.Start(startInfo);
+                    }
+
                     if (_botProcess != null)
                     {
+                        try
+                        {
+                            _botProcess.EnableRaisingEvents = true;
+                        }
+                        catch { }
+
                         _botProcess.Exited += (sender, e) =>
                         {
-                            _logger.LogInformation("Discord bot process exited with code: {ExitCode}", _botProcess.ExitCode);
+                            try
+                            {
+                                if (sender is Process exitedProc)
+                                {
+                                    try
+                                    {
+                                        _logger.LogInformation("Discord bot process exited with code: {ExitCode}", exitedProc.ExitCode);
+                                    }
+                                    catch { }
+                                }
+                            }
+                            catch { }
+
                             // Clear the process reference so it can be restarted
                             lock (_processLock)
                             {
@@ -128,8 +202,16 @@ namespace Listenarr.Api.Services
                         };
 
                         // Start async reading of output to prevent deadlocks
-                        _ = Task.Run(() => ReadOutputAsync(_botProcess));
-                        _ = Task.Run(() => ReadErrorAsync(_botProcess));
+                        var localProc = _botProcess;
+                        if (localProc?.StandardOutput != null)
+                        {
+                            _ = Task.Run(() => ReadOutputAsync(localProc));
+                        }
+
+                        if (localProc?.StandardError != null)
+                        {
+                            _ = Task.Run(() => ReadErrorAsync(localProc));
+                        }
                     }
                 }
 
@@ -164,7 +246,7 @@ namespace Listenarr.Api.Services
                     var request = httpContext.Request;
                     var scheme = request.Scheme;
                     var host = request.Host.Value;
-                    
+
                     // Check if we're behind a reverse proxy (X-Forwarded headers)
                     if (request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto))
                     {
@@ -194,12 +276,12 @@ namespace Listenarr.Api.Services
                     var protocol = (config.EnableSsl ?? false) ? "https" : "http";
                     var port = config.Port ?? 5000;
                     var urlBase = config.UrlBase?.TrimEnd('/') ?? "";
-                    
+
                     // In Docker, use host.docker.internal instead of localhost for better compatibility
-                    var host = Environment.GetEnvironmentVariable("DOCKER_ENV") != null 
-                        ? "host.docker.internal" 
+                    var host = Environment.GetEnvironmentVariable("DOCKER_ENV") != null
+                        ? "host.docker.internal"
                         : "localhost";
-                    
+
                     var url = $"{protocol}://{host}:{port}{urlBase}";
                     _logger.LogInformation("Constructed URL from startup config: {Url}", url);
                     return url;
@@ -211,38 +293,72 @@ namespace Listenarr.Api.Services
             }
 
             // Priority 4: Final fallback - try host.docker.internal first in Docker, then localhost
-            var fallbackHost = Environment.GetEnvironmentVariable("DOCKER_ENV") != null 
-                ? "host.docker.internal" 
+            var fallbackHost = Environment.GetEnvironmentVariable("DOCKER_ENV") != null
+                ? "host.docker.internal"
                 : "localhost";
-            
+
             var fallbackUrl = $"http://{fallbackHost}:5000";
             _logger.LogWarning("Using fallback URL: {Url}", fallbackUrl);
             return fallbackUrl;
         }
 
-        public Task<bool> StopBotAsync()
+        public async Task<bool> StopBotAsync()
         {
             lock (_processLock)
             {
                 if (_botProcess == null || _botProcess.HasExited)
                 {
                     _logger.LogInformation("Bot is not running");
-                    return Task.FromResult(true);
+                    return true;
+                }
+            }
+
+            try
+            {
+                Process? proc;
+                lock (_processLock)
+                {
+                    proc = _botProcess;
                 }
 
+                if (proc == null)
+                {
+                    _logger.LogInformation("Bot is not running");
+                    return true;
+                }
+
+                _logger.LogInformation("Stopping Discord bot process");
                 try
                 {
-                    _logger.LogInformation("Stopping Discord bot process");
-                    _botProcess.Kill(true); // Kill entire process tree
-                    _botProcess.WaitForExit(5000); // Wait up to 5 seconds
-                    _botProcess = null;
-                    return Task.FromResult(true);
+                    proc.Kill(true); // Kill entire process tree
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to stop Discord bot");
-                    return Task.FromResult(false);
+                    _logger.LogWarning(ex, "Error killing bot process (may have exited already)");
                 }
+
+                // Wait up to 5 seconds for process exit
+                try
+                {
+                    using var cts = new CancellationTokenSource(5000);
+                    await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("Timed out waiting for Discord bot to exit after kill");
+                }
+
+                lock (_processLock)
+                {
+                    _botProcess = null;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to stop Discord bot");
+                return false;
             }
         }
 
@@ -282,7 +398,8 @@ namespace Listenarr.Api.Services
                     var line = await process.StandardOutput.ReadLineAsync();
                     if (line != null)
                     {
-                        _logger.LogInformation("Bot stdout: {Line}", line);
+                        var safe = LogRedaction.RedactText(line, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty }));
+                        _logger.LogInformation("Bot stdout: {Line}", safe);
                     }
                 }
             }
@@ -301,7 +418,8 @@ namespace Listenarr.Api.Services
                     var line = await process.StandardError.ReadLineAsync();
                     if (line != null)
                     {
-                        _logger.LogError("Bot stderr: {Line}", line);
+                        var safe = LogRedaction.RedactText(line, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { _botApiKey ?? string.Empty }));
+                        _logger.LogError("Bot stderr: {Line}", safe);
                     }
                 }
             }
@@ -310,5 +428,7 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Error reading bot stderr");
             }
         }
+
+
     }
 }

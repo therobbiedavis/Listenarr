@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Api.Services
@@ -72,7 +73,7 @@ namespace Listenarr.Api.Services
             {
                 var existing = await _dbContext.ApiConfigurations
                     .FirstOrDefaultAsync(c => c.Id == config.Id);
-                
+
                 if (existing != null)
                 {
                     // Update existing
@@ -86,7 +87,7 @@ namespace Listenarr.Api.Services
                     config.CreatedAt = DateTime.UtcNow;
                     _dbContext.ApiConfigurations.Add(config);
                 }
-                
+
                 await _dbContext.SaveChangesAsync();
                 return config.Id;
             }
@@ -103,12 +104,12 @@ namespace Listenarr.Api.Services
             {
                 var config = await _dbContext.ApiConfigurations
                     .FirstOrDefaultAsync(c => c.Id == id);
-                
+
                 if (config == null) return false;
-                
+
                 _dbContext.ApiConfigurations.Remove(config);
                 await _dbContext.SaveChangesAsync();
-                
+
                 return true;
             }
             catch (Exception ex)
@@ -154,7 +155,7 @@ namespace Listenarr.Api.Services
             {
                 var existing = await _dbContext.DownloadClientConfigurations
                     .FirstOrDefaultAsync(c => c.Id == config.Id);
-                
+
                 if (existing != null)
                 {
                     // Update existing
@@ -167,7 +168,7 @@ namespace Listenarr.Api.Services
                     config.CreatedAt = DateTime.UtcNow;
                     _dbContext.DownloadClientConfigurations.Add(config);
                 }
-                
+
                 await _dbContext.SaveChangesAsync();
                 return config.Id;
             }
@@ -184,12 +185,12 @@ namespace Listenarr.Api.Services
             {
                 var config = await _dbContext.DownloadClientConfigurations
                     .FirstOrDefaultAsync(c => c.Id == id);
-                
+
                 if (config == null) return false;
-                
+
                 _dbContext.DownloadClientConfigurations.Remove(config);
                 await _dbContext.SaveChangesAsync();
-                
+
                 return true;
             }
             catch (Exception ex)
@@ -206,7 +207,7 @@ namespace Listenarr.Api.Services
             {
                 // Try to get from database first
                 var settings = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
-                
+
                 if (settings == null)
                 {
                     // Create default settings
@@ -219,7 +220,12 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error loading application settings from database");
+                // On error while loading settings we intentionally do NOT perform any
+                // runtime schema changes (eg. ALTER TABLE). Schema changes must be
+                // applied via EF migrations or external DB migration tools.
+                _logger.LogError(ex, "Error loading application settings from database (no runtime ALTERs will be attempted)");
+                // Return a fresh default settings instance so callers can continue using
+                // a consistent ApplicationSettings object without crashing the host.
                 return new ApplicationSettings();
             }
         }
@@ -230,9 +236,9 @@ namespace Listenarr.Api.Services
             {
                 // Ensure Id is always 1 (singleton pattern)
                 settings.Id = 1;
-                
+
                 var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
-                
+
                 if (existing != null)
                 {
                     // Update existing settings
@@ -245,7 +251,7 @@ namespace Listenarr.Api.Services
                     // Add new settings
                     _dbContext.ApplicationSettings.Add(settings);
                 }
-                
+
                 await _dbContext.SaveChangesAsync();
 
                 // If the request included admin credentials, ensure a user exists/updated
@@ -254,7 +260,7 @@ namespace Listenarr.Api.Services
                     if (!string.IsNullOrWhiteSpace(settings.AdminUsername) && !string.IsNullOrWhiteSpace(settings.AdminPassword))
                     {
                         _logger.LogDebug("Processing admin user credentials: {Username}", settings.AdminUsername);
-                        
+
                         var existingUser = await _userService.GetByUsernameAsync(settings.AdminUsername!);
                         if (existingUser == null)
                         {
@@ -284,7 +290,9 @@ namespace Listenarr.Api.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error saving application settings to database");
+                _logger.LogError(ex, "Error saving application settings to database (no runtime ALTERs will be attempted)");
+                // Re-throw to let higher-level handlers surface the failure. We intentionally
+                // do not attempt to alter the schema automatically here.
                 throw;
             }
         }

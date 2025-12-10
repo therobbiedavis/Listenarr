@@ -1,0 +1,11 @@
+{
+  "name": "listenarr-discord-bot-stub",
+  "version": "0.0.1",
+  "description": "Local placeholder Discord bot used for tests and development",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Listenarr",
+  "license": "MIT"
+}

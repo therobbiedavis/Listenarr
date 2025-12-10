@@ -7,14 +7,14 @@ namespace Listenarr.Api.Services
     /// </summary>
     public class ImageCacheCleanupService : BackgroundService
     {
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<ImageCacheCleanupService> _logger;
         private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(24); // Run daily
 
-        public ImageCacheCleanupService(IServiceProvider serviceProvider, ILogger<ImageCacheCleanupService> logger)
+        public ImageCacheCleanupService(IServiceScopeFactory scopeFactory, ILogger<ImageCacheCleanupService> logger)
         {
-            _serviceProvider = serviceProvider;
-            _logger = logger;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -29,9 +29,9 @@ namespace Listenarr.Api.Services
                 try
                 {
                     _logger.LogInformation("Running daily image cache cleanup at {Time}", DateTime.Now);
-                    
+
                     // Create a scope to resolve scoped services
-                    using (var scope = _serviceProvider.CreateScope())
+                    using (var scope = _scopeFactory.CreateScope())
                     {
                         var imageCacheService = scope.ServiceProvider.GetRequiredService<IImageCacheService>();
                         await imageCacheService.ClearTempCacheAsync();
@@ -64,9 +64,9 @@ namespace Listenarr.Api.Services
 
             if (timeUntilMidnight.TotalSeconds > 0)
             {
-                _logger.LogInformation("Waiting {Hours} hours and {Minutes} minutes until midnight for first cleanup", 
+                _logger.LogInformation("Waiting {Hours} hours and {Minutes} minutes until midnight for first cleanup",
                     (int)timeUntilMidnight.TotalHours, timeUntilMidnight.Minutes);
-                
+
                 try
                 {
                     await Task.Delay(timeUntilMidnight, stoppingToken);

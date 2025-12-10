@@ -1,6 +1,7 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using System;
 using Microsoft.Data.Sqlite;
+using Serilog;
 
 partial class Program
 {
@@ -8,11 +9,27 @@ partial class Program
     // program entry point when the web project uses top-level statements.
     public static void Run()
     {
+        EnsureSerilog();
+
+        static void EnsureSerilog()
+        {
+            try
+            {
+                var loggerType = Log.Logger?.GetType().Name;
+                if (string.Equals(loggerType, "SilentLogger", StringComparison.OrdinalIgnoreCase) || Log.Logger == null)
+                {
+                    Log.Logger = new LoggerConfiguration()
+                        .WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+                        .CreateLogger();
+                }
+            }
+            catch { }
+        }
         try
         {
             // Path to the database file
             string dbPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "listenarr.db");
-            Console.WriteLine($"Database path: {dbPath}");
+            Log.Information("Database path: {DbPath}", dbPath);
 
             using var connection = new SqliteConnection($"Data Source={dbPath}");
             connection.Open();
@@ -21,9 +38,9 @@ partial class Program
             command.CommandText = "SELECT Id, Username, Email, IsAdmin, CreatedAt FROM Users";
 
             using var reader = command.ExecuteReader();
-            Console.WriteLine("\nUsers in database:");
-            Console.WriteLine("ID | Username | Email | IsAdmin | CreatedAt");
-            Console.WriteLine("---|----------|-------|---------|-----------");
+            Log.Information("\nUsers in database:");
+            Log.Information("ID | Username | Email | IsAdmin | CreatedAt");
+            Log.Information("---|----------|-------|---------|-----------");
 
             while (reader.Read())
             {
@@ -33,18 +50,17 @@ partial class Program
                 var isAdmin = reader.GetBoolean(3);
                 var createdAt = reader.GetDateTime(4);
 
-                Console.WriteLine($"{id} | {username} | {email} | {isAdmin} | {createdAt}");
+                Log.Information("{Id} | {Username} | {Email} | {IsAdmin} | {CreatedAt}", id, username, email, isAdmin, createdAt);
             }
 
             if (!reader.HasRows)
             {
-                Console.WriteLine("No users found in database.");
+                Log.Information("No users found in database.");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            Log.Error(ex, "Error querying users database");
         }
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 using Listenarr.Api.Controllers;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using System.IO;
 
@@ -30,7 +30,7 @@ namespace Listenarr.Api.Tests
             };
 
             var rootPath = "/server/mnt/drive/Audiobooks";
-            var fileNamingPattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"; // Default pattern
+            var fileNamingPattern = "{Author}/{Series}/{Title}"; // Default pattern
 
             // Mock dependencies
             var mockRepo = new Mock<IAudiobookRepository>();
@@ -49,7 +49,7 @@ namespace Listenarr.Api.Tests
                 .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
                 {
                     // For non-series book, the method derives pattern from fileNamingPattern by removing file-specific tokens
-                    // Input: "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"
+                    // Input: "{Author}/{Series}/{Title}"
                     // Output after processing: "{Author}/{Title}" (Series removed since empty)
                     if (pattern == "{Author}/{Title}")
                     {
@@ -58,7 +58,7 @@ namespace Listenarr.Api.Tests
                     return pattern;
                 });
 
-            var serviceProvider = new Mock<IServiceProvider>();
+            var scopeFactory = new Mock<IServiceScopeFactory>();
 
             // Create controller instance
             var controller = new LibraryController(
@@ -66,7 +66,7 @@ namespace Listenarr.Api.Tests
                 mockImageCache.Object,
                 mockLogger.Object,
                 dbContext,
-                serviceProvider.Object,
+                scopeFactory.Object,
                 mockFileNamingService.Object,
                 mockScanQueue.Object);
 
@@ -96,7 +96,7 @@ namespace Listenarr.Api.Tests
             };
 
             var rootPath = "/server/mnt/drive/Audiobooks";
-            var fileNamingPattern = "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"; // Default pattern
+            var fileNamingPattern = "{Author}/{Series}/{Title}"; // Default pattern
 
             // Mock dependencies
             var mockRepo = new Mock<IAudiobookRepository>();
@@ -115,7 +115,7 @@ namespace Listenarr.Api.Tests
                 .Returns((string pattern, Dictionary<string, object> vars, bool sanitize) =>
                 {
                     // For series book, the method derives pattern from fileNamingPattern by removing file-specific tokens
-                    // Input: "{Author}/{Series}/{DiskNumber:00} - {ChapterNumber:00} - {Title}"
+                    // Input: "{Author}/{Series}/{Title}"
                     // Output after processing: "{Author}/{Series}/{Title}" (DiskNumber and ChapterNumber removed)
                     if (pattern == "{Author}/{Series}/{Title}")
                     {
@@ -124,7 +124,7 @@ namespace Listenarr.Api.Tests
                     return pattern;
                 });
 
-            var serviceProvider = new Mock<IServiceProvider>();
+            var scopeFactory = new Mock<IServiceScopeFactory>();
 
             // Create controller instance
             var controller = new LibraryController(
@@ -132,7 +132,7 @@ namespace Listenarr.Api.Tests
                 mockImageCache.Object,
                 mockLogger.Object,
                 dbContext,
-                serviceProvider.Object,
+                scopeFactory.Object,
                 mockFileNamingService.Object,
                 mockScanQueue.Object);
 

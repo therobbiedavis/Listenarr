@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.Mvc;
@@ -33,13 +33,17 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<ConfigurationController> _logger;
         private readonly IUserService _userService;
         private readonly IHubContext<SettingsHub> _settingsHub;
+        private readonly IDownloadService _downloadService;
+        private readonly NotificationService _notificationService;
 
-        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger, IUserService userService, IHubContext<SettingsHub> settingsHub)
+        public ConfigurationController(IConfigurationService configurationService, ILogger<ConfigurationController> logger, IUserService userService, IHubContext<SettingsHub> settingsHub, IDownloadService downloadService, NotificationService notificationService)
         {
             _configurationService = configurationService;
             _logger = logger;
             _userService = userService;
             _settingsHub = settingsHub;
+            _downloadService = downloadService;
+            _notificationService = notificationService;
         }
 
         // API Configuration endpoints
@@ -277,15 +281,50 @@ namespace Listenarr.Api.Controllers
         {
             try
             {
-                // Delegate to download service to perform protocol-specific lightweight tests
-                var downloadService = HttpContext.RequestServices.GetService(typeof(IDownloadService)) as IDownloadService;
-                if (downloadService == null)
+                if (config == null)
                 {
-                    _logger.LogError("DownloadService not available to perform client test");
-                    return StatusCode(500, new { success = false, message = "Server misconfiguration: download service unavailable" });
+                    return BadRequest(new { success = false, message = "Missing download client configuration" });
                 }
 
-                var (Success, Message, Client) = await downloadService.TestDownloadClientAsync(config);
+                if (!string.IsNullOrWhiteSpace(config.Id))
+                {
+                    var existing = await _configurationService.GetDownloadClientConfigurationAsync(config.Id);
+                    if (existing != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(existing.Username))
+                        {
+                            config.Username = existing.Username;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(config.Password) && !string.IsNullOrWhiteSpace(existing.Password))
+                        {
+                            config.Password = existing.Password;
+                        }
+
+                        try
+                        {
+                            if (existing.Settings != null)
+                            {
+                                config.Settings ??= new System.Collections.Generic.Dictionary<string, object>();
+
+                                foreach (var kvp in existing.Settings)
+                                {
+                                    if (!config.Settings.ContainsKey(kvp.Key))
+                                    {
+                                        config.Settings[kvp.Key] = kvp.Value;
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Non-fatal; continue with whatever settings were provided.
+                        }
+                    }
+                }
+
+                // Delegate to download service to perform protocol-specific lightweight tests
+                var (Success, Message, Client) = await _downloadService.TestDownloadClientAsync(config);
                 return Ok(new { success = Success, message = Message, client = Client });
             }
             catch (Exception ex)
@@ -318,17 +357,17 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogDebug("Saving application settings");
                 await _configurationService.SaveApplicationSettingsAsync(settings);
-                
+
                 // Return the saved settings to confirm what was persisted
                 var savedSettings = await _configurationService.GetApplicationSettingsAsync();
-                
+
                 // Clear sensitive admin credentials from response (they are [NotMapped] but let's be safe)
                 savedSettings.AdminUsername = null;
                 savedSettings.AdminPassword = null;
-                
+
                 // Broadcast settings change to all connected clients (including Discord bot)
                 await _settingsHub.Clients.All.SendAsync("SettingsUpdated", savedSettings);
-                
+
                 _logger.LogDebug("Application settings saved successfully and broadcasted via SignalR");
                 return Ok(savedSettings);
             }
@@ -453,8 +492,7 @@ namespace Listenarr.Api.Controllers
                 };
 
                 // Get notification service and send test notification
-                var notificationService = HttpContext.RequestServices.GetService(typeof(NotificationService)) as NotificationService;
-                if (notificationService == null)
+                if (_notificationService == null)
                 {
                     _logger.LogError("NotificationService not available to send test notification");
                     return StatusCode(500, new { success = false, message = "Server misconfiguration: notification service unavailable" });
@@ -462,7 +500,7 @@ namespace Listenarr.Api.Controllers
 
                 // Send notification with "test" trigger - this will bypass the enabled triggers check
                 // since we're testing the webhook URL directly
-                await notificationService.SendNotificationAsync("test", testData, settings.WebhookUrl, new List<string> { "test" });
+                await _notificationService.SendNotificationAsync("test", testData, settings.WebhookUrl, new List<string> { "test" });
 
                 return Ok(new { success = true, message = "Test notification sent successfully" });
             }
@@ -474,3 +512,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -17,34 +17,57 @@
  */
 
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
 using Listenarr.Api.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Middleware;
 using System.Net;
-using Microsoft.Extensions.Caching.Memory;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.DataProtection;
 using Serilog;
+using Serilog.Events;
 using Polly;
 using Polly.Extensions.Http;
+using Listenarr.Api.Extensions;
+using Listenarr.Infrastructure.Extensions;
 
 // Check for special CLI helpers before building the web host
 // Pass a non-null args array to satisfy nullable analysis
 var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
-// Configure Serilog for file logging with rotation and SignalR broadcasting
+// Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
 var signalRSink = new SignalRLogSink();
+
+// Industry-standard defaults:
+// - Application logs at Information
+// - Third-party and framework logs (Microsoft/System) at Warning
+// - EF Core DB command logging elevated to Warning by default (can be lowered to Debug for troubleshooting)
 Log.Logger = new Serilog.LoggerConfiguration()
+    .Enrich.FromLogContext()
+    // Use explicit properties to avoid optional enrichers that may not be present in all builds
+    .Enrich.WithProperty("Machine", Environment.MachineName)
+    .Enrich.WithProperty("ProcessId", Environment.ProcessId)
+    .Enrich.WithProperty("Application", "Listenarr.Api")
     .MinimumLevel.Information()
-    .WriteTo.Console()
+    // Framework and system noise should be at Warning by default
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("System", LogEventLevel.Warning)
+    // EF Core: keep DB command messages higher than app logs; changeable via configuration when needed
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
+    // Enable debug logging for Transmission adapter to troubleshoot RPC issues
+    .MinimumLevel.Override("Listenarr.Api.Services.Adapters.TransmissionAdapter", LogEventLevel.Debug)
+    // Console sink for developer-friendly output (includes SourceContext for quick tracing)
+    .WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    // Primary file sink with daily rolling and structured JSON compatible output template
     .WriteTo.File(
         logFilePath,
         rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 30, // Keep 30 days of logs
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .WriteTo.Sink(signalRSink) // Add SignalR sink for real-time log broadcasting
+        retainedFileCountLimit: 30,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.Sink(signalRSink)
     .CreateLogger();
 
 // Use Serilog for logging
@@ -59,6 +82,13 @@ if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
 // Configure logging is now handled by Serilog above
 
 // Add services to the container.
+// If running as an integration test host, allow the test-side partial to apply any
+// additional registrations (for example AddListenarrPersistence so IDbContextFactory<>
+// is available to hosted/background services during tests).
+if (builder.Environment.IsEnvironment("Testing"))
+{
+    ApplyTestHostPatches(builder);
+}
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -112,15 +142,15 @@ builder.Services.AddHttpClient("DownloadClient")
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
         .CircuitBreakerAsync(
-            handledEventsAllowedBeforeBreaking: 5,
+            handledEventsAllowedBeforeBreaking: 3,
             durationOfBreak: TimeSpan.FromSeconds(30),
             onBreak: (outcome, duration) =>
             {
-                Console.WriteLine($"[CIRCUIT BREAKER] Download client circuit opened due to {outcome.Exception?.Message ?? "policy trigger"}. Breaking for {duration.TotalSeconds}s");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Download client circuit opened due to {Reason}. Breaking for {Seconds}s", outcome.Exception?.Message ?? "policy trigger", duration.TotalSeconds);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Download client circuit reset - service recovered");
+                Log.Logger.Information("[CIRCUIT BREAKER] Download client circuit reset - service recovered");
             }
         ))
     .AddPolicyHandler(HttpPolicyExtensions
@@ -130,14 +160,112 @@ builder.Services.AddHttpClient("DownloadClient")
             sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
             onRetry: (outcome, timespan, retryAttempt, context) =>
             {
-                Console.WriteLine($"[RETRY] Download client retry attempt {retryAttempt} after {timespan.TotalSeconds}s delay");
+                Log.Logger.Information("[RETRY] Download client retry attempt {Attempt} after {Delay}s delay", retryAttempt, timespan.TotalSeconds);
             }
         ));
+
+// Bind download client definitions from configuration and expose via IOptions
+builder.Services.Configure<Listenarr.Api.Services.Adapters.DownloadClientsOptions>(builder.Configuration.GetSection("DownloadClients"));
+
+// Validate download client configuration at startup, surface errors early
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Listenarr.Api.Services.Adapters.DownloadClientsOptions>, Listenarr.Api.Services.Adapters.DownloadClientsOptionsValidator>();
+
+// Register named HttpClients for each adapter type so adapter implementations can request the appropriately-configured client.
+// qbittorrent
+builder.Services.AddHttpClient("qbittorrent")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 3,
+            durationOfBreak: TimeSpan.FromSeconds(30),
+            onBreak: (outcome, duration) =>
+            {
+                Log.Logger.Warning("[CIRCUIT BREAKER] qbittorrent client circuit opened due to {Reason}. Breaking for {Seconds}s", outcome.Exception?.Message ?? "policy trigger", duration.TotalSeconds);
+            },
+            onReset: () =>
+            {
+                Log.Logger.Information("[CIRCUIT BREAKER] qbittorrent client circuit reset - service recovered");
+            }
+        ))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(
+            retryCount: 3,
+            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+            onRetry: (outcome, timespan, retryAttempt, context) =>
+            {
+                Log.Logger.Information("[RETRY] qbittorrent client retry attempt {Attempt} after {Delay}s delay", retryAttempt, timespan.TotalSeconds);
+            }
+        ));
+
+// transmission
+builder.Services.AddHttpClient("transmission")
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+// sabnzbd
+builder.Services.AddHttpClient("sabnzbd")
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+// nzbget
+builder.Services.AddHttpClient("nzbget")
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        UseCookies = false
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .AddPolicyHandler(HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+// Adapter factory resolution is provided by `IDownloadClientAdapterFactory`.
 
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")
     .ConfigureHttpClient(client =>
     {
+
+
         // Allow up to 2 hours for large file downloads
         client.Timeout = TimeSpan.FromHours(2);
     })
@@ -153,11 +281,11 @@ builder.Services.AddHttpClient("DirectDownload")
             durationOfBreak: TimeSpan.FromMinutes(1),
             onBreak: (outcome, duration) =>
             {
-                Console.WriteLine($"[CIRCUIT BREAKER] Direct download circuit opened. Breaking for {duration.TotalMinutes}m");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Direct download circuit opened. Breaking for {Minutes}m", duration.TotalMinutes);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Direct download circuit reset");
+                Log.Logger.Information("[CIRCUIT BREAKER] Direct download circuit reset");
             }
         ))
     .AddPolicyHandler(HttpPolicyExtensions
@@ -172,86 +300,30 @@ builder.Services.AddHttpClient("DirectDownload")
 // Compute an absolute path for the SQLite file based on the content root so
 // the published exe will create/use the intended config/database path even
 // when the working directory differs.
+// Compute default SQLite DB path (config/database/listenarr.db) relative to content root.
 var sqliteDbPath = Path.Combine(builder.Environment.ContentRootPath, "config", "database", "listenarr.db");
+// Ensure directory exists at startup so EF migrations can create the DB file there
+var sqliteDbDir = Path.GetDirectoryName(sqliteDbPath);
+if (!string.IsNullOrEmpty(sqliteDbDir) && !Directory.Exists(sqliteDbDir))
+{
+    Directory.CreateDirectory(sqliteDbDir);
+}
 
-// Use DbContextFactory for better scoped context management
-builder.Services.AddDbContextFactory<ListenArrDbContext>(options =>
-    options.UseSqlite($"Data Source={sqliteDbPath}"));
+// Register persistence (DbContextFactory + compatibility DbContext + repositories) via extension
+builder.Services.AddListenarrPersistence(builder.Configuration, sqliteDbPath);
 
-// Keep AddDbContext for services that still inject DbContext directly (AudiobookRepository, etc.)
-builder.Services.AddDbContext<ListenArrDbContext>(options =>
-    options.UseSqlite($"Data Source={sqliteDbPath}"));
+// Register consolidated HttpClient policies and common typed clients
+builder.Services.AddListenarrHttpClients(builder.Configuration);
 
-builder.Services.AddScoped<IAudiobookRepository, AudiobookRepository>();
-builder.Services.AddScoped<IConfigurationService, ConfigurationService>();
-// Startup config: read config.json (optional) and expose via IStartupConfigService
-builder.Services.AddSingleton<IStartupConfigService, StartupConfigService>();
-builder.Services.AddScoped<ISearchService, SearchService>();
-builder.Services.AddScoped<IMetadataService, MetadataService>();
-builder.Services.AddScoped<IAudioFileService, AudioFileService>();
-// Metadata extraction limiter to bound concurrent ffprobe calls
-builder.Services.AddSingleton<MetadataExtractionLimiter>();
-// Ffmpeg installer: provides a bundled ffprobe binary when not present on the system
-builder.Services.AddSingleton<IFfmpegService, FfmpegInstallerService>();
-// Service to accept client-pushed download updates and maintain recent-push cache
-builder.Services.AddSingleton<Listenarr.Api.Services.DownloadPushService>();
-builder.Services.AddScoped<IAmazonAsinService, AmazonAsinService>();
-builder.Services.AddScoped<IDownloadService, DownloadService>();
-// NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
-// Removing duplicate scoped registration to avoid overriding the typed client configuration.
-builder.Services.AddScoped<IOpenLibraryService, OpenLibraryService>();
-builder.Services.AddScoped<IImageCacheService, ImageCacheService>();
-builder.Services.AddScoped<IFileNamingService, FileNamingService>();
-builder.Services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
-builder.Services.AddScoped<ISystemService, SystemService>();
-builder.Services.AddScoped<IQualityProfileService, QualityProfileService>();
-builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddSingleton<ILoginRateLimiter, LoginRateLimiter>();
-builder.Services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
+// Register adapters and related options/validators
+builder.Services.AddListenarrAdapters(builder.Configuration);
 
-// Discord bot service for managing bot process
-builder.Services.AddSingleton<IDiscordBotService, DiscordBotService>();
-
-// Toast service for broadcasting UI toasts via SignalR
-builder.Services.AddSingleton<IToastService, ToastService>();
-
-// Notification service for webhook notifications
-builder.Services.AddScoped<NotificationService>();
-
-// Allow services to access the current HttpContext so NotificationService can
-// build absolute image URLs when the startup config doesn't supply a base URL.
-builder.Services.AddHttpContextAccessor();
-
-// Always register session service, but it will check config internally
-builder.Services.AddScoped<ISessionService, ConditionalSessionService>();
-
-// Scan queue: enqueue folder scans to be processed in the background
-builder.Services.AddSingleton<IScanQueueService, ScanQueueService>();
-// Background worker to consume scan jobs and persist audiobook files
-builder.Services.AddHostedService<ScanBackgroundService>();
-
-// Register background service for daily cache cleanup
-builder.Services.AddHostedService<ImageCacheCleanupService>();
-
-// Register background service for temp file cleanup
-builder.Services.AddHostedService<TempFileCleanupService>();
-
-// Register background service for download monitoring and real-time updates
-builder.Services.AddHostedService<DownloadMonitorService>();
-
-// Register background service for queue monitoring (external clients) and real-time updates
-builder.Services.AddHostedService<QueueMonitorService>();
-
-// Register background service for automatic audiobook searching
-builder.Services.AddHostedService<AutomaticSearchService>();
-// Background installer for ffprobe - run in background so startup isn't blocked
-builder.Services.AddHostedService<FfmpegInstallBackgroundService>();
-
-// Background service to rescan files missing metadata
-builder.Services.AddHostedService<MetadataRescanService>();
-
-// Register background service for download processing queue
-builder.Services.AddHostedService<DownloadProcessingBackgroundService>();
+// Register infrastructure implementations (repositories live in the Infrastructure project)
+builder.Services.AddListenarrInfrastructure();
+// Register application-level services (moved from Program.cs to keep startup focused)
+builder.Services.AddListenarrAppServices(builder.Configuration);
+// Register hosted/background services (moved from Program.cs)
+builder.Services.AddListenarrHostedServices(builder.Configuration);
 
 // Typed HttpClients with automatic decompression for scraping services
 builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
@@ -272,7 +344,7 @@ builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
             onRetry: (outcome, timespan, retryAttempt, context) =>
             {
                 var reason = outcome.Result != null ? $"HTTP {(int)outcome.Result.StatusCode}" : outcome.Exception?.Message;
-                Console.WriteLine($"[RETRY] Amazon search retry attempt {retryAttempt} due to {reason}. Waiting {timespan.TotalSeconds}s");
+                Log.Logger.Information("[RETRY] Amazon search retry attempt {Attempt} due to {Reason}. Waiting {Delay}s", retryAttempt, reason, timespan.TotalSeconds);
             }))
     // Circuit-breaker: raise threshold slightly to avoid tripping on short throttling bursts
     .AddPolicyHandler(HttpPolicyExtensions
@@ -286,11 +358,11 @@ builder.Services.AddHttpClient<IAmazonSearchService, AmazonSearchService>()
             onBreak: (outcome, duration) =>
             {
                 var reason = outcome.Result != null ? $"HTTP {(int)outcome.Result.StatusCode}" : outcome.Exception?.Message ?? "policy trigger";
-                Console.WriteLine($"[CIRCUIT BREAKER] Amazon search circuit opened due to {reason}. Breaking for {duration.TotalMinutes}m");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Amazon search circuit opened due to {Reason}. Breaking for {Minutes}m", reason, duration.TotalMinutes);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Amazon search circuit reset");
+                Log.Logger.Information("[CIRCUIT BREAKER] Amazon search circuit reset");
             }
         ));
 
@@ -299,18 +371,18 @@ builder.Services.AddHttpClient<IAudibleSearchService, AudibleSearchService>()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
     })
-    .AddPolicyHandler(HttpPolicyExtensions
+            .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
         .CircuitBreakerAsync(
             handledEventsAllowedBeforeBreaking: 4,
             durationOfBreak: TimeSpan.FromMinutes(2),
             onBreak: (outcome, duration) =>
             {
-                Console.WriteLine($"[CIRCUIT BREAKER] Audible search circuit opened. Breaking for {duration.TotalMinutes}m");
+                Log.Logger.Warning("[CIRCUIT BREAKER] Audible search circuit opened. Breaking for {Minutes}m", duration.TotalMinutes);
             },
             onReset: () =>
             {
-                Console.WriteLine("[CIRCUIT BREAKER] Audible search circuit reset");
+                Log.Logger.Information("[CIRCUIT BREAKER] Audible search circuit reset");
             }
         ))
     .AddPolicyHandler(HttpPolicyExtensions
@@ -348,22 +420,32 @@ builder.Services.AddHttpClient("us").ConfigurePrimaryHttpMessageHandler(() =>
             }
         }
     }
-    catch (Exception ex) 
-    { 
-        Console.WriteLine($"[WARNING] Failed to configure proxy settings: {ex.Message}");
+    catch (Exception ex)
+    {
+        Log.Logger.Warning("[WARNING] Failed to configure proxy settings: {Message}", ex.Message);
     }
 
     return handler;
 });
 
-// Register Playwright page fetcher for JS-rendered pages and bot-workarounds
-// Register Playwright-based page fetcher (used as a fallback for JS-rendered / bot-protected pages)
-builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightPageFetcher, Listenarr.Api.Services.PlaywrightPageFetcher>();
+// Read Playwright enablement flag from config (default true)
+var playwrightEnabled = builder.Configuration.GetValue<bool>("Playwright:Enabled", true);
 
-// Playwright install status and background installer
-builder.Services.AddSingleton<Listenarr.Api.Services.PlaywrightInstallStatus>();
-builder.Services.AddHostedService<Listenarr.Api.Services.PlaywrightInstallBackgroundService>();
-builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightInstaller, Listenarr.Api.Services.PlaywrightInstaller>();
+// Register Playwright services only when enabled in configuration
+if (playwrightEnabled)
+{
+    // Register Playwright page fetcher for JS-rendered pages and bot-workarounds
+    builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightPageFetcher, Listenarr.Api.Services.PlaywrightPageFetcher>();
+
+    // Playwright install status and background installer
+    builder.Services.AddSingleton<Listenarr.Api.Services.PlaywrightInstallStatus>();
+    builder.Services.AddHostedService<Listenarr.Api.Services.PlaywrightInstallBackgroundService>();
+    builder.Services.AddSingleton<Listenarr.Api.Services.IPlaywrightInstaller, Listenarr.Api.Services.PlaywrightInstaller>();
+}
+else
+{
+    Log.Logger.Information("Playwright integration is disabled via configuration; skipping Playwright service registration.");
+}
 
 // CORS is handled by reverse proxy (nginx, Traefik, Caddy, etc.)
 // Only add CORS support for local development
@@ -401,9 +483,9 @@ builder.Services.AddSwaggerGen(options =>
             options.IncludeXmlComments(xmlPath);
         }
     }
-    catch (Exception ex) 
-    { 
-        Console.WriteLine($"[WARNING] Failed to include XML comments in Swagger: {ex.Message}");
+    catch (Exception ex)
+    {
+        Log.Logger.Warning("[WARNING] Failed to include XML comments in Swagger: {Message}", ex.Message);
     }
     // Use full type names for schema Ids (replace '+' from nested types with '.') to
     // avoid collisions between nested controller DTOs and top-level DTOs that share
@@ -420,7 +502,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     // Only forward the essential headers needed for proper operation
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    
+
     // Trust any proxy since this app runs in a controlled Docker/reverse proxy environment
     // Users are responsible for configuring their reverse proxy securely
     options.KnownNetworks.Clear();
@@ -443,13 +525,13 @@ if (builder.Environment.IsDevelopment())
         options.HeaderName = "X-XSRF-TOKEN";
         // Allow the antiforgery cookie to be sent over plain HTTP during local dev
         options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
-    // During local development the frontend often runs on a different origin
-    // (Vite dev server). Use SameSite=Lax so the browser will accept the
-    // cookie for same-site requests to the Vite dev server while avoiding
-    // the requirement to set Secure (which would require HTTPS). In our
-    // setup the dev server proxies /api requests, so Lax is sufficient and
-    // more compatible with local HTTP development.
-    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+        // During local development the frontend often runs on a different origin
+        // (Vite dev server). Use SameSite=Lax so the browser will accept the
+        // cookie for same-site requests to the Vite dev server while avoiding
+        // the requirement to set Secure (which would require HTTPS). In our
+        // setup the dev server proxies /api requests, so Lax is sufficient and
+        // more compatible with local HTTP development.
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     });
 }
 
@@ -472,7 +554,7 @@ using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    
+
     // Ensure the database directory exists (use the absolute path computed above)
     string dbFullPath = sqliteDbPath;
     string? dbDirectory = Path.GetDirectoryName(dbFullPath);
@@ -480,17 +562,52 @@ using (var scope = app.Services.CreateScope())
     {
         Directory.CreateDirectory(dbDirectory);
     }
-    
+
     try
     {
+        logger.LogInformation("Checking EF Core migrations (available/applied/pending)...");
+
+        try
+        {
+            var available = context.Database.GetMigrations().ToList();
+            var applied = context.Database.GetAppliedMigrations().ToList();
+            var pending = context.Database.GetPendingMigrations().ToList();
+
+            logger.LogInformation("Available migrations: {Count}", available.Count);
+            foreach (var m in available)
+            {
+                logger.LogInformation("  - {Migration}", m);
+            }
+
+            logger.LogInformation("Applied migrations: {Count}", applied.Count);
+            foreach (var m in applied)
+            {
+                logger.LogInformation("  - {Migration}", m);
+            }
+
+            logger.LogInformation("Pending migrations: {Count}", pending.Count);
+            foreach (var m in pending)
+            {
+                logger.LogInformation("  - {Migration}", m);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to enumerate EF Core migrations before migrating");
+        }
+
         logger.LogInformation("Applying database migrations...");
         // Apply any pending migrations (including AddDefaultMetadataSources which adds Audimeta and Audnexus)
         context.Database.Migrate();
         logger.LogInformation("Database migrations applied successfully");
-        
+
         // Apply SQLite PRAGMA settings after database is created
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
+
+        // NOTE: Automatic schema ALTERs were intentionally removed from startup.
+        // Schema changes should be applied by EF migrations. See Migration:
+        // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
     }
     catch (Exception ex)
     {
@@ -529,8 +646,8 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Initialize the SignalR sink now that the service provider is available
-signalRSink.Initialize(app.Services);
+// Initialize the SignalR sink now that the hub context is available
+signalRSink.Initialize(app.Services.GetRequiredService<IHubContext<LogHub>>());
 
 // Attempt to install Playwright browser binaries on startup (blocking with timeout).
 // This reduces repeated missing-executable warnings during runtime by ensuring
@@ -641,19 +758,28 @@ try
                                 UseShellExecute = false,
                                 CreateNoWindow = true
                             };
-                            using var proc = System.Diagnostics.Process.Start(psi);
-                            if (proc != null)
+
+                            var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                            if (processRunner != null)
                             {
-                                await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-                                if (proc.ExitCode == 0)
+                                var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromSeconds(90).TotalMilliseconds, cancellationToken: cts.Token).ConfigureAwait(false);
+                                if (result.TimedOut)
+                                {
+                                    logger.LogWarning("PowerShell Playwright install script timed out after {Timeout}s", TimeSpan.FromSeconds(90).TotalSeconds);
+                                }
+                                else if (result.ExitCode == 0)
                                 {
                                     logger.LogInformation("PowerShell Playwright install script completed successfully");
                                     return true;
                                 }
                                 else
                                 {
-                                    logger.LogWarning("PowerShell Playwright install script failed with exit code {ExitCode}", proc.ExitCode);
+                                    logger.LogWarning("PowerShell Playwright install script failed with exit code {ExitCode}. StdErr: {Err}", result.ExitCode, result.Stderr?.Length > 1000 ? result.Stderr.Substring(0, 1000) : result.Stderr);
                                 }
+                            }
+                            else
+                            {
+                                logger.LogWarning("IProcessRunner is not available; skipping PowerShell Playwright install script fallback.");
                             }
                         }
                     }
@@ -681,19 +807,28 @@ try
                                 UseShellExecute = false,
                                 CreateNoWindow = true
                             };
-                            using var proc = System.Diagnostics.Process.Start(psi);
-                            if (proc != null)
+
+                            var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                            if (processRunner != null)
                             {
-                                await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-                                if (proc.ExitCode == 0)
+                                var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromSeconds(90).TotalMilliseconds, cancellationToken: cts.Token).ConfigureAwait(false);
+                                if (result.TimedOut)
+                                {
+                                    logger.LogWarning("Bash Playwright install script timed out after {Timeout}s", TimeSpan.FromSeconds(90).TotalSeconds);
+                                }
+                                else if (result.ExitCode == 0)
                                 {
                                     logger.LogInformation("Bash Playwright install script completed successfully");
                                     return true;
                                 }
                                 else
                                 {
-                                    logger.LogWarning("Bash Playwright install script failed with exit code {ExitCode}", proc.ExitCode);
+                                    logger.LogWarning("Bash Playwright install script failed with exit code {ExitCode}. StdErr: {Err}", result.ExitCode, result.Stderr?.Length > 1000 ? result.Stderr.Substring(0, 1000) : result.Stderr);
                                 }
+                            }
+                            else
+                            {
+                                logger.LogWarning("IProcessRunner is not available; skipping bash Playwright install script fallback.");
                             }
                         }
                     }
@@ -707,9 +842,10 @@ try
             // Fallback: try npx playwright install (requires Node.js available on PATH)
             try
             {
-                // Install only Chromium to reduce download size and time. Stream output so we can
-                // observe progress in logs. Give a much larger timeout (10 minutes) because browser
-                // artifacts are large and may take time on slow networks.
+                // Install only Chromium to reduce download size and time. Give a much larger
+                // timeout (10 minutes) because browser artifacts are large and may take time
+                // on slow networks. Use the IProcessRunner when available so output is
+                // captured and timeouts are enforced consistently.
                 logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
@@ -721,72 +857,28 @@ try
                     CreateNoWindow = true
                 };
 
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
+                var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                if (processRunner != null)
                 {
-                    var outSb = new System.Text.StringBuilder();
-                    var errSb = new System.Text.StringBuilder();
-
-                    // Read streams asynchronously to avoid deadlocks and to capture progress
-                    var outTask = Task.Run(async () =>
-                    {
-                        var buffer = new char[4096];
-                        while (!proc.StandardOutput.EndOfStream)
-                        {
-                            var read = await proc.StandardOutput.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-                            if (read > 0)
-                            {
-                                outSb.Append(buffer, 0, read);
-                                // Log progress in debug so user can enable debug level if needed
-                                logger.LogDebug("[playwright:npx][out] {Chunk}", new string(buffer, 0, read));
-                            }
-                        }
-                    });
-
-                    var errTask = Task.Run(async () =>
-                    {
-                        var buffer = new char[4096];
-                        while (!proc.StandardError.EndOfStream)
-                        {
-                            var read = await proc.StandardError.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
-                            if (read > 0)
-                            {
-                                errSb.Append(buffer, 0, read);
-                                logger.LogDebug("[playwright:npx][err] {Chunk}", new string(buffer, 0, read));
-                            }
-                        }
-                    });
-
-                    // Wait up to 10 minutes for the installer to complete
-                    using var npxCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                    try
-                    {
-                        await Task.WhenAll(outTask, errTask).ConfigureAwait(false);
-                        await proc.WaitForExitAsync(npxCts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
+                    var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                    logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(result.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    if (result.TimedOut)
                     {
                         logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
                     }
-
-                    var outText = outSb.ToString();
-                    var errText = errSb.ToString();
-                    logger.LogDebug("Playwright npx output: {Out}\n{Err}", outText, errText);
-
-                    if (!proc.HasExited)
-                    {
-                        try { proc.Kill(); } catch { }
-                        logger.LogWarning("'npx playwright install chromium' did not finish in the allotted time");
-                    }
-                    else if (proc.ExitCode == 0)
+                    else if (result.ExitCode == 0)
                     {
                         logger.LogInformation("'npx playwright install chromium' completed successfully");
                         return true;
                     }
                     else
                     {
-                        logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", proc.ExitCode);
+                        logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", result.ExitCode);
                     }
+                }
+                else
+                {
+                    logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
                 }
             }
             catch (Exception ex)
@@ -867,21 +959,21 @@ app.UseForwardedHeaders();
 
 // Note: HTTPS redirection is handled by the reverse proxy, not by this application
 
-    // Serve frontend static files from wwwroot (index.html + assets)
-    // DefaultFiles enables serving index.html when requesting '/'
-    app.UseDefaultFiles();
-    app.UseStaticFiles();
+// Serve frontend static files from wwwroot (index.html + assets)
+// DefaultFiles enables serving index.html when requesting '/'
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
-    // Serve cached images from config/cache/images directory
-    var cacheImagesPath = Path.Combine(app.Environment.ContentRootPath, "config", "cache", "images");
-    if (Directory.Exists(cacheImagesPath))
+// Serve cached images from config/cache/images directory
+var cacheImagesPath = Path.Combine(app.Environment.ContentRootPath, "config", "cache", "images");
+if (Directory.Exists(cacheImagesPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
     {
-        app.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(cacheImagesPath),
-            RequestPath = "/config/cache/images"
-        });
-    }
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(cacheImagesPath),
+        RequestPath = "/config/cache/images"
+    });
+}
 
 // Ensure routing middleware is enabled so endpoint routing features (CORS, Authorization)
 // can be applied by subsequent middleware. This must run before UseCors()/UseAuthorization().
@@ -892,15 +984,15 @@ if (app.Environment.IsDevelopment())
 {
     app.UseCors("DevOnly");
 }
-    // Session-based authentication middleware
-    app.UseMiddleware<Listenarr.Api.Middleware.SessionAuthenticationMiddleware>();
-    // API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
-    app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
-    // Enforce authentication based on startup config
-    app.UseMiddleware<AuthenticationEnforcerMiddleware>();
-    // Validate antiforgery tokens for unsafe methods
-    app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
-    app.UseAuthorization();
+// Session-based authentication middleware
+app.UseMiddleware<Listenarr.Api.Middleware.SessionAuthenticationMiddleware>();
+// API key middleware: allows requests with a valid X-Api-Key or Authorization: ApiKey <key>
+app.UseMiddleware<Listenarr.Api.Middleware.ApiKeyMiddleware>();
+// Enforce authentication based on startup config
+app.UseMiddleware<AuthenticationEnforcerMiddleware>();
+// Validate antiforgery tokens for unsafe methods
+app.UseMiddleware<Listenarr.Api.Middleware.AntiforgeryValidationMiddleware>();
+app.UseAuthorization();
 
 app.MapControllers();
 
@@ -921,7 +1013,7 @@ else
     app.MapHub<SettingsHub>("/hubs/settings");
 }
 
-    // SPA fallback: serve index.html for non-API routes so client-side routing works
-    app.MapFallbackToFile("index.html");
+// SPA fallback: serve index.html for non-API routes so client-side routing works
+app.MapFallbackToFile("index.html");
 
 app.Run();
