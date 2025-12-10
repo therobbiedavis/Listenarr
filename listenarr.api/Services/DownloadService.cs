@@ -833,6 +833,16 @@ namespace Listenarr.Api.Services
                     return;
                 }
 
+                // Security: Validate that the torrent URL belongs to the configured indexer's domain
+                if (!Uri.TryCreate(searchResult.TorrentUrl, UriKind.Absolute, out var torrentUri) ||
+                    !Uri.TryCreate(indexer.Url, UriKind.Absolute, out var indexerUri) ||
+                    !string.Equals(torrentUri.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Rejecting MyAnonamouse torrent for '{Title}': URL {Url} does not match indexer domain {IndexerDomain}",
+                        searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl), indexer.Url);
+                    return;
+                }
+
                 var mamId = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
                 if (string.IsNullOrEmpty(mamId))
                 {
@@ -841,7 +851,7 @@ namespace Listenarr.Api.Services
                 }
 
                 using var httpClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
-                _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, searchResult.TorrentUrl);
+                _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl));
                 var response = await httpClient.GetAsync(searchResult.TorrentUrl);
 
                 if (!response.IsSuccessStatusCode)
