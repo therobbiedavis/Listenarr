@@ -4,8 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     
-    <Version>0.2.42</Version>
-    <AssemblyVersion>0.2.42</AssemblyVersion>
+    <Version>0.2.43</Version>
+    <AssemblyVersion>0.2.43</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -108,7 +108,7 @@
   
   
   <ItemGroup>
-    <!-- Include tools for build output but exclude from publish (custom targets handle publish) -->
+    
     <Content Include="..\tools\**\*.*" Link="tools\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
