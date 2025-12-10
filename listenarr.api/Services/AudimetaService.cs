@@ -39,7 +39,7 @@ namespace Listenarr.Api.Services
         {
             _httpClient = httpClient;
             _logger = logger;
-            
+
             // Set default headers as per API docs
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "Listenarr/1.0");
@@ -60,10 +60,10 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Fetching audiobook metadata from audimeta.de: {Url}", url);
 
                 var response = await _httpClient.GetAsync(url);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Audimeta API returned status code {StatusCode} for ASIN {Asin}", 
+                    _logger.LogWarning("Audimeta API returned status code {StatusCode} for ASIN {Asin}",
                         response.StatusCode, asin);
                     return null;
                 }
@@ -98,10 +98,10 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Searching audimeta.de: {Url}", url);
 
                 var response = await _httpClient.GetAsync(url);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Audimeta search returned status code {StatusCode} for query {Query}", 
+                    _logger.LogWarning("Audimeta search returned status code {StatusCode} for query {Query}",
                         response.StatusCode, query);
                     return null;
                 }

@@ -48,7 +48,7 @@ namespace Listenarr.Api.Services
         {
             var sessionToken = GenerateSecureToken();
             var expiration = rememberMe ? _rememberMeExpiration : _defaultExpiration;
-            
+
             var sessionData = new SessionData
             {
                 Username = username,
@@ -73,14 +73,14 @@ namespace Listenarr.Api.Services
             _cache.Set(userSessionsKey, userSessions, TimeSpan.FromDays(31)); // Slightly longer than max session
 
             _logger.LogInformation("Created session for user {Username} (RememberMe: {RememberMe})", username, rememberMe);
-            
+
             return Task.FromResult(sessionToken);
         }
 
         public Task<ClaimsPrincipal?> GetSessionUserAsync(string sessionToken)
         {
             var cacheKey = GetSessionCacheKey(sessionToken);
-            
+
             if (!_cache.TryGetValue(cacheKey, out SessionData? sessionData) || sessionData == null)
             {
                 return Task.FromResult<ClaimsPrincipal?>(null);
@@ -120,11 +120,11 @@ namespace Listenarr.Api.Services
         public Task<bool> InvalidateSessionAsync(string sessionToken)
         {
             var cacheKey = GetSessionCacheKey(sessionToken);
-            
+
             if (_cache.TryGetValue(cacheKey, out SessionData? sessionData) && sessionData != null)
             {
                 _cache.Remove(cacheKey);
-                
+
                 // Remove from user sessions list
                 var userSessionsKey = GetUserSessionsCacheKey(sessionData.Username);
                 if (_cache.TryGetValue(userSessionsKey, out HashSet<string>? userSessions) && userSessions != null)
@@ -150,7 +150,7 @@ namespace Listenarr.Api.Services
         public Task InvalidateAllSessionsForUserAsync(string username)
         {
             var userSessionsKey = GetUserSessionsCacheKey(username);
-            
+
             if (_cache.TryGetValue(userSessionsKey, out HashSet<string>? userSessions) && userSessions != null)
             {
                 foreach (var sessionToken in userSessions)
@@ -158,7 +158,7 @@ namespace Listenarr.Api.Services
                     var cacheKey = GetSessionCacheKey(sessionToken);
                     _cache.Remove(cacheKey);
                 }
-                
+
                 _cache.Remove(userSessionsKey);
                 _logger.LogInformation("Invalidated all sessions for user {Username} (count: {Count})", username, userSessions.Count);
             }
@@ -169,7 +169,7 @@ namespace Listenarr.Api.Services
         public Task<int> GetActiveSessionCountAsync(string username)
         {
             var userSessionsKey = GetUserSessionsCacheKey(username);
-            
+
             if (_cache.TryGetValue(userSessionsKey, out HashSet<string>? userSessions) && userSessions != null)
             {
                 // Clean up expired sessions
@@ -177,7 +177,7 @@ namespace Listenarr.Api.Services
                 foreach (var sessionToken in userSessions)
                 {
                     var cacheKey = GetSessionCacheKey(sessionToken);
-                    if (_cache.TryGetValue(cacheKey, out SessionData? sessionData) && 
+                    if (_cache.TryGetValue(cacheKey, out SessionData? sessionData) &&
                         sessionData != null && sessionData.ExpiresAt >= DateTimeOffset.UtcNow)
                     {
                         validSessions.Add(sessionToken);
@@ -219,7 +219,7 @@ namespace Listenarr.Api.Services
         public required string Username { get; init; }
         public required bool IsAdmin { get; init; }
         public required DateTimeOffset CreatedAt { get; init; }
-        public required DateTimeOffset ExpiresAt { get; init; }
-        public DateTimeOffset LastAccessed { get; set; }
+    public required DateTimeOffset ExpiresAt { get; init; }
+public DateTimeOffset LastAccessed { get; set; }
     }
 }

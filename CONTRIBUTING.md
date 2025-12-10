@@ -110,6 +110,37 @@ Note: there is also a `watch` task available in the workspace tasks that runs `d
 - Use meaningful variable and function names
 - Add comments for complex logic
 
+#### EF Core & DI guidance (important)
+This project follows a layered pattern: domain models in `listenarr.domain`, EF mappings and DbContext in `listenarr.infrastructure`, and services/controllers in `listenarr.api`. Follow these rules when working with EF and DI:
+
+- Where to add EF mappings:
+  - Add EF model configuration and ValueConverters in `listenarr.infrastructure`. Keep database-specific concerns (migrations, pragmas, converters) in Infrastructure.
+  - Centralized converters are in `listenarr.infrastructure/Persistence/Converters/JsonValueConverters.cs`. Add other shared converters there.
+
+- DbContext registration:
+  - Use `AddDbContextFactory<ListenArrDbContext>` for hosted/background services that need DbContext outside of HTTP request scope.
+  - Also keep `AddDbContext<ListenArrDbContext>` for compatibility with controllers/endpoints that use scoped DbContext.
+  - The helper extension `Listenarr.Api.Extensions.ServiceRegistrationExtensions.AddListenarrPersistence` centralizes these registrations. Call it from `Program.cs` to ensure consistent setup.
+
+- Pattern for hosted services:
+  - Inject `IDbContextFactory<ListenArrDbContext>` into hosted/background services and create contexts with `await factory.CreateDbContextAsync(cancellationToken)`.
+  - Dispose contexts promptly and avoid storing DbContext as a field.
+
+- Test host behavior:
+  - Integration tests use a test partial of Program. To patch the test host, implement `Program.Testing.cs` (or the `ApplyTestHostPatches` hook) to call `AddListenarrPersistence` and any test-specific overrides (e.g. a test SQLite path).
+  - Disable or mock heavy external installers (Playwright) in the test host by overriding configuration with an in-memory setting: `builder.Configuration.AddInMemoryCollection(new Dictionary<string,string>{{ "Playwright:Enabled","false"}})`.
+  - This prevents CI/tests from spawning external processes while keeping DI consistent.
+
+- New adapters / HttpClients:
+  - Register typed or named HttpClients in `listenarr.api` using the `AddListenarrHttpClients` extension or directly in `Program.cs`.
+  - Register adapter interfaces in the adapters module (see `listenarr.api/Extensions/ServiceRegistrationExtensions.cs`).
+  - If a factory delegate is required (resolve adapter by id), register a `Func<string, IDownloadClientAdapter>` as a singleton that resolves registered adapters.
+
+- Testing tips:
+  - Add unit tests for ValueConverters and ValueComparers to ensure JSON behavior is stable (null handling, empty JSON).
+  - Use `WebApplicationFactory<Program>` for integration tests and apply `WithWebHostBuilder` when you need to override services.
+  - Use the test-host patching approach to keep tests hermetic (no external network or process calls).
+
 **Testing:**
 - Run backend tests: `cd listenarr.api && dotnet test`
 - Run frontend tests: `cd fe && npm run test:unit`
@@ -263,5 +294,17 @@ If you have any questions about contributing, please:
 3. Open an issue if you think something is unclear in this guide
 
 ---
+
+## Layering rules & migration steps (practical)
+- Keep contracts (interfaces, DTOs, domain models) in `listenarr.application` or `listenarr.domain`.
+- Keep framework-dependent implementations (EF Core, HttpClients, filesystem) in `listenarr.infrastructure`.
+- `listenarr.api` should only compose services, host controllers, and register DI; do not add new interfaces that duplicate application/infrastructure contracts.
+- Migration checklist for misplaced interface + implementation found in `listenarr.api`:
+  1. Move the interface/DTO to `listenarr.application` or `listenarr.domain`.
+  2. Move the concrete implementation to `listenarr.infrastructure/Services`.
+  3. Add registration in `listenarr.infrastructure/Extensions/InfrastructureServiceRegistrationExtensions.cs` (e.g., `services.AddScoped<IFoo, Foo>();`).
+  4. In `listenarr.api/Program.cs` call the infrastructure registration extension instead of registering types inline.
+  5. Delete the old API placeholder files and run `dotnet test` to verify no regressions.
+- Add a small DI/registration unit test (DependencyInjectionTests) that asserts required services are resolvable; run it early in CI to catch layering regressions.
 
 Thank you for contributing to Listenarr! 🎵📚

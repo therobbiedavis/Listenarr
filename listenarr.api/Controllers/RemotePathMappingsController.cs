@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -18,7 +18,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Controllers;
 
@@ -245,3 +245,4 @@ public class RemotePathMappingsController : ControllerBase
         public string RemotePath { get; set; } = string.Empty;
     }
 }
+

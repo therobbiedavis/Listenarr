@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,7 +31,7 @@ namespace Listenarr.Api.Controllers
         private readonly ILogger<DownloadController> _logger;
 
         public DownloadController(
-            IDownloadService downloadService, 
+            IDownloadService downloadService,
             IDownloadProcessingQueueService processingQueueService,
             ILogger<DownloadController> logger)
         {
@@ -69,20 +69,20 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogInformation("=== SendToDownloadClient RECEIVED REQUEST ===");
                 _logger.LogInformation("Title: {Title}", request.SearchResult?.Title ?? "NULL");
-                _logger.LogInformation("DownloadType: '{DownloadType}'", request.SearchResult?.DownloadType ?? "NULL");  
+                _logger.LogInformation("DownloadType: '{DownloadType}'", request.SearchResult?.DownloadType ?? "NULL");
                 _logger.LogInformation("TorrentUrl: {TorrentUrl}", request.SearchResult?.TorrentUrl ?? "NULL");
                 _logger.LogInformation("NzbUrl: {NzbUrl}", request.SearchResult?.NzbUrl ?? "NULL");
                 _logger.LogInformation("MagnetLink: {MagnetLink}", request.SearchResult?.MagnetLink ?? "NULL");
                 _logger.LogInformation("Source: {Source}", request.SearchResult?.Source ?? "NULL");
                 _logger.LogInformation("==========================================");
-                
+
                 if (request.SearchResult == null)
                 {
                     return BadRequest(new { message = "SearchResult is required" });
                 }
-                
+
                 var downloadId = await _downloadService.SendToDownloadClientAsync(
-                    request.SearchResult, 
+                    request.SearchResult,
                     request.DownloadClientId,
                     request.AudiobookId
                 );
@@ -168,12 +168,12 @@ namespace Listenarr.Api.Controllers
             try
             {
                 var results = await _downloadService.ReprocessDownloadsAsync(request.DownloadIds);
-                return Ok(new 
-                { 
-                    message = "Bulk reprocessing initiated", 
+                return Ok(new
+                {
+                    message = "Bulk reprocessing initiated",
                     processed = results.Count(r => r.Success),
                     failed = results.Count(r => !r.Success),
-                    results 
+                    results
                 });
             }
             catch (Exception ex)
@@ -196,13 +196,13 @@ namespace Listenarr.Api.Controllers
                     request?.IncludeProcessed ?? false,
                     request?.MaxAge ?? TimeSpan.FromDays(30)
                 );
-                
-                return Ok(new 
-                { 
-                    message = "Reprocessing initiated for all eligible downloads", 
+
+                return Ok(new
+                {
+                    message = "Reprocessing initiated for all eligible downloads",
                     processed = results.Count(r => r.Success),
                     failed = results.Count(r => !r.Success),
-                    results 
+                    results
                 });
             }
             catch (Exception ex)
@@ -281,3 +281,4 @@ namespace Listenarr.Api.Controllers
         public TimeSpan MaxAge { get; set; } = TimeSpan.FromDays(30);
     }
 }
+

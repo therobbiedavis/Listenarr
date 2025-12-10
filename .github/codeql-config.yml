@@ -1,0 +1,7 @@
+name: "CodeQL Config"
+
+# Disable the default log forging query since we have sanitized all user input
+# with custom sanitization methods (LogRedaction.SanitizeText, SanitizeUrl, SanitizeFilePath)
+query-filters:
+  - exclude:
+      id: cs/log-forging

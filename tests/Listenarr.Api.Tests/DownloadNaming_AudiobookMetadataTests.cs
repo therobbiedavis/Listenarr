@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using System.Net.Http;
@@ -7,15 +7,21 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 using Moq;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 
 namespace Listenarr.Api.Tests
 {
-    public class DownloadNaming_AudiobookMetadataTests
+    public class DownloadNaming_AudiobookMetadataTests : Xunit.IClassFixture<TestServicesFixture>
     {
+        private readonly TestServicesFixture _fixture;
+        public DownloadNaming_AudiobookMetadataTests(TestServicesFixture fixture)
+        {
+            _fixture = fixture;
+        }
+
         [Fact]
         public async Task ProcessCompletedDownload_UsesAudiobookMetadata_ForNaming()
         {
@@ -75,48 +81,73 @@ namespace Listenarr.Api.Tests
             var hubClientsMock = new Mock<IHubClients>();
             var clientProxyMock = new Mock<IClientProxy>();
             hubClientsMock.Setup(h => h.All).Returns(clientProxyMock.Object);
+            clientProxyMock.Setup(c => c.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<System.Threading.CancellationToken>()))
+                .Returns(System.Threading.Tasks.Task.CompletedTask);
             var hubContextMock = new Mock<IHubContext<DownloadHub>>();
             hubContextMock.SetupGet(h => h.Clients).Returns(hubClientsMock.Object);
             services.AddSingleton(hubContextMock.Object);
 
-            var provider = services.BuildServiceProvider();
-            var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+            using var scope = _fixture.Provider.CreateScope();
+            var scopeFactory = scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>();
 
             // Create DownloadService
             var repoMock = new Mock<IAudiobookRepository>();
             var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetApplicationSettingsAsync()).ReturnsAsync(new ApplicationSettings { OutputPath = outputDir, EnableMetadataProcessing = true, CompletedFileAction = "Move" });
             var loggerMock = new Mock<Microsoft.Extensions.Logging.ILogger<DownloadService>>();
             var httpClient = new System.Net.Http.HttpClient();
             var httpClientFactoryMock = new Mock<IHttpClientFactory>();
             httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
             var cacheMock = new Mock<IMemoryCache>();
             var dbFactoryMock = new Mock<IDbContextFactory<ListenArrDbContext>>();
-            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(db);
+            dbFactoryMock.Setup(f => f.CreateDbContext()).Returns(() => new ListenArrDbContext(options));
+            dbFactoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(() => new ListenArrDbContext(options));
             var pathMappingMock = new Mock<IRemotePathMappingService>();
             var searchMock = new Mock<ISearchService>();
 
-            var downloadService = new DownloadService(
-                repoMock.Object,
-                configMock.Object,
-                dbFactoryMock.Object,
-                loggerMock.Object,
-                httpClient,
-                httpClientFactoryMock.Object,
-                scopeFactory,
-                pathMappingMock.Object,
-                searchMock.Object,
-                hubContextMock.Object,
-                cacheMock.Object,
-                null); // NotificationService is optional
+            // Note: construct ImportService from the provider so it receives the same
+            // IServiceScopeFactory used by DownloadService. This ensures ScopeFactory
+            // matches and scoped ListenArrDbContext instances (the test's `db`) are
+            // discoverable during synchronization steps.
+            var provider2 = TestServiceFactory.BuildServiceProvider(services =>
+            {
+                services.AddSingleton<IAudiobookRepository>(repoMock.Object);
+                services.AddSingleton<IConfigurationService>(configMock.Object);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(dbFactoryMock.Object);
+                // Provide metadata service so AudioFileService can extract metadata without throwing
+                services.AddSingleton<IMetadataService>(metadataMock.Object);
+                // Ensure the same in-memory ListenArrDbContext instance is resolvable
+                // by services created inside ImportService/AudioFileService during the test.
+                services.AddSingleton<ListenArrDbContext>(db);
+                services.AddSingleton<Microsoft.Extensions.Logging.ILogger<DownloadService>>(loggerMock.Object);
+                services.AddSingleton<HttpClient>(httpClient);
+                services.AddSingleton<IHttpClientFactory>(httpClientFactoryMock.Object);
+                services.AddSingleton<IImportService>(sp => new ImportService(
+                    dbFactoryMock.Object,
+                    sp.GetRequiredService<IServiceScopeFactory>(),
+                    new FileNamingService(configMock.Object, new Microsoft.Extensions.Logging.Abstractions.NullLogger<FileNamingService>()),
+                    metadataMock.Object,
+                    new Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>()));
+                services.AddSingleton<IRemotePathMappingService>(pathMappingMock.Object);
+                services.AddSingleton<ISearchService>(searchMock.Object);
+                // Required by AudioFileService/ImportService activation
+                services.AddSingleton<MetadataExtractionLimiter>();
+                services.AddSingleton<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>(new Mock<Listenarr.Api.Services.Adapters.IDownloadClientAdapterFactory>().Object);
+                services.AddSingleton<IHubContext<DownloadHub>>(hubContextMock.Object);
+                services.AddSingleton<IMemoryCache>(cacheMock.Object);
+                services.AddTransient<DownloadService>();
+            });
+            var downloadService = provider2.GetRequiredService<DownloadService>();
 
             // Act: call ProcessCompletedDownloadAsync which should generate a destination using audiobook metadata
             await downloadService.ProcessCompletedDownloadAsync(download.Id, download.FinalPath);
 
-            // Reload the download and audiobook files
-            var updated = await db.Downloads.FindAsync(download.Id);
+            // Reload the download and audiobook files using a fresh DbContext instance
+            await using var verifyDb = new ListenArrDbContext(options);
+            var updated = await verifyDb.Downloads.FindAsync(download.Id);
             Assert.Equal(DownloadStatus.Completed, updated.Status);
 
-            var fileRecord = await db.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id);
+            var fileRecord = await verifyDb.AudiobookFiles.FirstOrDefaultAsync(f => f.AudiobookId == book.Id);
             Assert.NotNull(fileRecord);
 
             // The stored path should include the audiobook Author (Jane Austen) as part of the generated folder

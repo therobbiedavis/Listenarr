@@ -1,4 +1,4 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -63,7 +63,7 @@ namespace Listenarr.Api.Controllers
 
             var user = await _userService.GetByUsernameAsync(req.Username);
             _rateLimiter.RecordSuccess(key);
-            
+
             // Try to create session token - this will fail if authentication is not enabled
             try
             {
@@ -98,20 +98,20 @@ namespace Listenarr.Api.Controllers
             }
         }
 
-    [HttpPost("logout")]
-    [AllowAnonymous]
-    public async Task<IActionResult> Logout()
+        [HttpPost("logout")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Logout()
         {
             var username = User?.Identity?.Name ?? "Anonymous";
             var authType = User?.Identity?.AuthenticationType ?? "Unknown";
-            
+
             _logger.LogInformation("Logout request received for user: {Username} (AuthType: {AuthType})", username, authType);
-            
+
             try
             {
                 // Extract session token from request headers directly
                 var sessionToken = ExtractSessionToken(HttpContext);
-                
+
                 // Handle session-based authentication logout
                 if (!string.IsNullOrEmpty(sessionToken))
                 {
@@ -128,7 +128,7 @@ namespace Listenarr.Api.Controllers
                 {
                     _logger.LogInformation("No session token found in logout request");
                 }
-                
+
                 // Determine response auth type based on configuration
                 var config = _startupConfigService.GetConfig();
                 var authEnabled = config?.AuthenticationRequired?.ToLowerInvariant() is "true" or "yes" or "1";
@@ -161,9 +161,9 @@ namespace Listenarr.Api.Controllers
             return null;
         }
 
-    [HttpGet("me")]
-    [AllowAnonymous]
-    public ActionResult<object> Me()
+        [HttpGet("me")]
+        [AllowAnonymous]
+        public ActionResult<object> Me()
         {
             if (!User?.Identity?.IsAuthenticated ?? false)
                 return Ok(new { authenticated = false });
@@ -183,7 +183,7 @@ namespace Listenarr.Api.Controllers
                 u.IsAdmin,
                 u.CreatedAt
             }).ToList();
-            
+
             return Ok(result);
         }
     }
@@ -203,3 +203,4 @@ namespace Listenarr.Api.Controllers
         public bool IsAdmin { get; set; }
     }
 }
+

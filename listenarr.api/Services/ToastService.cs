@@ -18,7 +18,8 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var payload = new {
+                var payload = new
+                {
                     level = level ?? "info",
                     title = title ?? string.Empty,
                     message = message ?? string.Empty,

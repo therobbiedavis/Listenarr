@@ -1,4 +1,5 @@
-using Listenarr.Api.Models;
+﻿using Listenarr.Domain.Models;
+using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 
@@ -35,7 +36,7 @@ namespace Listenarr.Api.Services
             try
             {
                 _logger.LogDebug("Attempting to create user: {Username} (IsAdmin: {IsAdmin})", username, isAdmin);
-                
+
                 var existing = await GetByUsernameAsync(username);
                 if (existing != null)
                 {
@@ -55,7 +56,7 @@ namespace Listenarr.Api.Services
 
                 _db.Users.Add(user);
                 await _db.SaveChangesAsync();
-                
+
                 _logger.LogInformation("User created successfully: {Username} (IsAdmin: {IsAdmin})", username, isAdmin);
                 return user;
             }
@@ -78,18 +79,18 @@ namespace Listenarr.Api.Services
             try
             {
                 _logger.LogDebug("Attempting to update password for user: {Username}", username);
-                
+
                 var user = await GetByUsernameAsync(username);
                 if (user == null)
                 {
                     _logger.LogWarning("Password update failed - user not found: {Username}", username);
                     throw new InvalidOperationException($"User '{username}' not found");
                 }
-                
+
                 user.PasswordHash = HashPassword(newPassword);
                 _db.Users.Update(user);
                 await _db.SaveChangesAsync();
-                
+
                 _logger.LogInformation("Password updated successfully for user: {Username}", username);
             }
             catch (Exception ex)
@@ -142,3 +143,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

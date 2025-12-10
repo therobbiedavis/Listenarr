@@ -48,6 +48,7 @@ class SignalRService {
   private queueUpdateCallbacks: Set<QueueUpdateCallback> = new Set()
   private audiobookUpdateCallbacks: Set<(a: Audiobook) => void> = new Set()
   private scanJobCallbacks: Set<ScanJobCallback> = new Set()
+  private moveJobCallbacks: Set<(job: { jobId: string; audiobookId?: number; status: string; target?: string; error?: string }) => void> = new Set()
   private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
   private searchProgressCallbacks: Map<(payload: { message: string; asin?: string | null; type?: string; audiobookId?: number }) => void, boolean> = new Map()
   private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
@@ -231,6 +232,12 @@ class SignalRService {
           this.scanJobCallbacks.forEach(cb => cb(job))
         }
         break
+      case 'MoveJobUpdate':
+        if (args && args[0]) {
+          const job = args[0] as unknown as { jobId: string; audiobookId?: number; status: string; target?: string; error?: string }
+          this.moveJobCallbacks.forEach(cb => cb(job))
+        }
+        break
       case 'FilesRemoved':
         if (args && args[0]) {
           const payload = args[0] as unknown as { audiobookId: number; removed: Array<{ id: number; path: string }> }
@@ -392,6 +399,12 @@ class SignalRService {
   onScanJobUpdate(callback: ScanJobCallback): () => void {
     this.scanJobCallbacks.add(callback)
     return () => { this.scanJobCallbacks.delete(callback) }
+  }
+
+  // Subscribe to move job updates
+  onMoveJobUpdate(callback: (job: { jobId: string; audiobookId?: number; status: string; target?: string; error?: string }) => void): () => void {
+    this.moveJobCallbacks.add(callback)
+    return () => { this.moveJobCallbacks.delete(callback) }
   }
 
   // Subscribe to search progress messages (from server-side search operations)

@@ -33,17 +33,17 @@ namespace Listenarr.Api.Services
 
     public class AmazonSearchService : IAmazonSearchService
     {
-    private readonly HttpClient _httpClient;
-    private readonly ILogger<AmazonSearchService> _logger;
-    private readonly IPlaywrightPageFetcher _playwrightFetcher;
-    private readonly IAmazonAsinService _amazonAsinService;
+        private readonly HttpClient _httpClient;
+        private readonly ILogger<AmazonSearchService> _logger;
+        private readonly IPlaywrightPageFetcher _playwrightFetcher;
+        private readonly IAmazonAsinService _amazonAsinService;
         private static readonly Regex AsinRegex = new(@"/dp/([A-Z0-9]{10})", RegexOptions.Compiled);
         // New: placeholder / non-product title patterns
         private static readonly Regex PlaceholderTitleRegex = new(
             @"^(?:\d+[-–]\d+ of \d+ results for|results for|RESULTS FOR|Amazon\.com:|audible session|Audible membership|Best Sellers|Discover more|Unlock\b|Unlock\s+\d+%|Save\b|Savings\b|Visit the\b|Store\b)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private const int EarlyAsinCap = int.MaxValue; // Temporarily disabled cap for debugging (was 50)
-        
+        private const int EarlyAsinCap = int.MaxValue; // Temporarily disabled cap for debugging (was 50)
+
         private bool IsPlaceholderTitle(string? title)
         {
             if (string.IsNullOrWhiteSpace(title)) return true;
@@ -63,7 +63,7 @@ namespace Listenarr.Api.Services
                 return true;
             return false;
         }
-        
+
         private AmazonSearchResult? ExtractFromLink(HtmlNode linkNode)
         {
             try
@@ -71,10 +71,10 @@ namespace Listenarr.Api.Services
                 var href = linkNode.GetAttributeValue("href", "");
                 var asinMatch = AsinRegex.Match(href);
                 if (!asinMatch.Success) return null;
-                
+
                 var asin = asinMatch.Groups[1].Value;
                 var title = linkNode.InnerText?.Trim() ?? "Unknown Title";
-                
+
                 // Try to find parent container for more info
                 var container = linkNode.ParentNode;
                 for (int i = 0; i < 5 && container != null; i++)
@@ -87,13 +87,13 @@ namespace Listenarr.Api.Services
                     }
                     container = container.ParentNode;
                 }
-                
+
                 if (IsPlaceholderTitle(title))
                 {
                     // Attempt product page fetch for a better title (limited via caller)
                     title = null;
                 }
-                
+
                 return new AmazonSearchResult
                 {
                     Asin = asin,
@@ -154,7 +154,7 @@ namespace Listenarr.Api.Services
                 {
                     var searchResults = await SearchAmazonAsync(query);
                     results.AddRange(searchResults);
-                    
+
                     // Stop if we found a larger set of results (increase from 10 to 50)
                     if (results.Count >= 50) break;
                 }
@@ -201,7 +201,7 @@ namespace Listenarr.Api.Services
                     // Search specifically in Audible store for general queries
                     searchUrl = $"https://www.amazon.com/s?k={Uri.EscapeDataString(query ?? string.Empty)}&i=audible&ref=sr_nr_n_1";
                 }
-                
+
                 _logger.LogInformation("Searching Amazon: {SearchUrl}", searchUrl);
 
                 var html = await GetHtmlAsync(searchUrl);
@@ -216,7 +216,7 @@ namespace Listenarr.Api.Services
 
                 // Debug: Log HTML length and check for bot detection
                 _logger.LogInformation("Amazon HTML response length: {Length} characters", html.Length);
-                
+
                 if (html.Contains("To discuss automated access to Amazon data please contact"))
                 {
                     _logger.LogWarning("Amazon bot detection triggered");
@@ -248,109 +248,109 @@ namespace Listenarr.Api.Services
                     {
                         if (results.Count >= EarlyAsinCap) break; // early cap
                         var result = ExtractSearchResult(node);
-                                if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
+                        if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
+                        {
+                            // If this query is an ISBN, require product-page verification that the ISBN is present
+                            if (!string.IsNullOrEmpty(digitsOnly) && (digitsOnly.Length == 10 || digitsOnly.Length == 13))
+                            {
+                                try
                                 {
-                                    // If this query is an ISBN, require product-page verification that the ISBN is present
-                                    if (!string.IsNullOrEmpty(digitsOnly) && (digitsOnly.Length == 10 || digitsOnly.Length == 13))
+                                    var verify = await _amazonAsinService.VerifyAsinContainsIsbnAsync(result.Asin!, digitsOnly);
+                                    if (verify.Success && verify.MatchesIsbn)
                                     {
-                                        try
+                                        // Optionally fetch a nicer title if we only had a placeholder
+                                        if (IsPlaceholderTitle(result.Title) && productPageFetches < 100)
                                         {
-                                            var verify = await _amazonAsinService.VerifyAsinContainsIsbnAsync(result.Asin!, digitsOnly);
-                                            if (verify.Success && verify.MatchesIsbn)
+                                            try
                                             {
-                                                // Optionally fetch a nicer title if we only had a placeholder
-                                                if (IsPlaceholderTitle(result.Title) && productPageFetches < 100)
+                                                var fetched = await FetchProductTitleAsync(result.Asin);
+                                                if (!IsPlaceholderTitle(fetched))
                                                 {
-                                                    try
-                                                    {
-                                                        var fetched = await FetchProductTitleAsync(result.Asin);
-                                                        if (!IsPlaceholderTitle(fetched))
-                                                        {
-                                                            result.Title = fetched;
-                                                            productPageFetches++;
-                                                        }
-                                                    }
-                                                    catch (Exception pex)
-                                                    {
-                                                        _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
-                                                    }
+                                                    result.Title = fetched;
+                                                    productPageFetches++;
                                                 }
-                                                results.Add(result);
-                                                _logger.LogInformation("Amazon candidate (ISBN): {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
                                             }
-                                            else
+                                            catch (Exception pex)
                                             {
-                                                // Record why the candidate was rejected for diagnostics
-                                                var reason = verify.Success ? "product-page-missing-isbn" : $"verify-failed:{verify.Error}";
-                                                filteredOut.Add((result.Asin ?? "<unknown>", result.Title, reason));
-                                                _logger.LogInformation("Filtered out Amazon candidate (ISBN) {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, reason);
-                                                _logger.LogDebug("Rejecting ASIN {Asin} for ISBN query {Isbn}: {Reason}", result.Asin, digitsOnly, reason);
+                                                _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
                                             }
                                         }
-                                        catch (Exception ex)
-                                        {
-                                            filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "verify-exception"));
-                                            _logger.LogDebug(ex, "Exception verifying ASIN {Asin} for ISBN {Isbn}", result.Asin, digitsOnly);
-                                        }
+                                        results.Add(result);
+                                        _logger.LogInformation("Amazon candidate (ISBN): {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
                                     }
                                     else
                                     {
-                                        // Non-ISBN flow unchanged
-                                        if (IsPlaceholderTitle(result.Title))
+                                        // Record why the candidate was rejected for diagnostics
+                                        var reason = verify.Success ? "product-page-missing-isbn" : $"verify-failed:{verify.Error}";
+                                        filteredOut.Add((result.Asin ?? "<unknown>", result.Title, reason));
+                                        _logger.LogInformation("Filtered out Amazon candidate (ISBN) {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, reason);
+                                        _logger.LogDebug("Rejecting ASIN {Asin} for ISBN query {Isbn}: {Reason}", result.Asin, digitsOnly, reason);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "verify-exception"));
+                                    _logger.LogDebug(ex, "Exception verifying ASIN {Asin} for ISBN {Isbn}", result.Asin, digitsOnly);
+                                }
+                            }
+                            else
+                            {
+                                // Non-ISBN flow unchanged
+                                if (IsPlaceholderTitle(result.Title))
+                                {
+                                    // attempt fetch product page title if budget remains (increased budget)
+                                    if (productPageFetches < 100)
+                                    {
+                                        try
                                         {
-                                            // attempt fetch product page title if budget remains (increased budget)
-                                            if (productPageFetches < 100)
+                                            var fetched = await FetchProductTitleAsync(result.Asin);
+                                            if (!IsPlaceholderTitle(fetched))
                                             {
-                                                try
-                                                {
-                                                    var fetched = await FetchProductTitleAsync(result.Asin);
-                                                    if (!IsPlaceholderTitle(fetched))
-                                                    {
-                                                        result.Title = fetched;
-                                                        productPageFetches++;
-                                                    }
-                                                }
-                                                catch (Exception pex)
-                                                {
-                                                    _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
-                                                }
+                                                result.Title = fetched;
+                                                productPageFetches++;
                                             }
                                         }
-                                        if (!IsPlaceholderTitle(result.Title))
+                                        catch (Exception pex)
                                         {
-                                            results.Add(result);
-                                            _logger.LogInformation("Amazon candidate: {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
-                                            // If author was missing/placeholder, try fetching it from the product page (budget permitting)
-                                            if (string.IsNullOrWhiteSpace(result.Author) && productPageFetches < 100)
-                                            {
-                                                try
-                                                {
-                                                    var fetchedAuthor = await FetchProductAuthorAsync(result.Asin);
-                                                    if (!string.IsNullOrWhiteSpace(fetchedAuthor))
-                                                    {
-                                                        result.Author = fetchedAuthor;
-                                                        _logger.LogInformation("Fetched product page author for {Asin}: {Author}", result.Asin, result.Author);
-                                                    }
-                                                    productPageFetches++;
-                                                }
-                                                catch (Exception ex)
-                                                {
-                                                    _logger.LogDebug(ex, "Product page author fetch failed for {Asin}", result.Asin);
-                                                }
-                                            }
-                                        }
-                                        else
-                                        {
-                                            // Still a placeholder after any fetch attempts - record for diagnostics
-                                            filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "placeholder-after-fetch"));
-                                            _logger.LogInformation("Filtered out Amazon candidate {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, "placeholder-after-fetch");
-                                            _logger.LogDebug("Filtering out ASIN {Asin} due to placeholder title (after fetch attempts): {Title}", result.Asin, result.Title);
+                                            _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
                                         }
                                     }
                                 }
+                                if (!IsPlaceholderTitle(result.Title))
+                                {
+                                    results.Add(result);
+                                    _logger.LogInformation("Amazon candidate: {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
+                                    // If author was missing/placeholder, try fetching it from the product page (budget permitting)
+                                    if (string.IsNullOrWhiteSpace(result.Author) && productPageFetches < 100)
+                                    {
+                                        try
+                                        {
+                                            var fetchedAuthor = await FetchProductAuthorAsync(result.Asin);
+                                            if (!string.IsNullOrWhiteSpace(fetchedAuthor))
+                                            {
+                                                result.Author = fetchedAuthor;
+                                                _logger.LogInformation("Fetched product page author for {Asin}: {Author}", result.Asin, result.Author);
+                                            }
+                                            productPageFetches++;
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Product page author fetch failed for {Asin}", result.Asin);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // Still a placeholder after any fetch attempts - record for diagnostics
+                                    filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "placeholder-after-fetch"));
+                                    _logger.LogInformation("Filtered out Amazon candidate {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, "placeholder-after-fetch");
+                                    _logger.LogDebug("Filtering out ASIN {Asin} due to placeholder title (after fetch attempts): {Title}", result.Asin, result.Title);
+                                }
+                            }
+                        }
                     }
                 }
-                
+
                 // Fallback: If no results, try finding any links with ASINs
                 if (!results.Any())
                 {
@@ -364,7 +364,7 @@ namespace Listenarr.Api.Services
                             var result = ExtractFromLink(link);
                             if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
                             {
-                                    if (IsPlaceholderTitle(result.Title) && productPageFetches < 100)
+                                if (IsPlaceholderTitle(result.Title) && productPageFetches < 100)
                                 {
                                     try
                                     {
@@ -380,17 +380,17 @@ namespace Listenarr.Api.Services
                                         _logger.LogDebug(dpex, "Failed to fetch product page for ASIN {Asin}", result.Asin);
                                     }
                                 }
-                                    if (!IsPlaceholderTitle(result.Title))
-                                    {
-                                        results.Add(result);
-                                        _logger.LogInformation("Amazon candidate (link-fallback): {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
-                                    }
-                                    else
-                                    {
-                                        filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "link-fallback-placeholder"));
-                                        _logger.LogInformation("Filtered out Amazon candidate {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, "link-fallback-placeholder");
-                                        _logger.LogDebug("Filtering out ASIN {Asin} from link fallback due to placeholder title: {Title}", result.Asin, result.Title);
-                                    }
+                                if (!IsPlaceholderTitle(result.Title))
+                                {
+                                    results.Add(result);
+                                    _logger.LogInformation("Amazon candidate (link-fallback): {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
+                                }
+                                else
+                                {
+                                    filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "link-fallback-placeholder"));
+                                    _logger.LogInformation("Filtered out Amazon candidate {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, "link-fallback-placeholder");
+                                    _logger.LogDebug("Filtering out ASIN {Asin} from link fallback due to placeholder title: {Title}", result.Asin, result.Title);
+                                }
                             }
                         }
                     }
@@ -457,14 +457,14 @@ namespace Listenarr.Api.Services
                 // Diagnostic: log how many candidates were filtered out due to placeholder titles
                 if (filteredOut.Any())
                 {
-                    var sample = string.Join(", ", filteredOut.Take(10).Select(f => $"{f.Asin}:{(string.IsNullOrWhiteSpace(f.Title)?"<empty>":f.Title)}[{f.Reason}]"));
+                    var sample = string.Join(", ", filteredOut.Take(10).Select(f => $"{f.Asin}:{(string.IsNullOrWhiteSpace(f.Title) ? "<empty>" : f.Title)}[{f.Reason}]"));
                     _logger.LogInformation("Filtered out {Count} ASIN candidates due to placeholder titles (showing up to 10): {Sample}", filteredOut.Count, sample);
                 }
                 return results;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error parsing Amazon search results for query: {Query}", query);
+                _logger.LogError(ex, "Error parsing Amazon search results for query: {Query}", LogRedaction.SanitizeText(query));
                 return results;
             }
         }
@@ -501,7 +501,8 @@ namespace Listenarr.Api.Services
                     if (spanNodes != null && spanNodes.Count > 0)
                     {
                         // Only treat this container as an author list if it contains an explicit 'by' token
-                        var hasByToken = spanNodes.Any(s => {
+                        var hasByToken = spanNodes.Any(s =>
+                        {
                             var txt = s.InnerText?.Trim();
                             return !string.IsNullOrWhiteSpace(txt) && (txt.Equals("by", StringComparison.OrdinalIgnoreCase) || txt.StartsWith("by ", StringComparison.OrdinalIgnoreCase));
                         });
@@ -642,8 +643,8 @@ namespace Listenarr.Api.Services
 
                 // Check if it's likely an audiobook
                 var nodeText = node.InnerText.ToLower();
-                var isAudiobook = nodeText.Contains("audible") || 
-                                  nodeText.Contains("audiobook") || 
+                var isAudiobook = nodeText.Contains("audible") ||
+                                  nodeText.Contains("audiobook") ||
                                   nodeText.Contains("narrator") ||
                                   nodeText.Contains("narrated by");
 
@@ -689,7 +690,7 @@ namespace Listenarr.Api.Services
                     response.StatusCode == HttpStatusCode.ServiceUnavailable ||
                     (body != null && (body.Contains("captcha", StringComparison.OrdinalIgnoreCase) || body.Contains("To discuss automated access to Amazon data please contact", StringComparison.OrdinalIgnoreCase))))
                 {
-                    _logger.LogInformation("HttpClient fetch returned status {Status} or challenge; falling back to Playwright for {Url}", (int)response.StatusCode, url);
+                    _logger.LogInformation("HttpClient fetch returned status {Status} or challenge; falling back to Playwright for {Url}", (int)response.StatusCode, LogRedaction.SanitizeUrl(url));
                     try
                     {
                         var pw = await _playwrightFetcher.FetchAsync(url);
@@ -697,7 +698,7 @@ namespace Listenarr.Api.Services
                     }
                     catch (Exception pex)
                     {
-                        _logger.LogDebug(pex, "Playwright fallback failed for {Url}", url);
+                        _logger.LogDebug(pex, "Playwright fallback failed for {Url}", LogRedaction.SanitizeUrl(url));
                     }
                 }
 
@@ -711,7 +712,7 @@ namespace Listenarr.Api.Services
             catch (Polly.CircuitBreaker.BrokenCircuitException<System.Net.Http.HttpResponseMessage> ex)
             {
                 // Circuit breaker is open - try Playwright fallback
-                _logger.LogWarning(ex, "Amazon search circuit open; attempting Playwright fallback for {Url}", url);
+                _logger.LogWarning(ex, "Amazon search circuit open; attempting Playwright fallback for {Url}", LogRedaction.SanitizeUrl(url));
                 try
                 {
                     var pw = await _playwrightFetcher.FetchAsync(url);
@@ -719,13 +720,13 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception pex)
                 {
-                    _logger.LogWarning(pex, "Playwright fallback also failed for {Url}", url);
+                    _logger.LogWarning(pex, "Playwright fallback also failed for {Url}", LogRedaction.SanitizeUrl(url));
                     return null;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching HTML from URL: {Url}", url);
+                _logger.LogError(ex, "Error fetching HTML from URL: {Url}", LogRedaction.SanitizeUrl(url));
                 // Try Playwright as a last resort
                 try
                 {
@@ -734,7 +735,7 @@ namespace Listenarr.Api.Services
                 }
                 catch (Exception pex)
                 {
-                    _logger.LogDebug(pex, "Playwright fallback failed for {Url}", url);
+                    _logger.LogDebug(pex, "Playwright fallback failed for {Url}", LogRedaction.SanitizeUrl(url));
                     return null;
                 }
             }

@@ -102,7 +102,18 @@
             </label>
           </div>
 
-          <div class="option-group">
+            <div class="option-group">
+              <label class="form-label">Destination</label>
+              <div class="destination-display">
+                <div class="destination-row">
+                  <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
+                  <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+                </div>
+                <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
+              </div>
+            </div>
+
+            <div class="option-group">
             <label class="form-label">Quality Profile</label>
             <select v-model="options.qualityProfileId" class="form-select">
               <option :value="null">Use Default Profile</option>
@@ -141,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import type { AudibleBookMetadata, QualityProfile, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -169,13 +180,121 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const options = ref({
   monitored: true,
   qualityProfileId: null as number | null,
-  autoSearch: false
+  autoSearch: false,
+  // editable relative path portion (relative to rootPath)
+  relativePath: '' as string | null
 })
 
-// Load quality profiles when modal opens
-onMounted(async () => {
+const rootPath = ref<string>('')
+const previewFull = ref<string>('')
+const previewRelative = ref<string>('')
+
+// Hold an enriched metadata object (populate if metadata sources available)
+const enriched = ref<AudibleBookMetadata | null>(null)
+
+// Local types for audimeta response to avoid `any`
+interface AudimetaPerson { name?: string }
+interface AudimetaSeries { name?: string; position?: string | number }
+interface AudimetaGenre { name?: string }
+interface Audimeta {
+  asin?: string
+  title?: string
+  subtitle?: string
+  authors?: AudimetaPerson[]
+  narrators?: AudimetaPerson[]
+  publisher?: string
+  publishDate?: string
+  releaseDate?: string
+  description?: string
+  imageUrl?: string
+  lengthMinutes?: number
+  language?: string
+  genres?: AudimetaGenre[]
+  series?: AudimetaSeries[]
+  bookFormat?: string
+  isbn?: string
+}
+
+// Helper to map audimeta response to AudibleBookMetadata
+const mapAudimetaToAudible = (audimeta: Partial<Audimeta> | undefined, source?: string): AudibleBookMetadata => {
+  let publishYear: string | undefined
+  const dateStr = audimeta?.publishDate || audimeta?.releaseDate
+  if (dateStr && typeof dateStr === 'string') {
+    const yearMatch = dateStr.match(/\d{4}/)
+    publishYear = yearMatch ? yearMatch[0] : undefined
+  }
+
+  const authors = (audimeta?.authors || []).map(a => a?.name).filter(Boolean) as string[]
+  const narrators = (audimeta?.narrators || []).map(n => n?.name).filter(Boolean) as string[]
+  const genres = (audimeta?.genres || []).map(g => g?.name).filter(Boolean) as string[]
+
+  const firstSeries = (audimeta?.series && audimeta.series.length > 0) ? audimeta.series[0] : undefined
+
+  return {
+    asin: audimeta?.asin || props.book?.asin || '',
+    title: audimeta?.title || props.book?.title || 'Unknown Title',
+    subtitle: audimeta?.subtitle,
+    authors: authors.length ? authors : (props.book?.authors || []),
+    narrators: narrators.length ? narrators : (props.book?.narrators || []),
+    publisher: audimeta?.publisher || props.book?.publisher,
+    publishYear: publishYear || props.book?.publishYear,
+    description: audimeta?.description || props.book?.description,
+    imageUrl: audimeta?.imageUrl || props.book?.imageUrl,
+    runtime: typeof audimeta?.lengthMinutes === 'number' ? audimeta.lengthMinutes * 60 : props.book?.runtime,
+    language: audimeta?.language || props.book?.language,
+    genres: genres.length ? genres : (props.book?.genres || []),
+    series: firstSeries?.name || props.book?.series,
+    seriesNumber: firstSeries?.position !== undefined ? String(firstSeries.position) : props.book?.seriesNumber,
+    abridged: typeof audimeta?.bookFormat === 'string' ? audimeta.bookFormat.toLowerCase().includes('abridged') : Boolean(props.book?.abridged),
+    isbn: audimeta?.isbn || props.book?.isbn,
+    source: source || props.book?.source
+  }
+}
+
+// helper to load profiles/settings and seed preview
+const seedPreview = async () => {
   await configStore.loadQualityProfiles()
   qualityProfiles.value = configStore.qualityProfiles
+
+  // Load application settings to get default root
+  await configStore.loadApplicationSettings()
+  rootPath.value = configStore.applicationSettings?.outputPath || ''
+
+  // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
+  try {
+    if (props.book?.asin) {
+      try {
+        const resp = await apiService.getMetadata(props.book.asin, 'us', true)
+        if (resp && resp.metadata) {
+          enriched.value = mapAudimetaToAudible(resp.metadata, resp.source)
+        }
+      } catch (metaErr) {
+        // ignore metadata fetch errors - we'll fall back to provided book
+        console.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+      }
+    }
+
+    const metadataForPreview = (enriched.value || props.book) as AudibleBookMetadata
+    // Compute a preview path using server logic
+    const resp2 = await apiService.previewLibraryPath(metadataForPreview, rootPath.value || undefined)
+    previewFull.value = resp2?.fullPath || ''
+    previewRelative.value = resp2?.relativePath || ''
+    // Seed editable relative path
+    options.value.relativePath = previewRelative.value
+  } catch (e) {
+    console.error('Failed to preview path:', e)
+  }
+}
+
+// Load when mounted
+onMounted(() => {
+  seedPreview()
+})
+
+// Re-seed preview if the passed book changes after mount (parent may update props)
+watch(() => props.book, (newVal) => {
+  if (!newVal) return
+  seedPreview()
 })
 
 const closeModal = () => {
@@ -186,15 +305,27 @@ const addToLibrary = async () => {
   if (!props.book) return
 
   isAdding.value = true
-  try {
-    const result = await apiService.addToLibrary(props.book, {
-      monitored: options.value.monitored,
-      qualityProfileId: options.value.qualityProfileId || undefined,
-      autoSearch: options.value.autoSearch
-    })
+  // Combine rootPath + relativePath into full destination path
+    let destination: string | undefined = undefined
+    try {
+      const rel = (options.value.relativePath || '').trim()
+      if (rootPath.value && rel) {
+        const sep = rootPath.value.includes('\\') ? '\\' : '/'
+        const cleanedRel = rel.replace(/\\|\//g, sep)
+        destination = rootPath.value.endsWith(sep) ? rootPath.value + cleanedRel : rootPath.value + sep + cleanedRel
+      } else if (rootPath.value && !rel) {
+        destination = rootPath.value
+      }
 
-  toast.success('Added', `"${props.book.title}" has been added to your library!`)
-    emit('added', result.audiobook)
+      const metadataToSend = (enriched.value || props.book) as AudibleBookMetadata
+      const result = await apiService.addToLibrary(metadataToSend, {
+        monitored: options.value.monitored,
+        qualityProfileId: options.value.qualityProfileId || undefined,
+        autoSearch: options.value.autoSearch,
+        destinationPath: destination || undefined
+      })
+      toast.success('Added', `"${metadataToSend.title}" has been added to your library!`)
+      emit('added', result.audiobook)
     closeModal()
   } catch (err: unknown) {
     console.error('Failed to add audiobook:', err)
@@ -457,6 +588,52 @@ const capitalizeFirst = (str: string): string => {
   color: #ccc;
   font-size: 0.85rem;
   margin-top: 0.5rem;
+}
+
+/* Destination display styles */
+.destination-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+/* root-label is used instead of readonly-path */
+
+.form-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #3a3a3a;
+  background-color: #2a2a2a;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 3px rgba(0,122,204,0.06);
+}
+
+/* Row layout for destination: root left, input right */
+.destination-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.root-label {
+  padding: 0.45rem 0 0.45rem 0.6rem;
+  color: #ccc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
+  font-size: 0.9rem;
+  width: fit-content;
+  white-space: nowrap;
+}
+
+.relative-input {
+  flex: 1 1 auto;
 }
 
 .btn {

@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Listenarr.Api.Hubs;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 
 namespace Listenarr.Api.Services
 {
@@ -38,33 +38,33 @@ namespace Listenarr.Api.Services
 
             try
             {
-                    // Broadcast the single download update to all clients
-                    // Construct a sanitized DTO that omits DownloadPath and removes client-local metadata
-                    var sanitizedMetadata = (download.Metadata ?? new Dictionary<string, object>())
-                        .Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase))
-                        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value!);
+                // Broadcast the single download update to all clients
+                // Construct a sanitized DTO that omits DownloadPath and removes client-local metadata
+                var sanitizedMetadata = (download.Metadata ?? new Dictionary<string, object>())
+                    .Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase))
+                    .ToDictionary(kvp => kvp.Key, kvp => kvp.Value!);
 
-                    var downloadDto = new
-                    {
-                        id = download.Id,
-                        audiobookId = download.AudiobookId,
-                        title = download.Title,
-                        artist = download.Artist,
-                        album = download.Album,
-                        originalUrl = download.OriginalUrl,
-                        status = download.Status.ToString(),
-                        progress = download.Progress,
-                        totalSize = download.TotalSize,
-                        downloadedSize = download.DownloadedSize,
-                        finalPath = download.FinalPath,
-                        startedAt = download.StartedAt,
-                        completedAt = download.CompletedAt,
-                        errorMessage = download.ErrorMessage,
-                        downloadClientId = download.DownloadClientId,
-                        metadata = sanitizedMetadata
-                    };
+                var downloadDto = new
+                {
+                    id = download.Id,
+                    audiobookId = download.AudiobookId,
+                    title = download.Title,
+                    artist = download.Artist,
+                    album = download.Album,
+                    originalUrl = download.OriginalUrl,
+                    status = download.Status.ToString(),
+                    progress = download.Progress,
+                    totalSize = download.TotalSize,
+                    downloadedSize = download.DownloadedSize,
+                    finalPath = download.FinalPath,
+                    startedAt = download.StartedAt,
+                    completedAt = download.CompletedAt,
+                    errorMessage = download.ErrorMessage,
+                    downloadClientId = download.DownloadClientId,
+                    metadata = sanitizedMetadata
+                };
 
-                    await _hubContext.Clients.All.SendAsync("DownloadUpdate", new[] { downloadDto }, cancellationToken);
+                await _hubContext.Clients.All.SendAsync("DownloadUpdate", new[] { downloadDto }, cancellationToken);
 
                 // Mark this download id as recently pushed
                 var key = CachePrefix + download.Id;
@@ -89,3 +89,4 @@ namespace Listenarr.Api.Services
         }
     }
 }
+

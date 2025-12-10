@@ -5,14 +5,14 @@ namespace Listenarr.Api.Services
 {
     public class AmazonAsinService : IAmazonAsinService
     {
-    private readonly HttpClient _httpClient;
-    private readonly ILogger<AmazonAsinService> _logger;
-    private readonly IHttpClientFactory? _httpClientFactory;
-    private readonly IConfigurationService _configurationService;
-    private static readonly Regex AsinRegex = new("/dp/([A-Z0-9]{10})", RegexOptions.Compiled);
-    private static readonly Regex DataAsinRegex = new("data-asin=\"([A-Z0-9]{10})\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-	private static readonly Regex ProductAsinRegex = new("\\\"asin\\\"\\s*:\\s*\\\"([A-Z0-9]{10})\\\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex DetailBulletsRegex = new("<li[^>]*>\\s*<span[^>]*>\\s*ASIN\\s*</span>\\s*<span[^>]*>\\s*([A-Z0-9]{10})\\s*</span>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private readonly HttpClient _httpClient;
+        private readonly ILogger<AmazonAsinService> _logger;
+        private readonly IHttpClientFactory? _httpClientFactory;
+        private readonly IConfigurationService _configurationService;
+        private static readonly Regex AsinRegex = new("/dp/([A-Z0-9]{10})", RegexOptions.Compiled);
+        private static readonly Regex DataAsinRegex = new("data-asin=\"([A-Z0-9]{10})\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex ProductAsinRegex = new("\\\"asin\\\"\\s*:\\s*\\\"([A-Z0-9]{10})\\\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex DetailBulletsRegex = new("<li[^>]*>\\s*<span[^>]*>\\s*ASIN\\s*</span>\\s*<span[^>]*>\\s*([A-Z0-9]{10})\\s*</span>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public AmazonAsinService(HttpClient httpClient, ILogger<AmazonAsinService> logger, IConfigurationService configurationService, IHttpClientFactory? httpClientFactory = null)
         {
@@ -92,7 +92,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-    internal async Task<string?> GetHtmlAsync(string url, CancellationToken ct)
+        internal async Task<string?> GetHtmlAsync(string url, CancellationToken ct)
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             // Amazon expects realistic headers
@@ -164,7 +164,7 @@ namespace Listenarr.Api.Services
             return html;
         }
 
-    internal static bool IsNonUsHost(string url)
+        internal static bool IsNonUsHost(string url)
         {
             try
             {
@@ -180,7 +180,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-    internal static string ForceToUSDomain(string url)
+        internal static string ForceToUSDomain(string url)
         {
             try
             {

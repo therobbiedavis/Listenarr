@@ -514,17 +514,26 @@ class ApiService {
     return this.request<Audiobook[]>('/library')
   }
 
-  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean; searchResult?: SearchResult }): Promise<{ message: string; audiobook: Audiobook }> {
+  async addToLibrary(metadata: AudibleBookMetadata, options?: { monitored?: boolean; qualityProfileId?: number; autoSearch?: boolean; searchResult?: SearchResult; destinationPath?: string }): Promise<{ message: string; audiobook: Audiobook }> {
     const request = {
       metadata,
       monitored: options?.monitored ?? true,
       qualityProfileId: options?.qualityProfileId,
       autoSearch: options?.autoSearch ?? false,
-      searchResult: options?.searchResult
+      searchResult: options?.searchResult,
+      destinationPath: options?.destinationPath
     }
     return this.request<{ message: string; audiobook: Audiobook }>('/library/add', {
       method: 'POST',
       body: JSON.stringify(request)
+    })
+  }
+
+  async previewLibraryPath(metadata: AudibleBookMetadata, destinationRoot?: string): Promise<{ fullPath: string; relativePath: string; root?: string }> {
+    const body = { metadata, destinationRoot }
+    return this.request<{ fullPath: string; relativePath: string; root?: string }>('/library/preview-path', {
+      method: 'POST',
+      body: JSON.stringify(body)
     })
   }
 
@@ -543,6 +552,15 @@ class ApiService {
     return this.request<{ message: string; audiobook: Audiobook }>(`/library/${id}`, {
       method: 'PUT',
       body: JSON.stringify(audiobook)
+    })
+  }
+
+  async moveAudiobook(id: number, destinationPath: string, sourcePath?: string): Promise<{ message: string; jobId: string }> {
+    const body: any = { destinationPath }
+    if (sourcePath) body.sourcePath = sourcePath
+    return this.request<{ message: string; jobId: string }>(`/library/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify(body)
     })
   }
 
@@ -750,6 +768,13 @@ class ApiService {
   async testIndexer(id: number): Promise<{ success: boolean; message: string; error?: string; indexer: Indexer }> {
     return this.request<{ success: boolean; message: string; error?: string; indexer: Indexer }>(`/indexers/${id}/test`, {
       method: 'POST'
+    })
+  }
+
+  async testIndexerDraft(indexer: Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>): Promise<{ success: boolean; message: string; error?: string; indexer: Indexer }> {
+    return this.request<{ success: boolean; message: string; error?: string; indexer: Indexer }>('/indexers/test', {
+      method: 'POST',
+      body: JSON.stringify(indexer)
     })
   }
 
@@ -1023,6 +1048,7 @@ export const createIndexer = (indexer: Omit<Indexer, 'id' | 'createdAt' | 'updat
 export const updateIndexer = (id: number, indexer: Partial<Indexer>) => apiService.updateIndexer(id, indexer)
 export const deleteIndexer = (id: number) => apiService.deleteIndexer(id)
 export const testIndexer = (id: number) => apiService.testIndexer(id)
+export const testIndexerDraft = (indexer: Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>) => apiService.testIndexerDraft(indexer)
 export const toggleIndexer = (id: number) => apiService.toggleIndexer(id)
 export const getEnabledIndexers = () => apiService.getEnabledIndexers()
 

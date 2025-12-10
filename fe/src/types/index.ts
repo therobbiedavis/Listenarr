@@ -157,7 +157,12 @@ export interface ApplicationSettings {
   enableCoverArtDownload: boolean
   audnexusApiUrl: string
   maxConcurrentDownloads: number
-  pollingIntervalSeconds: number
+    pollingIntervalSeconds?: number
+    // How many seconds a download must be observed as complete by the client before finalization begins
+    downloadCompletionStabilitySeconds?: number
+    // Retry/backoff settings used by the server when a finalized download's source file is not yet present
+    missingSourceRetryInitialDelaySeconds?: number
+    missingSourceMaxRetries?: number
   enableNotifications: boolean
   allowedFileExtensions: string[]
   // Action to perform for completed downloads: 'Move' or 'Copy'

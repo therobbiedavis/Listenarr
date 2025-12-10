@@ -40,7 +40,7 @@ namespace Listenarr.Api.Services
         {
             _httpClient = httpClient;
             _logger = logger;
-            
+
             // Set default headers
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "Listenarr/1.0");
@@ -61,28 +61,28 @@ namespace Listenarr.Api.Services
                 var seedAuthorsParam = seedAuthors ? "1" : "0";
                 var updateParam = update ? "1" : "0";
                 var url = $"{BASE_URL}/books/{asin}?region={region}&seedAuthors={seedAuthorsParam}&update={updateParam}";
-                
+
                 _logger.LogInformation("Fetching audiobook metadata from Audnexus: {Url}", url);
 
                 var response = await _httpClient.GetAsync(url);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Audnexus API returned status code {StatusCode} for ASIN {Asin}", 
+                    _logger.LogWarning("Audnexus API returned status code {StatusCode} for ASIN {Asin}",
                         response.StatusCode, asin);
                     return null;
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
-                
+
                 _logger.LogDebug("Audnexus raw JSON response for ASIN {Asin}: {Json}", asin, json.Length > 500 ? json.Substring(0, 500) + "..." : json);
-                
+
                 var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 };
-                
+
                 AudnexusBookResponse? result = null;
                 try
                 {
@@ -90,14 +90,14 @@ namespace Listenarr.Api.Services
                 }
                 catch (JsonException jsonEx)
                 {
-                    _logger.LogError(jsonEx, "JSON deserialization failed for Audnexus ASIN {Asin}. JSON: {Json}", 
+                    _logger.LogError(jsonEx, "JSON deserialization failed for Audnexus ASIN {Asin}. JSON: {Json}",
                         asin, json.Length > 200 ? json.Substring(0, 200) + "..." : json);
                     return null;
                 }
 
                 if (result != null)
                 {
-                    _logger.LogInformation("Successfully fetched metadata for ASIN {Asin} from Audnexus. Title: {Title}", 
+                    _logger.LogInformation("Successfully fetched metadata for ASIN {Asin} from Audnexus. Title: {Title}",
                         asin, result.Title ?? "null");
                 }
                 else
@@ -128,10 +128,10 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Searching Audnexus authors: {Url}", url);
 
                 var response = await _httpClient.GetAsync(url);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Audnexus author search returned status code {StatusCode} for query {Query}", 
+                    _logger.LogWarning("Audnexus author search returned status code {StatusCode} for query {Query}",
                         response.StatusCode, name);
                     return null;
                 }
@@ -142,10 +142,10 @@ namespace Listenarr.Api.Services
                     PropertyNameCaseInsensitive = true,
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 };
-                
+
                 var result = JsonSerializer.Deserialize<List<AudnexusAuthorSearchResult>>(json, options);
 
-                _logger.LogInformation("Successfully searched Audnexus for author: {Name}, found {Count} results", 
+                _logger.LogInformation("Successfully searched Audnexus for author: {Name}, found {Count} results",
                     name, result?.Count ?? 0);
                 return result;
             }
@@ -169,14 +169,14 @@ namespace Listenarr.Api.Services
             {
                 var updateParam = update ? "1" : "0";
                 var url = $"{BASE_URL}/authors/{asin}?region={region}&update={updateParam}";
-                
+
                 _logger.LogInformation("Fetching author from Audnexus: {Url}", url);
 
                 var response = await _httpClient.GetAsync(url);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Audnexus API returned status code {StatusCode} for author ASIN {Asin}", 
+                    _logger.LogWarning("Audnexus API returned status code {StatusCode} for author ASIN {Asin}",
                         response.StatusCode, asin);
                     return null;
                 }
@@ -187,7 +187,7 @@ namespace Listenarr.Api.Services
                     PropertyNameCaseInsensitive = true,
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 };
-                
+
                 var result = JsonSerializer.Deserialize<AudnexusAuthorResponse>(json, options);
 
                 _logger.LogInformation("Successfully fetched author ASIN {Asin} from Audnexus", asin);
@@ -223,14 +223,14 @@ namespace Listenarr.Api.Services
             {
                 var updateParam = update ? "1" : "0";
                 var url = $"{BASE_URL}/books/{asin}/chapters?region={region}&update={updateParam}";
-                
+
                 _logger.LogInformation("Fetching chapters from Audnexus: {Url}", url);
 
                 var response = await _httpClient.GetAsync(url);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Audnexus API returned status code {StatusCode} for chapters of ASIN {Asin}", 
+                    _logger.LogWarning("Audnexus API returned status code {StatusCode} for chapters of ASIN {Asin}",
                         response.StatusCode, asin);
                     return null;
                 }
@@ -241,7 +241,7 @@ namespace Listenarr.Api.Services
                     PropertyNameCaseInsensitive = true,
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 };
-                
+
                 var result = JsonSerializer.Deserialize<AudnexusChapterResponse>(json, options);
 
                 _logger.LogInformation("Successfully fetched chapters for ASIN {Asin} from Audnexus", asin);

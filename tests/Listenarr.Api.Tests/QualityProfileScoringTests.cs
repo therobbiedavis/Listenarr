@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Xunit;
 using Listenarr.Api.Services;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Api.Tests
@@ -82,6 +82,122 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
+        public async Task NZB_MissingQuality_ShouldNotBePenalized()
+        {
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string> { "m4b" },
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string> { "English" },
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Some NZB Book",
+                Size = 120 * 1024 * 1024,
+                Format = "m4b",
+                Quality = null,
+                Language = "English",
+                DownloadType = "nzb",
+                NzbUrl = "http://example.com/test.nzb",
+                Seeders = 0,
+                PublishedDate = DateTime.UtcNow
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            // For NZB indexers, quality should not be penalized even if missing
+            Assert.False(score.ScoreBreakdown.ContainsKey("QualityMissing"), "NZB results should not be penalized for missing quality");
+        }
+
+        [Fact]
+        public async Task NZB_OldPublishedDate_ShouldNotBeRejected()
+        {
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string> { "m4b" },
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string> { "English" },
+                MinimumSeeders = 0,
+                MaximumAge = 10 // 10 days - would reject old results for torrents
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Some Old NZB Book",
+                Size = 120 * 1024 * 1024,
+                Format = "m4b",
+                Quality = "320",
+                Language = "English",
+                DownloadType = "nzb",
+                NzbUrl = "http://example.com/old.nzb",
+                Seeders = 0,
+                PublishedDate = DateTime.UtcNow.AddDays(-365) // 1 year old
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            // For NZB indexers age should be ignored, so result should not be rejected for being too old
+            Assert.DoesNotContain(score.RejectionReasons, r => r.Contains("Too old"));
+            Assert.True(score.TotalScore > 0, "Old NZB should not be auto-rejected based on profile maximum age");
+        }
+
+        [Fact]
+        public async Task NZB_TitleParsing_DetectsFormatAndLanguageAndIgnoresSize()
+        {
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumSize = 150, // 150 MB limit normally enforced
+                PreferredFormats = new System.Collections.Generic.List<string> { "m4b" },
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string> { "English" },
+                MinimumSeeders = 0,
+                MaximumAge = 365
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Author - Great Book [English] [M4B]",
+                Size = 120 * 1024 * 1024, // 120 MB - would be too small for profile.MinimumSize
+                Format = null,
+                Quality = null,
+                Language = null,
+                DownloadType = "nzb",
+                NzbUrl = "http://example.com/test.nzb",
+                Seeders = 0,
+                PublishedDate = DateTime.UtcNow.AddDays(-60)
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            // Size should be ignored for NZB results: no size rejection and no Size penalty
+            Assert.DoesNotContain(score.RejectionReasons, r => r.Contains("File too small"));
+            Assert.False(score.ScoreBreakdown.ContainsKey("Size"), "NZB scoring should not add size penalties");
+
+            // Format should be detected from title and awarded a positive match
+            Assert.True(score.ScoreBreakdown.ContainsKey("FormatMatchedInTitle"), "Expected format token to be detected in title for NZB");
+
+            // Language should be detected from title and avoid language penalties
+            Assert.False(score.ScoreBreakdown.ContainsKey("Language"));
+            Assert.False(score.ScoreBreakdown.ContainsKey("LanguageMismatch"));
+
+            // Quality is intentionally ignored for NZB so there should be no QualityMissing penalty
+            Assert.False(score.ScoreBreakdown.ContainsKey("QualityMissing"));
+            Assert.True(score.TotalScore > 0, "NZB result with detected format/language should have positive score");
+        }
+
+        [Fact]
         public async Task LanguageMismatch_ShouldBePenalized()
         {
             var service = CreateService();
@@ -146,3 +262,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+

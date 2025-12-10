@@ -45,7 +45,7 @@ public class FileSystemController : ControllerBase
 
             // Validate and normalize the path
             var normalizedPath = Path.GetFullPath(path);
-            
+
             if (!Directory.Exists(normalizedPath))
             {
                 return NotFound(new { error = "Directory not found" });
@@ -112,7 +112,7 @@ public class FileSystemController : ControllerBase
             var normalizedPath = Path.GetFullPath(path);
             var exists = Directory.Exists(normalizedPath);
             var isWritable = false;
-            
+
             if (exists)
             {
                 try
@@ -134,8 +134,8 @@ public class FileSystemController : ControllerBase
                 IsValid = exists && isWritable,
                 Exists = exists,
                 IsWritable = isWritable,
-                Message = !exists ? "Directory does not exist" : 
-                         !isWritable ? "Directory is not writable" : 
+                Message = !exists ? "Directory does not exist" :
+                         !isWritable ? "Directory is not writable" :
                          "Directory is valid"
             };
         }

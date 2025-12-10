@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -189,7 +189,7 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogInformation("Deleting remote path mapping {Id}", id);
                 var deleted = await _pathMappingService.DeleteAsync(id);
-                
+
                 if (!deleted)
                 {
                     return NotFound(new { error = $"Path mapping with ID {id} not found" });
@@ -257,3 +257,4 @@ namespace Listenarr.Api.Controllers
         public string RemotePath { get; set; } = string.Empty;
     }
 }
+

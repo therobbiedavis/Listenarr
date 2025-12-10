@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
  * 
@@ -17,7 +17,7 @@
  */
 
 using Microsoft.AspNetCore.Mvc;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 
 namespace Listenarr.Api.Controllers
@@ -187,7 +187,7 @@ namespace Listenarr.Api.Controllers
         /// </summary>
         [HttpPost("{id}/score")]
         public async Task<ActionResult<List<QualityScore>>> ScoreResults(
-            int id, 
+            int id,
             [FromBody] List<SearchResult> searchResults)
         {
             try
@@ -209,3 +209,4 @@ namespace Listenarr.Api.Controllers
         }
     }
 }
+

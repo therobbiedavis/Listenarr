@@ -138,7 +138,11 @@
           </button>
         </div>
         <div class="modal-body">
-          <p>Are you sure you want to remove this download?</p>
+          <p v-if="clientHasQueueEntry === null">Are you sure you want to remove this download?</p>
+          <p v-else-if="clientHasQueueEntry === true">Are you sure you want to remove this download?</p>
+          <p v-else>
+            This download was not found in the selected download client's queue. Do you want to remove it from Listenarr only (this will delete the record from Listenarr's downloads)?
+          </p>
           <div class="remove-item-info">
             <strong>{{ itemToRemove?.title }}</strong>
             <div class="item-details">
@@ -152,9 +156,13 @@
               </span>
             </div>
           </div>
-          <p class="warning-text">
+          <p class="warning-text" v-if="clientHasQueueEntry !== false">
             <PhInfo />
             This will remove the download from your download client. Files may or may not be deleted depending on your client settings.
+          </p>
+          <p class="warning-text" v-else>
+            <PhInfo />
+            The download was not found in the remote client's queue. Removing it here will only delete the Listenarr record (no action will be taken against the remote client).
           </p>
         </div>
         <div class="modal-footer">
@@ -163,7 +171,7 @@
           </button>
           <button class="btn btn-danger" @click="confirmRemove" :disabled="removing">
             <component :is="removing ? PhSpinner : PhTrash" />
-            {{ removing ? 'Removing...' : 'Remove' }}
+            {{ removing ? 'Removing...' : (clientHasQueueEntry === false ? 'Remove from Listenarr' : 'Remove') }}
           </button>
         </div>
       </div>
@@ -188,6 +196,9 @@ const selectedTab = ref('all')
 const queue = ref<QueueItem[]>([])
 const loading = ref(false)
 const showRemoveModal = ref(false)
+// Tracks whether the item selected for removal exists in the remote client's queue.
+// null -> not evaluated yet, true -> found in client queue, false -> not present in client queue
+const clientHasQueueEntry = ref<boolean | null>(null)
 const itemToRemove = ref<QueueItem | null>(null)
 const removing = ref(false)
 let unsubscribeQueue: (() => void) | null = null
@@ -199,7 +210,8 @@ const mobileTabOptions = computed(() => [
   { value: 'downloading', label: `Downloading (${allActivityItems.value.filter(q => q.status === 'downloading').length})`, icon: PhDownloadSimple },
   { value: 'paused', label: `Paused (${allActivityItems.value.filter(q => q.status === 'paused').length})`, icon: PhPause },
   { value: 'queued', label: `Queued (${allActivityItems.value.filter(q => q.status === 'queued').length})`, icon: PhClock },
-  { value: 'completed', label: `Completed (${allActivityItems.value.filter(q => q.status === 'completed').length})`, icon: PhCheckCircle }
+  // Completed: include completed external downloads from the downloads store
+  { value: 'completed', label: `Completed (${completedActivityItems.value.filter(q => q.status === 'completed').length})`, icon: PhCheckCircle }
 ])
 
 // const onTabChange = () => {
@@ -279,6 +291,9 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
 const showCompletedExternalDownloads = computed(() => configStore.applicationSettings?.showCompletedExternalDownloads ?? false)
 
 // Merge queue items and active downloads (DDL) into unified list
+// Also expose a version of activity that includes completed external downloads
+// from the downloads store so the "Completed" tab can show completion candidates
+// observed by the backend monitor (these are saved in the downloads table).
 const allActivityItems = computed(() => {
   // Get queue items from external clients (these are already filtered by backend to only show Listenarr-managed downloads)
   const queueItems = [...queue.value]
@@ -297,6 +312,9 @@ const allActivityItems = computed(() => {
   const userPref = showCompletedExternalDownloads.value
   if (userPref) return combined
 
+  // By default we hide completed external client items from the main
+  // combined list (to avoid clutter). Completed external downloads will
+  // still be surfaced in the Completed tab (see `completedActivityItems`).
   const filtered = combined.filter(it => {
     // if item is from external client and completed, omit it
     if ((it.downloadClientType || '').toString().toLowerCase() !== 'ddl' && it.status === 'completed') return false
@@ -306,18 +324,55 @@ const allActivityItems = computed(() => {
   return filtered
 })
 
+// Build a version of the activity list that includes completed external
+// downloads coming from the Downloads store (these represent complete
+// candidates or finished transfers persisted in the DB). We deduplicate
+// by id to avoid showing duplicates between queue items and downloads.
+const completedActivityItems = computed(() => {
+  // Start with the main combined set but allow completed external items
+  // from the downloads store to be shown in the Completed tab.
+  const base = (() => {
+    const queueItems = [...queue.value]
+    const ddlDownloadItems = downloadsStore.activeDownloads
+      .filter(d => d.downloadClientId === 'DDL')
+      .map(convertDownloadToQueueItem)
+    return [...queueItems, ...ddlDownloadItems]
+  })()
+
+  // Completed external downloads from the downloads store
+  const completedExternal = (downloadsStore.completedDownloads || [])
+    .filter(d => d.downloadClientId && d.downloadClientId !== 'DDL')
+    .map(convertDownloadToQueueItem)
+
+  // Merge and deduplicate by id (prefer queue/base entries where present)
+  const map = new Map<string, QueueItem>()
+  for (const it of base) map.set(it.id, it)
+  for (const it of completedExternal) {
+    if (!map.has(it.id)) map.set(it.id, it)
+  }
+
+  return Array.from(map.values())
+})
+
 const filterTabs = computed(() => [
   { label: 'All', value: 'all', count: allActivityItems.value.length },
   { label: 'Downloading', value: 'downloading', count: allActivityItems.value.filter(q => q.status === 'downloading').length },
   { label: 'Paused', value: 'paused', count: allActivityItems.value.filter(q => q.status === 'paused').length },
   { label: 'Queued', value: 'queued', count: allActivityItems.value.filter(q => q.status === 'queued').length },
-  { label: 'Completed', value: 'completed', count: allActivityItems.value.filter(q => q.status === 'completed').length },
+  // Completed tab should reflect combined view including completed external downloads
+  { label: 'Completed', value: 'completed', count: completedActivityItems.value.filter(q => q.status === 'completed').length },
 ])
 
 const filteredQueue = computed(() => {
   if (selectedTab.value === 'all') {
     return allActivityItems.value
   }
+
+  if (selectedTab.value === 'completed') {
+    // Use the completed-augmented list for the Completed tab
+    return completedActivityItems.value.filter(item => item.status === 'completed')
+  }
+
   return allActivityItems.value.filter(item => item.status === selectedTab.value)
 })
 
@@ -334,6 +389,20 @@ const refreshQueue = async () => {
 
 const removeFromQueue = async (item: QueueItem) => {
   itemToRemove.value = item
+
+  // If the item is DDL (internal) we don't need to pre-check client queue
+  if (item.downloadClientId === 'DDL' || item.downloadClientType === 'DDL') {
+    clientHasQueueEntry.value = true
+    showRemoveModal.value = true
+    return
+  }
+
+  // For external client items, check the current queue snapshot to see if
+  // the remote client still contains the item. If not present, show an
+  // alternate modal that asks the user if they want to remove the item
+  // from Listenarr only (DB cleanup).
+  const found = queue.value.some(q => q.id === item.id)
+  clientHasQueueEntry.value = found
   showRemoveModal.value = true
 }
 
@@ -351,16 +420,28 @@ const confirmRemove = async () => {
       // Refresh downloads from store
       await downloadsStore.loadDownloads()
     } else {
-      // External client downloads: Remove from queue
-      console.log('[ActivityView] Removing from external client queue:', itemToRemove.value.id, itemToRemove.value.downloadClientId)
-      await apiService.removeFromQueue(itemToRemove.value.id, itemToRemove.value.downloadClientId)
-      
-      // Refresh queue
-      await refreshQueue()
+      // External client downloads:
+      // If the remote client's queue no longer contains the item then offer
+      // Listenarr-only removal (DB cleanup). Otherwise perform the normal
+      // remove-from-client flow.
+      if (clientHasQueueEntry.value === false) {
+        console.log('[ActivityView] Removing external item only from Listenarr (client missing):', itemToRemove.value.id)
+        // Removing the DB record for an external item uses cancelDownload
+        // since it's a Listenarr-level cleanup.
+        await apiService.cancelDownload(itemToRemove.value.id)
+        await downloadsStore.loadDownloads()
+      } else {
+        console.log('[ActivityView] Removing from external client queue:', itemToRemove.value.id, itemToRemove.value.downloadClientId)
+        await apiService.removeFromQueue(itemToRemove.value.id, itemToRemove.value.downloadClientId)
+
+        // Refresh queue
+        await refreshQueue()
+      }
     }
     
     showRemoveModal.value = false
     itemToRemove.value = null
+    clientHasQueueEntry.value = null
   } catch (err) {
     console.error('Failed to remove download:', err)
     const toast = useToast()

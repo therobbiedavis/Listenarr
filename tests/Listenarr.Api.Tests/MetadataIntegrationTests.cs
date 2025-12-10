@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Moq;
-using Listenarr.Api.Models;
+using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 
 namespace Listenarr.Api.Tests
@@ -56,3 +56,4 @@ namespace Listenarr.Api.Tests
         }
     }
 }
+
