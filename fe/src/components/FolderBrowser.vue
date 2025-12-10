@@ -62,10 +62,12 @@
           <div
             v-for="item in items"
             :key="item.path"
-            @click="navigateToDirectory(item)"
+            @click="handleItemClick(item)"
             class="directory-item"
+            :class="{ 'file-item': !item.isDirectory }"
           >
-            <PhFolder />
+            <PhFolder v-if="item.isDirectory" />
+            <PhFile v-else />
             <span>{{ item.name }}</span>
           </div>
 
@@ -82,12 +84,13 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { apiService } from '@/services/api'
-import { PhFolderOpen, PhCheckCircle, PhWarningCircle, PhArrowLeft, PhFolder, PhSpinner, PhArrowUp } from '@phosphor-icons/vue'
+import { PhFolderOpen, PhCheckCircle, PhWarningCircle, PhArrowLeft, PhFolder, PhSpinner, PhArrowUp, PhFile } from '@phosphor-icons/vue'
 
 interface Props {
   modelValue?: string
   placeholder?: string
   inputDataCy?: string
+  showFiles?: boolean
 }
 
 interface FileSystemItem {
@@ -105,7 +108,8 @@ const props = withDefaults(defineProps<BrowserProps>(), {
   modelValue: '',
   placeholder: 'Select a folder...',
   inline: false,
-  inputDataCy: ''
+  inputDataCy: '',
+  showFiles: false
 })
 
 const emit = defineEmits<{
@@ -127,6 +131,10 @@ const isValid = ref(false)
 // Watch for external changes to modelValue
 watch(() => props.modelValue, (newValue) => {
   localPath.value = newValue
+  // Trigger validation when path is set externally
+  if (newValue) {
+    validatePath()
+  }
 })
 
 // Watch for local changes
@@ -158,7 +166,8 @@ const browseDirectory = async (path: string) => {
     
     currentPath.value = response.currentPath
     parentPath.value = response.parentPath
-    items.value = response.items
+    // Filter to only show directories unless showFiles prop is true
+    items.value = props.showFiles ? response.items : response.items.filter(item => item.isDirectory)
   } catch (err: unknown) {
     error.value = err instanceof Error ? err.message : 'Failed to browse directory'
     console.error('Error browsing directory:', err)
@@ -173,8 +182,19 @@ const navigateToParent = () => {
   }
 }
 
+const handleItemClick = (item: FileSystemItem) => {
+  if (item.isDirectory) {
+    navigateToDirectory(item)
+  }
+  // For files, do nothing (they're just displayed for context)
+}
+
 const navigateToDirectory = (item: FileSystemItem) => {
   browseDirectory(item.path)
+  // Update the input field with the selected path
+  localPath.value = item.path
+  emit('update:modelValue', item.path)
+  validatePath()
 }
 
 const selectCurrentPath = () => {
@@ -476,6 +496,21 @@ const validatePath = async () => {
 
 .directory-item.parent-item i {
   color: #007acc;
+}
+
+.directory-item.file-item {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.directory-item.file-item:hover {
+  background-color: #333;
+  border-color: #444;
+  transform: none;
+}
+
+.directory-item.file-item i {
+  color: #999;
 }
 
 .browser-footer {

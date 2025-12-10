@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.45] - 2025-12-10
+
+### Changed
+- **Manual Import Modal UX Improvements**: Significantly improved the manual import workflow for better usability
+  - Directory picker now automatically populates the input field when clicking folders (no need for green checkmark)
+  - Interactive Import and Automatic Import buttons moved to modal footer when directory picker is open
+  - Buttons are disabled until a valid directory is selected
+  - Centered action buttons appear when a valid path exists and browser is closed
+  - Recent folder selection now triggers automatic path validation with visual feedback
+- **File System Browser Enhancements**: Backend now returns both files and directories for comprehensive browsing
+  - Files and directories sorted with directories first, then alphabetically
+  - Files displayed with appropriate styling (gray icon, non-interactive)
+  - FolderBrowser component now supports optional `showFiles` prop (default: false)
+  - Manual Import Modal enables file display for better context when selecting import folders
+- **Interactive Import Table Improvements**: Action column now shows informative icon with tooltip
+  - Replaced non-functional warning button with info icon showing validation issues
+  - Tooltip displays missing required fields (audiobook, quality profile, language)
+  - Info icon only appears when validation issues exist
+  - Added `rejections` field to preview items for backend validation feedback
+
+### Fixed
+- **FolderBrowser Validation**: External path changes (like selecting recent folders) now automatically trigger validation
+- **Manual Import Footer Logic**: Import mode dropdown now only shows during preview mode when relevant
+
+## [0.2.44] - 2025-12-10
+
+### Fixed
+- Updated test files to use correct type assertions for wrapper.vm and simplified timeout options. Changed autoCloseTimer type in NotificationModal.vue to use ReturnType<typeof setTimeout> for better type safety.
+
 ## [0.2.43] - 2025-12-10
 
 ### Fixed

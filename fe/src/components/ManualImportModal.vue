@@ -18,13 +18,14 @@
             v-model="selectedPath" 
             placeholder="Select a folder..." 
             :inline="true"
+            :show-files="true"
             @browser-opened="browserMode = true"
             @browser-closed="browserMode = false"
           />
         </div>
 
-        <!-- Centered action buttons like screenshots -->
-        <div v-if="!showPreview" class="center-actions">
+        <!-- Centered action buttons - shown when valid path exists -->
+        <div v-if="!showPreview && isPathValid && !browserMode" class="center-actions">
           <button class="btn btn-info" @click="startAutomaticImport" :disabled="!isPathValid || loading">
             <PhRocket />
             Automatic Import
@@ -95,7 +96,9 @@
                   </div>
                   <div class="col col-size">{{ it.size || '' }}</div>
                   <div class="col col-action">
-                    <button class="btn-icon" @click="openMatchDialog(it)"><PhWarning /></button>
+                    <div v-if="getItemIssues(it).length > 0" class="info-icon" :title="getItemIssues(it).join(', ')">
+                      <PhInfo />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -110,7 +113,7 @@
 
       <div class="modal-footer">
         <div class="footer-left">
-          <select class="extra-select" v-model="inputMode">
+          <select v-if="showPreview" class="extra-select" v-model="inputMode">
             <option value="">Select Import Mode</option>
             <option value="move">Move</option>
             <option value="copy">Copy</option>
@@ -118,7 +121,19 @@
         </div>
         <div class="footer-right">
           <button class="btn btn-secondary" @click="close">Cancel</button>
-          <button class="btn btn-success" @click="importSelected" :disabled="selectedCount === 0 || loading">Import</button>
+          <!-- Show Interactive/Automatic Import when browser is open and not in preview mode -->
+          <template v-if="!showPreview && browserMode">
+            <button class="btn btn-info" @click="startAutomaticImport" :disabled="!isPathValid || loading">
+              <PhRocket />
+              Automatic Import
+            </button>
+            <button class="btn btn-primary" @click="startInteractiveImport" :disabled="!isPathValid || loading">
+              <PhUser />
+              Interactive Import
+            </button>
+          </template>
+          <!-- Show Import button in preview mode -->
+          <button v-else-if="showPreview" class="btn btn-success" @click="importSelected" :disabled="selectedCount === 0 || loading">Import</button>
         </div>
       </div>
     </div>
@@ -205,7 +220,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
-import { PhFolderOpen, PhX, PhRocket, PhUser, PhSpinner, PhWarning } from '@phosphor-icons/vue'
+import { PhFolderOpen, PhX, PhRocket, PhUser, PhSpinner, PhInfo } from '@phosphor-icons/vue'
 import type { ManualImportRequest } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
 import { apiService } from '@/services/api'
@@ -233,6 +248,7 @@ interface PreviewItem {
   qualityProfileId?: number | null
   language?: string | null
   fullPath?: string | null
+  rejections?: string[]
 }
 const previewItems = ref<PreviewItem[]>([])
 // Recent folders stored in sessionStorage
@@ -260,6 +276,7 @@ const saveRecentFolder = (path: string) => {
 
 const selectRecent = (path: string) => {
   selectedPath.value = path
+  // Validation will be triggered automatically by FolderBrowser's watcher
 }
 const libraryStore = useLibraryStore()
 const library = computed(() => libraryStore.audiobooks)
@@ -520,6 +537,28 @@ const toggleSelectAll = (ev: Event) => {
   const checked = (ev.target as HTMLInputElement).checked
   previewItems.value.forEach(i => i.selected = checked)
 }
+
+const getItemIssues = (item: PreviewItem): string[] => {
+  const issues: string[] = []
+  
+  // Check for rejections from backend
+  if (item.rejections && item.rejections.length > 0) {
+    issues.push(...item.rejections)
+  }
+  
+  // Check for missing required fields
+  if (!item.matchedAudiobookId) {
+    issues.push('No audiobook matched')
+  }
+  if (!item.qualityProfileId) {
+    issues.push('No quality profile')
+  }
+  if (!item.language) {
+    issues.push('No language specified')
+  }
+  
+  return issues
+}
 </script>
 
 <style scoped>
@@ -697,6 +736,20 @@ const toggleSelectAll = (ev: Event) => {
 .col-action {
   width: 48px;
   justify-content: center;
+}
+
+.info-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3498db;
+  font-size: 1.2rem;
+  cursor: help;
+  transition: color 0.2s;
+}
+
+.info-icon:hover {
+  color: #2980b9;
 }
 
 /* Clickable empty cells used to open the cell editor */
