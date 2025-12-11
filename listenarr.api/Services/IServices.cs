@@ -66,6 +66,30 @@ namespace Listenarr.Api.Services
     }
 
     /// <summary>
+    /// Provides audiobook metadata lookup across configured providers (Audimeta, Audnexus, Audible, etc.).
+    /// </summary>
+    public interface IAudiobookMetadataService
+    {
+        /// <summary>
+        /// Gets audiobook metadata from configured providers in priority order.
+        /// </summary>
+        /// <param name="asin">Amazon/Audible ASIN.</param>
+        /// <param name="region">Region code (default: us).</param>
+        /// <param name="cache">Whether provider caching should be used.</param>
+        /// <returns>Metadata payload (provider-specific shape) or null when unavailable.</returns>
+        Task<object?> GetMetadataAsync(string asin, string region = "us", bool cache = true);
+
+        /// <summary>
+        /// Gets audiobook metadata directly from Audimeta.
+        /// </summary>
+        /// <param name="asin">Amazon/Audible ASIN.</param>
+        /// <param name="region">Region code (default: us).</param>
+        /// <param name="cache">Whether provider caching should be used.</param>
+        /// <returns>Audimeta metadata or null when unavailable.</returns>
+        Task<AudimetaBookResponse?> GetAudimetaMetadataAsync(string asin, string region = "us", bool cache = true);
+    }
+
+    /// <summary>
     /// Manages download lifecycle including starting, monitoring, and processing downloads
     /// </summary>
     public interface IDownloadService

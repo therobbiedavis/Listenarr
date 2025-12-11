@@ -40,8 +40,10 @@ namespace Listenarr.Api.Extensions
             var circuitBreakerPolicy = HttpPolicyExtensions.HandleTransientHttpError()
                 .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30));
 
-            // Default HTTP client
-            services.AddHttpClient();
+            // Default HTTP client (bypass system proxy unless explicitly configured)
+            var defaultHttp = services.AddHttpClient("default");
+            defaultHttp.ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
+            services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
 
             // Generic named client used by legacy code paths for downloads
             services.AddHttpClient("DownloadClient")
@@ -131,44 +133,11 @@ namespace Listenarr.Api.Extensions
 
             // US-origin client (supports optional proxy via configuration)
             services.AddHttpClient("us")
-                .ConfigurePrimaryHttpMessageHandler(() =>
-                {
-                    var handler = new HttpClientHandler
-                    {
-                        AutomaticDecompression = DecompressionMethods.All
-                    };
-
-                    try
-                    {
-                        var section = config.GetSection("ExternalRequests");
-                        var useProxy = section.GetValue<bool>("UseUsProxy");
-                        if (useProxy)
-                        {
-                            var host = section.GetValue<string>("UsProxyHost");
-                            var port = section.GetValue<int>("UsProxyPort");
-                            if (!string.IsNullOrWhiteSpace(host) && port > 0)
-                            {
-                                var proxy = new WebProxy(host, port);
-                                var user = section.GetValue<string>("UsProxyUsername");
-                                var pass = section.GetValue<string>("UsProxyPassword");
-                                if (!string.IsNullOrWhiteSpace(user))
-                                    proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
-                                handler.Proxy = proxy;
-                                handler.UseProxy = true;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Swallow here; caller services can detect proxy misconfigurations via failing requests.
-                    }
-
-                    return handler;
-                });
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
 
             // Typed clients used by scraping/search services. Add consistent handlers + policies.
             services.AddHttpClient<Listenarr.Api.Services.IAmazonSearchService, Listenarr.Api.Services.AmazonSearchService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(HttpPolicyExtensions
                     .HandleTransientHttpError()
                     .OrResult((HttpResponseMessage r) => r.StatusCode == HttpStatusCode.Forbidden
@@ -183,27 +152,64 @@ namespace Listenarr.Api.Extensions
                     .CircuitBreakerAsync(6, TimeSpan.FromMinutes(2)));
 
             services.AddHttpClient<Listenarr.Api.Services.IAudibleSearchService, Listenarr.Api.Services.AudibleSearchService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             // Misc scraping/metadata clients (Audible metadata, Audimeta, Audnexus)
             services.AddHttpClient<Listenarr.Api.Services.IAudibleMetadataService, Listenarr.Api.Services.AudibleMetadataService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient<Listenarr.Api.Services.AudimetaService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient<Listenarr.Api.Services.AudnexusService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             return services;
+        }
+
+        // Centralized handler to avoid inheriting system proxies; uses app settings when enabled.
+        private static HttpClientHandler CreateExternalHandler(IConfiguration config)
+        {
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                UseProxy = false
+            };
+
+            try
+            {
+                var section = config.GetSection("ExternalRequests");
+                var useProxy = section.GetValue<bool>("UseUsProxy");
+                if (useProxy)
+                {
+                    var host = section.GetValue<string>("UsProxyHost");
+                    var port = section.GetValue<int>("UsProxyPort");
+                    if (!string.IsNullOrWhiteSpace(host) && port > 0)
+                    {
+                        var proxy = new WebProxy(host, port);
+                        var user = section.GetValue<string>("UsProxyUsername");
+                        var pass = section.GetValue<string>("UsProxyPassword");
+                        if (!string.IsNullOrWhiteSpace(user))
+                            proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
+                        handler.Proxy = proxy;
+                        handler.UseProxy = true;
+                    }
+                }
+            }
+            catch
+            {
+                // Swallow here; caller services can detect proxy misconfigurations via failing requests.
+            }
+
+            return handler;
         }
 
         /// <summary>

@@ -102,6 +102,20 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(m);
         }
 
+        public Task<AudibleBookMetadata> ScrapeAmazonMetadataAsync(string asin)
+        {
+            var m = new AudibleBookMetadata
+            {
+                Asin = asin,
+                Title = "Clean Title from Amazon",
+                Authors = new List<string> { "Author Name" },
+                ImageUrl = "http://example.com/test.jpg",
+                PublishYear = "2024",
+                Source = "Amazon"
+            };
+            return Task.FromResult(m);
+        }
+
         public Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins)
         {
             var result = new List<AudibleBookMetadata>();

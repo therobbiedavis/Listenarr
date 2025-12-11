@@ -764,10 +764,27 @@ namespace Listenarr.Api.Services
                     var pageTitle = doc.DocumentNode.SelectSingleNode("//title")?.InnerText;
                     if (!string.IsNullOrWhiteSpace(pageTitle))
                     {
-                        // Amazon often appends: : A Novel, Audible Audiobook – Unabridged
-                        // Remove trailing marketing phrases after a delimiter
-                        var cleaned = pageTitle.Split('|', '-', '–').FirstOrDefault();
-                        if (!string.IsNullOrWhiteSpace(cleaned)) title = cleaned.Trim();
+                        // Amazon title format: "Amazon.com: Product Title: Optional Subtitle | Category"
+                        // Prefer the second segment (product title) over "Amazon.com" prefix
+                        var segments = pageTitle.Split('|', '\u2013' /* en dash */, '\u2014' /* em dash */);
+                        if (segments.Length > 1)
+                        {
+                            // Take second-to-last or second segment to get product name
+                            var candidate = segments.Length > 2 ? segments[segments.Length - 2].Trim() : segments[0].Trim();
+                            if (!string.IsNullOrWhiteSpace(candidate) && !candidate.Equals("Amazon.com", StringComparison.OrdinalIgnoreCase))
+                            {
+                                title = candidate.Replace("Amazon.com:", "").Trim();
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: clean the single segment
+                            var cleaned = segments[0].Trim();
+                            if (!string.IsNullOrWhiteSpace(cleaned) && !cleaned.Equals("Amazon.com", StringComparison.OrdinalIgnoreCase))
+                            {
+                                title = cleaned.Replace("Amazon.com:", "").Trim();
+                            }
+                        }
                     }
                 }
                 // Filter placeholders / generic phrases

@@ -25,7 +25,8 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudimetaService = new Mock<AudimetaService>(new System.Net.Http.HttpClient(), Mock.Of<ILogger<AudimetaService>>());
-            var controller = new SearchController(mockService.Object, logger, mockAudimetaService.Object);
+            var mockMetadataService = new Mock<IAudiobookMetadataService>();
+            var controller = new SearchController(mockService.Object, logger, mockAudimetaService.Object, mockMetadataService.Object);
 
             // Act
             var actionResult = await controller.IntelligentSearch("query");
@@ -59,7 +60,8 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudimetaService = new Mock<AudimetaService>(new System.Net.Http.HttpClient(), Mock.Of<ILogger<AudimetaService>>());
-            var controller = new SearchController(mockService.Object, logger, mockAudimetaService.Object);
+            var mockMetadataService = new Mock<IAudiobookMetadataService>();
+            var controller = new SearchController(mockService.Object, logger, mockAudimetaService.Object, mockMetadataService.Object);
 
             // Act
             var actionResult = await controller.IndexersSearch("query");

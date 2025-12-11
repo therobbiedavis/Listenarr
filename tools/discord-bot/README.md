@@ -43,3 +43,4 @@ Security
 
 Notes
 - This is an example implementation to get you started. You may want to harden interaction handling, add persistent session storage, and better error handling.
+- API note: metadata lookups now live at `/api/metadata/{asin}` (and `/api/metadata/audimeta/{asin}`); the bot has been updated accordingly. Legacy `/api/search/metadata` routes are deprecated and may be removed.

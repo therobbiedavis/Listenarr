@@ -38,6 +38,7 @@ namespace Listenarr.Domain.Models
         [JsonIgnore]
         public string? TorrentFileName { get; set; }
         public string Source { get; set; } = string.Empty;
+        public string? SourceLink { get; set; } // Direct link to the source (Amazon/Audible product page, indexer page, etc.)
         public string DownloadType { get; set; } = string.Empty; // "Torrent", "Usenet", or "DDL"
         public DateTime PublishedDate { get; set; }
         public string Quality { get; set; } = string.Empty;

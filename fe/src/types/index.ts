@@ -11,6 +11,7 @@ export interface SearchResult {
   torrentUrl: string
   nzbUrl: string
   source: string
+  sourceLink?: string // Direct link to the source (product page, indexer page, etc.)
   downloadType: string // "Torrent", "Usenet", or "DDL"
   publishedDate: string
   quality: string
@@ -249,6 +250,7 @@ export interface AudibleBookMetadata {
   subtitle?: string
   authors: string[]
   publishYear?: string
+  publishedDate?: string
   series?: string
   seriesNumber?: string
   description?: string
@@ -265,6 +267,7 @@ export interface AudibleBookMetadata {
   explicit?: boolean
   abridged?: boolean
   source?: string
+  sourceLink?: string
   openLibraryId?: string
   // Optional local mapping to a quality profile ID when viewing in the UI
   qualityProfileId?: number

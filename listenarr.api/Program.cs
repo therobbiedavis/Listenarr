@@ -17,6 +17,9 @@
  */
 
 using Listenarr.Api.Services;
+using Listenarr.Api.Services.Search;
+using Listenarr.Api.Services.Search.Filters;
+using Listenarr.Api.Services.Search.Strategies;
 using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Middleware;
@@ -114,6 +117,9 @@ builder.Services.AddHttpClient<IAudibleMetadataService, AudibleMetadataService>(
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
 
+// Add Amazon metadata service (delegates to AudibleMetadataService for shared logic)
+builder.Services.AddScoped<IAmazonMetadataService, AmazonMetadataService>();
+
 // Add HTTP client for Audimeta service
 builder.Services.AddHttpClient<AudimetaService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
@@ -127,6 +133,25 @@ builder.Services.AddHttpClient<AudnexusService>()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
+
+// Metadata routing across providers
+builder.Services.AddScoped<IAudiobookMetadataService, AudiobookMetadataService>();
+
+// Add metadata converters helper
+builder.Services.AddScoped<MetadataConverters>();
+builder.Services.AddScoped<MetadataMerger>();
+builder.Services.AddScoped<SearchProgressReporter>();
+
+// Add search result filters
+builder.Services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
+builder.Services.AddScoped<ISearchResultFilter, PromotionalTitleFilter>();
+builder.Services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
+builder.Services.AddScoped<SearchResultFilterPipeline>();
+
+// Add metadata fetching strategies
+builder.Services.AddScoped<IMetadataStrategy, AudimetaStrategy>();
+builder.Services.AddScoped<IMetadataStrategy, AudnexusStrategy>();
+builder.Services.AddScoped<MetadataStrategyCoordinator>();
 
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();

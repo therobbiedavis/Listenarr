@@ -16,6 +16,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -29,15 +32,18 @@ namespace Listenarr.Api.Controllers
         private readonly ISearchService _searchService;
         private readonly ILogger<SearchController> _logger;
         private readonly AudimetaService _audimetaService;
+        private readonly IAudiobookMetadataService _metadataService;
 
         public SearchController(
             ISearchService searchService,
             ILogger<SearchController> logger,
-            AudimetaService audimetaService)
+            AudimetaService audimetaService,
+            IAudiobookMetadataService metadataService)
         {
             _searchService = searchService;
             _logger = logger;
             _audimetaService = audimetaService;
+            _metadataService = metadataService;
         }
 
         [HttpGet]
@@ -206,7 +212,8 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Search for audiobooks by title, automatically fetching full metadata from configured sources
+        /// Search for audiobooks by title, automatically fetching full metadata from configured sources.
+        /// Note: currently consumed by the Discord bot; changes here can cascade to that integration.
         /// </summary>
         [HttpGet("title")]
         [ProducesResponseType(typeof(List<object>), StatusCodes.Status200OK)]
@@ -261,23 +268,19 @@ namespace Listenarr.Api.Controllers
                         _logger.LogWarning(ex, "Audimeta lookup failed for ASIN {Asin}, trying other configured metadata sources", asin);
                     }
 
-                    // If audimeta didn't return anything, try all configured metadata sources via GetMetadata
+                    // If audimeta didn't return anything, try configured metadata sources directly
                     try
                     {
-                        var metaAction = await GetMetadata(asin, region, true);
-                        if (metaAction.Result is Microsoft.AspNetCore.Mvc.OkObjectResult objResult)
+                        var meta = await _metadataService.GetMetadataAsync(asin, region, true);
+                        if (meta != null)
                         {
-                            // Return the single metadata object wrapped in a list to match the title endpoint shape
-                            var val = objResult.Value;
-                            if (val != null)
-                            {
-                                return Ok(new List<object> { val });
-                            }
+                            return Ok(new List<object> { meta });
                         }
+                        _logger.LogWarning("Metadata lookup returned null for ASIN {Asin}, falling back to intelligent search", asin);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "GetMetadata lookup failed for ASIN {Asin}, falling back to intelligent search", asin);
+                        _logger.LogWarning(ex, "Metadata lookup failed for ASIN {Asin}, falling back to intelligent search", asin);
                     }
 
                     // If no metadata found via configured sources, fall back to the generic intelligent search below
@@ -343,14 +346,18 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get audiobook metadata from audimeta.de by ASIN
+        /// Get audiobook metadata from audimeta.de by ASIN (deprecated in favor of /api/metadata/audimeta/{asin})
         /// </summary>
+        [Obsolete("Use /api/metadata/audimeta/{asin} instead.")]
         [HttpGet("audimeta/{asin}")]
         public async Task<ActionResult<AudimetaBookResponse>> GetAudimetaMetadata(
             string asin,
             [FromQuery] string region = "us",
             [FromQuery] bool cache = true)
         {
+            Response.Headers["Deprecation"] = "true";
+            Response.Headers["Link"] = $"</api/metadata/audimeta/{asin}>; rel=\"successor-version\"";
+
             try
             {
                 if (string.IsNullOrEmpty(asin))
@@ -358,7 +365,7 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("ASIN parameter is required");
                 }
 
-                var result = await _audimetaService.GetBookMetadataAsync(asin, region, cache);
+                var result = await _metadataService.GetAudimetaMetadataAsync(asin, region, cache);
                 if (result == null)
                 {
                     return NotFound($"No metadata found for ASIN: {asin}");
@@ -374,14 +381,18 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Get audiobook metadata from configured metadata sources by ASIN
+        /// Get audiobook metadata from configured metadata sources by ASIN (deprecated in favor of /api/metadata/{asin})
         /// </summary>
+        [Obsolete("Use /api/metadata/{asin} instead.")]
         [HttpGet("metadata/{asin}")]
         public async Task<ActionResult<object>> GetMetadata(
             string asin,
             [FromQuery] string region = "us",
             [FromQuery] bool cache = true)
         {
+            Response.Headers["Deprecation"] = "true";
+            Response.Headers["Link"] = $"</api/metadata/{asin}>; rel=\"successor-version\"";
+
             try
             {
                 if (string.IsNullOrWhiteSpace(asin))
@@ -389,68 +400,13 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("ASIN is required");
                 }
 
-                // Get enabled metadata sources ordered by priority
-                var metadataSources = await _searchService.GetEnabledMetadataSourcesAsync();
-
-                _logger.LogInformation("Found {Count} enabled metadata sources for ASIN {Asin}: {Sources}",
-                    metadataSources?.Count ?? 0, LogRedaction.SanitizeText(asin),
-                    string.Join(", ", metadataSources?.Select(s => $"{s.Name} (Priority: {s.Priority}, Enabled: {s.IsEnabled})") ?? new List<string>()));
-
-                if (metadataSources == null || !metadataSources.Any())
+                var result = await _metadataService.GetMetadataAsync(asin, region, cache);
+                if (result == null)
                 {
-                    _logger.LogWarning("No enabled metadata sources found for ASIN {Asin}", asin);
-                    return BadRequest("No metadata sources configured. Please configure at least one enabled metadata source in Settings.");
+                    return NotFound($"No metadata found for ASIN: {asin} from any configured source");
                 }
 
-                // Try each metadata source in priority order
-                foreach (var source in metadataSources)
-                {
-                    try
-                    {
-                        _logger.LogInformation("Attempting to fetch metadata from {SourceName} (Priority: {Priority}) for ASIN: {Asin}",
-                            source.Name, source.Priority, asin);
-
-                        object? result = null;
-
-                        // Route to appropriate service based on source name/URL
-                        if (source.BaseUrl.Contains("audimeta.de", StringComparison.OrdinalIgnoreCase))
-                        {
-                            result = await _audimetaService.GetBookMetadataAsync(asin, region, cache);
-                        }
-                        else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Audnexus API call would go here
-                            // For now, we'll skip and try the next source
-                            _logger.LogInformation("Audnexus support not yet implemented, trying next source");
-                            continue;
-                        }
-                        else
-                        {
-                            _logger.LogWarning("Unknown metadata source: {SourceName} ({BaseUrl})", source.Name, source.BaseUrl);
-                            continue;
-                        }
-
-                        if (result != null)
-                        {
-                            _logger.LogInformation("Successfully fetched metadata from {SourceName} for ASIN: {Asin}", source.Name, asin);
-
-                            // Add source information to response
-                            return Ok(new
-                            {
-                                metadata = result,
-                                source = source.Name,
-                                sourceUrl = source.BaseUrl
-                            });
-                        }
-                    }
-                    catch (Exception sourceEx)
-                    {
-                        _logger.LogWarning(sourceEx, "Failed to fetch metadata from {SourceName}, trying next source", source.Name);
-                        continue;
-                    }
-                }
-
-                return NotFound($"No metadata found for ASIN: {asin} from any configured source");
+                return Ok(result);
             }
             catch (Exception ex)
             {

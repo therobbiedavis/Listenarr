@@ -282,7 +282,7 @@ public class ManualImportController : ControllerBase
     private async Task<string> GenerateManualImportPathAsync(Audiobook audiobook, AudioMetadata metadata, string sourceFilePath)
     {
         // Get the configured file naming pattern from settings
-        var settings = await _configService.GetSettingsAsync();
+        var settings = await _configService.GetApplicationSettingsAsync();
         var pattern = settings.FileNamingPattern ?? "{Author}/{Title}/{Title}";
 
         // Get the file extension from the source file (preserve original extension)
@@ -295,8 +295,10 @@ public class ManualImportController : ControllerBase
         // Build variables for the pattern - only include non-empty values
         var variables = new Dictionary<string, object>();
         
-        if (!string.IsNullOrWhiteSpace(audiobook.Author))
-            variables["Author"] = audiobook.Author;
+        // Get first author from Authors list
+        var author = audiobook.Authors?.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(author))
+            variables["Author"] = author;
         
         if (!string.IsNullOrWhiteSpace(audiobook.Title))
             variables["Title"] = audiobook.Title;

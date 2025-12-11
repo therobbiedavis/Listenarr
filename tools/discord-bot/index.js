@@ -929,13 +929,15 @@ async function handleSelectMenuInteraction(interaction) {
     // fetch metadata endpoint
     try {
       const asin = selected
-      const resp = await fetch(`${listenarrUrl}/api/search/metadata/${encodeURIComponent(asin)}`)
+      // Deprecated route replaced by /api/metadata/{asin}; keep compatibility header-wise
+      const resp = await fetch(`${listenarrUrl}/api/metadata/${encodeURIComponent(asin)}`)
       if (resp.ok) {
         const data = await resp.json()
         metadata = data.metadata || data
       } else {
         // Fall back: try audimeta lookup
-        const fallback = await fetch(`${listenarrUrl}/api/search/audimeta/${encodeURIComponent(asin)}`)
+        // Deprecated route replaced by /api/metadata/audimeta/{asin}; keep compatibility header-wise
+        const fallback = await fetch(`${listenarrUrl}/api/metadata/audimeta/${encodeURIComponent(asin)}`)
         if (fallback.ok) {
           metadata = await fallback.json()
         }

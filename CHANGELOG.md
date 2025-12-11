@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.46] - 2025-12-10
+
+### Changed
+- **Search/Metadata API refactor**: Added `api/metadata` controller and deprecated `api/search/metadata` + `api/search/audimeta`  (any external consumers should migrate)
+
 ## [0.2.45] - 2025-12-10
 
 ### Changed
@@ -24,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tooltip displays missing required fields (audiobook, quality profile, language)
   - Info icon only appears when validation issues exist
   - Added `rejections` field to preview items for backend validation feedback
+- **Search/Metadata API refactor**: Added `api/metadata` controller and deprecated `api/search/metadata` + `api/search/audimeta` (Discord bot and any external consumers should migrate)
 
 ### Fixed
 - **FolderBrowser Validation**: External path changes (like selecting recent folders) now automatically trigger validation

@@ -50,7 +50,11 @@
       <div class="search-hint">
         <PhInfo />
         <span v-if="searchType === 'asin'">Searching by ASIN</span>
-        <span v-else-if="searchType === 'title'">Searching by title/author</span>
+        <span v-else-if="searchType === 'title'">
+          <template v-if="searchQuery.toUpperCase().startsWith('TITLE:')">Searching by title</template>
+          <template v-else-if="searchQuery.toUpperCase().startsWith('AUTHOR:')">Searching by author</template>
+          <template v-else>Searching by title/author</template>
+        </span>
         <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
         <span v-else>Type an ASIN or book title to search</span>
       </div>
@@ -114,14 +118,23 @@
               </div>
               
               <p v-if="audibleResult.publishYear" class="result-year">Published: {{ audibleResult.publishYear }}</p>
+              <p v-else-if="audibleResult.publishedDate" class="result-year">Published: {{ new Date(audibleResult.publishedDate).getFullYear() }}</p>
               <p v-if="audibleResult.publisher" class="result-publisher">
                 Publisher: {{ safeText(audibleResult.publisher) }}
               </p>
               
               <div class="result-meta">
-                <span v-if="audibleResult.source" class="metadata-source-badge" :data-source="audibleResult.source">
+                <a v-if="audibleResult.sourceLink"
+                   :href="audibleResult.sourceLink" 
+                   target="_blank" 
+                   rel="noopener noreferrer"
+                   class="source-link">
                   <PhCloud />
-                  {{ audibleResult.source }}
+                  Source: {{ audibleResult.source }}
+                </a>
+                <span v-else-if="audibleResult.source" class="source-badge">
+                  <PhCloud />
+                  Source: {{ audibleResult.source }}
                 </span>
                 <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
                 <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
@@ -663,7 +676,18 @@ const searchPlaceholder = computed(() => {
 const detectSearchType = (query: string): 'asin' | 'title' | 'isbn' => {
   const trimmed = query.trim().toUpperCase()
 
-  // ISBN detection first (more specific)
+  // Check for explicit prefixes first (ASIN:, ISBN:, AUTHOR:, TITLE:)
+  if (trimmed.startsWith('ASIN:')) {
+    return 'asin'
+  }
+  if (trimmed.startsWith('ISBN:')) {
+    return 'isbn'
+  }
+  if (trimmed.startsWith('AUTHOR:') || trimmed.startsWith('TITLE:')) {
+    return 'title'
+  }
+
+  // ISBN detection (more specific)
   if (isbnService.detectISBN(trimmed)) {
     return 'isbn'
   }
@@ -727,8 +751,11 @@ const performSearch = async () => {
 const searchByAsin = async (asin: string) => {
   logger.debug('searchByAsin called with:', asin)
   
+  // Strip ASIN: prefix if present
+  const cleanAsin = asin.replace(/^ASIN:/i, '').trim()
+  
   // Validate ASIN using the same strict pattern as detection.
-  if (!/^(B[0-9A-Z]{9})$/.test(asin.toUpperCase())) {
+  if (!/^(B[0-9A-Z]{9})$/.test(cleanAsin.toUpperCase())) {
     searchError.value = 'Invalid ASIN format. Expected an Amazon ASIN like B08G9PRS1K'
     return
   }
@@ -738,7 +765,7 @@ const searchByAsin = async (asin: string) => {
   titleResults.value = []
   isbnResult.value = null
   errorMessage.value = ''
-  asinQuery.value = asin
+  asinQuery.value = cleanAsin
   
   // Check if metadata sources are configured
   if (enabledMetadataSources.value.length === 0) {
@@ -748,46 +775,44 @@ const searchByAsin = async (asin: string) => {
     return
   }
   
-  searchStatus.value = `Searching for ASIN ${asin}...`
+  searchStatus.value = `Searching for ASIN ${cleanAsin}...`
   
   try {
-    // Use the new metadata endpoint that respects configured sources
-    const response = await apiService.getMetadata(asin, 'us', true)
-    const result = response.metadata
-    const sourceName = response.source
+    // Use the search API with ASIN: prefix to trigger intelligent search with direct product page scraping
+    // This will scrape Amazon/Audible product pages directly instead of only checking metadata APIs
+    const results = await apiService.searchByTitle(`ASIN:${cleanAsin}`)
     
-    logger.debug('Metadata response:', { sourceName, hasMetadata: !!result })
+    logger.debug('ASIN search results:', results)
     
-    searchStatus.value = `Metadata received from ${sourceName}, processing...`
-    
-    // Convert audimeta response to our audiobook format
-    if (result) {
-      // Extract year from publishDate if available
+    if (results && results.length > 0) {
+      // Take the first result (should be the direct ASIN match)
+      const result = results[0]
+      
+      // Extract year from publishedDate if available
       let publishYear: string | undefined
-      if (result.publishDate || result.releaseDate) {
-        const dateStr = result.publishDate || result.releaseDate
-        const yearMatch = dateStr?.match(/\d{4}/)
+      if (result.publishedDate) {
+        const yearMatch = result.publishedDate.match(/\d{4}/)
         publishYear = yearMatch ? yearMatch[0] : undefined
       }
       
       audibleResult.value = {
-        asin: result.asin || asin,
+        asin: result.asin || cleanAsin,
         title: result.title || 'Unknown Title',
-        subtitle: result.subtitle,
-        authors: result.authors?.map(a => a.name).filter(n => n) as string[] || [],
-        narrators: result.narrators?.map(n => n.name).filter(n => n) as string[] || [],
+        subtitle: undefined,
+        authors: result.artist ? [result.artist] : [],
+        narrators: result.narrator ? result.narrator.split(', ') : [],
         publisher: result.publisher,
         publishYear: publishYear,
+        publishedDate: result.publishedDate,
         description: result.description,
         imageUrl: result.imageUrl,
-        runtime: result.lengthMinutes ? result.lengthMinutes * 60 : undefined,
+        runtime: result.runtime,
         language: result.language,
-        genres: result.genres?.map(g => g.name).filter(n => n) as string[] || [],
-        series: result.series?.[0]?.name,
-        seriesNumber: result.series?.[0]?.position,
-        abridged: result.bookFormat?.toLowerCase().includes('abridged') || false,
-        isbn: result.isbn,
-        source: sourceName
+        series: result.series,
+        seriesNumber: result.seriesNumber,
+        isbn: undefined,
+        source: result.source,
+        sourceLink: result.sourceLink
       }
       
       logger.debug('audibleResult set with source:', audibleResult.value.source)
@@ -797,7 +822,7 @@ const searchByAsin = async (asin: string) => {
   searchStatus.value = 'Checking library for existing copies...'
   await checkExistingInLibrary()
   // Finalize status
-  searchStatus.value = audibleResult.value ? `Metadata ready from ${sourceName}` : 'No metadata available'
+  searchStatus.value = audibleResult.value ? `Found metadata from ${audibleResult.value.source || 'search'}` : 'No metadata available'
   } catch (error) {
     logger.error('ASIN search failed:', error)
     errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
@@ -820,14 +845,15 @@ const searchByTitle = async (query: string) => {
   resolvedAsins.value = {}
   asinFilteringApplied.value = false
   
-  // Parse query for display in error messages
-  const parsed = parseSearchQuery(query)
+  // Parse query for display in error messages (but keep prefix for backend)
+  const parsed = parseSearchQuery(query.replace(/^(TITLE:|AUTHOR:)/i, '').trim())
   titleQuery.value = parsed.title
   authorQuery.value = parsed.author || ''
   
   searchStatus.value = 'Searching for audiobooks and fetching metadata...'
   try {
     // Use intelligent search API that searches Audible/Amazon, gets ASINs, and enriches with metadata
+    // Pass the original query WITH prefix so backend can handle TITLE:/AUTHOR: prefixes
     const results = await apiService.searchByTitle(query)
     // expose raw results for debugging on the Add New page
     rawDebugResults.value = results
@@ -1497,7 +1523,10 @@ const capitalizeLanguage = (language: string | undefined): string => {
 // Search by ISBN: prefer ISBN->ASIN lookup (strip dashes) and fetch metadata directly.
 // Fall back to title-based search only if ASIN resolution fails.
 const searchByISBNChain = async (isbn: string) => {
-  if (!isbnService.validateISBN(isbn)) {
+  // Strip ISBN: prefix if present
+  const cleanIsbn = isbn.replace(/^ISBN:/i, '').trim()
+  
+  if (!isbnService.validateISBN(cleanIsbn)) {
     searchError.value = 'Invalid ISBN format. Please enter a valid ISBN-10 or ISBN-13'
     return
   }
@@ -1512,7 +1541,7 @@ const searchByISBNChain = async (isbn: string) => {
   errorMessage.value = ''
 
   // Normalize ISBN (remove dashes/spaces)
-  const cleanedIsbn = isbn.replace(/[-\s]/g, '')
+  const cleanedIsbn = cleanIsbn.replace(/[-\s]/g, '')
 
   try {
     // Per requirements: do not convert ISBN to ASIN. Search directly using the ISBN digits.
@@ -2232,6 +2261,18 @@ onMounted(async () => {
   background-color: rgba(33, 150, 243, 0.15);
   color: #4dabf7;
   transform: translateY(-1px);
+}
+
+.result-meta .source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.result-meta .source-badge svg,
+.result-meta a.source-link svg {
+  width: 14px;
+  height: 14px;
 }
 
 .result-actions {
