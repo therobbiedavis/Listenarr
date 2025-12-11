@@ -381,7 +381,11 @@ namespace Listenarr.Api.Services
 
                 // Extract image
                 var imageNode = node.SelectSingleNode(".//img");
-                var imageUrl = imageNode?.GetAttributeValue("src", "") ?? imageNode?.GetAttributeValue("data-lazy", "");
+                var rawImageUrl = imageNode?.GetAttributeValue("src", "") ?? imageNode?.GetAttributeValue("data-lazy", "");
+                _logger.LogDebug("Raw image URL for ASIN {Asin}: {RawUrl}", extractedAsin, rawImageUrl);
+                // Clean and upgrade to high-resolution image URL
+                var imageUrl = CleanImageUrl(rawImageUrl);
+                _logger.LogDebug("Cleaned image URL for ASIN {Asin}: {CleanUrl}", extractedAsin, imageUrl);
 
                 // Extract duration/runtime from runtimeLabel
                 var durationNode = node.SelectSingleNode(
@@ -619,6 +623,46 @@ namespace Listenarr.Api.Services
             {
                 return false;
             }
+        }
+
+        private string? CleanImageUrl(string? imgUrl)
+        {
+            if (string.IsNullOrWhiteSpace(imgUrl))
+            {
+                _logger.LogDebug("CleanImageUrl: Empty or null image URL");
+                return null;
+            }
+
+            // Filter out logos, navigation images, and batch processing URLs
+            if (imgUrl.Contains("/navigation/") ||
+                imgUrl.Contains("logo") ||
+                imgUrl.Contains("/batch/") ||
+                imgUrl.Contains("fls-na.amazon") ||
+                imgUrl.StartsWith("data:"))
+            {
+                _logger.LogDebug("Filtered out non-product image: {Url}", imgUrl);
+                return null;
+            }
+
+            // Clean up social share overlay URLs and upgrade to high-resolution
+            // Example: https://m.media-amazon.com/images/I/61D7uTS7-TL._SL400_.jpg
+            // Should become: https://m.media-amazon.com/images/I/61D7uTS7-TL._SL500_.jpg
+            var cleanUrl = imgUrl;
+            
+            // Extract image ID and create high-res URL
+            var match = System.Text.RegularExpressions.Regex.Match(imgUrl, @"/images/I/([A-Za-z0-9_-]+)\.");
+            if (match.Success)
+            {
+                var imageId = match.Groups[1].Value;
+                cleanUrl = $"https://m.media-amazon.com/images/I/{imageId}._SL500_.jpg";
+                _logger.LogInformation("Upgraded image URL to high-res: {ImageId} -> {CleanUrl}", imageId, cleanUrl);
+            }
+            else
+            {
+                _logger.LogWarning("Could not extract image ID from URL: {Url}", imgUrl);
+            }
+
+            return cleanUrl;
         }
 
         internal static string ForceToUSDomain(string url)

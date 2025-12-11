@@ -146,12 +146,16 @@ builder.Services.AddScoped<SearchProgressReporter>();
 builder.Services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
 builder.Services.AddScoped<ISearchResultFilter, PromotionalTitleFilter>();
 builder.Services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
+builder.Services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
 builder.Services.AddScoped<SearchResultFilterPipeline>();
 
 // Add metadata fetching strategies
 builder.Services.AddScoped<IMetadataStrategy, AudimetaStrategy>();
 builder.Services.AddScoped<IMetadataStrategy, AudnexusStrategy>();
 builder.Services.AddScoped<MetadataStrategyCoordinator>();
+
+// Add ASIN candidate collector
+builder.Services.AddScoped<AsinCandidateCollector>();
 
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();

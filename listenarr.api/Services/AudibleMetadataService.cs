@@ -901,7 +901,13 @@ namespace Listenarr.Api.Services
                         if (root.TryGetProperty("headline", out p)) desc = p.GetString();
                         if (root.TryGetProperty("description", out p) && string.IsNullOrEmpty(desc)) desc = p.GetString();
                         if (root.TryGetProperty("image", out p)) img = p.ValueKind == JsonValueKind.String ? p.GetString() : p[0].GetString();
-                        if (root.TryGetProperty("datePublished", out p)) year = p.GetString();
+                        if (root.TryGetProperty("datePublished", out p))
+                        {
+                            var dateStr = p.GetString();
+                            // Extract just the year from ISO date format (e.g., "2025-11-11" -> "2025")
+                            var yearMatch = System.Text.RegularExpressions.Regex.Match(dateStr ?? "", @"\b(19|20)\d{2}\b");
+                            year = yearMatch.Success ? yearMatch.Value : dateStr;
+                        }
                         if (root.TryGetProperty("inLanguage", out p)) lang = p.GetString();
                         if (root.TryGetProperty("publisher", out p) && p.ValueKind == JsonValueKind.Object && p.TryGetProperty("name", out var np)) pub = np.GetString();
                         if (root.TryGetProperty("author", out p))
@@ -1303,13 +1309,16 @@ namespace Listenarr.Api.Services
             // Image - look for product image (book cover), not site logo
             // Try meta og:image first (most reliable), then look for product-specific images
             var imgNode = doc.DocumentNode.SelectSingleNode("//meta[@property='og:image']")
+                       ?? doc.DocumentNode.SelectSingleNode("//meta[@name='og:image']")
                        ?? productDetails.SelectSingleNode(".//img[contains(@src,'images/I/')]")
                        ?? doc.DocumentNode.SelectSingleNode("//img[contains(@src,'images/I/') and contains(@src,'_SL')]")
+                       ?? doc.DocumentNode.SelectSingleNode("//img[contains(@class,'product') and contains(@src,'images/I/')]")
+                       ?? doc.DocumentNode.SelectSingleNode("//div[contains(@class,'product-image')]//img")
                        ?? productDetails.SelectSingleNode(".//img[contains(@class,'bc-image-inset-border')]")
                        ?? productDetails.SelectSingleNode(".//img");
             if (imgNode != null)
             {
-                var imgUrl = imgNode.GetAttributeValue("content", null) ?? imgNode.GetAttributeValue("src", null);
+                var imgUrl = imgNode.GetAttributeValue("content", null) ?? imgNode.GetAttributeValue("src", null) ?? imgNode.GetAttributeValue("data-src", null);
                 var cleanUrl = CleanImageUrl(imgUrl);
                 if (!string.IsNullOrWhiteSpace(cleanUrl))
                 {
@@ -1318,12 +1327,28 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
-                    _logger.LogWarning("Found image but filtered as logo/nav: {Url}", imgUrl);
+                    _logger.LogWarning("Found image node but URL filtered as logo/nav: {Url}", imgUrl);
                 }
             }
             else
             {
-                _logger.LogWarning("No image element found in component or page");
+                _logger.LogWarning("No image element found in component or page for ASIN {Asin}", metadata.Asin);
+                // Last resort: check if there's any Amazon image URL in the raw HTML
+                var docHtml = doc.DocumentNode.OuterHtml;
+                if (!string.IsNullOrEmpty(docHtml) && docHtml.Contains("images/I/"))
+                {
+                    var imageMatch = System.Text.RegularExpressions.Regex.Match(docHtml, @"(https?://[^""']+/images/I/[A-Za-z0-9_-]+\.[^""']+)");
+                    if (imageMatch.Success)
+                    {
+                        var foundUrl = imageMatch.Groups[1].Value;
+                        var cleanUrl = CleanImageUrl(foundUrl);
+                        if (!string.IsNullOrWhiteSpace(cleanUrl))
+                        {
+                            metadata.ImageUrl = cleanUrl;
+                            _logger.LogInformation("Extracted image URL via regex fallback: {Url}", cleanUrl);
+                        }
+                    }
+                }
             }
 
             // Authors - Extract from productDetails area after Playwright rendering

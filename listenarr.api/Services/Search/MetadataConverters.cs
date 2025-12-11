@@ -179,6 +179,18 @@ public class MetadataConverters
         if (string.IsNullOrWhiteSpace(imageUrl))
         {
             imageUrl = fallbackImageUrl;
+            if (!string.IsNullOrWhiteSpace(imageUrl))
+            {
+                _logger.LogInformation("Using fallback image URL for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
+            }
+            else
+            {
+                _logger.LogWarning("No image URL available for ASIN {Asin} from metadata or fallback. Metadata source: {Source}", asin, metadata.Source);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("Using metadata image URL for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
         }
 
         // Download and cache the image to temp storage for future use
@@ -207,7 +219,7 @@ public class MetadataConverters
                 : $"https://www.audible.com/pd/{asin}";
         }
 
-        return Task.FromResult(new SearchResult
+        var result = new SearchResult
         {
             Id = Guid.NewGuid().ToString(),
             Title = title,
@@ -234,6 +246,11 @@ public class MetadataConverters
             ImageUrl = imageUrl,
             Asin = asin,
             ProductUrl = productUrl
-        });
+        };
+        
+        _logger.LogInformation("SearchResult for ASIN {Asin}: PublishYear='{PublishYear}', PublishedDate={PublishedDate:yyyy-MM-dd}", 
+            asin, metadata.PublishYear, result.PublishedDate);
+        
+        return Task.FromResult(result);
     }
 }
