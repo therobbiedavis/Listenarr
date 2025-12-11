@@ -89,7 +89,7 @@ namespace Listenarr.Api.Tests
 
     internal class TestAudibleMetadataService : IAudibleMetadataService
     {
-        public Task<AudibleBookMetadata> ScrapeAudibleMetadataAsync(string asin)
+        public Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin)
         {
             var m = new AudibleBookMetadata
             {
@@ -102,7 +102,7 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(m);
         }
 
-        public Task<AudibleBookMetadata> ScrapeAmazonMetadataAsync(string asin)
+        public Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin)
         {
             var m = new AudibleBookMetadata
             {

@@ -72,6 +72,7 @@ public class MetadataMerger
                 .ToList();
         }
         metadata.ImageUrl = searchResult.ImageUrl;
+        metadata.Publisher = searchResult.Publisher;
         // Don't use series from search results - HTML structure can cause incorrect series assignment
         // Series should only come from product page scraping or metadata APIs
         metadata.Subtitle = searchResult.Subtitle;

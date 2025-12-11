@@ -41,8 +41,8 @@ namespace Listenarr.Api.Extensions
                 .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30));
 
             // Default HTTP client (bypass system proxy unless explicitly configured)
-            var defaultHttp = services.AddHttpClient("default");
-            defaultHttp.ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
+            services.AddHttpClient("default")
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
             services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
 
             // Generic named client used by legacy code paths for downloads
@@ -153,23 +153,19 @@ namespace Listenarr.Api.Extensions
 
             services.AddHttpClient<Listenarr.Api.Services.IAudibleSearchService, Listenarr.Api.Services.AudibleSearchService>()
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             // Misc scraping/metadata clients (Audible metadata, Audimeta, Audnexus)
             services.AddHttpClient<Listenarr.Api.Services.IAudibleMetadataService, Listenarr.Api.Services.AudibleMetadataService>()
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient<Listenarr.Api.Services.AudimetaService>()
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient<Listenarr.Api.Services.AudnexusService>()
                 .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
-                .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
             return services;

@@ -19,6 +19,7 @@ namespace Listenarr.Api.Services
         public string? Subtitle { get; set; }
         public string? ReleaseDate { get; set; }
         public string? Language { get; set; }
+        public string? Publisher { get; set; }
     }
 
     public class AudibleSearchService : IAudibleSearchService
@@ -443,6 +444,30 @@ namespace Listenarr.Api.Services
                 );
                 var language = languageNode?.InnerText?.Replace("Language:", "").Trim();
 
+                // Extract publisher from publisherLabel or publisherSummary with comprehensive selectors
+                var publisherNode = node.SelectSingleNode(
+                    ".//li[contains(@class,'publisherLabel')] | " +
+                    ".//span[contains(@class,'publisherLabel')] | " +
+                    ".//li[contains(@class,'publisherSummary')] | " +
+                    ".//span[contains(@class,'publisherSummary')] | " +
+                    ".//li[contains(@class,'publisher')] | " +
+                    ".//span[contains(@class,'publisher')] | " +
+                    ".//span[contains(text(),'By:')]/following-sibling::span | " +
+                    ".//span[contains(text(),'Publisher:')]/following-sibling::span | " +
+                    ".//li[contains(text(),'Publisher:')]"
+                );
+                var publisher = publisherNode?.InnerText?
+                    .Replace("By:", "")
+                    .Replace("Publisher:", "")
+                    .Replace("©", "")
+                    .Trim();
+                
+                // Log if publisher extraction fails for debugging
+                if (string.IsNullOrWhiteSpace(publisher))
+                {
+                    _logger.LogDebug("Publisher not found for result with title: {Title}, ASIN: {Asin}", title, extractedAsin);
+                }
+
                 // Extract price
                 var priceNode = node.SelectSingleNode(
                     ".//span[contains(@class,'price')] | " +
@@ -465,7 +490,8 @@ namespace Listenarr.Api.Services
                     SeriesNumber = seriesNumber,
                     Subtitle = subtitle,
                     ReleaseDate = releaseDate,
-                    Language = language
+                    Language = language,
+                    Publisher = publisher
                 };
             }
             catch (Exception ex)

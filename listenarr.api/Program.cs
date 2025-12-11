@@ -157,6 +157,18 @@ builder.Services.AddScoped<MetadataStrategyCoordinator>();
 // Add ASIN candidate collector
 builder.Services.AddScoped<AsinCandidateCollector>();
 
+// Add ASIN enricher
+builder.Services.AddScoped<AsinEnricher>();
+
+// Add fallback scraper
+builder.Services.AddScoped<FallbackScraper>();
+
+// Add search result scorer
+builder.Services.AddScoped<SearchResultScorer>();
+
+// Add ASIN search handler
+builder.Services.AddScoped<AsinSearchHandler>();
+
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
 

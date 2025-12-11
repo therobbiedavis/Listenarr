@@ -48,7 +48,7 @@ namespace Listenarr.Api.Services
             _loggerFactory = loggerFactory ?? LoggerFactory.Create(_ => { });
         }
 
-        public async Task<AudibleBookMetadata> ScrapeAudibleMetadataAsync(string asin)
+        public async Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin)
         {
             if (string.IsNullOrWhiteSpace(asin)) return new AudibleBookMetadata();
 
@@ -290,6 +290,8 @@ namespace Listenarr.Api.Services
                     if (string.IsNullOrWhiteSpace(metadata.Publisher))
                     {
                         var publisher = doc.DocumentNode.SelectSingleNode("//meta[@name='publisher']")?.GetAttributeValue("content", null)
+                            ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and @class='line' and @key='publisher']//a[@class='link']")?.InnerText?.Trim()
+                            ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and contains(@key,'publisher')]//div[@class='value']//a")?.InnerText?.Trim()
                             ?? doc.DocumentNode.SelectSingleNode("//li[contains(.,'Publisher')]|//th[contains(.,'Publisher')]/following-sibling::td")?.InnerText?.Trim();
                         if (!string.IsNullOrWhiteSpace(publisher)) metadata.Publisher = publisher;
                     }
@@ -342,7 +344,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        public async Task<AudibleBookMetadata> ScrapeAmazonMetadataAsync(string asin)
+        public async Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin)
         {
             if (string.IsNullOrWhiteSpace(asin)) return new AudibleBookMetadata();
 
@@ -505,6 +507,8 @@ namespace Listenarr.Api.Services
                 if (string.IsNullOrWhiteSpace(metadata.Publisher))
                 {
                     var publisher = doc.DocumentNode.SelectSingleNode("//meta[@name='publisher']")?.GetAttributeValue("content", null)
+                        ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and @class='line' and @key='publisher']//a[@class='link']")?.InnerText?.Trim()
+                        ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and contains(@key,'publisher')]//div[@class='value']//a")?.InnerText?.Trim()
                         ?? doc.DocumentNode.SelectSingleNode("//li[contains(.,'Publisher')]|//th[contains(.,'Publisher')]/following-sibling::td")?.InnerText?.Trim();
                     if (!string.IsNullOrWhiteSpace(publisher)) metadata.Publisher = publisher;
                 }
@@ -668,6 +672,53 @@ namespace Listenarr.Api.Services
                     await page.WaitForTimeoutAsync(2000); // Wait 2s for component hydration
                 }
 
+                // Extract publisher from page content before returning
+                // Try both shadow DOM and visible page text
+                try
+                {
+                    // Try to extract from the full page text including all components
+                    var publisherFromPage = await page.EvaluateAsync<string>(@"
+                        () => {
+                            // Strategy 1: Look in document body text for Publisher pattern
+                            const bodyText = document.body.textContent || '';
+                            let match = bodyText.match(/Publisher[:\s]+([^\n]+?)(?=\s*(?:Release Date|Language|Length|ASIN|Categories|$))/i);
+                            if (match) {
+                                const pub = match[1].trim();
+                                if (pub && pub.length > 0 && pub.length < 100 && !pub.match(/^\d+$/)) {
+                                    return pub;
+                                }
+                            }
+                            
+                            // Strategy 2: Look for publisher in meta tags
+                            const metaPublisher = document.querySelector('meta[property=""book:publisher""], meta[name=""publisher""]');
+                            if (metaPublisher && metaPublisher.content) return metaPublisher.content.trim();
+                            
+                            return null;
+                        }
+                    ");
+                    
+                    if (!string.IsNullOrWhiteSpace(publisherFromPage))
+                    {
+                        pwLogger.LogInformation("Extracted publisher from page content: {Publisher}", publisherFromPage);
+                        // Inject as HTML comment so it can be extracted later
+                        var safePublisher = publisherFromPage.Replace("'", "\\'").Replace("\r", "").Replace("\n", " ").Replace("--", "");
+                        await page.EvaluateAsync(@"
+                            (publisher) => {
+                                const comment = document.createComment('LISTENARR_PUBLISHER: ' + publisher);
+                                document.body.appendChild(comment);
+                            }
+                        ", safePublisher);
+                    }
+                    else
+                    {
+                        pwLogger.LogWarning("Could not extract publisher from page content");
+                    }
+                }
+                catch (Exception publisherEx)
+                {
+                    pwLogger.LogWarning(publisherEx, "Error extracting publisher from page");
+                }
+
                 var content = await page.ContentAsync();
                 if (!string.IsNullOrWhiteSpace(content))
                 {
@@ -708,7 +759,10 @@ namespace Listenarr.Api.Services
             foreach (var asin in asins)
             {
                 var metadata = await ScrapeAudibleMetadataAsync(asin);
-                results.Add(metadata);
+                if (metadata != null)
+                {
+                    results.Add(metadata);
+                }
             }
             return results;
         }
@@ -1842,6 +1896,22 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Starting ExtractFromProductMetadata for adbl-product-metadata component");
 
+                // First, check for publisher extracted from shadow DOM via Playwright JavaScript
+                if (string.IsNullOrWhiteSpace(metadata.Publisher))
+                {
+                    var htmlContent = doc.DocumentNode.OuterHtml;
+                    var shadowPublisherMatch = System.Text.RegularExpressions.Regex.Match(
+                        htmlContent, 
+                        @"<!--LISTENARR_PUBLISHER:\s*(.+?)-->",
+                        System.Text.RegularExpressions.RegexOptions.Singleline);
+                    
+                    if (shadowPublisherMatch.Success)
+                    {
+                        metadata.Publisher = shadowPublisherMatch.Groups[1].Value.Trim();
+                        _logger.LogInformation("Extracted publisher from shadow DOM (via Playwright): {Publisher}", metadata.Publisher);
+                    }
+                }
+
                 // Log all custom elements starting with "adbl-"
                 var allAdblElements = doc.DocumentNode.SelectNodes("//*[starts-with(local-name(), 'adbl-')]");
                 if (allAdblElements != null)
@@ -2091,7 +2161,23 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                // Extract Publisher (e.g., "Publisher\nRecorded Books" or "Publisher Recorded Books")
+                // Extract Publisher - Try DOM-based extraction first for modern HTML
+                if (string.IsNullOrWhiteSpace(metadata.Publisher))
+                {
+                    // Modern Audible HTML structure with data-testid="line"
+                    var publisherNode = doc.DocumentNode.SelectSingleNode(
+                        "//div[@data-testid='line' and @key='publisher']//a[@class='link']" +
+                        " | //div[@data-testid='line' and contains(@key,'publisher')]//div[@class='value']//a" +
+                        " | //div[contains(@class,'line')]//div[contains(@class,'label') and contains(text(),'Publisher')]/following-sibling::div//a");
+                    
+                    if (publisherNode != null)
+                    {
+                        metadata.Publisher = publisherNode.InnerText?.Trim();
+                        _logger.LogInformation("Extracted publisher from DOM structure: {Publisher}", metadata.Publisher);
+                    }
+                }
+
+                // Fallback to regex extraction from rendered text for legacy HTML
                 if (string.IsNullOrWhiteSpace(metadata.Publisher))
                 {
                     var publisherMatch = System.Text.RegularExpressions.Regex.Match(pageText,
@@ -2214,8 +2300,8 @@ namespace Listenarr.Api.Services
 
     public interface IAudibleMetadataService
     {
-        Task<AudibleBookMetadata> ScrapeAudibleMetadataAsync(string asin);
-        Task<AudibleBookMetadata> ScrapeAmazonMetadataAsync(string asin);
+        Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin);
+        Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin);
         Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins);
     }
 }
