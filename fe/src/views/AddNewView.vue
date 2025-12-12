@@ -57,7 +57,13 @@
           <template v-else>Searching by title/author</template>
         </span>
         <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
-        <span v-else>Type an ASIN or book title to search</span>
+        <span v-else>
+          <span v-if="!searchQuery.trim()" class="search-prefix-hint">
+            You can use the following prefixes for precise searches: <strong>ASIN:B08G9PRS1K</strong>,
+            <strong>AUTHOR:J. R. R. Tolkien</strong>,
+            <strong>TITLE:The Hobbit</strong>
+          </span>
+        </span>
       </div>
       
       <div v-if="searchError" class="error-message">
