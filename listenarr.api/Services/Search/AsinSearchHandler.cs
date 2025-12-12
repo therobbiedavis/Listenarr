@@ -43,7 +43,8 @@ public class AsinSearchHandler
     /// </summary>
     public async Task<List<SearchResult>> SearchByAsinAsync(
         string asin,
-        List<ApiConfiguration> metadataSources)
+        List<ApiConfiguration> metadataSources,
+        CancellationToken ct = default)
     {
         _logger.LogInformation("Processing direct ASIN query: {Asin}", asin);
         await _searchProgressReporter.BroadcastAsync($"Extracting ASIN: {asin}", null);
@@ -125,7 +126,8 @@ public class AsinSearchHandler
                 try
                 {
                     await _searchProgressReporter.BroadcastAsync($"Scraping Audible for {asin}", null);
-                    var audibleMeta = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                    ct.ThrowIfCancellationRequested();
+                    var audibleMeta = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin, ct);
                     if (audibleMeta != null)
                     {
                         metadata = audibleMeta;

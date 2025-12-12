@@ -28,8 +28,9 @@ namespace Listenarr.Api.Services
         /// <param name="containmentMode">Containment mode: Strict|Relaxed|Off</param>
         /// <param name="requireAuthorAndPublisher">Whether both author and publisher are required</param>
         /// <param name="fuzzyThreshold">Similarity threshold used for fuzzy matching (0.0 - 1.0)</param>
+        /// <param name="ct">Cancellation token to cancel the intelligent search operation.</param>
         /// <returns>Search results enriched with metadata from Amazon and Audible</returns>
-        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7);
+        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, CancellationToken ct = default);
 
         /// <summary>
         /// Searches a specific API/indexer by ID
@@ -538,8 +539,9 @@ namespace Listenarr.Api.Services
         /// Searches Audible for audiobooks
         /// </summary>
         /// <param name="query">Search query</param>
+        /// <param name="ct">Cancellation token to cancel the Audible search request.</param>
         /// <returns>List of Audible search results</returns>
-        Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query);
+        Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, CancellationToken ct = default);
     }
 
     /// <summary>

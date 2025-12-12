@@ -152,7 +152,7 @@ public class MetadataConverters
     /// <summary>
     /// Converts AudibleBookMetadata to SearchResult with fallback handling for missing fields.
     /// </summary>
-    public Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null)
+    public async Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null)
     {
         // Use metadata if available, otherwise fallback to raw search result, finally to generic fallback
         var title = metadata.Title;
@@ -176,14 +176,16 @@ public class MetadataConverters
         }
 
         var imageUrl = metadata.ImageUrl;
-        if (string.IsNullOrWhiteSpace(imageUrl))
+        // Use fallback image if metadata has no image OR if it's a grey-pixel placeholder
+        if (string.IsNullOrWhiteSpace(imageUrl) || imageUrl.Contains("grey-pixel.gif"))
         {
-            imageUrl = fallbackImageUrl;
-            if (!string.IsNullOrWhiteSpace(imageUrl))
+            if (!string.IsNullOrWhiteSpace(fallbackImageUrl))
             {
-                _logger.LogInformation("Using fallback image URL for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
+                imageUrl = fallbackImageUrl;
+                _logger.LogInformation("Using fallback image URL for ASIN {Asin}: {ImageUrl} (replaced {OriginalUrl})", 
+                    asin, imageUrl, string.IsNullOrWhiteSpace(metadata.ImageUrl) ? "null" : "grey-pixel");
             }
-            else
+            else if (string.IsNullOrWhiteSpace(imageUrl))
             {
                 _logger.LogWarning("No image URL available for ASIN {Asin} from metadata or fallback. Metadata source: {Source}", asin, metadata.Source);
             }
@@ -193,20 +195,32 @@ public class MetadataConverters
             _logger.LogDebug("Using metadata image URL for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
         }
 
-        // Download and cache the image to temp storage for future use
-        // Keep the original external URL for search results to avoid 404s
-        if (!string.IsNullOrEmpty(imageUrl) && !string.IsNullOrEmpty(asin))
+        // If we already have a cached image for this ASIN, use the local API endpoint
+        // instead of the external URL so search results serve cached images.
+        if (!string.IsNullOrEmpty(asin))
         {
             try
             {
-                // Cache the image in background, but don't wait for it or change the URL
-                // This ensures search results always show images immediately from their source
-                _ = _imageCacheService.DownloadAndCacheImageAsync(imageUrl, asin);
-                _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
+                var cachedPath = await _imageCacheService.GetCachedImagePathAsync(asin);
+                if (!string.IsNullOrWhiteSpace(cachedPath))
+                {
+                    // Use the images controller endpoint which serves the cached file
+                    imageUrl = $"/api/images/{asin}";
+                    _logger.LogInformation("Using cached image for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
+                }
+                else if (!string.IsNullOrEmpty(imageUrl))
+                {
+                    // Cache the image in background, but don't wait for it or change the URL
+                    // Log the exact URL we are passing to the cache to aid debugging when
+                    // an unexpected placeholder (e.g. grey-pixel.gif) is downloaded.
+                    _logger.LogDebug("Initiating background image cache for ASIN {Asin} with URL: {ImageUrl}", asin, imageUrl);
+                    _ = _imageCacheService.DownloadAndCacheImageAsync(imageUrl, asin);
+                    _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to initiate image caching for ASIN {Asin}", asin);
+                _logger.LogWarning(ex, "Failed to check/initiate image caching for ASIN {Asin}", asin);
             }
         }
 
@@ -251,6 +265,6 @@ public class MetadataConverters
         _logger.LogInformation("SearchResult for ASIN {Asin}: PublishYear='{PublishYear}', PublishedDate={PublishedDate:yyyy-MM-dd}", 
             asin, metadata.PublishYear, result.PublishedDate);
         
-        return Task.FromResult(result);
+        return result;
     }
 }

@@ -73,14 +73,20 @@ namespace Listenarr.Api.Services.Extractors
                 if (string.IsNullOrWhiteSpace(imgUrl))
                 {
                     // Try data-a-dynamic-image (JSON with multiple sizes)
-                    imgUrl = imageNode.GetAttributeValue("data-a-dynamic-image", null);
-                    if (!string.IsNullOrWhiteSpace(imgUrl))
+                    var dynamicImageJson = imageNode.GetAttributeValue("data-a-dynamic-image", null);
+                    if (!string.IsNullOrWhiteSpace(dynamicImageJson))
                     {
                         // Parse JSON and get the first URL (usually highest quality)
-                        var match = System.Text.RegularExpressions.Regex.Match(imgUrl, @"""(https?://[^""]+)""");
+                        var match = System.Text.RegularExpressions.Regex.Match(dynamicImageJson, @"""(https?://[^""]+)""");
                         if (match.Success)
                         {
                             imgUrl = match.Groups[1].Value;
+                        }
+                        else
+                        {
+                            // If regex fails, don't use the JSON string
+                            logger.LogWarning("Failed to parse dynamic image JSON: {Json}", dynamicImageJson.Substring(0, Math.Min(100, dynamicImageJson.Length)));
+                            imgUrl = null;
                         }
                     }
                 }

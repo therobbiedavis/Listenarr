@@ -176,7 +176,7 @@ namespace Listenarr.Api.Services.Extractors
                 {
                     var imageId = match.Groups[1].Value;
                     cleanUrl = $"https://m.media-amazon.com/images/I/{imageId}._SL500_.jpg";
-                    logger.LogInformation("Cleaned social share URL to: {CleanUrl}", cleanUrl);
+                    logger.LogDebug("Cleaned social share URL to: {CleanUrl}", cleanUrl);
                 }
             }
 

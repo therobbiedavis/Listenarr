@@ -97,7 +97,7 @@ namespace Listenarr.Api.Controllers
                 }
 
                 _logger.LogInformation("IntelligentSearch called for query: {Query}", LogRedaction.SanitizeText(query));
-                var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold);
+                var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold, HttpContext.RequestAborted);
                 _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return Ok(results);
             }
@@ -288,7 +288,7 @@ namespace Listenarr.Api.Controllers
 
                 // Use intelligent search (Amazon/Audible + metadata enrichment) for Discord bot
                 // This excludes indexer results which are not suitable for bot interactions
-                var searchResults = await _searchService.IntelligentSearchAsync(query);
+                var searchResults = await _searchService.IntelligentSearchAsync(query, ct: HttpContext.RequestAborted);
 
                 if (searchResults == null || !searchResults.Any())
                 {

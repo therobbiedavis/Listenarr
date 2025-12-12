@@ -26,9 +26,9 @@ namespace Listenarr.Api.Services
 
     public interface IAmazonSearchService
     {
-        Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null);
+        Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null, CancellationToken ct = default);
         // Scrape the product detail page for an ASIN (product title/author/image) as a fallback
-        Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin);
+        Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, CancellationToken ct = default);
     }
 
     public class AmazonSearchService : IAmazonSearchService
@@ -115,7 +115,7 @@ namespace Listenarr.Api.Services
             _amazonAsinService = amazonAsinService;
         }
 
-        public async Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null)
+        public async Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null, CancellationToken ct = default)
         {
             var results = new List<AmazonSearchResult>();
 
@@ -152,7 +152,7 @@ namespace Listenarr.Api.Services
 
                 foreach (var query in searchVariations)
                 {
-                    var searchResults = await SearchAmazonAsync(query);
+                    var searchResults = await SearchAmazonAsync(query, ct);
                     results.AddRange(searchResults);
 
                     // Stop if we found a larger set of results (increase from 10 to 50)
@@ -177,7 +177,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<List<AmazonSearchResult>> SearchAmazonAsync(string query)
+        private async Task<List<AmazonSearchResult>> SearchAmazonAsync(string query, CancellationToken ct = default)
         {
             var results = new List<AmazonSearchResult>();
             var seenAsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -204,7 +204,7 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Searching Amazon: {SearchUrl}", searchUrl);
 
-                var html = await GetHtmlAsync(searchUrl);
+                var html = await GetHtmlAsync(searchUrl, ct);
                 if (string.IsNullOrEmpty(html))
                 {
                     return results;
@@ -246,6 +246,7 @@ namespace Listenarr.Api.Services
                 {
                     foreach (var node in resultNodes.Take(200)) // Increase scan to first 200 nodes to capture more candidates
                     {
+                        ct.ThrowIfCancellationRequested();
                         if (results.Count >= EarlyAsinCap) break; // early cap
                         var result = ExtractSearchResult(node);
                         if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
@@ -263,7 +264,7 @@ namespace Listenarr.Api.Services
                                         {
                                             try
                                             {
-                                                var fetched = await FetchProductTitleAsync(result.Asin);
+                                                var fetched = await FetchProductTitleAsync(result.Asin, ct);
                                                 if (!IsPlaceholderTitle(fetched))
                                                 {
                                                     result.Title = fetched;
@@ -303,7 +304,7 @@ namespace Listenarr.Api.Services
                                     {
                                         try
                                         {
-                                            var fetched = await FetchProductTitleAsync(result.Asin);
+                                            var fetched = await FetchProductTitleAsync(result.Asin, ct);
                                             if (!IsPlaceholderTitle(fetched))
                                             {
                                                 result.Title = fetched;
@@ -325,7 +326,7 @@ namespace Listenarr.Api.Services
                                     {
                                         try
                                         {
-                                            var fetchedAuthor = await FetchProductAuthorAsync(result.Asin);
+                                            var fetchedAuthor = await FetchProductAuthorAsync(result.Asin, ct);
                                             if (!string.IsNullOrWhiteSpace(fetchedAuthor))
                                             {
                                                 result.Author = fetchedAuthor;
@@ -360,6 +361,7 @@ namespace Listenarr.Api.Services
                     {
                         foreach (var link in asinLinks.Take(200))
                         {
+                            ct.ThrowIfCancellationRequested();
                             if (results.Count >= EarlyAsinCap) break;
                             var result = ExtractFromLink(link);
                             if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
@@ -368,7 +370,7 @@ namespace Listenarr.Api.Services
                                 {
                                     try
                                     {
-                                        var fetched = await FetchProductTitleAsync(result.Asin);
+                                        var fetched = await FetchProductTitleAsync(result.Asin, ct);
                                         if (!IsPlaceholderTitle(fetched))
                                         {
                                             result.Title = fetched;
@@ -405,6 +407,7 @@ namespace Listenarr.Api.Services
                         var asinMatches = AsinRegex.Matches(html);
                         foreach (Match m in asinMatches)
                         {
+                            ct.ThrowIfCancellationRequested();
                             if (results.Count >= EarlyAsinCap) break;
                             if (!m.Success) continue;
                             var asin = m.Groups[1].Value;
@@ -416,7 +419,7 @@ namespace Listenarr.Api.Services
                             {
                                 try
                                 {
-                                    var fetched = await FetchProductTitleAsync(asin);
+                                    var fetched = await FetchProductTitleAsync(asin, ct);
                                     if (!IsPlaceholderTitle(fetched))
                                     {
                                         titleGuess = fetched!;
@@ -665,7 +668,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> GetHtmlAsync(string url)
+        private async Task<string?> GetHtmlAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -680,8 +683,8 @@ namespace Listenarr.Api.Services
                 request.Headers.Add("Connection", "keep-alive");
                 request.Headers.Add("Upgrade-Insecure-Requests", "1");
 
-                var response = await _httpClient.SendAsync(request);
-                var body = await response.Content.ReadAsStringAsync();
+                var response = await _httpClient.SendAsync(request, ct);
+                var body = await response.Content.ReadAsStringAsync(ct);
 
                 // If the response is not successful or looks like a bot/challenge page, try Playwright fallback
                 if (!response.IsSuccessStatusCode ||
@@ -741,12 +744,12 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> FetchProductTitleAsync(string asin)
+        private async Task<string?> FetchProductTitleAsync(string asin, CancellationToken ct = default)
         {
             try
             {
                 var url = $"https://www.amazon.com/dp/{asin}";
-                var html = await GetHtmlAsync(url);
+            var html = await GetHtmlAsync(url, ct);
                 if (string.IsNullOrEmpty(html)) return null;
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
@@ -806,12 +809,12 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> FetchProductAuthorAsync(string asin)
+        private async Task<string?> FetchProductAuthorAsync(string asin, CancellationToken ct = default)
         {
             try
             {
                 var url = $"https://www.amazon.com/dp/{asin}";
-                var html = await GetHtmlAsync(url);
+            var html = await GetHtmlAsync(url, ct);
                 if (string.IsNullOrEmpty(html)) return null;
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
@@ -860,12 +863,12 @@ namespace Listenarr.Api.Services
         }
 
         // Public wrapper to allow callers to scrape product detail pages (uses Playwright fallback when needed)
-        public async Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin)
+        public async Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, CancellationToken ct = default)
         {
             try
             {
-                var title = await FetchProductTitleAsync(asin);
-                var author = await FetchProductAuthorAsync(asin);
+            var title = await FetchProductTitleAsync(asin, ct);
+            var author = await FetchProductAuthorAsync(asin, ct);
 
                 // Single HTML fetch and structured parsing for image + product details
                 string? image = null;
@@ -879,7 +882,7 @@ namespace Listenarr.Api.Services
                 string? language = null;
 
                 var url = $"https://www.amazon.com/dp/{asin}";
-                var html = await GetHtmlAsync(url);
+                var html = await GetHtmlAsync(url, ct);
                 if (!string.IsNullOrWhiteSpace(html))
                 {
                     var doc = new HtmlDocument();

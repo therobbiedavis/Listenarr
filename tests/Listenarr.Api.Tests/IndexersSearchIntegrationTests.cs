@@ -57,15 +57,15 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(new List<SearchResult>());
         }
 
-        public Task<List<SearchResult>> IntelligentSearchAsync(string query)
+        public Task<List<SearchResult>> IntelligentSearchAsync(string query, CancellationToken ct = default)
         {
             return Task.FromResult(new List<SearchResult>());
         }
 
         // Compatibility overload for updated ISearchService signature used in production
-        public Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 10, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7)
+        public Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 10, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, CancellationToken ct = default)
         {
-            return IntelligentSearchAsync(query);
+            return IntelligentSearchAsync(query, ct);
         }
 
         public Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null)

@@ -48,7 +48,7 @@ namespace Listenarr.Api.Services
             _loggerFactory = loggerFactory ?? LoggerFactory.Create(_ => { });
         }
 
-        public async Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin)
+        public async Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(asin)) return new AudibleBookMetadata();
 
@@ -64,7 +64,7 @@ namespace Listenarr.Api.Services
             
             try
             {
-                var (html, statusCode) = await GetHtmlAsync(url);
+                var (html, statusCode) = await GetHtmlAsync(url, ct);
 
                 // If Audible returns 404, return null (don't fallback)
                 if (statusCode == 404)
@@ -550,7 +550,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        protected async Task<(string? html, int statusCode)> GetHtmlAsync(string url)
+        protected async Task<(string? html, int statusCode)> GetHtmlAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -573,7 +573,7 @@ namespace Listenarr.Api.Services
                 request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
                 request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
                 request.Headers.Add("Accept-Encoding", "gzip, deflate, br");
-                var response = await _httpClient.SendAsync(request);
+                var response = await _httpClient.SendAsync(request, ct);
                 var statusCode = (int)response.StatusCode;
 
                 if (statusCode == 404)
@@ -597,7 +597,7 @@ namespace Listenarr.Api.Services
                 }
 
                 // Try Playwright fallback on-demand (await-using for async disposables)
-                return await GetHtmlWithPlaywrightAsync(url);
+                return await GetHtmlWithPlaywrightAsync(url, ct);
             }
             catch (Exception ex)
             {
@@ -606,7 +606,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        protected async Task<(string? html, int statusCode)> GetHtmlWithPlaywrightAsync(string url)
+        protected async Task<(string? html, int statusCode)> GetHtmlWithPlaywrightAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -628,6 +628,7 @@ namespace Listenarr.Api.Services
                 System.Threading.Interlocked.Increment(ref _playwrightFallbackCount);
                 pwLogger.LogInformation("Playwright invocation count: {Count}", Interlocked.Read(ref _playwrightFallbackCount));
 
+                if (ct.IsCancellationRequested) return (null, 0);
                 using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
                 await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true, Args = new[] { "--no-sandbox" } });
                 await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" });
@@ -636,6 +637,7 @@ namespace Listenarr.Api.Services
                 // Navigate with a more resilient wait strategy (DOMContentLoaded instead of NetworkIdle)
                 // Increase timeout to 60 seconds for slow connections/CAPTCHA scenarios
                 var gotoOptions = new Microsoft.Playwright.PageGotoOptions { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = 60000 };
+                if (ct.IsCancellationRequested) return (null, 0);
                 var pwResponse = await page.GotoAsync(url, gotoOptions);
 
                 var responseStatus = pwResponse?.Status ?? 0;
@@ -898,7 +900,7 @@ namespace Listenarr.Api.Services
                 {
                     var imageId = match.Groups[1].Value;
                     cleanUrl = $"https://m.media-amazon.com/images/I/{imageId}._SL500_.jpg";
-                    _logger.LogInformation("Cleaned social share URL to: {CleanUrl}", cleanUrl);
+                    _logger.LogDebug("Cleaned social share URL to: {CleanUrl}", cleanUrl);
                 }
             }
 
@@ -2300,7 +2302,7 @@ namespace Listenarr.Api.Services
 
     public interface IAudibleMetadataService
     {
-        Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin);
+        Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, CancellationToken ct = default);
         Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin);
         Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins);
     }

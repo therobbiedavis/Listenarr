@@ -435,7 +435,7 @@ namespace Listenarr.Api.Services
             return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-        public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2)
+        public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, CancellationToken ct = default)
         {
             var results = new List<SearchResult>();
 
@@ -544,12 +544,12 @@ namespace Listenarr.Api.Services
                         // For ISBN, prefer Amazon (Audible doesn't support ISBN well)
                         if (!skipAmazon)
                         {
-                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!);
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!, null, ct);
                             searchTasks.Add(amazonTask);
                         }
                         if (!skipAudible)
                         {
-                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!);
+                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!, ct);
                             searchTasks.Add(audibleTask);
                         }
                     }
@@ -558,12 +558,12 @@ namespace Listenarr.Api.Services
                         // For AUTHOR, TITLE, or normal search - search both in parallel
                         if (!skipAmazon)
                         {
-                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!);
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!, null, ct);
                             searchTasks.Add(amazonTask);
                         }
                         if (!skipAudible)
                         {
-                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!);
+                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!, ct);
                             searchTasks.Add(audibleTask);
                         }
                     }
@@ -628,7 +628,8 @@ namespace Listenarr.Api.Services
                     asinToSource,
                     asinToOpenLibrary,
                     metadataSources,
-                    query);
+                    query,
+                    ct);
 
                 var enriched = enrichmentResult.EnrichedResults;
                 var asinsNeedingFallback = enrichmentResult.AsinsNeedingFallback;
@@ -701,7 +702,9 @@ namespace Listenarr.Api.Services
                     var fallbackResult = await _fallbackScraper.ScrapeAsinsAsync(
                         asinsNeedingFallback,
                         enrichedList,
-                        candidateDropReasons);
+                        candidateDropReasons,
+                        asinToRawResult,
+                        ct);
 
                     // Add scraped results to enriched list
                     enriched.AddRange(fallbackResult.ScrapedResults);
@@ -835,7 +838,7 @@ namespace Listenarr.Api.Services
                                 if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
                                 {
                                     _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
-                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
+                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!, null, ct);
 
                                     foreach (var altResult in altResults.Take(2))
                                     {
@@ -1019,6 +1022,11 @@ namespace Listenarr.Api.Services
                 }
 
                 _logger.LogInformation("Intelligent search complete. Returning {Count} filtered and sorted results for query: {Query}", results.Count, query);
+                return results;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Intelligent search cancelled by request for query: {Query}", query);
                 return results;
             }
             catch (Exception ex)

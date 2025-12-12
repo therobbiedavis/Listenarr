@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -36,7 +37,9 @@ public class FallbackScraper
     public async Task<FallbackScrapeResult> ScrapeAsinsAsync(
         List<string> asinsNeedingFallback,
         List<SearchResult> alreadyEnrichedResults,
-        ConcurrentDictionary<string, string> candidateDropReasons)
+        ConcurrentDictionary<string, string> candidateDropReasons,
+        Dictionary<string, (string Title, string Author, string? ImageUrl)>? asinToRawResult = null,
+        CancellationToken ct = default)
     {
         var scrapedResults = new ConcurrentBag<SearchResult>();
 
@@ -55,12 +58,14 @@ public class FallbackScraper
         var scrapeSemaphore = new SemaphoreSlim(5); // Increased from 3 to 5 for better throughput
         var scrapeTasks = fallbackAsins.Select(asin => Task.Run(async () =>
         {
-            await scrapeSemaphore.WaitAsync();
+            await scrapeSemaphore.WaitAsync(ct);
+            ct.ThrowIfCancellationRequested();
             try
             {
                 _logger.LogDebug("Scraping product page for ASIN {Asin}", asin);
                 await _searchProgressReporter.BroadcastAsync($"Processing ASIN {asin}", asin);
                 
+                ct.ThrowIfCancellationRequested();
                 var metadata = await _amazonMetadataService.ScrapeAmazonMetadataAsync(asin!);
                 
                 if (metadata != null)
@@ -85,8 +90,35 @@ public class FallbackScraper
                         return;
                     }
 
+                    // Prefer original search result image URL over scraped placeholder
+                    string? fallbackImageUrl = metadata.ImageUrl;
+                    _logger.LogDebug("FallbackScraper: ASIN {Asin} - Scraped ImageUrl: {ScrapedUrl}", asin, fallbackImageUrl ?? "null");
+                    
+                    if (asinToRawResult != null && asinToRawResult.TryGetValue(asin!, out var rawResult))
+                    {
+                        _logger.LogDebug("FallbackScraper: ASIN {Asin} - Original search ImageUrl: {OriginalUrl}", asin, rawResult.ImageUrl ?? "null");
+                        
+                        if (!string.IsNullOrWhiteSpace(rawResult.ImageUrl))
+                        {
+                            // If scraper returned a grey-pixel placeholder but we have a real image from search, use the search image
+                            if (string.IsNullOrWhiteSpace(fallbackImageUrl) || fallbackImageUrl.Contains("grey-pixel.gif"))
+                            {
+                                fallbackImageUrl = rawResult.ImageUrl;
+                                _logger.LogInformation("Using original search result image URL for ASIN {Asin}: {ImageUrl} (replaced grey-pixel or null)", asin, fallbackImageUrl);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("FallbackScraper: ASIN {Asin} - Keeping scraped image (not a placeholder)", asin);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogDebug("FallbackScraper: ASIN {Asin} - No original search result available in asinToRawResult", asin);
+                    }
+
                     var enrichedResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(
-                        metadata, asin!, null, null, metadata.ImageUrl);
+                        metadata, asin!, null, null, fallbackImageUrl);
                     
                     enrichedResult.IsEnriched = true;
                     enrichedResult.MetadataSource = metadata.Source; // Set Amazon as metadata source

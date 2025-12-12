@@ -12,7 +12,7 @@
     </div>
 
     <!-- Debug: show raw search results (temporary) -->
-    <div v-if="!searchStore.isSearching" class="debug-results" style="background:#fff;border:1px solid #eee;padding:1rem;border-radius:6px;margin-top:1rem;">
+    <div v-if="!searchStore.isSearching && !searchStore.isCancelled" class="debug-results" style="background:#fff;border:1px solid #eee;padding:1rem;border-radius:6px;margin-top:1rem;">
       <strong>Debug: raw searchStore.searchResults</strong>
       <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(searchStore.searchResults, null, 2) }}</pre>
       <div style="margin-top:0.5rem">
@@ -38,6 +38,13 @@
         >
           {{ searchStore.isSearching ? 'Searching...' : 'Search' }}
         </button>
+        <button 
+          v-if="searchStore.isSearching"
+          @click="cancelSearch"
+          class="search-button cancel-button"
+        >
+          Cancel
+        </button>
       </div>
 
       <div class="search-filters">
@@ -54,8 +61,12 @@
       <PhSpinner class="ph-spin" />
       <p>Searching...</p>
     </div>
+    <div v-else-if="showCancelled" class="cancelled">
+      <PhXCircle />
+      <p>Search cancelled</p>
+    </div>
 
-    <div v-else-if="searchStore.hasResults" class="search-results">
+    <div v-else-if="showResults" class="search-results">
       <h3>Search Results ({{ searchStore.searchResults.length }})</h3>
       <div class="results-grid">
         <div 
@@ -142,7 +153,7 @@
       </div>
     </div>
 
-    <div v-else-if="searchQuery && !searchStore.isSearching" class="no-results">
+    <div v-else-if="showNoResults" class="no-results">
       <p>No results found for "{{ searchQuery }}"</p>
     </div>
   </div>
@@ -275,6 +286,29 @@ const performSearch = async () => {
   checkExistingInLibrary()
   console.log('=== performSearch END ===')
 }
+
+const cancelSearch = () => {
+  console.log('Cancelling search')
+  searchStore.cancel()
+}
+
+// UI state helpers to ensure only one state is shown at a time
+import { computed } from 'vue'
+const showCancelled = computed(() => {
+  const val = !!searchStore.isCancelled
+  console.log('showCancelled:', val, 'isCancelled:', searchStore.isCancelled)
+  return val
+})
+const showResults = computed(() => {
+  const val = !searchStore.isSearching && !searchStore.isCancelled && searchStore.hasResults
+  console.log('showResults:', val, 'isSearching:', searchStore.isSearching, 'isCancelled:', searchStore.isCancelled, 'hasResults:', searchStore.hasResults)
+  return val
+})
+const showNoResults = computed(() => {
+  const val = !!searchQuery.value && !searchStore.isSearching && !searchStore.isCancelled && !searchStore.hasResults
+  console.log('showNoResults:', val, 'searchQuery:', !!searchQuery.value, 'isSearching:', searchStore.isSearching, 'isCancelled:', searchStore.isCancelled, 'hasResults:', searchStore.hasResults)
+  return val
+})
 
 const checkExistingInLibrary = () => {
   console.log('checkExistingInLibrary called')
@@ -474,6 +508,14 @@ const getScoreClass = (score: number): string => {
   cursor: not-allowed;
 }
 
+.cancel-button {
+  background-color: #e74c3c;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background-color: #c0392b;
+}
+
 .search-filters {
   display: flex;
   gap: 1rem;
@@ -494,6 +536,18 @@ const getScoreClass = (score: number): string => {
 .loading i {
   font-size: 2rem;
   color: #3498db;
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.cancelled {
+  text-align: center;
+  padding: 2rem;
+  color: #e74c3c;
+}
+
+.cancelled i {
+  font-size: 2rem;
   display: block;
   margin-bottom: 1rem;
 }

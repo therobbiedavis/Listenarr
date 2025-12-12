@@ -54,8 +54,8 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogInformation("Received request for ASIN: {Asin}", asin);
 
-                // First, scrape the product page metadata
-                var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                // First, scrape the product page metadata (pass cancellation token)
+                var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin, HttpContext.RequestAborted);
                 
                 if (metadata == null)
                 {
@@ -66,8 +66,8 @@ namespace Listenarr.Api.Controllers
                 // Then try to enrich with search result data (runtime, series, etc.)
                 try
                 {
-                    // Search by ASIN to get the search result with metadata
-                    var searchResults = await _audibleSearchService.SearchAudiobooksAsync(asin);
+                    // Search by ASIN to get the search result with metadata (pass cancellation token)
+                    var searchResults = await _audibleSearchService.SearchAudiobooksAsync(asin, HttpContext.RequestAborted);
                     var matchingResult = searchResults.FirstOrDefault(r =>
                         r.Asin?.Equals(asin, System.StringComparison.OrdinalIgnoreCase) == true);
 

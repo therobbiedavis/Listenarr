@@ -32,18 +32,19 @@
           @input="handleSearchInput"
           @keyup.enter="performSearch"
         />
-        <button 
-          @click="performSearch" 
-          :disabled="isSearching || !searchQuery.trim()"
+        <button
+          @click="isSearching ? cancelSearch() : performSearch()"
+          :disabled="!isSearching && !searchQuery.trim()"
           class="search-btn"
         >
           <template v-if="isSearching">
             <PhSpinner class="ph-spin" />
+            Cancel
           </template>
           <template v-else>
             <PhMagnifyingGlass />
+            Search
           </template>
-          {{ isSearching ? 'Searching...' : 'Search' }}
         </button>
       </div>
       
@@ -270,7 +271,7 @@
     </div>
 
     <!-- No Results -->
-    <div v-if="searchType === 'asin' && !audibleResult && !isSearching && searchQuery" class="empty-state">
+    <div v-if="searchType === 'asin' && !audibleResult && !isSearching && !isCancelled && searchQuery" class="empty-state">
       <div class="empty-icon">
         <PhMagnifyingGlass />
       </div>
@@ -284,7 +285,7 @@
       </div>
     </div>
 
-    <div v-if="searchType === 'title' && titleResults.length === 0 && !isSearching && searchQuery" class="empty-state">
+    <div v-if="searchType === 'title' && titleResults.length === 0 && !isSearching && !isCancelled && searchQuery" class="empty-state">
       <div class="empty-icon">
         <PhBook />
       </div>
@@ -331,7 +332,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud } from '@phosphor-icons/vue'
+import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud, PhXCircle } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre } from '@/types'
 import { apiService } from '@/services/api'
@@ -374,6 +375,10 @@ const enabledMetadataSources = computed(() => {
     .filter(api => api.isEnabled && api.type === 'metadata' && api.name.toLowerCase() !== 'openlibrary')
     .sort((a, b) => a.priority - b.priority) // Sort by priority (lower = higher priority)
 })
+
+// Abort controller for cancelling the active intelligent search
+const searchAbortController = ref<AbortController | null>(null)
+
 
 // Small helper to decode basic HTML entities (covers &amp;, &lt;, &gt;, &quot;, &#39;)
 // const decodeHtml = (input?: string | null): string => {
@@ -519,6 +524,7 @@ watch(searchQuery, (v) => {
 })
 const searchType = ref<'asin' | 'title' | 'isbn' | null>(null)
 const isSearching = ref(false)
+const isCancelled = ref(false)
 const searchError = ref('')
 const searchDebounceTimer = ref<number | null>(null)
 const searchStatus = ref('')
@@ -737,6 +743,7 @@ const performSearch = async () => {
   const detectedType = detectSearchType(query)
   logger.debug('Detected search type:', detectedType)
   searchType.value = detectedType
+  isCancelled.value = false
   searchStatus.value = ''
 
   if (detectedType === 'asin') {
@@ -746,6 +753,22 @@ const performSearch = async () => {
   } else {
     await searchByTitle(query)
   }
+}
+
+const cancelSearch = () => {
+  if (searchAbortController.value) {
+    try {
+      searchAbortController.value.abort()
+      logger.debug('User requested search cancellation')
+      searchStatus.value = 'Search cancelled'
+    } catch (e) {
+      logger.debug('Failed to abort search controller', e)
+    }
+  }
+  isSearching.value = false
+  isCancelled.value = true
+  // Clear controller reference
+  try { searchAbortController.value = null } catch {}
 }
 
 const searchByAsin = async (asin: string) => {
@@ -780,7 +803,10 @@ const searchByAsin = async (asin: string) => {
   try {
     // Use the search API with ASIN: prefix to trigger intelligent search with direct product page scraping
     // This will scrape Amazon/Audible product pages directly instead of only checking metadata APIs
-    const results = await apiService.searchByTitle(`ASIN:${cleanAsin}`)
+    // Cancel any previous search and create controller for this request
+    try { searchAbortController.value?.abort() } catch {}
+    searchAbortController.value = new AbortController()
+    const results = await apiService.searchByTitle(`ASIN:${cleanAsin}`, { signal: searchAbortController.value.signal })
     
     logger.debug('ASIN search results:', results)
     
@@ -788,34 +814,36 @@ const searchByAsin = async (asin: string) => {
       // Take the first result (should be the direct ASIN match)
       const result = results[0]
       
-      // Extract year from publishedDate if available
-      let publishYear: string | undefined
-      if (result.publishedDate) {
-        const yearMatch = result.publishedDate.match(/\d{4}/)
-        publishYear = yearMatch ? yearMatch[0] : undefined
+      if (result) {
+        // Extract year from publishedDate if available
+        let publishYear: string | undefined
+        if (result.publishedDate) {
+          const yearMatch = result.publishedDate.match(/\d{4}/)
+          publishYear = yearMatch ? yearMatch[0] : undefined
+        }
+        
+        audibleResult.value = {
+          asin: result.asin || cleanAsin,
+          title: result.title || 'Unknown Title',
+          subtitle: undefined,
+          authors: result.artist ? [result.artist] : [],
+          narrators: result.narrator ? result.narrator.split(', ') : [],
+          publisher: result.publisher,
+          publishYear: publishYear,
+          publishedDate: result.publishedDate,
+          description: result.description,
+          imageUrl: result.imageUrl,
+          runtime: result.runtime,
+          language: result.language,
+          series: result.series,
+          seriesNumber: result.seriesNumber,
+          isbn: undefined,
+          source: result.source,
+          sourceLink: result.sourceLink
+        }
+        
+        logger.debug('audibleResult set with source:', audibleResult.value.source)
       }
-      
-      audibleResult.value = {
-        asin: result.asin || cleanAsin,
-        title: result.title || 'Unknown Title',
-        subtitle: undefined,
-        authors: result.artist ? [result.artist] : [],
-        narrators: result.narrator ? result.narrator.split(', ') : [],
-        publisher: result.publisher,
-        publishYear: publishYear,
-        publishedDate: result.publishedDate,
-        description: result.description,
-        imageUrl: result.imageUrl,
-        runtime: result.runtime,
-        language: result.language,
-        series: result.series,
-        seriesNumber: result.seriesNumber,
-        isbn: undefined,
-        source: result.source,
-        sourceLink: result.sourceLink
-      }
-      
-      logger.debug('audibleResult set with source:', audibleResult.value.source)
     }
     
   // Check library status after getting result
@@ -834,6 +862,10 @@ const searchByAsin = async (asin: string) => {
 }
 
 const searchByTitle = async (query: string) => {
+  // Cancel any previous search in progress
+  try { searchAbortController.value?.abort() } catch {}
+  searchAbortController.value = new AbortController()
+
   isSearching.value = true
   searchError.value = ''
   audibleResult.value = null
@@ -854,7 +886,7 @@ const searchByTitle = async (query: string) => {
   try {
     // Use intelligent search API that searches Audible/Amazon, gets ASINs, and enriches with metadata
     // Pass the original query WITH prefix so backend can handle TITLE:/AUTHOR: prefixes
-    const results = await apiService.searchByTitle(query)
+    const results = await apiService.searchByTitle(query, { signal: searchAbortController.value.signal })
     // expose raw results for debugging on the Add New page
     rawDebugResults.value = results
     try { window.addnew_rawDebugResults = results } catch {}
@@ -923,12 +955,19 @@ const searchByTitle = async (query: string) => {
     await checkExistingInLibrary()
     searchStatus.value = `Search complete — found ${titleResults.value.length} items`
   } catch (error) {
-    logger.error('Title search failed:', error)
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
+    if (error && (error as any).name === 'AbortError') {
+      logger.debug('Title search aborted by user')
+      errorMessage.value = 'Search cancelled'
+    } else {
+      logger.error('Title search failed:', error)
+      errorMessage.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
+    }
   } finally {
     isSearching.value = false
     // Clear status shortly after completion so UI isn't stale
     setTimeout(() => { searchStatus.value = '' }, 1000)
+    // clear controller after completion
+    try { searchAbortController.value = null } catch {}
   }
 }
 
@@ -2496,6 +2535,18 @@ onMounted(async () => {
     white-space: normal;
     overflow-wrap: anywhere;
   }
+}
+
+.cancelled {
+  text-align: center;
+  padding: 2rem;
+  color: #e74c3c;
+}
+
+.cancelled svg {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 1rem;
 }
 
 </style>

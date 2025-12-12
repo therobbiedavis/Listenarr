@@ -1,4 +1,5 @@
 using Listenarr.Api.Services.Search;
+using System.Threading;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Microsoft.Extensions.Logging;
@@ -36,7 +37,8 @@ public class AsinCandidateCollector
         string query,
         bool skipOpenLibrary = false,
         int amazonProviderCap = 50,
-        int audibleProviderCap = 50)
+        int audibleProviderCap = 50,
+        CancellationToken ct = default)
     {
         var collection = new AsinCandidateCollection();
         
@@ -96,21 +98,24 @@ public class AsinCandidateCollector
         // Augment ASIN candidates with OpenLibrary suggestions
         if (!skipOpenLibrary && !string.IsNullOrEmpty(query))
         {
-            await CollectOpenLibraryCandidatesAsync(query, collection);
+            ct.ThrowIfCancellationRequested();
+            await CollectOpenLibraryCandidatesAsync(query, collection, ct);
         }
 
         return collection;
     }
 
-    private async Task CollectOpenLibraryCandidatesAsync(string query, AsinCandidateCollection collection)
+    private async Task CollectOpenLibraryCandidatesAsync(string query, AsinCandidateCollection collection, CancellationToken ct = default)
     {
         try
         {
+            ct.ThrowIfCancellationRequested();
             await _searchProgressReporter.BroadcastAsync($"Searching OpenLibrary for additional titles", null);
             var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
             
             foreach (var book in books.Docs.Take(3))
             {
+                ct.ThrowIfCancellationRequested();
                 if (!string.IsNullOrEmpty(book.Title) && !string.Equals(book.Title, query, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogInformation("OpenLibrary suggested title: {Title}", book.Title);
@@ -137,6 +142,7 @@ public class AsinCandidateCollector
                             ImageUrl = coverUrl
                         };
 
+                        ct.ThrowIfCancellationRequested();
                         var searchResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, string.Empty);
                         searchResult.IsEnriched = true;
                         searchResult.MetadataSource = "OpenLibrary";

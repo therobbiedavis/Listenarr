@@ -38,7 +38,7 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly string _tempCachePath;
         private readonly string _libraryImagePath;
-
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _downloadLocks = new();
         public ImageCacheService(ILogger<ImageCacheService> logger, IHttpClientFactory httpClientFactory)
         {
             _logger = logger;
@@ -67,15 +67,7 @@ namespace Listenarr.Api.Services
 
             try
             {
-                // Check if already cached
-                var existingPath = GetImagePath(identifier, _tempCachePath);
-                if (File.Exists(existingPath))
-                {
-                    _logger.LogInformation("Image already cached: {Identifier}", identifier);
-                    return GetRelativePath(existingPath);
-                }
-
-                // Check library storage
+                // Check library storage first
                 var libraryPath = GetImagePath(identifier, _libraryImagePath);
                 if (File.Exists(libraryPath))
                 {
@@ -83,23 +75,63 @@ namespace Listenarr.Api.Services
                     return GetRelativePath(libraryPath);
                 }
 
+                // Check temp cache for a valid (non-placeholder) image
+                var tempExisting = GetBestTempImagePathIfValid(identifier);
+                if (!string.IsNullOrEmpty(tempExisting))
+                {
+                    _logger.LogInformation("Image already cached: {Identifier}", identifier);
+                    return GetRelativePath(tempExisting);
+                }
+
                 _logger.LogInformation("Downloading image from {Url} for {Identifier}", imageUrl, identifier);
 
-                // Download image
-                var response = await _httpClient.GetAsync(imageUrl);
-                response.EnsureSuccessStatusCode();
+                // Skip known Amazon placeholder URL to avoid caching tiny grey-pixel images
+                if (imageUrl.Contains("grey-pixel.gif", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Skipping known grey-pixel placeholder URL for {Identifier}", identifier);
+                    return null;
+                }
 
-                // Determine file extension from content type or URL
-                var extension = GetImageExtension(imageUrl, response.Content.Headers.ContentType?.MediaType);
-                var fileName = $"{SanitizeFileName(identifier)}{extension}";
-                var filePath = Path.Combine(_tempCachePath, fileName);
+                // Use per-identifier lock to prevent concurrent downloads for same identifier
+                var sem = _downloadLocks.GetOrAdd(identifier, _ => new System.Threading.SemaphoreSlim(1, 1));
+                await sem.WaitAsync();
+                try
+                {
+                    // Re-check after acquiring lock
+                    libraryPath = GetImagePath(identifier, _libraryImagePath);
+                    if (File.Exists(libraryPath))
+                    {
+                        _logger.LogInformation("Image already in library storage (after wait): {Identifier}", identifier);
+                        return GetRelativePath(libraryPath);
+                    }
 
-                // Save to temp cache
-                await using var fileStream = File.Create(filePath);
-                await response.Content.CopyToAsync(fileStream);
+                    tempExisting = GetBestTempImagePathIfValid(identifier);
+                    if (!string.IsNullOrEmpty(tempExisting))
+                    {
+                        _logger.LogInformation("Image already cached (after wait): {Identifier}", identifier);
+                        return GetRelativePath(tempExisting);
+                    }
 
-                _logger.LogInformation("Image cached successfully: {FilePath}", filePath);
-                return GetRelativePath(filePath);
+                    // Download image
+                    var response = await _httpClient.GetAsync(imageUrl);
+                    response.EnsureSuccessStatusCode();
+
+                    // Determine file extension from content type or URL
+                    var extension = GetImageExtension(imageUrl, response.Content.Headers.ContentType?.MediaType);
+                    var fileName = $"{SanitizeFileName(identifier)}{extension}";
+                    var filePath = Path.Combine(_tempCachePath, fileName);
+
+                    // Save to temp cache
+                    await using var fileStream = File.Create(filePath);
+                    await response.Content.CopyToAsync(fileStream);
+
+                    _logger.LogInformation("Image cached successfully: {FilePath}", filePath);
+                    return GetRelativePath(filePath);
+                }
+                finally
+                {
+                    sem.Release();
+                }
             }
             catch (Exception ex)
             {
@@ -180,18 +212,51 @@ namespace Listenarr.Api.Services
         {
             if (string.IsNullOrWhiteSpace(identifier))
                 return Task.FromResult<string?>(null);
-
             // Check library storage first
             var libraryPath = GetImagePath(identifier, _libraryImagePath);
             if (File.Exists(libraryPath))
                 return Task.FromResult<string?>(GetRelativePath(libraryPath));
 
-            // Check temp cache
-            var tempPath = GetImagePath(identifier, _tempCachePath);
-            if (File.Exists(tempPath))
-                return Task.FromResult<string?>(GetRelativePath(tempPath));
+            // Check temp cache and prefer non-placeholder images
+            var tempBest = GetBestTempImagePathIfValid(identifier);
+            if (!string.IsNullOrEmpty(tempBest))
+                return Task.FromResult<string?>(GetRelativePath(tempBest));
 
             return Task.FromResult<string?>(null);
+        }
+
+        private string? GetBestTempImagePathIfValid(string identifier)
+        {
+            var sanitized = SanitizeFileName(identifier);
+            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+
+            foreach (var ext in extensions)
+            {
+                var path = Path.Combine(_tempCachePath, sanitized + ext);
+                if (!File.Exists(path)) continue;
+
+                // If it's a GIF that is very small, treat it as a placeholder and ignore it
+                if (ext.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var fi = new FileInfo(path);
+                        if (fi.Length < 2048)
+                        {
+                            _logger.LogInformation("Ignoring small GIF placeholder in cache for {Identifier}: {Path} ({Length} bytes)", identifier, path, fi.Length);
+                            continue;
+                        }
+                    }
+                    catch
+                    {
+                        // If anything goes wrong inspecting the file, fall back to using it
+                    }
+                }
+
+                return path;
+            }
+
+            return null;
         }
 
         /// <summary>

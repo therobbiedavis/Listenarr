@@ -218,10 +218,10 @@ class ApiService {
   // Search API
   // Deprecated compatibility shim removed. Use `intelligentSearch`, `searchIndexers`, or `searchByApi`.
 
-  async intelligentSearch(query: string, category?: string): Promise<SearchResult[]> {
+  async intelligentSearch(query: string, category?: string, signal?: AbortSignal): Promise<SearchResult[]> {
     const params = new URLSearchParams({ query })
     if (category) params.append('category', category)
-    return this.request<SearchResult[]>(`/search/intelligent?${params}`)
+    return this.request<SearchResult[]>(`/search/intelligent?${params}`, { signal })
   }
 
   async searchIndexers(query: string, category?: string, sortBy?: SearchSortBy, sortDirection?: SearchSortDirection): Promise<SearchResult[]> {
@@ -258,8 +258,8 @@ class ApiService {
     return this.request(`/search/metadata/${asin}?region=${region}&cache=${cache}`)
   }
 
-  async searchByTitle(query: string): Promise<SearchResult[]> {
-    return this.request(`/search/intelligent?query=${encodeURIComponent(query)}`)
+  async searchByTitle(query: string, options?: RequestInit): Promise<SearchResult[]> {
+    return this.request(`/search/intelligent?query=${encodeURIComponent(query)}`, options)
   }
 
   // Downloads API

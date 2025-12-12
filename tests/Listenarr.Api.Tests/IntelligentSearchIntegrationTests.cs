@@ -45,7 +45,7 @@ namespace Listenarr.Api.Tests
                     // ISearchService used by controllers with a controlled mock that returns
                     // deterministic enriched results for this test.
                     var mockSearch = new Moq.Mock<ISearchService>();
-                    mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>()))
+                    mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<System.Threading.CancellationToken>()))
                         .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "B0TESTASIN", Title = "Clean Title" } });
                     services.AddSingleton<ISearchService>(mockSearch.Object);
                 });
@@ -65,12 +65,48 @@ namespace Listenarr.Api.Tests
             // The TestAudibleMetadataService provides a cleaned/enriched title
             Assert.Equal("Clean Title", first.Title);
         }
+
+        [Fact]
+        public async Task IntelligentSearch_TitlePrefix_MatchesOnlyTitleNotAuthor()
+        {
+            var client = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    // Provide an Amazon service with two results: one where title contains "Ingram" and one where the author is "Ingram"
+                    services.AddSingleton<IAmazonSearchService>(sp => new TestAmazonTitlePrefixSearchService());
+
+                    // Ensure Audible search returns no results for deterministic output
+                    services.AddSingleton<IAudibleSearchService>(sp => new TestAudibleSearchService());
+
+                    // Provide metadata service that returns a cleaned/enriched version of the title for the Asin we expect to accept
+                    services.AddSingleton<IAudibleMetadataService>(sp => new TestAudibleMetadataService());
+
+                    // Prevent external HTTP calls for images during tests by injecting a test image cache
+                    services.AddSingleton<IImageCacheService>(sp => new TestImageCacheService());
+                });
+            }).CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            var resp = await client.GetAsync("/api/search/intelligent?query=TITLE:Ingram");
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+            var body = await resp.Content.ReadAsStringAsync();
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var results = JsonSerializer.Deserialize<List<SearchResult>>(body, options);
+
+            Assert.NotNull(results);
+            // Expect a single result whose title contains 'Ingram', not the author-only match
+            Assert.Single(results);
+            var first = results![0];
+            // The result should be the ASIN whose title contains 'Ingram' (A1). The ASIN with 'Ingram' only as author (A2) should be excluded.
+            Assert.Equal("B000000001", first.Asin);
+        }
     }
 
     // Simple test implementations to avoid network calls in integration tests
     internal class TestAudibleSearchService : IAudibleSearchService
     {
-        public Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query)
+        public Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, System.Threading.CancellationToken ct = default)
         {
             var list = new List<AudibleSearchResult>
             {
@@ -89,7 +125,7 @@ namespace Listenarr.Api.Tests
 
     internal class TestAudibleMetadataService : IAudibleMetadataService
     {
-        public Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin)
+        public Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, System.Threading.CancellationToken ct = default)
         {
             var m = new AudibleBookMetadata
             {
@@ -99,7 +135,7 @@ namespace Listenarr.Api.Tests
                 ImageUrl = "http://example.com/test.jpg",
                 PublishYear = "2024"
             };
-            return Task.FromResult(m);
+            return Task.FromResult<AudibleBookMetadata?>(m);
         }
 
         public Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin)
@@ -113,7 +149,7 @@ namespace Listenarr.Api.Tests
                 PublishYear = "2024",
                 Source = "Amazon"
             };
-            return Task.FromResult(m);
+            return Task.FromResult<AudibleBookMetadata?>(m);
         }
 
         public Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins)
@@ -129,14 +165,44 @@ namespace Listenarr.Api.Tests
 
     internal class TestAmazonSearchService : IAmazonSearchService
     {
-        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null)
+        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null, System.Threading.CancellationToken ct = default)
         {
             // Return empty list to avoid interference with Audible-only test
             return Task.FromResult(new List<AmazonSearchResult>());
         }
-        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin)
+        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, System.Threading.CancellationToken ct = default)
         {
             // Tests don't need product page scraping; return null
+            return Task.FromResult<AmazonSearchResult?>(null);
+        }
+    }
+
+    internal class TestAmazonTitlePrefixSearchService : IAmazonSearchService
+    {
+        public Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string query, string? author = null, System.Threading.CancellationToken ct = default)
+        {
+            var list = new List<AmazonSearchResult>
+            {
+                new AmazonSearchResult
+                {
+                    Asin = "B000000001",
+                    Title = "Ingram: A Novel",
+                    ImageUrl = "http://example.com/a1.jpg",
+                    Author = "John Doe"
+                },
+                new AmazonSearchResult
+                {
+                    Asin = "B000000002",
+                    Title = "Different Book",
+                    ImageUrl = "http://example.com/a2.jpg",
+                    Author = "Ingram"
+                }
+            };
+            return Task.FromResult(list);
+        }
+
+        public Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, System.Threading.CancellationToken ct = default)
+        {
             return Task.FromResult<AmazonSearchResult?>(null);
         }
     }

@@ -6,9 +6,11 @@ import { apiService } from '@/services/api'
 export const useSearchStore = defineStore('search', () => {
   const searchResults = ref<SearchResult[]>([])
   const isSearching = ref(false)
+  const isCancelled = ref(false)
   const searchQuery = ref('')
   const selectedCategory = ref<string>('')
   const selectedApiIds = ref<string[]>([])
+  let abortController: AbortController | null = null
   
   const hasResults = computed(() => searchResults.value.length > 0)
 
@@ -17,6 +19,7 @@ export const useSearchStore = defineStore('search', () => {
     ;(window as unknown as Record<string, unknown>).pinia_search = {
       searchResults,
       isSearching,
+      isCancelled,
       searchQuery,
       selectedCategory,
       selectedApiIds,
@@ -27,21 +30,42 @@ export const useSearchStore = defineStore('search', () => {
   
   const search = async (query: string, category?: string, apiIds?: string[]) => {
     isSearching.value = true
+    isCancelled.value = false
     searchQuery.value = query
     selectedCategory.value = category || ''
     selectedApiIds.value = apiIds || []
     
+    abortController = new AbortController()
+    
     try {
       // Default to intelligent (Amazon + Audible enrichment) search for unified searches
-      const results = await apiService.intelligentSearch(query, category)
+      const results = await apiService.intelligentSearch(query, category, abortController.signal)
       console.log('Search results received:', results)
       console.log('First result:', results[0])
       searchResults.value = results
     } catch (error) {
-      console.error('Search failed:', error)
-      searchResults.value = []
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Search was cancelled')
+        isCancelled.value = true
+        searchResults.value = []
+      } else {
+        console.error('Search failed:', error)
+        searchResults.value = []
+      }
     } finally {
       isSearching.value = false
+      abortController = null
+    }
+  }
+  
+  const cancel = () => {
+    console.log('Cancel called, abortController:', !!abortController)
+    if (abortController) {
+      abortController.abort()
+      isCancelled.value = true
+      isSearching.value = false
+      searchResults.value = [] // Clear results when cancelled
+      console.log('Cancelled: isCancelled set to true, results cleared')
     }
   }
   
@@ -50,16 +74,19 @@ export const useSearchStore = defineStore('search', () => {
     searchQuery.value = ''
     selectedCategory.value = ''
     selectedApiIds.value = []
+    isCancelled.value = false
   }
   
   return {
     searchResults,
     isSearching,
+    isCancelled,
     searchQuery,
     selectedCategory,
     selectedApiIds,
     hasResults,
     search,
+    cancel,
     clearResults
   }
 })

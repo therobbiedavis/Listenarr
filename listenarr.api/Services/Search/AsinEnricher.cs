@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
 using Listenarr.Infrastructure.Models;
@@ -47,7 +48,8 @@ public class AsinEnricher
         Dictionary<string, string> asinToSource,
         Dictionary<string, OpenLibraryBook> asinToOpenLibrary,
         List<ApiConfiguration> metadataSources,
-        string? query)
+        string? query,
+        CancellationToken ct = default)
     {
         var semaphore = new SemaphoreSlim(5); // Increased from 3 to 5 for better throughput
         var enrichmentTasks = new List<Task>();
@@ -59,9 +61,10 @@ public class AsinEnricher
         {
             enrichmentTasks.Add(Task.Run(async () =>
             {
-                await semaphore.WaitAsync();
+                await semaphore.WaitAsync(ct);
                 try
                 {
+                    ct.ThrowIfCancellationRequested();
                     _logger.LogDebug("Enriching ASIN {Asin}", asin);
                     await _searchProgressReporter.BroadcastAsync($"Enriching ASIN: {asin}", asin);
 
@@ -140,6 +143,7 @@ public class AsinEnricher
                     // Use the pre-fetched metadata sources (avoid DbContext concurrency issues)
                     if (metadata == null && metadataSources.Count > 0)
                     {
+                        ct.ThrowIfCancellationRequested();
                         await _searchProgressReporter.BroadcastAsync($"Fetching metadata for ASIN: {asin}", asin);
                         (metadata, metadataSourceName) = await _metadataStrategyCoordinator.FetchMetadataAsync(
                             asin, metadataSources, originalSource);
@@ -157,7 +161,8 @@ public class AsinEnricher
                             {
                                 _logger.LogInformation("No external metadata sources succeeded for ASIN {Asin} - trying audible metadata scraper", asin);
                                 await _searchProgressReporter.BroadcastAsync($"Scraping Audible page for ASIN: {asin}", asin);
-                                var scrapedMd = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                                ct.ThrowIfCancellationRequested();
+                                    var scrapedMd = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin, ct);
                                 if (scrapedMd != null)
                                 {
                                     metadata = scrapedMd;
@@ -226,6 +231,11 @@ public class AsinEnricher
                         _logger.LogWarning("✗ No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
                         try { candidateDropReasons[asin] = "no_metadata_after_sources"; } catch { }
                     }
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("Metadata enrichment cancelled for ASIN {Asin}", asin);
+                    throw;
                 }
                 catch (Exception ex)
                 {
