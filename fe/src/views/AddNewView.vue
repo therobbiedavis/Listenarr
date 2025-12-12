@@ -719,6 +719,16 @@ const handleSearchInput = () => {
     searchDebounceTimer.value = null
   }
   
+  // If a search is currently running, cancel it immediately so new input
+  // will trigger a fresh search (prevents overlapping searches)
+  if (isSearching.value) {
+    try {
+      cancelSearch()
+    } catch (e) {
+      logger.debug('Error cancelling previous search on input', e)
+    }
+  }
+
   if (query) {
     searchType.value = detectSearchType(query)
     
