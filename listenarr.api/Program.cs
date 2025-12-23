@@ -1,7 +1,7 @@
 ﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
@@ -39,9 +39,13 @@ var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
 var signalRSink = new SignalRLogSink();
+var logLevelEnv = Environment.GetEnvironmentVariable("LISTENARR_LOG_LEVEL");
+var minimumLevel = Enum.TryParse<LogEventLevel>(logLevelEnv, ignoreCase: true, out var parsedLevel)
+	? parsedLevel
+	: LogEventLevel.Information;
 
 // Industry-standard defaults:
-// - Application logs at Information
+// - Application logs at Information (unless overridden)
 // - Third-party and framework logs (Microsoft/System) at Warning
 // - EF Core DB command logging elevated to Warning by default (can be lowered to Debug for troubleshooting)
 Log.Logger = new Serilog.LoggerConfiguration()
@@ -50,7 +54,7 @@ Log.Logger = new Serilog.LoggerConfiguration()
     .Enrich.WithProperty("Machine", Environment.MachineName)
     .Enrich.WithProperty("ProcessId", Environment.ProcessId)
     .Enrich.WithProperty("Application", "Listenarr.Api")
-    .MinimumLevel.Information()
+    .MinimumLevel.Is(minimumLevel)
     // Framework and system noise should be at Warning by default
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
