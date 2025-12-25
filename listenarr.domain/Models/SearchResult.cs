@@ -25,6 +25,8 @@ namespace Listenarr.Domain.Models
         public string Id { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
+        // Backwards-compatibility: some tests and callers expect `Author` property name.
+        public string Author { get => Artist; set => Artist = value; }
         public string Album { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
         public long Size { get; set; }
@@ -51,6 +53,10 @@ namespace Listenarr.Domain.Models
         // Additional properties for enhanced audiobook metadata
         public string? Description { get; set; }
         public string? Publisher { get; set; }
+        // Subtitle provided by metadata sources (e.g., Audible/Audimeta)
+        public string? Subtitle { get; set; }
+        // Publish year as provided by metadata (convenience for UI)
+        public string? PublishYear { get; set; }
         public string? Language { get; set; }
         public int? Runtime { get; set; }
         public string? Narrator { get; set; }
@@ -66,6 +72,7 @@ namespace Listenarr.Domain.Models
         public int Score { get; set; }
         // Tracks which metadata API was used to enrich this result (e.g., "Audimeta", "Audnexus", "Audible (Scraped)")
         public string? MetadataSource { get; set; }
+        public string? Subtitles { get; set; }
     }
 
     public class SearchAndDownloadResult

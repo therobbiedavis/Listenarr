@@ -122,11 +122,11 @@
 
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl)})` }"></div>
+      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'})` }"></div>
       <div class="hero-content">
         <div class="poster-container">
           <img 
-            :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
+            :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'" 
             :alt="audiobook.title"
             class="poster"
             loading="lazy"
@@ -1323,7 +1323,7 @@ function formatDate(dateString?: string): string {
   padding: 8px 12px;
   background-color: #3a3a3a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
@@ -1373,7 +1373,7 @@ function formatDate(dateString?: string): string {
   margin-top: 4px;
   background-color: #2a2a2a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   min-width: 180px;
   z-index: 100;
@@ -1400,7 +1400,7 @@ function formatDate(dateString?: string): string {
 }
 
 .more-dropdown .dropdown-item {
-  border-radius: 0;
+  border-radius: 6px;
 }
 
 .dropdown-item {
@@ -1419,11 +1419,11 @@ function formatDate(dateString?: string): string {
 }
 
 .dropdown-item:first-child {
-  border-radius: 4px 4px 0 0;
+  border-radius: 6px;
 }
 
 .dropdown-item:last-child {
-  border-radius: 0 0 4px 4px;
+  border-radius: 6px;
 }
 
 .dropdown-item:hover:not(:disabled) {
@@ -1544,7 +1544,7 @@ function formatDate(dateString?: string): string {
   width: 350px;
   height: 350px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
@@ -1617,7 +1617,7 @@ function formatDate(dateString?: string): string {
 
 .file-path {
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 6px;
   font-size: 13px;
   color: #aaa;
 }
@@ -1634,7 +1634,7 @@ function formatDate(dateString?: string): string {
   gap: 10px;
   padding: 10px 14px;
   background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
 }
 
@@ -1660,7 +1660,7 @@ function formatDate(dateString?: string): string {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
 }
@@ -1747,7 +1747,7 @@ function formatDate(dateString?: string): string {
   padding: 8px 16px;
   background-color: rgba(0, 122, 204, 0.1);
   border: 1px solid #007acc;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #007acc;
   font-size: 13px;
   cursor: pointer;
@@ -1978,7 +1978,7 @@ function formatDate(dateString?: string): string {
 .detail-card {
   background-color: #2a2a2a;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 20px;
 }
 
@@ -2022,7 +2022,7 @@ function formatDate(dateString?: string): string {
   padding: 6px 12px;
   background-color: #3a3a3a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 12px;
 }
@@ -2039,7 +2039,7 @@ function formatDate(dateString?: string): string {
   padding: 6px 12px;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #e0e0e0;
   font-size: 12px;
   font-weight: 500;
@@ -2055,7 +2055,7 @@ function formatDate(dateString?: string): string {
 .files-content, .history-content {
   background-color: #2a2a2a;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 20px;
 }
 
@@ -2080,7 +2080,7 @@ function formatDate(dateString?: string): string {
   padding: 8px 12px;
   background-color: #3a3a3a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
@@ -2102,7 +2102,7 @@ function formatDate(dateString?: string): string {
   flex-direction: column;
   padding: 12px;
   background-color: #333;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s ease;
 }
 
@@ -2375,7 +2375,7 @@ function formatDate(dateString?: string): string {
   padding: 8px 16px;
   background-color: #007acc;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   cursor: pointer;
   font-size: 14px;
@@ -2402,7 +2402,7 @@ function formatDate(dateString?: string): string {
   gap: 16px;
   padding: 16px;
   background-color: #333;
-  border-radius: 8px;
+  border-radius: 6px;
   border-left: 3px solid #555;
   transition: transform 0.2s, box-shadow 0.2s;
 }
@@ -2476,7 +2476,7 @@ function formatDate(dateString?: string): string {
   color: #5865F2;
   background-color: rgba(88, 101, 242, 0.15);
   padding: 2px 8px;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(88, 101, 242, 0.3);
   font-weight: 500;
 }
@@ -2486,7 +2486,7 @@ function formatDate(dateString?: string): string {
   color: #999;
   padding: 2px 8px;
   background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
+  border-radius: 6px;
 }
 
 .history-message {
@@ -2537,7 +2537,7 @@ function formatDate(dateString?: string): string {
   padding: 12px 24px;
   background-color: #007acc;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   cursor: pointer;
   font-size: 14px;
@@ -2564,7 +2564,7 @@ function formatDate(dateString?: string): string {
 
 .dialog {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #444;
   width: 90%;
   max-width: 500px;
@@ -2622,7 +2622,7 @@ function formatDate(dateString?: string): string {
   gap: 6px;
   padding: 10px 20px;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;

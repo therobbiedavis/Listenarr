@@ -34,6 +34,18 @@
   --color-text: var(--vt-c-text-light-1);
 
   --section-gap: 160px;
+
+  /* App-level aliases (keeps older/legacy view vars working) */
+  --primary-color: #2196F3; /* Listenarr branding */
+  --card-bg: var(--color-background-soft);
+  --border-color: var(--color-border);
+  --text-color: var(--color-text);
+  --text-muted: rgba(0, 0, 0, 0.6);
+  --button-bg: var(--card-bg);
+  --button-hover-bg: var(--color-background-mute);
+  --input-bg: var(--color-background);
+  --selected-bg: rgba(33, 150, 243, 0.06);
+  --muted-bg: var(--color-background-mute);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +59,11 @@
 
     --color-heading: var(--vt-c-text-dark-1);
     --color-text: var(--vt-c-text-dark-2);
+
+    /* Dark mode overrides for aliases */
+    --text-muted: rgba(255, 255, 255, 0.64);
+    --selected-bg: rgba(33, 150, 243, 0.12);
+    --button-hover-bg: rgba(255, 255, 255, 0.03);
   }
 }
 

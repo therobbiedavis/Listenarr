@@ -155,7 +155,7 @@ const handleCancel = () => {
 .remote-path-mapping-form {
   background-color: #222;
   padding: 1.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid #444;
 }
 
@@ -188,7 +188,7 @@ const handleCancel = () => {
   margin-bottom: 1rem;
   background-color: rgba(220, 53, 69, 0.1);
   border: 1px solid rgba(220, 53, 69, 0.3);
-  border-radius: 4px;
+  border-radius: 6px;
   color: #ff6b7a;
 }
 
@@ -241,7 +241,7 @@ label.required::after {
   padding: 0.75rem;
   font-size: 0.95rem;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   background-color: #1a1a1a;
   color: #fff;
   transition: all 0.2s;
@@ -278,7 +278,7 @@ label.required::after {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;

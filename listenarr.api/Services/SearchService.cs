@@ -435,7 +435,7 @@ namespace Listenarr.Api.Services
             return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-        public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, CancellationToken ct = default)
+        public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, string region = "us", string? language = null, CancellationToken ct = default)
         {
             var results = new List<SearchResult>();
 
@@ -443,33 +443,435 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Starting intelligent search for: {Query}", query);
 
-                // Parse search prefixes to force specific search types
+                // Parse search prefixes (AUTHOR:, TITLE:, ISBN:, ASIN:) anywhere in the query
                 string? searchType = null;
                 string actualQuery = query;
-                
-                if (query.StartsWith("ASIN:", StringComparison.OrdinalIgnoreCase))
+
+                var prefixes = new[] { "AUTHOR:", "TITLE:", "ISBN:", "ASIN:" };
+                var foundRanges = new List<(int Start, int End)>();
+                var parsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                int pos = 0;
+                while (pos < query.Length)
                 {
-                    searchType = "ASIN";
-                    actualQuery = query.Substring(5).Trim();
-                    _logger.LogInformation("Detected ASIN search: {ASIN}", actualQuery);
+                    int foundAt = -1;
+                    string? foundPrefix = null;
+                    for (int pi = 0; pi < prefixes.Length; pi++)
+                    {
+                        var prefix = prefixes[pi];
+                        var idx = query.IndexOf(prefix, pos, StringComparison.OrdinalIgnoreCase);
+                        if (idx >= 0 && (foundAt == -1 || idx < foundAt))
+                        {
+                            foundAt = idx;
+                            foundPrefix = prefix;
+                        }
+                    }
+                    if (foundAt == -1 || foundPrefix == null) break;
+
+                    int valueStart = foundAt + foundPrefix.Length;
+                    int nextAt = -1;
+                    for (int pi = 0; pi < prefixes.Length; pi++)
+                    {
+                        var np = query.IndexOf(prefixes[pi], valueStart, StringComparison.OrdinalIgnoreCase);
+                        if (np >= 0 && (nextAt == -1 || np < nextAt)) nextAt = np;
+                    }
+                    int valueEnd = nextAt == -1 ? query.Length : nextAt;
+
+                    var value = query.Substring(valueStart, valueEnd - valueStart).Trim();
+                    if (!string.IsNullOrEmpty(value)) parsed[foundPrefix] = value;
+                    foundRanges.Add((foundAt, valueEnd));
+                    pos = valueEnd;
                 }
-                else if (query.StartsWith("ISBN:", StringComparison.OrdinalIgnoreCase))
+
+                if (parsed.TryGetValue("ASIN:", out var asinVal)) asinVal = asinVal?.Trim();
+                if (parsed.TryGetValue("ISBN:", out var isbnVal)) isbnVal = isbnVal?.Trim();
+                if (parsed.TryGetValue("AUTHOR:", out var authorVal)) authorVal = authorVal?.Trim();
+                if (parsed.TryGetValue("TITLE:", out var titleVal)) titleVal = titleVal?.Trim();
+
+                string? parsedAsin = parsed.ContainsKey("ASIN:") ? parsed["ASIN:"] : null;
+                string? parsedIsbn = parsed.ContainsKey("ISBN:") ? parsed["ISBN:"] : null;
+                string? parsedAuthor = parsed.ContainsKey("AUTHOR:") ? parsed["AUTHOR:"] : null;
+                string? parsedTitle = parsed.ContainsKey("TITLE:") ? parsed["TITLE:"] : null;
+
+                try { _logger.LogInformation("Parsed prefixes: ASIN={Asin}, ISBN={Isbn}, AUTHOR={Author}, TITLE={Title}", parsedAsin, parsedIsbn, parsedAuthor, parsedTitle); } catch {}
+
+                // Determine search type (priority: ASIN > ISBN > AUTHOR+TITLE > AUTHOR > TITLE)
+                if (!string.IsNullOrEmpty(parsedAsin)) searchType = "ASIN";
+                else if (!string.IsNullOrEmpty(parsedIsbn)) searchType = "ISBN";
+                else if (!string.IsNullOrEmpty(parsedAuthor) && !string.IsNullOrEmpty(parsedTitle)) searchType = "AUTHOR_TITLE";
+                else if (!string.IsNullOrEmpty(parsedAuthor)) searchType = "AUTHOR";
+                else if (!string.IsNullOrEmpty(parsedTitle)) searchType = "TITLE";
+                else searchType = null;
+
+                try { _logger.LogInformation("[DBG] Determined searchType='{SearchType}'", searchType); } catch {}
+
+                // Build a fallback actualQuery by removing the recognized prefix ranges
+                if (foundRanges.Any())
                 {
-                    searchType = "ISBN";
-                    actualQuery = query.Substring(5).Trim();
-                    _logger.LogInformation("Detected ISBN search: {ISBN}", actualQuery);
+                    foundRanges.Sort((a, b) => a.Start.CompareTo(b.Start));
+                    var sb = new System.Text.StringBuilder();
+                    int idx = 0;
+                    foreach (var r in foundRanges)
+                    {
+                        if (r.Start > idx) sb.Append(query.Substring(idx, r.Start - idx));
+                        idx = r.End;
+                    }
+                    if (idx < query.Length) sb.Append(query.Substring(idx));
+                    // collapse multiple spaces
+                    var collapsed = sb.ToString();
+                    while (collapsed.Contains("  ")) collapsed = collapsed.Replace("  ", " ");
+                    actualQuery = collapsed.Trim();
                 }
-                else if (query.StartsWith("AUTHOR:", StringComparison.OrdinalIgnoreCase))
+
+                // Try Audimeta-first for various search types. If Audimeta returns results,
+                // convert them to SearchResult and return immediately to avoid scraping.
+                try
                 {
-                    searchType = "AUTHOR";
-                    actualQuery = query.Substring(7).Trim();
-                    _logger.LogInformation("Detected AUTHOR search: {Author}", actualQuery);
+                    // ASIN case is handled separately above via ASIN handler
+
+                    // ISBN
+                    if (searchType == "ISBN" && !string.IsNullOrWhiteSpace(parsedIsbn))
+                    {
+                        var amRes = await _audimetaService.SearchByIsbnAsync(parsedIsbn, 1, 50, region, language);
+                        if (amRes?.Results != null && amRes.Results.Any())
+                        {
+                            var converted = new List<SearchResult>();
+                            var amFiltered = amRes.Results.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) amFiltered = amFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in amFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate,
+                                    Isbn = book.Asin // fallback (audimeta search by isbn may not populate)
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return converted.ToList();
+                        }
+                    }
+
+                    // AUTHOR-only
+                    if (searchType == "AUTHOR" && !string.IsNullOrWhiteSpace(parsedAuthor))
+                    {
+                        // Aggregate multiple pages from Audimeta until we reach candidateLimit
+                        var aggregated = new List<AudimetaSearchResult>();
+                        int page = 1;
+                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // For Audimeta author listings, do not artificially cap aggregation
+                        // by the Amazon candidateLimit. Instead, fetch pages until a
+                        // page returns fewer than pageSize results (natural end).
+                        int maxPages = int.MaxValue;
+                        for (; page <= maxPages; page++)
+                        {
+                            try
+                            {
+                                var pageRes = await _audimetaService.SearchByAuthorAsync(parsedAuthor, page, pageSize, region, language);
+                                var pageCount = pageRes?.Results?.Count ?? 0;
+                                aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudimetaSearchResult>());
+                                _logger.LogInformation("Audimeta author page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'", page, pageCount, aggregated.Count, parsedAuthor);
+                                if (pageRes?.Results == null || pageCount == 0)
+                                {
+                                    _logger.LogInformation("Stopping aggregation: page {Page} returned no results for author '{Author}'", page, parsedAuthor);
+                                    break;
+                                }
+                                if (pageCount < pageSize)
+                                {
+                                    _logger.LogInformation("Stopping aggregation: page {Page} result count {PageCount} < pageSize {PageSize}", page, pageCount, pageSize);
+                                    break; // last page
+                                }
+                                // Do not stop aggregating based on candidateLimit for audimeta
+                            }
+                            catch (Exception exPage)
+                            {
+                                _logger.LogDebug(exPage, "Failed fetching audimeta author page {Page} for author {Author}", page, parsedAuthor);
+                                break;
+                            }
+                        }
+
+                        _logger.LogInformation("Finished aggregating author pages for '{Author}': total aggregated={AggregatedCount}, candidateLimit={CandidateLimit}, pageSize={PageSize}, maxPages={MaxPages}", parsedAuthor, aggregated.Count, candidateLimit, pageSize, maxPages);
+                        if (aggregated.Any())
+                        {
+                            // Deduplicate results based on ASIN to prevent repeated books across pages
+                            var deduplicated = aggregated
+                                .Where(b => !string.IsNullOrWhiteSpace(b.Asin))
+                                .GroupBy(b => b.Asin, StringComparer.OrdinalIgnoreCase)
+                                .Select(g => g.First())
+                                .ToList();
+                            
+                            _logger.LogInformation("Deduplicated author results for '{Author}': {OriginalCount} -> {DeduplicatedCount}", parsedAuthor, aggregated.Count, deduplicated.Count);
+                            
+                            var converted = new List<SearchResult>();
+                            var authorFiltered = deduplicated.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in authorFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return converted.ToList();
+                        }
+                    }
+
+                    // AUTHOR + TITLE: prefer author endpoint then filter by title/isbn to ensure consistent Audimeta enrichment
+                    if (searchType == "AUTHOR_TITLE" && !string.IsNullOrWhiteSpace(parsedAuthor))
+                    {
+                        try { _logger.LogInformation("Entering AUTHOR_TITLE branch: author='{Author}', title='{Title}', isbn='{Isbn}'", parsedAuthor, parsedTitle, parsedIsbn); } catch {}
+                        // Aggregate author pages up to candidateLimit to enrich matching
+                        var aggregated = new List<AudimetaSearchResult>();
+                        int page = 1;
+                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // For Audimeta author/title combined flows, allow full aggregation
+                        // across available pages; we will narrow/return a bounded set later.
+                        int maxPages = int.MaxValue;
+                        for (; page <= maxPages; page++)
+                        {
+                            try
+                            {
+                                var pageRes = await _audimetaService.SearchByAuthorAsync(parsedAuthor, page, pageSize, region, language);
+                                var pageCount = pageRes?.Results?.Count ?? 0;
+                                aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudimetaSearchResult>());
+                                _logger.LogInformation("Audimeta AUTHOR_TITLE: page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'", page, pageCount, aggregated.Count, parsedAuthor);
+                                if (pageRes?.Results == null || pageCount == 0)
+                                {
+                                    _logger.LogInformation("Audimeta AUTHOR_TITLE: stopping aggregation — page {Page} returned no results", page);
+                                    break;
+                                }
+                                if (pageCount < pageSize)
+                                {
+                                    _logger.LogInformation("Audimeta AUTHOR_TITLE: stopping aggregation — page {Page} count {PageCount} < pageSize {PageSize}", page, pageCount, pageSize);
+                                    break;
+                                }
+                            }
+                            catch (Exception exPage)
+                            {
+                                _logger.LogDebug(exPage, "Failed fetching audimeta author page {Page} for author {Author}", page, parsedAuthor);
+                                break;
+                            }
+                        }
+                        _logger.LogInformation("Audimeta AUTHOR_TITLE: finished aggregating pages for '{Author}': aggregated={AggregatedCount}, pageSize={PageSize}, maxPages={MaxPages}", parsedAuthor, aggregated.Count, pageSize, maxPages);
+                            if (aggregated?.Any() == true)
+                        {
+                            // Deduplicate results based on ASIN to prevent repeated books across pages
+                            var deduplicated = aggregated
+                                .Where(b => !string.IsNullOrWhiteSpace(b.Asin))
+                                .GroupBy(b => b.Asin, StringComparer.OrdinalIgnoreCase)
+                                .Select(g => g.First())
+                                .ToList();
+                            
+                            _logger.LogInformation("Deduplicated AUTHOR_TITLE results for '{Author}': {OriginalCount} -> {DeduplicatedCount}", parsedAuthor, aggregated.Count, deduplicated.Count);
+                            
+                            var converted = new List<SearchResult>();
+                            try { _logger.LogInformation("Audimeta author lookup returned {Count} aggregated results for author '{Author}'", deduplicated.Count, parsedAuthor); } catch {}
+
+                            // Use the lightweight author/books results to perform title filtering
+                            // and avoid fetching detailed metadata for every ASIN. Only fetch
+                            // detailed metadata when an ISBN lookup is explicitly required or
+                            // when we need to enrich a small set of final matches.
+                            var authorFiltered = deduplicated.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+
+                            // Title-based filtering can be done directly against the author results
+                            if (!string.IsNullOrWhiteSpace(parsedTitle))
+                            {
+                                var t = parsedTitle.Trim();
+                                authorFiltered = authorFiltered.Where(b =>
+                                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0)
+                                );
+                            }
+
+                            // If an ISBN was provided we must match against detailed metadata;
+                            // instead of fetching metadata for every ASIN, scan a limited set
+                            // of candidates and only fetch metadata until we find ISBN matches.
+                            var detailedMetaByAsin = new Dictionary<string, AudimetaBookResponse>(StringComparer.OrdinalIgnoreCase);
+                            if (!string.IsNullOrWhiteSpace(parsedIsbn))
+                            {
+                                var isbn = parsedIsbn.Trim();
+                                // Limit how many author results to scan for ISBNs to avoid huge loads
+                                var isbnScanLimit = Math.Min(200, Math.Max(50, candidateLimit));
+                                var scanCandidates = aggregated.Where(r => !string.IsNullOrWhiteSpace(r.Asin)).Take(isbnScanLimit).ToList();
+                                try { _logger.LogInformation("Scanning up to {Limit} author candidates for ISBN {Isbn}", scanCandidates.Count, isbn); } catch {}
+                                foreach (var c in scanCandidates)
+                                {
+                                    if (string.IsNullOrWhiteSpace(c.Asin)) continue;
+                                    try
+                                    {
+                                        var meta = await _audimetaService.GetBookMetadataAsync(c.Asin, region, true, language);
+                                        if (meta == null) continue;
+                                        detailedMetaByAsin[c.Asin] = meta;
+                                        if (!string.IsNullOrWhiteSpace(meta.Isbn) && string.Equals(meta.Isbn.Trim(), isbn, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            // Narrow authorFiltered to only matching ASINs
+                                            authorFiltered = authorFiltered.Where(r => !string.IsNullOrWhiteSpace(r.Asin) && string.Equals(r.Asin, c.Asin, StringComparison.OrdinalIgnoreCase));
+                                            break; // stop scanning once we found the ISBN match
+                                        }
+                                    }
+                                    catch (Exception exMeta)
+                                    {
+                                        _logger.LogDebug(exMeta, "Failed fetching audimeta metadata for ASIN {Asin} while scanning for ISBN", c.Asin);
+                                    }
+                                }
+                            }
+
+                            try { _logger.LogInformation("[DBG] authorFiltered count after language/title/isbn filtering: {Count}", authorFiltered.Count()); } catch {}
+
+                            // Convert filtered lightweight results; if we collected detailed
+                            // metadata for some ASINs (e.g., ISBN scan), prefer that for enrichment.
+                            foreach (var book in authorFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                AudimetaBookResponse? bookResp = null;
+                                if (detailedMetaByAsin.TryGetValue(book.Asin, out var found)) bookResp = found;
+                                if (bookResp == null)
+                                {
+                                    bookResp = new AudimetaBookResponse
+                                    {
+                                        Asin = book.Asin,
+                                        Title = book.Title,
+                                        Subtitle = book.Subtitle,
+                                        Authors = book.Authors,
+                                        ImageUrl = book.ImageUrl,
+                                        Language = book.Language,
+                                        BookFormat = book.BookFormat,
+                                        Genres = book.Genres,
+                                        Series = book.Series,
+                                        Publisher = book.Publisher,
+                                        Narrators = book.Narrators,
+                                        ReleaseDate = book.ReleaseDate,
+                                        Isbn = null
+                                    };
+                                }
+                                try
+                                {
+                                    var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                    var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                    sr.IsEnriched = true;
+                                    sr.MetadataSource = "Audimeta";
+                                    converted.Add(sr);
+                                }
+                                catch (Exception exMetaConv)
+                                {
+                                    _logger.LogDebug(exMetaConv, "Failed converting audimeta data for ASIN {Asin}", book.Asin);
+                                }
+                            }
+
+                            if (converted.Any()) return converted.ToList();
+                        }
+                    }
+
+                    // TITLE-only
+                    if (searchType == "TITLE" && !string.IsNullOrWhiteSpace(parsedTitle))
+                    {
+                        var titleRes = await _audimetaService.SearchByTitleAsync(parsedTitle, 1, 50, region, language);
+                        if (titleRes?.Results != null && titleRes.Results.Any())
+                        {
+                            var converted = new List<SearchResult>();
+                            var titleFiltered = titleRes.Results.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) titleFiltered = titleFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in titleFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return converted.ToList();
+                        }
+                    }
+
+                    // General/simple query - try audimeta search endpoint first
+                    if (string.IsNullOrWhiteSpace(searchType) && !string.IsNullOrWhiteSpace(actualQuery))
+                    {
+                        var simpleRes = await _audimetaService.SearchBooksAsync(actualQuery, 1, 50, region, language);
+                        if (simpleRes?.Results != null && simpleRes.Results.Any())
+                        {
+                            var converted = new List<SearchResult>();
+                            var simpleFiltered = simpleRes.Results.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) simpleFiltered = simpleFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in simpleFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return converted.ToList();
+                        }
+                    }
                 }
-                else if (query.StartsWith("TITLE:", StringComparison.OrdinalIgnoreCase))
+                catch (Exception exAudimetaFirst)
                 {
-                    searchType = "TITLE";
-                    actualQuery = query.Substring(6).Trim();
-                    _logger.LogInformation("Detected TITLE search: {Title}", actualQuery);
+                    _logger.LogWarning(exAudimetaFirst, "Audimeta-first attempt failed; falling back to provider searches for query: {Query}", query);
                 }
 
                 // Flags controlling provider calls (enabled by default) - declare at outer scope
@@ -752,13 +1154,6 @@ namespace Listenarr.Api.Services
                 {
                     var r = s.Result;
 
-                    // OpenLibrary items preserved unless explicitly rejected by requireAuthorAndPublisher
-                    if (isOpenLibraryResult(r) && !requireAuthorAndPublisher)
-                    {
-                        finalList.Add(r);
-                        continue;
-                    }
-
                     // Author/publisher requirement
                     if (requireAuthorAndPublisher)
                     {
@@ -776,7 +1171,7 @@ namespace Listenarr.Api.Services
                         if (string.Equals(containmentMode, "Strict", StringComparison.OrdinalIgnoreCase))
                         {
                             // Require direct containment (substring) in key fields
-                            var hay = string.Join(" ", new[] { r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
+                            var hay = string.Join(" ", new[] { r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series }.Where(s2 => !string.IsNullOrEmpty(s2))).ToLowerInvariant();
                             if (string.IsNullOrEmpty(hay) || hay.IndexOf(query ?? string.Empty, StringComparison.OrdinalIgnoreCase) < 0)
                             {
                                 keep = false;
@@ -849,7 +1244,7 @@ namespace Listenarr.Api.Services
                                                 await _searchProgressReporter.BroadcastAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
 
                                                 // Try audimeta first
-                                                var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
+                                                var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, region, true, language);
                                                 AudibleBookMetadata? metadata = null;
 
                                                 if (audimetaData != null)

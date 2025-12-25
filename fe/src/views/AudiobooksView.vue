@@ -1,5 +1,6 @@
 <template>
   <div class="audiobooks-view">
+    
     <!-- Top Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
@@ -16,9 +17,32 @@
         >
           <PhInfo />
         </button>
-        <span v-if="audiobooks.length > 0" class="count-badge">
-          {{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}
+        <span v-if="(groupBy === 'books' ? audiobooks.length : groupedCollections.length) > 0" class="count-badge">
+          {{ groupBy === 'books' ? audiobooks.length : groupedCollections.length }} {{ groupBy === 'books' ? 'Book' : groupBy === 'authors' ? 'Author' : 'Series' }}{{ (groupBy === 'books' ? audiobooks.length : groupedCollections.length) !== 1 && groupBy !== 'series' ? 's' : '' }}
         </span>
+        <div class="group-dropdown" v-if="audiobooks.length > 0">
+          <button class="toolbar-btn group-btn" @click="showGroupMenu = !showGroupMenu">
+            <PhBookOpen v-if="groupBy === 'books'" />
+            <PhUser v-else-if="groupBy === 'authors'" />
+            <PhStack v-else />
+            {{ groupBy === 'books' ? 'Books' : groupBy === 'authors' ? 'Authors' : 'Series' }}
+            <PhCaretDown />
+          </button>
+          <div v-if="showGroupMenu" class="group-menu">
+            <button class="menu-item" @click="setGroupBy('books')">
+              <PhBookOpen />
+              Books
+            </button>
+            <button class="menu-item" @click="setGroupBy('authors')">
+              <PhUser />
+              Authors
+            </button>
+            <button class="menu-item" @click="setGroupBy('series')">
+              <PhStack />
+              Series
+            </button>
+          </div>
+        </div>
         <button class="toolbar-btn" @click="refreshLibrary">
           <PhArrowClockwise />
           Refresh
@@ -136,6 +160,80 @@
       </div>
     </div>
     
+    <!-- Grouped View -->
+    <div v-else-if="groupBy !== 'books'" class="grouped-view">
+      <div class="grouped-grid">
+        <div
+          v-for="collection in groupedCollections"
+          :key="collection.name"
+          class="collection-card"
+          @click="navigateToCollection(collection)"
+        >
+          <div class="collection-cover">
+            <template v-if="groupBy === 'authors'">
+              <img
+                v-if="collection.coverUrl"
+                :src="apiService.getImageUrl(collection.coverUrl)"
+                :alt="collection.name"
+                @error="handleImageError"
+              />
+              <div v-else class="no-cover">
+                <PhUser />
+              </div>
+            </template>
+            <template v-else-if="groupBy === 'series'">
+              <div v-if="collection.coverUrls && collection.coverUrls.length > 0" class="series-covers-container">
+                <div class="series-covers">
+                  <div
+                    v-for="(coverUrl, index) in collection.coverUrls.slice(0, 8)"
+                    :key="index"
+                    :style="{
+                      height: '192px',
+                      width: '192px',
+                      left: `${index * (192 / 7)}px`,
+                      zIndex: 8 - index,
+                      boxShadow: 'rgba(17, 17, 17, 0.4) 4px 0px 4px'
+                    }"
+                    class="series-cover-item"
+                  >
+                    <img
+                      :src="apiService.getImageUrl(coverUrl)"
+                      :alt="`${collection.name} Cover`"
+                      class="series-cover-image"
+                      @error="handleImageError"
+                    />
+                  </div>
+                </div>
+                <!-- Book count counter -->
+                <div class="series-count-badge">
+                  {{ collection.count }}
+                </div>
+                <!-- Hover overlay -->
+                <div class="series-hover-overlay">
+                  <p>{{ collection.name }}</p>
+                </div>
+              </div>
+              <div v-else class="no-cover">
+                <PhStack />
+              </div>
+            </template>
+          </div>
+          <!-- Collection content for authors -->
+          <div v-if="groupBy === 'authors'" class="collection-content">
+            <h3 class="collection-title">{{ collection.name }}</h3>
+            <p class="collection-count">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</p>
+          </div>
+          <!-- Bottom placard for series (only show when item details are enabled) -->
+          <div v-if="groupBy === 'series' && showItemDetails" class="series-bottom-placard">
+            <div class="series-bottom-content">
+              <p class="series-bottom-title">{{ collection.name }}</p>
+              <p class="series-bottom-count">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
   <div v-else ref="scrollContainer" :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]" @scroll="updateVisibleRange">
       <div class="audiobooks-scroll-spacer" :style="{ height: `${totalHeight}px` }">
         <div v-if="viewMode === 'grid'" class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
@@ -168,7 +266,7 @@
     </div>
       <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
       <img 
-        :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/300x450?text=No+Image`" 
+        :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'" 
         :alt="audiobook.title" 
         class="audiobook-poster"
         loading="lazy"
@@ -248,7 +346,7 @@
               </div>
               <img
                 class="list-thumb"
-                :src="apiService.getImageUrl(audiobook.imageUrl) || `https://via.placeholder.com/80x80?text=No+Image`"
+                :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'"
                 :alt="audiobook.title"
                 loading="lazy"
               />
@@ -333,7 +431,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX } from '@phosphor-icons/vue'
+import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -645,6 +743,35 @@ const filteredAndSortedAudiobooks = computed(() => {
 
 const audiobooks = computed(() => filteredAndSortedAudiobooks.value)
 
+const groupedCollections = computed(() => {
+  if (groupBy.value === 'books') return []
+
+  const books = filteredAndSortedAudiobooks.value
+  const groups = new Map<string, { name: string, count: number, coverUrl?: string, coverUrls?: string[] }>()
+
+  books.forEach(book => {
+    const key = groupBy.value === 'authors' ? book.authors?.[0] : book.series
+    if (key) {
+      if (!groups.has(key)) {
+        if (groupBy.value === 'authors') {
+          groups.set(key, { name: key, count: 0, coverUrl: book.imageUrl })
+        } else {
+          groups.set(key, { name: key, count: 0, coverUrls: [] })
+        }
+      }
+      const group = groups.get(key)!
+      group.count++
+      if (groupBy.value === 'series' && group.coverUrls && group.coverUrls.length < 8) {
+        if (book.imageUrl && !group.coverUrls.includes(book.imageUrl)) {
+          group.coverUrls.push(book.imageUrl)
+        }
+      }
+    }
+  })
+
+  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name))
+})
+
 // Options for custom selects used in the toolbar
 // Build sort options and attach an up/down caret icon for the currently selected key
 const sortOptions = computed(() => {
@@ -733,6 +860,22 @@ try {
 
 watch(showItemDetails, (v) => {
   try { localStorage.setItem(SHOW_ITEM_DETAILS_KEY, v ? 'true' : 'false') } catch {}
+})
+
+// Grouping mode
+const GROUP_BY_KEY = 'listenarr.groupBy'
+const groupBy = ref<'books' | 'authors' | 'series'>('books')
+const showGroupMenu = ref(false)
+
+try {
+  const stored = localStorage.getItem(GROUP_BY_KEY)
+  if (stored && ['books', 'authors', 'series'].includes(stored)) {
+    groupBy.value = stored as 'books' | 'authors' | 'series'
+  }
+} catch {}
+
+watch(groupBy, (v) => {
+  try { localStorage.setItem(GROUP_BY_KEY, v) } catch {}
 })
 
 function toggleItemDetails() {
@@ -900,7 +1043,15 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   return 'quality-mismatch'
 }
 
+function handleClickOutside(event: Event) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.group-dropdown')) {
+    showGroupMenu.value = false
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('click', handleClickOutside)
   await Promise.all([
     libraryStore.fetchLibrary(),
     configStore.loadApplicationSettings(),
@@ -967,6 +1118,7 @@ onMounted(async () => {
       resizeObserver.disconnect()
       stopWatch()
       stopPersist()
+      document.removeEventListener('click', handleClickOutside)
     })
   }
 })
@@ -1010,6 +1162,21 @@ function navigateToDetail(id: number) {
 
 function toggleViewMode() {
   viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
+}
+
+function setGroupBy(mode: 'books' | 'authors' | 'series') {
+  groupBy.value = mode
+  showGroupMenu.value = false
+}
+
+function navigateToCollection(collection: { name: string }) {
+  const type = groupBy.value === 'authors' ? 'author' : 'series'
+  router.push(`/collection/${type}/${encodeURIComponent(collection.name)}`)
+}
+
+function handleImageError(event: Event) {
+  const img = event.target as HTMLImageElement
+  img.style.display = 'none'
 }
 
 async function refreshLibrary() {
@@ -1157,6 +1324,13 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 
   lastClickedIndex.value = currentIndex
 }
+
+// Expose for testing
+defineExpose({
+  setGroupBy,
+  groupedCollections,
+  showItemDetails
+})
 </script>
 
 <style scoped>
@@ -1299,7 +1473,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   border: 1px solid rgba(255,255,255,0.08);
   color: #e6eef8;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   min-height: 36px;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -1322,9 +1496,221 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 .count-badge {
   padding: 6px 12px;
   background-color: #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #ccc;
   font-size: 12px;
+}
+
+.group-dropdown {
+  position: relative;
+}
+
+.group-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.group-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: #2a2a2a;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  min-width: 120px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: rgba(255,255,255,0.03)
+}
+
+.menu-item:first-child {
+  border-radius: 6px;
+}
+
+.menu-item:last-child {
+  border-radius: 6px;
+}
+
+.grouped-view {
+  padding: 1rem;
+}
+
+.grouped-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.collection-card {
+  overflow: visible;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.collection-card:hover {
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+}
+
+.collection-cover {
+  aspect-ratio: 1/1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Special styling for series cards */
+.collection-card:has(.series-covers-container) {
+  margin-bottom: 2rem; /* Extra space for bottom placard */
+}
+
+.collection-card:has(.series-covers-container) .collection-cover {
+  aspect-ratio: auto;
+  height: 192px;
+}
+
+.collection-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.series-covers-container {
+  position: relative;
+  width: 100%;
+  height: 192px;
+  overflow: hidden;
+}
+
+.series-count-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: var(--primary-color);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  z-index: 15;
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.series-covers {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.series-cover-item {
+  position: absolute;
+  top: 0;
+  transition: transform 0.2s ease;
+}
+
+.series-cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.series-hover-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+}
+
+.series-hover-overlay p {
+  font-size: 1rem;
+  color: var(--text-color);
+  margin: 0;
+  font-weight: 600;
+}
+
+.collection-card:hover .series-hover-overlay {
+  opacity: 1;
+}
+
+.series-bottom-placard {
+  margin-top: .5rem;
+  display: flex;
+  justify-content: center;
+  z-index: 10;
+}
+
+.series-bottom-content {
+  width: 200px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+}
+
+/* Use same typography as grid-bottom-details to keep consistency */
+.series-bottom-title {
+  font-size: 12px; /* match grid-bottom-details .detail-line.title */
+  color: #fff;
+  margin: 0 0 4px 0;
+  font-weight: 600;
+  text-align: center;
+}
+
+.series-bottom-count {
+  font-size: 12px; /* match grid-bottom-details .detail-line */
+  color: #bfcad6;
+  margin: 0;
+  text-align: center;
+}
+
+.collection-content {
+  padding: 1rem;
+}
+
+.collection-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collection-count {
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 .audiobooks-scroll-container {
@@ -1467,7 +1853,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   transform: translate(-50%, -50%);
   width: 14px;
   height: 14px;
-  border-radius: 3px;
+  border-radius: 6px;
   border: 2px solid rgba(255,255,255,0.14);
   background: transparent;
   box-sizing: border-box;
@@ -1591,7 +1977,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 .audiobook-poster-container {
   position: relative;
   aspect-ratio: 1/1;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
@@ -1712,7 +2098,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   margin-right: 0.5rem;
   background-color: rgba(52, 152, 219, 0.2);
   border: 1px solid rgba(52, 152, 219, 0.4);
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 10px;
   font-weight: 600;
   color: #3498db;
@@ -1730,7 +2116,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   margin-right: 0.5rem;
   background-color: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 10px;
   font-weight: 600;
   color: #cfcfcf;
@@ -1777,7 +2163,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   margin-left: 0.25rem;
   background-color: rgba(46, 204, 113, 0.2);
   border: 1px solid rgba(46, 204, 113, 0.4);
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 10px;
   font-weight: 600;
   color: #2ecc71;
@@ -1817,7 +2203,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   padding: 6px 8px;
   background-color: rgba(0, 0, 0, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border-radius: 6px;
   color: white;
   cursor: pointer;
   font-size: 14px;
@@ -1888,7 +2274,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   background-color: #007acc;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   transition: background-color 0.2s;
@@ -1914,7 +2300,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   padding: 12px 24px;
   background-color: #007acc;
   color: white;
-  border-radius: 4px;
+  border-radius: 6px;
   text-decoration: none;
   font-weight: 500;
   transition: background-color 0.2s;
@@ -1940,7 +2326,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 
 .dialog {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #444;
   width: 90%;
   max-width: 500px;
@@ -1998,7 +2384,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   gap: 6px;
   padding: 10px 20px;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;

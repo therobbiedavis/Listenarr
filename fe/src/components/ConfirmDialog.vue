@@ -51,7 +51,7 @@ function onCancel() {
 .confirm-dialog {
   background: #2a2a2a;
   border: 1px solid #444;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 90%;
   max-width: 520px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.6);

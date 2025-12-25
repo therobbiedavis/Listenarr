@@ -217,7 +217,8 @@ const fetchRawDebug = async (q: string) => {
 
 const fetchRawDebugWindow = async (q: string) => {
     try {
-      const resp = await window.fetch(`/api/search/intelligent?query=${encodeURIComponent(q)}`, { credentials: 'include' })
+      const body = JSON.stringify({ mode: 'Simple', query: q })
+      const resp = await window.fetch('/api/search', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const results = await resp.json()
       rawDebugResults.value = results as unknown[]
@@ -469,7 +470,7 @@ const getScoreClass = (score: number): string => {
 .search-form {
   background: white;
   padding: 2rem;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   margin-bottom: 2rem;
 }
@@ -484,7 +485,7 @@ const getScoreClass = (score: number): string => {
   flex: 1;
   padding: 0.75rem;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 1rem;
 }
 
@@ -493,7 +494,7 @@ const getScoreClass = (score: number): string => {
   background-color: #3498db;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
   transition: background-color 0.2s;
@@ -507,7 +508,16 @@ const getScoreClass = (score: number): string => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.search-button.advanced-button {
+  background-color: #9b59b6;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 
+.search-button.advanced-button:hover:not(:disabled) {
+  background-color: #8e44ad;
+}
 .cancel-button {
   background-color: #e74c3c;
 }
@@ -524,7 +534,7 @@ const getScoreClass = (score: number): string => {
 .filter-select {
   padding: 0.5rem;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .loading {
@@ -565,7 +575,7 @@ const getScoreClass = (score: number): string => {
 
 .result-card {
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   display: flex;
@@ -635,7 +645,7 @@ const getScoreClass = (score: number): string => {
 .result-meta span {
   background-color: #f8f9fa;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #666;
 }
 
@@ -648,7 +658,7 @@ const getScoreClass = (score: number): string => {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -708,7 +718,7 @@ const getScoreClass = (score: number): string => {
   background-color: #27ae60;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
   transition: background-color 0.2s;
@@ -741,7 +751,7 @@ const getScoreClass = (score: number): string => {
   padding: 2rem;
   color: #666;
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 </style>

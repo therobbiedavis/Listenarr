@@ -95,7 +95,7 @@ watch(() => props.visible, (isVisible) => {
 
 .notification-modal {
   background: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 1.5rem;
   max-width: 500px;
   width: 100%;

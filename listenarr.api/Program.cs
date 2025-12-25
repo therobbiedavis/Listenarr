@@ -128,7 +128,7 @@ builder.Services.AddHttpClient<AudimetaService>()
     });
 
 // Add HTTP client for Audnexus service
-builder.Services.AddHttpClient<AudnexusService>()
+builder.Services.AddHttpClient<IAudnexusService, AudnexusService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
@@ -144,6 +144,7 @@ builder.Services.AddScoped<SearchProgressReporter>();
 
 // Add search result filters
 builder.Services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
+builder.Services.AddScoped<ISearchResultFilter, AudiobookOnlyFilter>();
 builder.Services.AddScoped<ISearchResultFilter, PromotionalTitleFilter>();
 builder.Services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
 builder.Services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
@@ -168,6 +169,8 @@ builder.Services.AddScoped<SearchResultScorer>();
 
 // Add ASIN search handler
 builder.Services.AddScoped<AsinSearchHandler>();
+
+// Audible integration removed: AudibleApiService registration omitted
 
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();

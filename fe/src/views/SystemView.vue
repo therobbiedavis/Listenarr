@@ -473,7 +473,7 @@ onMounted(() => {
   padding: 1rem;
   background: rgba(231, 76, 60, 0.1);
   border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 8px;
+  border-radius: 6px;
   color: #e74c3c;
   margin-bottom: 2rem;
 }
@@ -512,7 +512,7 @@ onMounted(() => {
 .status-card {
   background: #1e1e1e;
   border: 1px solid #333;
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 1.5rem;
   transition: all 0.2s;
 }
@@ -551,7 +551,7 @@ onMounted(() => {
 
 .status-badge {
   padding: 0.35rem 0.85rem;
-  border-radius: 20px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -648,7 +648,7 @@ onMounted(() => {
 
 .client-indicator {
   padding: 0.25rem 0.65rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -719,7 +719,7 @@ onMounted(() => {
 .section {
   background: #1e1e1e;
   border: 1px solid #333;
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 1.5rem;
 }
 
@@ -758,7 +758,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.85rem;
-  border-radius: 20px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -833,7 +833,7 @@ onMounted(() => {
   padding: 1.25rem;
   background: #252525;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -881,7 +881,7 @@ onMounted(() => {
   overflow-y: auto;
   background: #252525;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .log-entry {
@@ -965,7 +965,7 @@ onMounted(() => {
   font-weight: 700;
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   letter-spacing: 0.5px;
 }
 
@@ -1005,12 +1005,12 @@ onMounted(() => {
 
 .logs-container::-webkit-scrollbar-track {
   background: #1e1e1e;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .logs-container::-webkit-scrollbar-thumb {
   background: #444;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .logs-container::-webkit-scrollbar-thumb:hover {

@@ -242,7 +242,7 @@ const validatePath = async () => {
   padding: 0.75rem;
   background-color: #2a2a2a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 1rem;
   color: #fff;
   transition: all 0.2s;
@@ -259,7 +259,7 @@ const validatePath = async () => {
   background-color: #007acc;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -278,7 +278,7 @@ const validatePath = async () => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.85rem;
 }
 
@@ -308,7 +308,7 @@ const validatePath = async () => {
 .browser-content {
   background: #2a2a2a;
   border: 1px solid #444;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 100%;
   max-width: 700px;
   max-height: 80vh;
@@ -348,7 +348,7 @@ const validatePath = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -372,7 +372,7 @@ const validatePath = async () => {
   padding: 0.75rem 1rem;
   background-color: #333;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   margin-bottom: 1rem;
   color: #007acc;
   font-family: 'Courier New', monospace;
@@ -395,7 +395,7 @@ const validatePath = async () => {
   padding: 0.5rem;
   background-color: rgba(0, 122, 204, 0.2);
   border: 1px solid rgba(0, 122, 204, 0.3);
-  border-radius: 4px;
+  border-radius: 6px;
   color: #007acc;
   cursor: pointer;
   display: flex;
@@ -467,7 +467,7 @@ const validatePath = async () => {
   padding: 1rem;
   background-color: #333;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   color: #fff;
@@ -525,7 +525,7 @@ const validatePath = async () => {
 .select-button {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -560,7 +560,7 @@ const validatePath = async () => {
   .browser-content {
     max-width: 100%;
     max-height: 100vh;
-    border-radius: 0;
+    border-radius: 6px;
   }
 
   .browser-input-group {

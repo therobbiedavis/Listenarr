@@ -79,6 +79,7 @@
     <PhBell />
           Notifications
         </button>
+        <!-- Integrations tab removed -->
         <button 
           @click="router.push({ hash: '#requests' })" 
           :class="{ active: activeTab === 'requests' }"
@@ -100,6 +101,8 @@
         </button>
       </div>
     </div>
+
+      <!-- Integrations tab removed -->
 
     <div class="settings-content">
       <!-- Indexers Tab -->
@@ -1721,7 +1724,7 @@ import {
   // Bot Controls
   PhRobot, PhPlay, PhStop, PhArrowClockwise, PhCircle,
   // Misc
-  PhTextAa, PhEye, PhEyeSlash
+  PhTextAa, PhEye, PhEyeSlash, PhPlug, PhSignOut
 } from '@phosphor-icons/vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
@@ -1745,7 +1748,7 @@ const configStore = useConfigurationStore()
 const toast = useToast()
 // Debug environment markers (Vitest exposes import.meta.vitest / import.meta.env.VITEST)
 console.debug('[test-debug] import.meta.vitest:', (import.meta as unknown as { vitest?: unknown }).vitest, 'env.VITEST:', (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST, '__vitest_global__:', (globalThis as unknown as { __vitest?: unknown }).__vitest)
-const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'>('indexers')
+  const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'>('indexers')
 
 const mobileTabOptions = computed(() => [
   { value: 'indexers', label: 'Indexers', icon: PhListMagnifyingGlass },
@@ -1754,7 +1757,8 @@ const mobileTabOptions = computed(() => [
   { value: 'quality-profiles', label: 'Quality Profiles', icon: PhStar },
   { value: 'general', label: 'General Settings', icon: PhSliders },
   { value: 'notifications', label: 'Notifications', icon: PhBell },
-  { value: 'requests', label: 'Requests', icon: PhGlobe }
+  { value: 'requests', label: 'Requests', icon: PhGlobe },
+  // Integrations removed
 ])
 // Desktop tabs carousel refs/state
 const desktopTabsRef = ref<HTMLElement | null>(null)
@@ -1823,6 +1827,8 @@ function ensureActiveTabVisible() {
     active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
   }
 }
+
+// Audible integration removed
 
 watch(activeTab, () => {
   // delay slightly to allow layout updates
@@ -3194,9 +3200,9 @@ const resetWebhookFormErrors = () => {
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
-  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'
-  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'requests', 'notifications'].includes(hash)) {
-    activeTab.value = hash
+  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications' | 'integrations'
+  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'requests', 'notifications', 'integrations'].includes(hash)) {
+    activeTab.value = hash as any
   } else {
     // Default to indexers and update URL
     activeTab.value = 'indexers'
@@ -3226,7 +3232,8 @@ const loaded = reactive({
   admins: false,
   mappings: false,
   general: false,
-  requests: false
+  requests: false,
+  integrations: false
 })
 
 async function loadTabContents(tab: string) {
@@ -3524,12 +3531,12 @@ onMounted(async () => {
   right: 0;
   height: 3px;
   background: linear-gradient(90deg, #4dabf7 0%, #339af0 100%);
-  border-radius: 3px 3px 0 0;
+  border-radius: 6px;
 }
 
 .settings-content {
   background: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 500px;
 }
@@ -3580,7 +3587,7 @@ onMounted(async () => {
   transform: translateY(-50%);
   width: 36px;
   height: 36px;
-  border-radius: 999px;
+  border-radius: 6px;
   background: rgba(0, 0, 0, 0.8);
   color: #fff;
   border: none;
@@ -3697,7 +3704,7 @@ onMounted(async () => {
   background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
   display: inline-flex;
@@ -3736,7 +3743,7 @@ onMounted(async () => {
 .webhook-card {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: 6px;
   overflow: hidden;
   transition: all 0.2s ease;
   display: flex;
@@ -3785,7 +3792,7 @@ onMounted(async () => {
 .webhook-icon {
   width: 48px;
   height: 48px;
-  border-radius: 10px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3909,7 +3916,7 @@ onMounted(async () => {
   background-color: rgba(231, 76, 60, 0.15);
   color: #ff6b6b;
   border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   white-space: nowrap;
@@ -3987,7 +3994,7 @@ onMounted(async () => {
   padding: 0.75rem 1rem;
   background-color: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -4037,7 +4044,7 @@ onMounted(async () => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.85rem;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   border: 1px solid;
@@ -4178,7 +4185,7 @@ onMounted(async () => {
   padding: 1.5rem;
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   transition: all 0.2s ease;
 }
 
@@ -4376,7 +4383,7 @@ onMounted(async () => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 0.95rem;
   transition: all 0.2s;
@@ -4441,7 +4448,7 @@ onMounted(async () => {
   padding: 1rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -4539,7 +4546,7 @@ onMounted(async () => {
 .status-pill {
   display: inline-block;
   padding: 0.35rem 0.6rem;
-  border-radius: 999px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -4691,7 +4698,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: color 0.2s ease;
 }
 
@@ -4771,7 +4778,7 @@ onMounted(async () => {
   color: #adb5bd;
   padding: 0.75rem 1rem;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 6px !important;
   box-shadow: none !important;
 }
 
@@ -4792,7 +4799,7 @@ onMounted(async () => {
   justify-content: center;
   background: rgba(255, 255, 255, 0.05);
   border: none;
-  border-radius: 0;
+  border-radius: 6px;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   color: #868e96;
   padding: 0.75rem 1rem;
@@ -4835,7 +4842,7 @@ onMounted(async () => {
   transition: all 0.2s ease;
   border: none;
   border-left: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 0;
+  border-radius: 6px;
   font-size: 0.9rem;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
@@ -4868,7 +4875,7 @@ onMounted(async () => {
 .modal-content {
   background: #2a2a2a;
   border: 1px solid #444;
-  border-radius: 8px;
+  border-radius: 6px;
   max-width: 700px;
   width: 100%;
   max-height: 90vh;
@@ -4908,7 +4915,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -4932,7 +4939,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -5007,7 +5014,7 @@ onMounted(async () => {
   background-color: #555;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -5033,7 +5040,7 @@ onMounted(async () => {
 .indexer-card {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
   transition: all 0.2s ease;
 }
@@ -5295,7 +5302,7 @@ onMounted(async () => {
 .profile-card {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   transition: all 0.2s ease;
 }
@@ -5700,7 +5707,7 @@ onMounted(async () => {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -5856,7 +5863,7 @@ onMounted(async () => {
   gap: 1rem;
   padding: 1rem;
   background-color: var(--card-bg);
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border-color);
 }
 
@@ -5907,7 +5914,7 @@ onMounted(async () => {
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
   transition: all 0.2s ease;

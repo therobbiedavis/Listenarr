@@ -366,7 +366,7 @@ const capitalizeFirst = (str: string): string => {
 
 .modal-content {
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
   max-width: 900px;
   width: 100%;
@@ -397,7 +397,7 @@ const capitalizeFirst = (str: string): string => {
   font-size: 1.5rem;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -431,7 +431,7 @@ const capitalizeFirst = (str: string): string => {
   height: 160px;
   flex-shrink: 0;
   background-color: #555;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -534,7 +534,7 @@ const capitalizeFirst = (str: string): string => {
   gap: 0.75rem;
   cursor: pointer;
   padding: 0.75rem;
-  border-radius: 8px;
+  border-radius: 6px;
   transition: background-color 0.2s;
 }
 
@@ -571,7 +571,7 @@ const capitalizeFirst = (str: string): string => {
   width: 100%;
   padding: 0.75rem;
   border: 1px solid #555;
-  border-radius: 8px;
+  border-radius: 6px;
   background-color: #333;
   color: white;
   font-size: 1rem;
@@ -639,7 +639,7 @@ const capitalizeFirst = (str: string): string => {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;

@@ -307,7 +307,7 @@ onMounted(() => {
   background-color: #3498db;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.2s;
 }
@@ -357,7 +357,7 @@ onMounted(() => {
   padding: 4rem 2rem;
   color: #666;
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
@@ -369,7 +369,7 @@ onMounted(() => {
 
 .download-card {
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   display: grid;
@@ -409,7 +409,7 @@ onMounted(() => {
 .download-meta span {
   background-color: #f8f9fa;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .download-status-section {
@@ -419,7 +419,7 @@ onMounted(() => {
 .download-status {
   display: inline-block;
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -464,7 +464,7 @@ onMounted(() => {
   width: 100%;
   height: 8px;
   background-color: #eee;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
   margin-bottom: 0.5rem;
 }
@@ -486,7 +486,7 @@ onMounted(() => {
   padding: 0.5rem;
   background-color: #fee;
   border: 1px solid #fcc;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #c33;
   font-size: 0.9rem;
 }
@@ -500,7 +500,7 @@ onMounted(() => {
 .action-button {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
   transition: background-color 0.2s;

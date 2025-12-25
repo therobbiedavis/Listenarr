@@ -114,6 +114,17 @@ class ApiService {
 
         // If the server returns 401, redirect to login (don't surface raw 401 errors to the UI)
         if (response.status === 401) {
+          // Avoid redirecting to the login page for certain API routes
+          // (e.g., Audible endpoints) so the UI can handle 401 and show
+          // a helpful message instead of performing a full-page redirect.
+          const audibleEndpoints = ['/search/audible-library', '/search/audible-catalog', '/audible-auth']
+          if (endpoint && audibleEndpoints.some(e => endpoint.startsWith(e))) {
+            const err = new Error(`HTTP error! status: 401 - ${respText}`) as ErrorWithStatus
+            err.status = 401
+            err.body = respText
+            throw err
+          }
+
           // Avoid causing a SPA redirect loop when the app is trying to fetch
           // the startup configuration during router boot. Let callers (router/auth)
           // handle 401 for that specific endpoint instead of performing a navigation
@@ -124,37 +135,38 @@ class ApiService {
             err.body = respText
             throw err
           }
+
           // Sanitize redirect to avoid open-redirects or unsafe values
-              try {
-                const { normalizeRedirect } = await import('@/utils/redirect')
-                const current = window.location.pathname + window.location.search + window.location.hash
-                const safe = normalizeRedirect(current)
-                if (!current.startsWith('/login')) {
-                  if (import.meta.env.DEV) {
-                    try { console.debug('[ApiService] 401 received, redirecting to login', { current, safe }) } catch {}
-                  }
-
-                  // Persist the safe redirect in sessionStorage as a fallback in case the
-                  // query parameter gets lost or sanitized during navigation. This helps
-                  // recover the intended SPA destination after login.
-                  try {
-                    sessionStorage.setItem('listenarr_pending_redirect', safe)
-                  } catch {}
-
-                  // Perform a full-page redirect to the login route with a safe redirect query.
-                  // Avoid dynamic importing the router here to prevent circular imports and
-                  // Vite chunking warnings. SPA navigation will still work after login via the
-                  // redirect query parameter.
-                  window.location.href = `/login?redirect=${encodeURIComponent(safe)}`
-
-                  // stop further processing by throwing a specific error
-                  throw new Error('Redirecting to login')
-                }
-              } catch {
-                // fallback to a safe redirect to root
-                window.location.href = '/login?redirect=%2F'
-                throw new Error('Redirecting to login')
+          try {
+            const { normalizeRedirect } = await import('@/utils/redirect')
+            const current = window.location.pathname + window.location.search + window.location.hash
+            const safe = normalizeRedirect(current)
+            if (!current.startsWith('/login')) {
+              if (import.meta.env.DEV) {
+                try { console.debug('[ApiService] 401 received, redirecting to login', { current, safe }) } catch {}
               }
+
+              // Persist the safe redirect in sessionStorage as a fallback in case the
+              // query parameter gets lost or sanitized during navigation. This helps
+              // recover the intended SPA destination after login.
+              try {
+                sessionStorage.setItem('listenarr_pending_redirect', safe)
+              } catch {}
+
+              // Perform a full-page redirect to the login route with a safe redirect query.
+              // Avoid dynamic importing the router here to prevent circular imports and
+              // Vite chunking warnings. SPA navigation will still work after login via the
+              // redirect query parameter.
+              window.location.href = `/login?redirect=${encodeURIComponent(safe)}`
+
+              // stop further processing by throwing a specific error
+              throw new Error('Redirecting to login')
+            }
+          } catch {
+            // fallback to a safe redirect to root
+            window.location.href = '/login?redirect=%2F'
+            throw new Error('Redirecting to login')
+          }
         }
 
         // If this looks like a missing/invalid CSRF token, try to fetch a fresh
@@ -219,9 +231,10 @@ class ApiService {
   // Deprecated compatibility shim removed. Use `intelligentSearch`, `searchIndexers`, or `searchByApi`.
 
   async intelligentSearch(query: string, category?: string, signal?: AbortSignal): Promise<SearchResult[]> {
-    const params = new URLSearchParams({ query })
-    if (category) params.append('category', category)
-    return this.request<SearchResult[]>(`/search/intelligent?${params}`, { signal })
+    const body: any = { mode: 'Simple', query }
+    if (category) body.category = category
+    const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body), signal })
+    return Array.isArray(resp) ? resp : (resp?.results ?? [])
   }
 
   async searchIndexers(query: string, category?: string, sortBy?: SearchSortBy, sortDirection?: SearchSortDirection): Promise<SearchResult[]> {
@@ -245,9 +258,18 @@ class ApiService {
   }
 
   // Audimeta API
-  async searchAudimeta(query: string, region: string = 'us'): Promise<AudimetaSearchResponse> {
-    const params = new URLSearchParams({ query, region })
+  async searchAudimeta(query: string, page: number = 1, limit: number = 50, region: string = 'us', language?: string): Promise<AudimetaSearchResponse> {
+    const params = new URLSearchParams({ query, page: String(page), limit: String(limit), region })
+    if (language) params.append('language', language)
     return this.request<AudimetaSearchResponse>(`/search/audimeta?${params}`)
+  }
+
+  async searchAudimetaByTitleAndAuthor(title: string, author: string, page: number = 1, limit: number = 50, region: string = 'us', language?: string): Promise<AudimetaSearchResponse> {
+    // Use unified POST /search in Advanced mode to route author/title flows to Audimeta
+    const body: any = { mode: 'Advanced', title, author, page, limit, region }
+    if (language) body.language = language
+    const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body) })
+    return resp
   }
 
     async getAudimetaMetadata(asin: string, region: string = 'us', cache: boolean = true): Promise<AudimetaBookResponse> {
@@ -258,8 +280,75 @@ class ApiService {
     return this.request(`/search/metadata/${asin}?region=${region}&cache=${cache}`)
   }
 
-  async searchByTitle(query: string, options?: RequestInit): Promise<SearchResult[]> {
-    return this.request(`/search/intelligent?query=${encodeURIComponent(query)}`, options)
+  async searchByTitle(query: string, options?: RequestInit & { language?: string }): Promise<SearchResult[]> {
+    const language = options?.language || 'english'
+    const body: any = { mode: 'Simple', query, language }
+    const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body), ...options })
+    // Backend returns either an array or an envelope { results: [...] } depending on mode.
+    return Array.isArray(resp) ? resp : (resp?.results ?? [])
+  }
+
+  async advancedSearch(params: {
+    title?: string
+    author?: string
+    isbn?: string
+    asin?: string
+    language?: string
+    pagination?: { page?: number; limit?: number }
+    cap?: number
+  }): Promise<SearchResult[]> {
+    const body: any = { mode: 'Advanced' }
+    if (params.title) body.title = params.title
+    if (params.author) body.author = params.author
+    if (params.isbn) body.isbn = params.isbn
+    if (params.asin) body.asin = params.asin
+    if (params.language) body.language = params.language
+    if (params.pagination) body.pagination = params.pagination
+    if (typeof params.cap === 'number') body.cap = params.cap
+    const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body) })
+    return Array.isArray(resp) ? resp : (resp?.results ?? [])
+  }
+
+  async searchAudibleLibrary(query?: string, language?: string): Promise<SearchResult[]> {
+    const queryParams = new URLSearchParams()
+    if (query) queryParams.append('query', query)
+    if (language) queryParams.append('language', language)
+    
+    const url = `/search/audible-library${queryParams.toString() ? '?' + queryParams.toString() : ''}`
+    return this.request(url)
+  }
+
+  async searchAudibleCatalog(query?: string, title?: string, author?: string, language?: string): Promise<SearchResult[]> {
+    const queryParams = new URLSearchParams()
+    if (query) queryParams.append('query', query)
+    if (title) queryParams.append('title', title)
+    if (author) queryParams.append('author', author)
+    if (language) queryParams.append('language', language)
+    
+    const url = `/search/audible-catalog${queryParams.toString() ? '?' + queryParams.toString() : ''}`
+    return this.request(url)
+  }
+
+  async getAudibleAuthStatus(): Promise<{ authenticated: boolean; identityFile?: string }> {
+    return this.request('/audible-auth/status')
+  }
+
+  async startAudibleExternalLogin(locale: string = 'us', deviceName: string = 'Listenarr'): Promise<{ loginUrl: string; message?: string }> {
+    return this.request('/audible-auth/external-login-start', {
+      method: 'POST',
+      body: JSON.stringify({ locale, deviceName })
+    })
+  }
+
+  async completeAudibleExternalLogin(responseUrl: string, locale?: string, deviceName?: string): Promise<any> {
+    return this.request('/audible-auth/external-login-complete', {
+      method: 'POST',
+      body: JSON.stringify({ responseUrl, locale, deviceName })
+    })
+  }
+
+  async logoutAudible(): Promise<any> {
+    return this.request('/audible-auth/logout', { method: 'POST' })
   }
 
   // Downloads API
@@ -626,6 +715,32 @@ class ApiService {
     if (!imageUrl) return ''
     // If already absolute URL, return as is
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      // Prefer serving images from the backend image cache when referencing
+      // known vendor/product links (Amazon/Audible). Try to extract a 10-char
+      // identifier (ASIN) and map to our `/api/images/{identifier}` endpoint.
+      try {
+        const lower = imageUrl.toLowerCase()
+        if (lower.includes('amazon.') || lower.includes('audible.')) {
+          // Try to extract ASIN-like identifier (10 alphanumeric)
+          const asinMatch = imageUrl.match(/([A-Z0-9]{10})/i)
+          if (asinMatch && asinMatch[1]) {
+            const identifier = asinMatch[1]
+            let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
+            const sessionToken = sessionTokenManager.getToken()
+            if (sessionToken) {
+              url += `?access_token=${encodeURIComponent(sessionToken)}`
+            } else {
+              const cfg = getCachedStartupConfig()
+              const apiKey = cfg?.apiKey
+              if (apiKey) url += `?access_token=${encodeURIComponent(apiKey)}`
+            }
+            return url
+          }
+        }
+      } catch (e) {
+        try { console.debug('[ApiService] amazon-image-detect error', e) } catch {}
+      }
+
       return imageUrl
     }
     // If the stored path is the library cache path, convert to our images API endpoint
@@ -1080,9 +1195,17 @@ export const scoreSearchResults = (profileId: number, searchResults: SearchResul
 export const testDownloadClient = (config: DownloadClientConfiguration) => apiService.testDownloadClient(config)
 
 // Audimeta helpers
-export const searchAudimeta = (query: string, region?: string) => apiService.searchAudimeta(query, region)
+export const searchAudimeta = (query: string, page: number = 1, limit: number = 50, region?: string, language?: string) => apiService.searchAudimeta(query, page, limit, region, language)
+export const searchAudimetaByTitleAndAuthor = (title: string, author: string, page: number = 1, limit: number = 50, region?: string, language?: string) => apiService.searchAudimetaByTitleAndAuthor(title, author, page, limit, region, language)
 export const getAudimetaMetadata = (asin: string, region?: string, cache?: boolean) => apiService.getAudimetaMetadata(asin, region, cache)
 export const getMetadata = (asin: string, region?: string, cache?: boolean) => apiService.getMetadata(asin, region, cache)
+
+
+// Audible auth helpers
+export const getAudibleAuthStatus = () => apiService.getAudibleAuthStatus()
+export const startAudibleExternalLogin = (locale?: string, deviceName?: string) => apiService.startAudibleExternalLogin(locale, deviceName)
+export const completeAudibleExternalLogin = (responseUrl: string, locale?: string, deviceName?: string) => apiService.completeAudibleExternalLogin(responseUrl, locale, deviceName)
+export const logoutAudible = () => apiService.logoutAudible()
 
 
 

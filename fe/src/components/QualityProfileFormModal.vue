@@ -622,7 +622,7 @@ const handleSubmit = () => {
 
 .modal-content {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   max-width: 800px;
   width: 100%;
   max-height: 90vh;
@@ -730,7 +730,7 @@ const handleSubmit = () => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 1rem;
 }
@@ -766,7 +766,7 @@ const handleSubmit = () => {
   appearance: none;
   background-color: #1a1a1a;
   border: 2px solid #555;
-  border-radius: 3px;
+  border-radius: 6px;
   position: relative;
   transition: all 0.2s ease;
   vertical-align: sub;
@@ -831,7 +831,7 @@ const handleSubmit = () => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .quality-name {
@@ -859,7 +859,7 @@ const handleSubmit = () => {
   padding: 0.4rem;
   background-color: #2a2a2a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
 }
 
@@ -901,7 +901,7 @@ const handleSubmit = () => {
   padding: 0.4rem 0.8rem;
   background-color: #2196F3;
   color: #fff;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.9rem;
 }
 
@@ -948,7 +948,7 @@ const handleSubmit = () => {
   padding: 0.6rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
 }
 
@@ -957,7 +957,7 @@ const handleSubmit = () => {
   background-color: #2196F3;
   color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -991,7 +991,7 @@ const handleSubmit = () => {
 .submit-button {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;

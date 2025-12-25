@@ -143,7 +143,7 @@ onUnmounted(() => document.removeEventListener('click', handleClickOutside))
   padding: 6px 8px;
   background: #2a2a2a;
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 8px;
+  border-radius: 6px;
   color: #e6eef8;
   cursor: pointer;
   font-size: 12px;
@@ -158,9 +158,9 @@ onUnmounted(() => document.removeEventListener('click', handleClickOutside))
   box-shadow: 0 8px 24px rgba(0,0,0,0.6);
   z-index: 1100;
 }
-.dropdown-section { padding: 6px 4px; }
+
 .dropdown-item {
-  padding: 6px 8px;
+  padding: 0.75rem 1rem;
   cursor: pointer;
   display: flex;
   justify-content: space-between;

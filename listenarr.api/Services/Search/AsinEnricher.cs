@@ -43,7 +43,7 @@ public class AsinEnricher
     /// </summary>
     public async Task<EnrichmentResult> EnrichAsinsAsync(
         List<string> asinCandidates,
-        Dictionary<string, (string Title, string Author, string? ImageUrl)> asinToRawResult,
+        Dictionary<string, (string Title, string Author, string? ImageUrl, string? Language)> asinToRawResult,
         Dictionary<string, AudibleSearchResult> asinToAudibleResult,
         Dictionary<string, string> asinToSource,
         Dictionary<string, OpenLibraryBook> asinToOpenLibrary,
@@ -197,7 +197,7 @@ public class AsinEnricher
                     {
                         // Accept metadata even if Title is missing. ConvertMetadataToSearchResult
                         // will use raw result title as fallback if metadata title is empty.
-                        var enrichedResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, asin, rawResult.Title, rawResult.Author, rawResult.ImageUrl);
+                        var enrichedResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, asin, rawResult.Title, rawResult.Author, rawResult.ImageUrl, rawResult.Language);
                         enrichedResult.IsEnriched = true;
 
                         // Store the metadata source name for the badge

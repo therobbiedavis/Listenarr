@@ -28,9 +28,11 @@ namespace Listenarr.Api.Services
         /// <param name="containmentMode">Containment mode: Strict|Relaxed|Off</param>
         /// <param name="requireAuthorAndPublisher">Whether both author and publisher are required</param>
         /// <param name="fuzzyThreshold">Similarity threshold used for fuzzy matching (0.0 - 1.0)</param>
+        /// <param name="region">Region code to prefer when querying metadata providers (default: us)</param>
+        /// <param name="language">Optional language code to filter metadata results (e.g. en, de)</param>
         /// <param name="ct">Cancellation token to cancel the intelligent search operation.</param>
         /// <returns>Search results enriched with metadata from Amazon and Audible</returns>
-        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, CancellationToken ct = default);
+        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, CancellationToken ct = default);
 
         /// <summary>
         /// Searches a specific API/indexer by ID

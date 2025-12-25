@@ -30,7 +30,7 @@ namespace Listenarr.Api.Services
     /// Service for fetching audiobook metadata from Audnexus API
     /// API Documentation: https://audnex.us/
     /// </summary>
-    public class AudnexusService
+    public class AudnexusService : IAudnexusService
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<AudnexusService> _logger;

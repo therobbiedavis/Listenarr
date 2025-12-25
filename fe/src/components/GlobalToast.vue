@@ -24,7 +24,7 @@ onUnmounted(() => {
 
 <style scoped>
 .toast-container { position: fixed; right: 20px; top: 80px; z-index: 2000; display: flex; flex-direction: column; gap: 8px; }
-.toast { min-width: 260px; max-width: 380px; padding: 12px 14px; border-radius: 8px; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.45); position: relative; overflow: hidden; }
+.toast { min-width: 260px; max-width: 380px; padding: 12px 14px; border-radius: 6px; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.45); position: relative; overflow: hidden; }
 .toast .toast-title { font-weight: 700; margin-bottom: 4px; }
 .toast .toast-message { font-size: 13px; color: #f3f3f3; }
 .toast .toast-close { position: absolute; top: 6px; right: 8px; background: transparent; border: none; color: #fff; font-size: 16px; cursor: pointer; }

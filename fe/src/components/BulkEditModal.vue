@@ -338,7 +338,7 @@ function close() {
 
 .modal-container {
   background-color: #1e1e1e;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 100%;
   max-width: 600px;
   max-height: 90vh;
@@ -370,7 +370,7 @@ function close() {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   font-size: 1.5rem;
   display: flex;
@@ -408,7 +408,7 @@ function close() {
   padding: 0.75rem;
   background: #1a1a1a;
   border: 1px solid #2e2e2e;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .result-header {

@@ -17,6 +17,8 @@
  */
 
 using System.Net.Http;
+using System.Threading;
+using System.Buffers.Binary;
 using System.Threading.Tasks;
 using Listenarr.Domain.Models;
 using HtmlAgilityPack;
@@ -112,7 +114,24 @@ namespace Listenarr.Api.Services
                     metadata.ImageUrl = AmazonMetadataExtractors.ExtractImageUrl(doc, _logger);
                     if (!string.IsNullOrWhiteSpace(metadata.ImageUrl))
                     {
-                        _logger.LogInformation("Extracted image from Amazon: {ImageUrl}", metadata.ImageUrl);
+                        // Validate image dimensions: ignore 1x1 or non-square images
+                        try
+                        {
+                            var isSquare = await IsImageSquareAsync(metadata.ImageUrl!);
+                            if (!isSquare)
+                            {
+                                _logger.LogInformation("Discarding non-square or placeholder image for ASIN {Asin}: {ImageUrl}", metadata.Asin, metadata.ImageUrl);
+                                metadata.ImageUrl = null;
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Extracted image from Amazon: {ImageUrl}", metadata.ImageUrl);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error validating image for ASIN {Asin}; keeping image URL: {ImageUrl}", metadata.Asin, metadata.ImageUrl);
+                        }
                     }
                 }
 
@@ -151,6 +170,111 @@ namespace Listenarr.Api.Services
                 _logger.LogError(ex, "Error scraping Amazon metadata for ASIN {Asin}", asin);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Downloads the image at the given URL and returns true if it's square and larger than 1x1.
+        /// Returns false for placeholders, non-square or 1x1 images, or on any error.
+        /// </summary>
+        private async Task<bool> IsImageSquareAsync(string imageUrl, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl)) return false;
+
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+                using var resp = await _httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (!resp.IsSuccessStatusCode) return false;
+
+                using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                // Read up to first 64KB which is more than enough to find headers for common formats
+                var buffer = new byte[64 * 1024];
+                var read = 0;
+                while (read < buffer.Length)
+                {
+                    var r = await stream.ReadAsync(buffer, read, buffer.Length - read, ct);
+                    if (r == 0) break;
+                    read += r;
+                }
+
+                var content = new byte[read];
+                Array.Copy(buffer, content, read);
+
+                var dims = TryGetImageDimensions(content);
+                if (dims == null) return false;
+                var (w, h) = dims.Value;
+                if (w <= 1 || h <= 1) return false;
+                return w == h;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "IsImageSquareAsync failed for URL {Url}", imageUrl);
+                return false;
+            }
+        }
+
+        private static (int width, int height)? TryGetImageDimensions(byte[] data)
+        {
+            if (data == null || data.Length < 10) return null;
+
+            // PNG: signature 89 50 4E 47 0D 0A 1A 0A, IHDR chunk contains width/height at offset 16..23 (big-endian)
+            if (data.Length >= 24 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47)
+            {
+                try
+                {
+                    var width = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(16, 4));
+                    var height = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(20, 4));
+                    return (width, height);
+                }
+                catch { return null; }
+            }
+
+            // GIF: header GIF87a or GIF89a; width/height at offset 6..9 little-endian 16-bit
+            if (data.Length >= 10 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F')
+            {
+                try
+                {
+                    var width = BitConverter.ToUInt16(data, 6);
+                    var height = BitConverter.ToUInt16(data, 8);
+                    return ((int)width, (int)height);
+                }
+                catch { return null; }
+            }
+
+            // JPEG: need to parse segments to find SOF0/2 marker which contains height/width
+            if (data.Length >= 2 && data[0] == 0xFF && data[1] == 0xD8)
+            {
+                int offset = 2;
+                while (offset + 9 < data.Length)
+                {
+                    if (data[offset] != 0xFF) break;
+                    var marker = data[offset + 1];
+                    // SOF0 (0xC0), SOF2 (0xC2) contain frame header
+                    if (marker == 0xC0 || marker == 0xC2)
+                    {
+                        try
+                        {
+                            // length = next two bytes
+                            var length = (data[offset + 2] << 8) + data[offset + 3];
+                            if (offset + 5 + 4 >= data.Length) return null;
+                            var height = (data[offset + 5] << 8) + data[offset + 6];
+                            var width = (data[offset + 7] << 8) + data[offset + 8];
+                            return (width, height);
+                        }
+                        catch { return null; }
+                    }
+                    else
+                    {
+                        // Skip this segment
+                        if (offset + 4 >= data.Length) break;
+                        var segLen = (data[offset + 2] << 8) + data[offset + 3];
+                        if (segLen < 2) break;
+                        offset += 2 + segLen;
+                    }
+                }
+            }
+
+            return null;
         }
     }
 

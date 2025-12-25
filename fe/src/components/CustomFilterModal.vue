@@ -273,7 +273,7 @@ function onClose() {
 }
 .modal-container {
   background: #1f1f1f;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 720px;
   max-width: calc(100% - 32px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
@@ -291,14 +291,14 @@ function onClose() {
 .btn-close { background: transparent; border: none; color: #fff; font-size: 18px }
 .form-row { margin-bottom: 12px }
 .form-label { display: block; margin-bottom: 6px; color: #ddd }
-.form-input, .form-select { width: 100%; padding: 8px 10px; border-radius: 4px; background: #121212; border: 1px solid rgba(255,255,255,0.06); color: #fff }
+.form-input, .form-select { width: 100%; padding: 8px 10px; border-radius: 6px; background: #121212; border: 1px solid rgba(255,255,255,0.06); color: #fff }
 .form-select.small { width: 140px }
 .rules { display: flex; flex-direction: column; gap: 8px }
 .rule-row { display: flex; gap: 8px; align-items: center }
 .rule-actions { margin-left: auto }
 .rules-actions { margin-top: 8px }
 .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px }
-.btn { padding: 8px 12px; border-radius: 4px; cursor: pointer }
+.btn { padding: 8px 12px; border-radius: 6px; cursor: pointer }
 .btn-primary { background: #2196F3; color: #fff; border: none }
 .btn-secondary { background: #333; color: #fff; border: none }
 
@@ -307,7 +307,7 @@ function onClose() {
   border: 1px solid rgba(255,255,255,0.06);
   color: #ddd;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
 }
 .group-toggle.active {

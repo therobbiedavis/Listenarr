@@ -12,7 +12,7 @@ public class AsinSearchHandler
     private readonly ILogger<AsinSearchHandler> _logger;
     private readonly IConfigurationService _configurationService;
     private readonly AudimetaService _audimetaService;
-    private readonly AudnexusService _audnexusService;
+    private readonly IAudnexusService _audnexusService;
     private readonly IAudibleMetadataService _audibleMetadataService;
     private readonly IAmazonMetadataService _amazonMetadataService;
     private readonly MetadataConverters _metadataConverters;
@@ -22,7 +22,7 @@ public class AsinSearchHandler
         ILogger<AsinSearchHandler> logger,
         IConfigurationService configurationService,
         AudimetaService audimetaService,
-        AudnexusService audnexusService,
+        IAudnexusService audnexusService,
         IAudibleMetadataService audibleMetadataService,
         IAmazonMetadataService amazonMetadataService,
         MetadataConverters metadataConverters,
@@ -39,7 +39,11 @@ public class AsinSearchHandler
     }
 
     /// <summary>
-    /// Searches for a specific ASIN using metadata APIs first, then fallback to scraping.
+    /// Searches for a specific ASIN using the following workflow:
+    /// 1. Audimeta.de /book/{asin} endpoint (primary)
+    /// 2. Audnexus fallback (if configured)
+    /// 3. Amazon product page scraping (final fallback)
+    /// Note: Audible scraping has been removed per new workflow requirements.
     /// </summary>
     public async Task<List<SearchResult>> SearchByAsinAsync(
         string asin,
@@ -67,33 +71,44 @@ public class AsinSearchHandler
             _logger.LogDebug(ex, "Failed to load application settings for ASIN search");
         }
 
-        // Step 1: Try to get metadata from configured sources (Audimeta, Audnexus)
+        // Initialize metadata variables
         AudibleBookMetadata? metadata = null;
         string? metadataSourceName = null;
 
-        if (metadataSources != null && metadataSources.Any())
+        // Step 1: Try to get metadata from Audimeta.de first (primary source)
+        _logger.LogInformation("Attempting Audimeta.de for ASIN {Asin}", asin);
+        await _searchProgressReporter.BroadcastAsync($"Searching Audimeta.de for {asin}", null);
+        
+        try
         {
-            _logger.LogInformation("Trying {Count} metadata source(s) for ASIN {Asin}", metadataSources.Count, asin);
-            await _searchProgressReporter.BroadcastAsync($"Checking metadata sources for {asin}", null);
+            var audimetaData = await _audimetaService.GetBookMetadataAsync(asin, "us", true);
+            if (audimetaData != null)
+            {
+                metadata = _metadataConverters.ConvertAudimetaToMetadata(audimetaData, asin, "Audible");
+                metadataSourceName = "Audimeta";
+                _logger.LogInformation("Successfully got metadata from Audimeta.de for ASIN {Asin}", asin);
+            }
+            else
+            {
+                _logger.LogInformation("Audimeta.de returned no data for ASIN {Asin}", asin);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to get metadata from Audimeta.de for ASIN {Asin}", asin);
+        }
+
+        // Step 2: If Audimeta failed, try other configured metadata sources (Audnexus)
+        if (metadata == null && metadataSources != null && metadataSources.Any())
+        {
+            _logger.LogInformation("Trying {Count} fallback metadata source(s) for ASIN {Asin}", metadataSources.Count, asin);
+            await _searchProgressReporter.BroadcastAsync($"Checking fallback metadata sources for {asin}", null);
 
             foreach (var source in metadataSources.OrderBy(s => s.Priority))
             {
                 try
                 {
-                    if (source.Name.Contains("Audimeta", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _logger.LogInformation("Attempting Audimeta for ASIN {Asin}", asin);
-                        await _searchProgressReporter.BroadcastAsync($"Searching Audimeta for {asin}", null);
-                        var audimetaData = await _audimetaService.GetBookMetadataAsync(asin, "us", true);
-                        if (audimetaData != null)
-                        {
-                            metadata = _metadataConverters.ConvertAudimetaToMetadata(audimetaData, asin, "Audible");
-                            metadataSourceName = source.Name;
-                            _logger.LogInformation("Successfully got metadata from {Source} for ASIN {Asin}", source.Name, asin);
-                            break;
-                        }
-                    }
-                    else if (source.Name.Contains("Audnexus", StringComparison.OrdinalIgnoreCase))
+                    if (source.Name.Contains("Audnexus", StringComparison.OrdinalIgnoreCase))
                     {
                         _logger.LogInformation("Attempting Audnexus for ASIN {Asin}", asin);
                         await _searchProgressReporter.BroadcastAsync($"Searching Audnexus for {asin}", null);
@@ -114,35 +129,14 @@ public class AsinSearchHandler
             }
         }
 
-        // Step 2: If metadata sources failed, scrape product pages as fallback
+        // Step 3: If metadata sources failed, scrape Amazon product page as fallback (Audible scraping removed)
         if (metadata == null)
         {
-            _logger.LogInformation("No metadata found from APIs for ASIN {Asin}, falling back to product page scraping", asin);
-            await _searchProgressReporter.BroadcastAsync($"Metadata sources unavailable, scraping product pages", null);
+            _logger.LogInformation("No metadata found from APIs for ASIN {Asin}, falling back to Amazon scraping", asin);
+            await _searchProgressReporter.BroadcastAsync($"Metadata sources unavailable, scraping Amazon", null);
 
-            // Try Audible scraping first (more reliable for audiobooks)
-            if (!skipAudible)
-            {
-                try
-                {
-                    await _searchProgressReporter.BroadcastAsync($"Scraping Audible for {asin}", null);
-                    ct.ThrowIfCancellationRequested();
-                    var audibleMeta = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin, ct);
-                    if (audibleMeta != null)
-                    {
-                        metadata = audibleMeta;
-                        metadataSourceName = audibleMeta.Source ?? "Audible";
-                        _logger.LogInformation("Successfully scraped metadata for ASIN {Asin} from {Source}", asin, metadataSourceName);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to scrape Audible for ASIN {Asin}", asin);
-                }
-            }
-
-            // If Audible scraping failed, try Amazon
-            if (metadata == null && !skipAmazon)
+            // Try Amazon scraping only (Audible no longer used as fallback)
+            if (!skipAmazon)
             {
                 try
                 {

@@ -126,7 +126,7 @@ export default defineComponent({
   max-width: 420px;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 2rem;
   color: white;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -168,7 +168,7 @@ export default defineComponent({
 .form-input {
   padding: 0.75rem;
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   background-color: #1a1a1a;
   color: white;
   font-size: 1rem;
@@ -196,7 +196,7 @@ export default defineComponent({
   appearance: auto; /* allow native look unless accent-color supported */
   accent-color: #2196F3; /* modern browsers: sets the checked color */
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   background-color: #1a1a1a;
   display: inline-block;
 }
@@ -214,7 +214,7 @@ export default defineComponent({
   background-color: #2196F3;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 1rem;
   font-weight: bold;
   cursor: pointer;

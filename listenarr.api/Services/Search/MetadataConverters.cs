@@ -152,7 +152,7 @@ public class MetadataConverters
     /// <summary>
     /// Converts AudibleBookMetadata to SearchResult with fallback handling for missing fields.
     /// </summary>
-    public async Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null)
+    public async Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null, string? fallbackLanguage = null)
     {
         // Use metadata if available, otherwise fallback to raw search result, finally to generic fallback
         var title = metadata.Title;
@@ -224,13 +224,20 @@ public class MetadataConverters
             }
         }
 
-        // Generate product URL based on source and ASIN
+        // Generate product URL based on source and ASIN. Ensure only HTTP(S) URLs are used
         string? productUrl = null;
         if (!string.IsNullOrEmpty(asin))
         {
             productUrl = metadata.Source == "Amazon"
                 ? $"https://www.amazon.com/dp/{asin}"
                 : $"https://www.audible.com/pd/{asin}";
+        }
+
+        // If metadata provided a non-http product link, prefer synthesized productUrl and
+        // do not leak internal/custom-scheme links into the user-facing ProductUrl field.
+        if (!string.IsNullOrEmpty(metadata.Source) && !string.IsNullOrEmpty(metadata.ImageUrl))
+        {
+            // no-op; placeholder to keep behavior explicit in future
         }
 
         var result = new SearchResult
@@ -248,11 +255,13 @@ public class MetadataConverters
             MetadataSource = metadata.Source, // Set the metadata source for display
             SourceLink = productUrl, // Link to the product page
             PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? new DateTime(year, 1, 1) : DateTime.MinValue,
+            PublishYear = metadata.PublishYear,
+            Subtitle = metadata.Subtitle,
             Quality = metadata.Version ?? "Unknown",
             Format = "Audiobook",
             Description = metadata.Description,
             Publisher = metadata.Publisher,
-            Language = metadata.Language,
+            Language = metadata.Language ?? fallbackLanguage,
             Runtime = metadata.Runtime,
             Narrator = string.Join(", ", metadata.Narrators ?? new List<string>()),
             Series = metadata.Series,

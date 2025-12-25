@@ -38,7 +38,7 @@ public class FallbackScraper
         List<string> asinsNeedingFallback,
         List<SearchResult> alreadyEnrichedResults,
         ConcurrentDictionary<string, string> candidateDropReasons,
-        Dictionary<string, (string Title, string Author, string? ImageUrl)>? asinToRawResult = null,
+        Dictionary<string, (string Title, string Author, string? ImageUrl, string? Language)>? asinToRawResult = null,
         CancellationToken ct = default)
     {
         var scrapedResults = new ConcurrentBag<SearchResult>();
@@ -70,33 +70,19 @@ public class FallbackScraper
                 
                 if (metadata != null)
                 {
-                    // Create temporary result to test filters
-                    var tempResult = new SearchResult 
-                    { 
-                        Title = metadata.Title!, 
-                        Artist = metadata.Authors?.FirstOrDefault() ?? "" 
-                    };
-                    
-                    // Apply filters to scraped metadata
-                    if (_filterPipeline.WouldFilter(tempResult, out string? filterReason))
-                    {
-                        _logger.LogDebug("Filtering out scraped result: {Title} (ASIN: {Asin}) - Reason: {Reason}", 
-                            metadata.Title, asin, filterReason);
-                        
-                        if (!string.IsNullOrWhiteSpace(asin))
-                        {
-                            try { candidateDropReasons[asin] = filterReason ?? "scrape_filtered"; } catch { }
-                        }
-                        return;
-                    }
-
+                    // Convert scraped metadata into a SearchResult and then apply filters so
+                    // the filter pipeline can observe that the result is enriched and which
+                    // metadata source produced it (this prevents product-like heuristics from
+                    // rejecting valid audiobook pages when we have real metadata).
                     // Prefer original search result image URL over scraped placeholder
                     string? fallbackImageUrl = metadata.ImageUrl;
+                    string? fallbackLanguage = null;
                     _logger.LogDebug("FallbackScraper: ASIN {Asin} - Scraped ImageUrl: {ScrapedUrl}", asin, fallbackImageUrl ?? "null");
                     
                     if (asinToRawResult != null && asinToRawResult.TryGetValue(asin!, out var rawResult))
                     {
                         _logger.LogDebug("FallbackScraper: ASIN {Asin} - Original search ImageUrl: {OriginalUrl}", asin, rawResult.ImageUrl ?? "null");
+                        fallbackLanguage = rawResult.Language;
                         
                         if (!string.IsNullOrWhiteSpace(rawResult.ImageUrl))
                         {
@@ -118,21 +104,35 @@ public class FallbackScraper
                     }
 
                     var enrichedResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(
-                        metadata, asin!, null, null, fallbackImageUrl);
-                    
+                        metadata, asin!, null, null, fallbackImageUrl, fallbackLanguage);
+
                     enrichedResult.IsEnriched = true;
                     enrichedResult.MetadataSource = metadata.Source; // Set Amazon as metadata source
-                    
-                    scrapedResults.Add(enrichedResult);
-                    
-                    if (!string.IsNullOrWhiteSpace(asin))
+
+                    // Now run the filter pipeline on the enriched result so filters can
+                    // consider the metadata source and enriched flag before deciding.
+                    if (_filterPipeline.WouldFilter(enrichedResult, out string? filterReason))
                     {
-                        try { candidateDropReasons[asin] = "scrape_enriched"; } catch { }
+                        _logger.LogDebug("Filtering out scraped result after enrichment: {Title} (ASIN: {Asin}) - Reason: {Reason}",
+                            enrichedResult.Title, asin, filterReason);
+
+                        if (!string.IsNullOrWhiteSpace(asin))
+                        {
+                            try { candidateDropReasons[asin] = filterReason ?? "scrape_filtered"; } catch { }
+                        }
                     }
-                    
-                    _logger.LogInformation("Product-page scraping enriched ASIN {Asin} with title={Title}", 
-                        asin, metadata.Title);
-                    await _searchProgressReporter.BroadcastAsync($"Found: {metadata.Title}", asin);
+                    else
+                    {
+                        scrapedResults.Add(enrichedResult);
+
+                        if (!string.IsNullOrWhiteSpace(asin))
+                        {
+                            try { candidateDropReasons[asin] = "scrape_enriched"; } catch { }
+                        }
+
+                        _logger.LogInformation("Product-page scraping enriched ASIN {Asin} with title={Title}", asin, metadata.Title);
+                        await _searchProgressReporter.BroadcastAsync($"Found: {metadata.Title}", asin);
+                    }
                 }
                 else
                 {

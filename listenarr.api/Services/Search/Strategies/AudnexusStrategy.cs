@@ -10,14 +10,14 @@ namespace Listenarr.Api.Services.Search.Strategies;
 /// </summary>
 public class AudnexusStrategy : IMetadataStrategy
 {
-    private readonly AudnexusService _audnexusService;
+    private readonly IAudnexusService _audnexusService;
     private readonly MetadataConverters _metadataConverters;
     private readonly ILogger<AudnexusStrategy> _logger;
 
     public string SourceName => "Audnexus";
 
     public AudnexusStrategy(
-        AudnexusService audnexusService,
+        IAudnexusService audnexusService,
         MetadataConverters metadataConverters,
         ILogger<AudnexusStrategy> logger)
     {

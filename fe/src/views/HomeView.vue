@@ -294,7 +294,7 @@ const formatTime = (timestamp: Date): string => {
 .stats-card {
   background-color: #2a2a2a;
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -345,7 +345,7 @@ const formatTime = (timestamp: Date): string => {
 
 .section-card {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
 }
 
@@ -404,7 +404,7 @@ const formatTime = (timestamp: Date): string => {
 
 .status-badge {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: bold;
   text-transform: uppercase;
@@ -439,7 +439,7 @@ const formatTime = (timestamp: Date): string => {
   width: 40px;
   height: 60px;
   background-color: #555;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -512,7 +512,7 @@ const formatTime = (timestamp: Date): string => {
   align-items: center;
   padding: 0.75rem;
   background-color: #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .health-label {
@@ -522,7 +522,7 @@ const formatTime = (timestamp: Date): string => {
 
 .health-status {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: bold;
 }

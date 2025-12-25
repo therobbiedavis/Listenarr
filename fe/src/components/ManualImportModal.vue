@@ -580,7 +580,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
 .modal-content {
   background: #2a2a2a;
   border: 1px solid #444;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 100%;
   max-height: 90vh;
   display: flex;
@@ -615,7 +615,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -650,7 +650,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
 
 .preview-table {
   border: 1px solid #333;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -691,7 +691,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   width: 18px;
   height: 18px;
   accent-color: #ffffff;
-  border-radius: 3px;
+  border-radius: 6px;
 }
 
 .col-path {
@@ -759,7 +759,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   display: flex;
   align-items: center;
   padding: 0.25rem 0;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -768,7 +768,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   width: 100%;
   height: 100%;
   border: 1px dashed rgba(255,255,255,0.12);
-  border-radius: 4px;
+  border-radius: 6px;
   box-sizing: border-box;
 }
 
@@ -787,7 +787,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   padding: 0.5rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 0.85rem;
   transition: all 0.2s;
@@ -831,14 +831,14 @@ const getItemIssues = (item: PreviewItem): string[] => {
   color: #ddd;
   border: 1px solid #444;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 /* Button styles */
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -938,7 +938,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   background: #2a2a2a;
   border: 1px solid #444;
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 90vw;
   max-width: 1100px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -956,7 +956,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   margin-bottom: 1rem;
 }

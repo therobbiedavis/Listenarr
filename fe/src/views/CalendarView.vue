@@ -166,7 +166,7 @@ const formatDate = (date: Date): string => {
 .btn {
   padding: 0.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   background-color: #555;
   color: white;
@@ -174,7 +174,7 @@ const formatDate = (date: Date): string => {
 
 .calendar-grid {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   margin-bottom: 2rem;
 }
@@ -236,7 +236,7 @@ const formatDate = (date: Date): string => {
 
 .upcoming-episodes {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
 }
 
@@ -256,7 +256,7 @@ const formatDate = (date: Date): string => {
   gap: 1rem;
   padding: 1rem;
   background-color: #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .episode-date {

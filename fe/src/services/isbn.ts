@@ -16,6 +16,9 @@ interface OpenLibraryAuthorRef {
   key?: string
 }
 
+import { useConfigurationStore } from '@/stores/configuration'
+import { createAmazonSearchUrl } from '@/utils/marketDomains'
+
 export interface ISBNBook {
   isbn: string
   title: string
@@ -243,20 +246,9 @@ class ISBNService {
    * Create Amazon search URL for finding the audiobook
    */
   private createAmazonSearchUrl(title: string, author?: string): string {
-    const baseUrl = 'https://www.amazon.com/s'
-    const params = new URLSearchParams()
-    
-    let searchTerm = title
-    if (author) {
-      searchTerm += ` ${author}`
-    }
-    searchTerm += ' audiobook'
-    
-    params.set('k', searchTerm)
-    params.set('i', 'audible')
-    params.set('ref', 'sr_nr_i_0')
-    
-    return `${baseUrl}?${params.toString()}`
+    const configStore = useConfigurationStore()
+    const region = (configStore.applicationSettings as any)?.region
+    return createAmazonSearchUrl(title, author, region)
   }
 
   /**

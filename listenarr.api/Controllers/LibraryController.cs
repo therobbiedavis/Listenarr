@@ -741,9 +741,10 @@ namespace Listenarr.Api.Controllers
             }
 
             // Delete associated image from cache if it exists
-            if (!string.IsNullOrEmpty(audiobook.Asin))
+            try
             {
-                try
+                // Prefer ASIN-based cleanup when available
+                if (!string.IsNullOrEmpty(audiobook.Asin))
                 {
                     var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
                     if (imagePath != null)
@@ -756,11 +757,38 @@ namespace Listenarr.Api.Controllers
                         }
                     }
                 }
-                catch (Exception ex)
+                else if (!string.IsNullOrEmpty(audiobook.ImageUrl))
                 {
-                    _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
-                    // Continue with deletion even if image cleanup fails
+                    // If ImageUrl points to our cached library folder, extract the filename and delete it
+                    try
+                    {
+                        var match = System.Text.RegularExpressions.Regex.Match(audiobook.ImageUrl, "/config/cache/images/library/(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (match.Success && match.Groups.Count > 1)
+                        {
+                            var filename = match.Groups[1].Value;
+                            var identifier = System.IO.Path.GetFileNameWithoutExtension(filename);
+                            var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
+                            if (!string.IsNullOrEmpty(imagePath))
+                            {
+                                var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                if (System.IO.File.Exists(fullPath))
+                                {
+                                    System.IO.File.Delete(fullPath);
+                                    _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
+                // Continue with deletion even if image cleanup fails
             }
 
             var deleted = await _repo.DeleteByIdAsync(id);
@@ -802,9 +830,9 @@ namespace Listenarr.Api.Controllers
                             }
 
                             // Delete associated image from cache if it exists
-                            if (!string.IsNullOrEmpty(audiobook.Asin))
+                            try
                             {
-                                try
+                                if (!string.IsNullOrEmpty(audiobook.Asin))
                                 {
                                     var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
                                     if (imagePath != null)
@@ -818,11 +846,38 @@ namespace Listenarr.Api.Controllers
                                         }
                                     }
                                 }
-                                catch (Exception ex)
+                                else if (!string.IsNullOrEmpty(audiobook.ImageUrl))
                                 {
-                                    _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
-                                    // Continue with deletion even if image cleanup fails
+                                    try
+                                    {
+                                        var match = System.Text.RegularExpressions.Regex.Match(audiobook.ImageUrl, "/config/cache/images/library/(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                        if (match.Success && match.Groups.Count > 1)
+                                        {
+                                            var filename = match.Groups[1].Value;
+                                            var identifier = System.IO.Path.GetFileNameWithoutExtension(filename);
+                                            var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
+                                            if (!string.IsNullOrEmpty(imagePath))
+                                            {
+                                                var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                                if (System.IO.File.Exists(fullPath))
+                                                {
+                                                    System.IO.File.Delete(fullPath);
+                                                    deletedImagesCount++;
+                                                    _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
+                                    }
                                 }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
+                                // Continue with deletion even if image cleanup fails
                             }
 
                             // Log history entry for the deleted audiobook

@@ -156,22 +156,34 @@ public static class SearchValidation
     public static bool IsLikelyAudiobook(SearchResult r)
     {
         if (r == null) return false;
+        // Positive signals: runtime, narrator, or trusted audio metadata
+        var hasRuntime = r.Runtime.HasValue && r.Runtime.Value > 5;
+        var hasNarrator = !string.IsNullOrWhiteSpace(r.Narrator);
+        var metadataSource = (r.MetadataSource ?? string.Empty).ToLowerInvariant();
+        var sourceIsTrustedAudio = metadataSource.Contains("audimeta") || metadataSource.Contains("audnex") || metadataSource.Contains("audnexus") || metadataSource.Contains("audible");
 
-        // If a proper metadata provider enriched it, trust it
-        if (!string.IsNullOrWhiteSpace(r.MetadataSource))
+        if (hasRuntime || hasNarrator || sourceIsTrustedAudio) return true;
+
+        // Negative indicators in title/format that strongly suggest non-audio products
+        var title = (r.Title ?? string.Empty);
+        // Positive audio-format indicators (accept these even when metadata isn't from a trusted audio source)
+        string[] audioFormatIndicators = new[] { "audio cd", "audio cassette", "radio production", "radio collection", "radio play", "bbc radio", "radio" };
+        if (audioFormatIndicators.Any(p => title.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0))
         {
-            var md = r.MetadataSource.ToLowerInvariant();
-            if (md.Contains("audimeta") || md.Contains("audnex") || md.Contains("audnexus") || md.Contains("audible"))
-                return true;
+            return true;
         }
 
-        // If we have runtime in minutes and it's a reasonable audiobook length (>5 minutes)
-        if (r.Runtime.HasValue && r.Runtime.Value > 5) return true;
+        string[] negativeIndicators = new[] {
+            "paperback", "hardcover", "mass market paperback", "kindle edition", "ebook", "box set",
+            "three volume", "three volume set", "3 books", "3 book", "3-book", "slipcase", "collector's edition"
+        };
 
-        // If we have narrators, it's likely an audiobook
-        if (!string.IsNullOrWhiteSpace(r.Narrator)) return true;
+        if (negativeIndicators.Any(p => title.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0))
+        {
+            return false;
+        }
 
-        // Default: trust that it's an audiobook if it passed other filters
-        return true;
+        // If none of the above apply, be conservative: don't assume it's an audiobook
+        return false;
     }
 }

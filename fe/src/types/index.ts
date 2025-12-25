@@ -18,6 +18,7 @@ export interface SearchResult {
   format: string
   // Extended audiobook metadata (optional)
   description?: string
+  subtitle?: string
   publisher?: string
   language?: string
   runtime?: number
@@ -574,4 +575,9 @@ export interface AudimetaSearchResult {
   imageUrl?: string
   lengthMinutes?: number
   language?: string
+  series?: AudimetaSeries[]
+  publisher?: string
+  narrators?: AudimetaNarrator[]
+  releaseDate?: string
+  link?: string
 }

@@ -61,7 +61,7 @@
           >
         <div class="wanted-poster">
           <img 
-            :src="apiService.getImageUrl(item.imageUrl) || `https://via.placeholder.com/60x90?text=No+Image`" 
+            :src="apiService.getImageUrl(item.imageUrl) || '/placeholder.svg'" 
             :alt="item.title"
             loading="lazy"
           />
@@ -629,7 +629,7 @@ const markAsSkipped = async (item: Audiobook) => {
   color: #adb5bd;
   cursor: pointer;
   padding: 0.875rem 1.5rem;
-  border-radius: 6px 6px 0 0;
+  border-radius: 6px;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -668,7 +668,7 @@ const markAsSkipped = async (item: Audiobook) => {
 
 .tab-badge {
   background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -686,7 +686,7 @@ const markAsSkipped = async (item: Audiobook) => {
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -727,7 +727,7 @@ const markAsSkipped = async (item: Audiobook) => {
   align-items: center;
   padding: 1.25rem;
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border-left: 4px solid #fa5252;
   transition: all 0.2s ease;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -794,7 +794,7 @@ const markAsSkipped = async (item: Audiobook) => {
 .wanted-meta span {
   background-color: rgba(255, 255, 255, 0.05);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .wanted-meta span span {
@@ -809,7 +809,7 @@ background-color: unset;
   font-weight: 500;
   background-color: rgba(255, 212, 59, 0.1);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
   display: inline-block;
 }
 
@@ -827,7 +827,7 @@ background-color: unset;
   gap: 0.5rem;
   background-color: rgba(77, 171, 247, 0.1);
   padding: 0.35rem 0.7rem;
-  border-radius: 4px;
+  border-radius: 6px;
   display: inline-flex;
 }
 
@@ -885,7 +885,7 @@ background-color: unset;
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 

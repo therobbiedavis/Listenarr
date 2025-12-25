@@ -675,7 +675,7 @@ onUnmounted(() => {
   color: #adb5bd;
   cursor: pointer;
   padding: 0.875rem 1.5rem;
-  border-radius: 6px 6px 0 0;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -713,7 +713,7 @@ onUnmounted(() => {
 
 .tab-badge {
   background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -738,7 +738,7 @@ onUnmounted(() => {
   gap: 1.25rem;
   padding: 1.25rem;
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border-left: 4px solid #4dabf7;
   transition: all 0.2s;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -759,7 +759,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
-  border-radius: 8px;
+  border-radius: 6px;
   color: white;
   font-size: 1.5rem;
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
@@ -807,7 +807,7 @@ onUnmounted(() => {
   gap: 0.35rem;
   background-color: rgba(255, 255, 255, 0.05);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .queue-client {
@@ -846,7 +846,7 @@ onUnmounted(() => {
   gap: 0.35rem;
   background-color: rgba(81, 207, 102, 0.1);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .download-speed svg {
@@ -861,7 +861,7 @@ onUnmounted(() => {
   gap: 0.35rem;
   background-color: rgba(255, 212, 59, 0.1);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .eta svg {
@@ -973,7 +973,7 @@ onUnmounted(() => {
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -1008,7 +1008,7 @@ onUnmounted(() => {
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -1071,7 +1071,7 @@ onUnmounted(() => {
 
 .modal-content {
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   width: 90%;
   max-width: 500px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -1156,7 +1156,7 @@ onUnmounted(() => {
   background-color: rgba(0, 0, 0, 0.3);
   border-left: 4px solid #ffd43b;
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 6px;
   margin-bottom: 1rem;
 }
 
@@ -1195,7 +1195,7 @@ onUnmounted(() => {
   gap: 0.625rem;
   background-color: rgba(255, 212, 59, 0.1);
   padding: 0.875rem;
-  border-radius: 8px;
+  border-radius: 6px;
   margin: 0;
   border: 1px solid rgba(255, 212, 59, 0.25);
   line-height: 1.5;

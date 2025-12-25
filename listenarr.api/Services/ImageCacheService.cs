@@ -212,6 +212,15 @@ namespace Listenarr.Api.Services
         {
             if (string.IsNullOrWhiteSpace(identifier))
                 return Task.FromResult<string?>(null);
+
+            // Special-case for built-in unavailable cover asset
+            if (string.Equals(identifier, "cover-unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                var staticPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "cover-unavailable.svg");
+                if (File.Exists(staticPath))
+                    return Task.FromResult<string?>(GetRelativePath(staticPath));
+            }
+
             // Check library storage first
             var libraryPath = GetImagePath(identifier, _libraryImagePath);
             if (File.Exists(libraryPath))
@@ -228,7 +237,7 @@ namespace Listenarr.Api.Services
         private string? GetBestTempImagePathIfValid(string identifier)
         {
             var sanitized = SanitizeFileName(identifier);
-            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" };
 
             foreach (var ext in extensions)
             {
@@ -297,7 +306,7 @@ namespace Listenarr.Api.Services
         {
             // Try to find existing file with any extension
             var sanitized = SanitizeFileName(identifier);
-            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+            var extensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" };
 
             foreach (var ext in extensions)
             {
@@ -332,6 +341,7 @@ namespace Listenarr.Api.Services
                 if (contentType.Contains("png")) return ".png";
                 if (contentType.Contains("webp")) return ".webp";
                 if (contentType.Contains("gif")) return ".gif";
+                if (contentType.Contains("svg+xml")) return ".svg";
             }
 
             // Try to get extension from URL

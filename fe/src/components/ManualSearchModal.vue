@@ -642,7 +642,7 @@ function getScoreClass(score: number): string {
 
 .modal-container {
   background-color: #1e1e1e;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 100%;
   max-height: 90vh;
   display: flex;
@@ -673,7 +673,7 @@ function getScoreClass(score: number): string {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   font-size: 1.5rem;
   display: flex;
@@ -823,7 +823,7 @@ function getScoreClass(score: number): string {
 .btn {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;
@@ -871,7 +871,7 @@ function getScoreClass(score: number): string {
 .results-table-wrapper {
   overflow-x: auto;
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .results-table {
@@ -986,7 +986,7 @@ function getScoreClass(score: number): string {
 .source-badge {
   display: inline-block;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -1063,7 +1063,7 @@ function getScoreClass(score: number): string {
   display: inline-block;
   padding: 0.25rem 0.5rem;
   background-color: #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.8rem;
   color: #ccc;
 }
@@ -1079,7 +1079,7 @@ function getScoreClass(score: number): string {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   white-space: nowrap;
@@ -1124,7 +1124,7 @@ function getScoreClass(score: number): string {
 
 .language-badge.unknown,
 .quality-badge.unknown {
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.8rem;
   color: #ddd;
 }
@@ -1140,7 +1140,7 @@ function getScoreClass(score: number): string {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -1194,7 +1194,7 @@ function getScoreClass(score: number): string {
     width: 95%;
     max-width: 500px;
     max-height: 80vh;
-    border-radius: 12px;
+    border-radius: 6px;
   }
 
   .modal-header {
@@ -1219,7 +1219,7 @@ function getScoreClass(score: number): string {
     max-width: 400px;
     z-index: 1001;
     background-color: #1e1e1e;
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.75rem;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     border: 1px solid #3a3a3a;
@@ -1276,7 +1276,7 @@ function getScoreClass(score: number): string {
   /* Table responsiveness on mobile */
   .results-table-wrapper {
     margin: 0 -1rem;
-    border-radius: 0;
+    border-radius: 6px;
     border-left: none;
     border-right: none;
   }

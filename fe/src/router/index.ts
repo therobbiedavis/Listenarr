@@ -12,6 +12,7 @@ const routes = [
   { path: '/', name: 'home', component: () => import('../views/AudiobooksView.vue'), meta: { requiresAuth: true } },
   { path: '/audiobooks', name: 'audiobooks', component: () => import('../views/AudiobooksView.vue'), meta: { requiresAuth: true } },
   { path: '/audiobooks/:id', name: 'audiobook-detail', component: () => import('../views/AudiobookDetailView.vue'), meta: { requiresAuth: true } },
+  { path: '/collection/:type/:name', name: 'collection', component: () => import('../views/CollectionView.vue'), meta: { requiresAuth: true } },
   { path: '/add-new', name: 'add-new', component: () => import('../views/AddNewView.vue'), meta: { requiresAuth: true } },
   { path: '/library-import', name: 'library-import', component: () => import('../views/LibraryImportView.vue'), meta: { requiresAuth: true } },
   { path: '/activity', name: 'activity', component: () => import('../views/ActivityView.vue'), meta: { requiresAuth: true } },

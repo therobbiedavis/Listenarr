@@ -385,7 +385,7 @@ onMounted(() => {
   padding: 1.25rem;
   background: #1e1e1e;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .filter-group {
@@ -465,7 +465,7 @@ onMounted(() => {
   background: transparent;
   color: #666;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -492,7 +492,7 @@ onMounted(() => {
   padding: 1rem;
   background: rgba(231, 76, 60, 0.1);
   border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 8px;
+  border-radius: 6px;
   color: #e74c3c;
   margin-bottom: 2rem;
 }
@@ -532,7 +532,7 @@ onMounted(() => {
 .logs-wrapper {
   background: #1e1e1e;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -608,7 +608,7 @@ onMounted(() => {
   font-weight: 700;
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   letter-spacing: 0.5px;
 }
 
@@ -643,12 +643,12 @@ onMounted(() => {
 
 .logs-container::-webkit-scrollbar-track {
   background: #1e1e1e;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .logs-container::-webkit-scrollbar-thumb {
   background: #444;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .logs-container::-webkit-scrollbar-thumb:hover {

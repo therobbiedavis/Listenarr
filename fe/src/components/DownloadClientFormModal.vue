@@ -544,7 +544,7 @@ const handleDelete = () => {
 .modal-content {
   background: #2a2a2a;
   border: 1px solid #444;
-  border-radius: 8px;
+  border-radius: 6px;
   max-width: 700px;
   width: 100%;
   max-height: 90vh;
@@ -577,7 +577,7 @@ const handleDelete = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -630,7 +630,7 @@ const handleDelete = () => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 0.95rem;
   transition: all 0.2s;
@@ -661,7 +661,7 @@ const handleDelete = () => {
   padding: 1rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -706,7 +706,7 @@ const handleDelete = () => {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;

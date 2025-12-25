@@ -467,7 +467,7 @@ function close() {
 
 .modal-container {
   background-color: #1e1e1e;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 100%;
   max-width: 650px;
   max-height: 85vh;
@@ -500,7 +500,7 @@ function close() {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   font-size: 1.5rem;
   display: flex;
@@ -529,7 +529,7 @@ function close() {
 
 .modal-body::-webkit-scrollbar-thumb {
   background: #555;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .modal-body::-webkit-scrollbar-thumb:hover {
@@ -766,7 +766,7 @@ function close() {
   padding: 0.4rem 0.75rem;
   background-color: #2a2a2a;
   color: #e0e0e0;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 500;
   border: 1px solid #3a3a3a;
@@ -802,7 +802,7 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: 6px;
   transition: all 0.2s ease;
   flex-shrink: 0;
   margin-left: 0.25rem;

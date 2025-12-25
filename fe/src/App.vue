@@ -897,7 +897,7 @@ const hideLayout = computed(() => {
 .version {
   background-color: #555;
   padding: 0.2rem 0.5rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   color: #ccc;
 }
@@ -963,7 +963,7 @@ const hideLayout = computed(() => {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   position: relative;
   transition: background-color 0.2s;
 }
@@ -1081,7 +1081,7 @@ const hideLayout = computed(() => {
 .badge {
   background-color: #f39c12;
   color: white;
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 0.2rem 0.5rem;
   font-size: 0.75rem;
   font-weight: bold;
@@ -1091,7 +1091,7 @@ const hideLayout = computed(() => {
 .notification-badge {
   background-color: #f39c12;
   color: white;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 0.1rem 0.3rem;
   font-size: 0.65rem;
   font-weight: bold;
@@ -1210,7 +1210,7 @@ const hideLayout = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 
@@ -1259,7 +1259,7 @@ const hideLayout = computed(() => {
   color: #c7cfd6;
   font-size: 20px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1274,7 +1274,7 @@ const hideLayout = computed(() => {
   color: #c7cfd6;
   font-size: 20px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1295,7 +1295,7 @@ const hideLayout = computed(() => {
   height: 48px;
   font-size: 32px;
   color: #c7cfd6; /* slightly brighter than default */
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .top-nav .nav-btn.mobile-menu-btn {
@@ -1338,7 +1338,7 @@ const hideLayout = computed(() => {
   width: 340px;
   max-width: 50vw;
   padding: 8px 12px 8px 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #424242;
   background: #222;
   color: #fff;
@@ -1375,7 +1375,7 @@ const hideLayout = computed(() => {
   right: 0;
   background: #1f1f1f;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 6px;
   z-index: 1400;
 }
@@ -1461,7 +1461,7 @@ const hideLayout = computed(() => {
     max-width: 400px;
     z-index: 2001;
     background-color: #1e1e1e;
-    border-radius: 8px;
+    border-radius: 6px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     border: 1px solid #3a3a3a;
   }
@@ -1505,7 +1505,7 @@ const hideLayout = computed(() => {
     border: none;
     color: #ccc;
     padding: 0.5rem;
-    border-radius: 4px;
+    border-radius: 6px;
     z-index: 1;
     width: 44px;
     height: 44px;
@@ -1567,7 +1567,7 @@ const hideLayout = computed(() => {
   right: 0;
   background: #252525;
   border: 1px solid #3a3a3a;
-  border-radius: 8px;
+  border-radius: 6px;
   min-width: 320px;
   max-width: 400px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.6);
@@ -1600,7 +1600,7 @@ const hideLayout = computed(() => {
   font-size: 12px;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: background-color 0.2s;
 }
 
@@ -1685,7 +1685,7 @@ const hideLayout = computed(() => {
   font-size: 12px;
   cursor: pointer;
   padding: 2px;
-  border-radius: 2px;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
