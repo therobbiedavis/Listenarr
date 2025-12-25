@@ -57,6 +57,7 @@
               <div class="search-empty" v-else-if="searchQuery.length > 0">No matches</div>
             </div>
           </div>
+          
         </div>
         <div class="notification-wrapper" ref="notificationRef">
           <button class="nav-btn" @click="toggleNotifications" aria-haspopup="true" :aria-expanded="notificationsOpen">
@@ -126,6 +127,18 @@
               <PhBooks />
               <span>Audiobooks</span>
             </RouterLink>
+            <!-- Sub-navigation for Audiobooks grouping (stacked under Audiobooks) -->
+            <div class="nav-sub" v-if="route.path.startsWith('/audiobooks') || route.name === 'home' || route.name === 'audiobooks'">
+              <RouterLink :to="{ path: '/audiobooks', query: { group: 'books' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: ((route.query.group || 'books') === 'books') }">
+                <span>Books</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/audiobooks', query: { group: 'authors' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: (route.query.group === 'authors') }">
+                <span>Authors</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/audiobooks', query: { group: 'series' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: (route.query.group === 'series') }">
+                <span>Series</span>
+              </RouterLink>
+            </div>
             <RouterLink to="/add-new" class="nav-item" @mouseenter="preload('add-new')" @focus="preload('add-new')" @touchstart.passive="preload('add-new')" @click="closeMobileMenu">
               <PhPlus />
               <span>Add New</span>
@@ -1322,6 +1335,30 @@ const hideLayout = computed(() => {
   font-size: 20px;
   flex-shrink: 0;
   color: #c7cfd6;
+}
+
+/* Sub-navigation under main nav items */
+.sidebar .nav-sub {
+  display: flex;
+  flex-direction: column;
+  padding-left: 36px;
+  margin-bottom: 0.5rem;
+}
+
+.sidebar .nav-subitem {
+  display: block;
+  font-size: 0.9rem;
+  color: #cfcfcf;
+  padding: 6px 0;
+  text-decoration: none;
+  border-left: 3px solid rgba(255,255,255,0.1); /* Muted border for all */
+  padding-left: 8px; /* Adjust for border */
+}
+
+.sidebar .nav-subitem.active {
+  color: #ffffff;
+  font-weight: 600;
+  border-left: 3px solid #2196F3; /* Highlighted border for active */
 }
 
 .inline-spinner {

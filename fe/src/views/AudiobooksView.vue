@@ -432,7 +432,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -479,6 +479,7 @@ function getNarratorFirstNameSortKey(narrator: string): string {
 }
 
 const router = useRouter()
+const route = useRoute()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const downloadsStore = useDownloadsStore()
@@ -878,6 +879,28 @@ watch(groupBy, (v) => {
   try { localStorage.setItem(GROUP_BY_KEY, v) } catch {}
 })
 
+// Sync grouping with optional route query: ?group=books|authors|series
+function applyGroupFromQuery() {
+  try {
+    const q = route.query.group as string | undefined
+    if (q && ['books', 'authors', 'series'].includes(q)) {
+      groupBy.value = q as 'books' | 'authors' | 'series'
+    }
+  } catch {}
+}
+
+onMounted(() => {
+  applyGroupFromQuery()
+})
+
+watch(() => route.query.group, (g) => {
+  try {
+    const q = g as string | undefined
+    if (q && ['books', 'authors', 'series'].includes(q)) groupBy.value = q as any
+    else if (q === undefined) groupBy.value = 'books'
+  } catch {}
+})
+
 function toggleItemDetails() {
   showItemDetails.value = !showItemDetails.value
 }
@@ -1167,6 +1190,12 @@ function toggleViewMode() {
 function setGroupBy(mode: 'books' | 'authors' | 'series') {
   groupBy.value = mode
   showGroupMenu.value = false
+  try {
+    // update route query so sidebar subnav and URL stay in sync
+    router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
+  } catch (err) {
+    console.debug('Failed to update route query for group:', err)
+  }
 }
 
 function navigateToCollection(collection: { name: string }) {
