@@ -177,6 +177,9 @@ appsettings.Production.json
 **/config/dataprotection-keys/
 **/dataprotection-keys/
 
+# Nix config
+*.nix
+
 ##########################
 # OS & System Files      #
 ##########################
