@@ -6,27 +6,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import AddNewView from '@/views/AddNewView.vue'
 import { useLibraryStore } from '@/stores/library'
 
-vi.mock('@/services/api', () => ({
-  apiService: {
-    searchAudimetaByTitleAndAuthor: vi.fn(),
-    getImageUrl: vi.fn((url: string) => url || ''),
-    getStartupConfig: vi.fn(async () => ({})),
-    getApplicationSettings: vi.fn(async () => ({}))
-  }
-}))
-
-// Minimal stub for SignalR service to prevent real WebSocket behavior during tests
-vi.mock('@/services/signalr', () => ({
-  signalRService: {
-    connect: () => {},
-    onSearchProgress: (_cb: any) => () => {},
-    onQueueUpdate: (_cb: any) => () => {},
-    onDownloadUpdate: (_cb: any) => () => {},
-    onFilesRemoved: (_cb: any) => () => {},
-    onAudiobookUpdate: (_cb: any) => () => {},
-    onToast: (_cb: any) => () => {}
-  }
-}))
+// apiService and signalR are mocked centrally in test-setup.ts
 
 describe('AddNewView pagination', () => {
   beforeEach(() => {

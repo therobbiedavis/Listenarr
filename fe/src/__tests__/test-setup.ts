@@ -26,6 +26,47 @@ class MockWebSocket {
   }
 }
 
+// Centralized apiService and signalR mocks used by unit tests.
+import { vi } from 'vitest'
+
+vi.mock('@/services/api', () => ({
+  apiService: {
+    searchAudimetaByTitleAndAuthor: vi.fn(async () => ({ totalResults: 0, results: [] })),
+    advancedSearch: async (params: any) => {
+      if (params?.title) {
+        const mod = await import('@/services/api')
+        const svc = mod.apiService as any
+        if (svc.searchAudimetaByTitleAndAuthor) {
+          const resp = await svc.searchAudimetaByTitleAndAuthor(params.title, params.author)
+          return resp?.results || resp || []
+        }
+        return []
+      }
+      return { totalResults: 0, results: [] }
+    },
+    getImageUrl: vi.fn((url: string) => url || ''),
+    getStartupConfig: vi.fn(async () => ({})),
+    getApplicationSettings: vi.fn(async () => ({})),
+    getLibrary: vi.fn(async () => []),
+    previewLibraryPath: vi.fn(async () => ({ path: '' })),
+    getQualityProfiles: vi.fn(async () => ([])),
+    getApiConfigurations: vi.fn(async () => ([])),
+  }
+}))
+
+vi.mock('@/services/signalr', () => ({
+  signalRService: {
+    connect: () => {},
+    onDownloadsList: (_cb: any) => () => {},
+    onSearchProgress: (_cb: any) => () => {},
+    onQueueUpdate: (_cb: any) => () => {},
+    onDownloadUpdate: (_cb: any) => () => {},
+    onFilesRemoved: (_cb: any) => () => {},
+    onAudiobookUpdate: (_cb: any) => () => {},
+    onToast: (_cb: any) => () => {}
+  }
+}))
+
 // Ensure global WebSocket exists for code that references it
 if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
   ;(globalThis as unknown as { WebSocket?: unknown }).WebSocket = MockWebSocket

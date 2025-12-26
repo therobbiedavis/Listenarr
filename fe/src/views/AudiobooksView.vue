@@ -199,25 +199,40 @@
             <template v-else-if="groupBy === 'series'">
               <div v-if="collection.coverUrls && collection.coverUrls.length > 0" class="series-covers-container">
                 <div class="series-covers">
-                  <div
-                    v-for="(coverUrl, index) in collection.coverUrls.slice(0, 8)"
-                    :key="index"
-                    :style="{
-                      height: '192px',
-                      width: '192px',
-                      left: `${index * (192 / 7)}px`,
-                      zIndex: 8 - index,
-                      boxShadow: 'rgba(17, 17, 17, 0.4) 4px 0px 4px'
-                    }"
-                    class="series-cover-item"
-                  >
-                    <img
-                      :src="apiService.getImageUrl(coverUrl)"
-                      :alt="`${collection.name} Cover`"
-                      class="series-cover-image"
-                      @error="handleImageError"
+                  <!-- Single cover: blurred background + centered cover -->
+                  <template v-if="collection.coverUrls.length === 1">
+                    <div
+                      class="series-single-bg"
+                      :style="{ backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0])})` }"
                     />
-                  </div>
+                    <div
+                      class="series-cover-item"
+                      :style="getCoverStyle(0, collection.coverUrls.length)"
+                    >
+                      <img
+                        :src="apiService.getImageUrl(collection.coverUrls[0])"
+                        :alt="`${collection.name} Cover`"
+                        class="series-cover-image centered"
+                        @error="handleImageError"
+                      />
+                    </div>
+                  </template>
+                  <!-- Multiple covers: distribute across container using computed offset -->
+                  <template v-else>
+                    <div
+                      v-for="(coverUrl, index) in collection.coverUrls.slice(0, 8)"
+                      :key="index"
+                      class="series-cover-item"
+                      :style="getCoverStyle(index, collection.coverUrls.length)"
+                    >
+                      <img
+                        :src="apiService.getImageUrl(coverUrl)"
+                        :alt="`${collection.name} Cover`"
+                        class="series-cover-image"
+                        @error="handleImageError"
+                      />
+                    </div>
+                  </template>
                 </div>
                 <!-- Book count counter -->
                 <div class="series-count-badge">
@@ -1275,6 +1290,25 @@ function handleImageError(event: Event) {
   img.style.display = 'none'
 }
 
+// Series cover layout constants and helper
+const SERIES_CONTAINER_WIDTH = 384
+const COVER_SIZE = 192
+
+function getCoverStyle(index: number, count: number) {
+  const spacing = count <= 1 ? 0 : (SERIES_CONTAINER_WIDTH - COVER_SIZE) / Math.max(1, count - 1)
+  const left = count === 1 ? (SERIES_CONTAINER_WIDTH - COVER_SIZE) / 2 : index * spacing
+  const z = count === 1 ? 1 : Math.max(1, 100 - index)
+  return {
+    height: `${COVER_SIZE}px`,
+    width: `${COVER_SIZE}px`,
+    top: '0px',
+    left: `${left}px`,
+    zIndex: z,
+    boxShadow: 'rgba(17, 17, 17, 0.4) 4px 0px 4px',
+    borderRadius: '6px'
+  }
+}
+
 async function refreshLibrary() {
   await libraryStore.fetchLibrary()
 }
@@ -1682,8 +1716,10 @@ defineExpose({
 }
 
 .collection-card:has(.series-covers-container) .collection-cover {
-  aspect-ratio: auto;
+  aspect-ratio: 2/1;
   height: 192px;
+  background: #2a2a2a;
+  border-radius: 6px;
 }
 
 .collection-cover img {
@@ -1695,22 +1731,23 @@ defineExpose({
 
 .series-covers-container {
   position: relative;
-  width: 100%;
+  /* fixed width to allow stacked covers (two visible columns) */
+  width: 384px;
   height: 192px;
   overflow: hidden;
 }
 
 .series-count-badge {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  background: var(--primary-color);
+  top: 0.375em;
+  right: 0.375em;
+  background-color: rgba(205, 157, 73, 0.867);
   color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  z-index: 15;
+  padding: 0.1em 0.25em;
+  border-radius: 0.5rem; /* rounded-lg like sample */
+  font-size: 0.8rem;
+  font-weight: 600;
+  z-index: 20;
   min-width: 1.5rem;
   text-align: center;
 }
@@ -1751,8 +1788,32 @@ defineExpose({
   z-index: 10;
 }
 
+/* Blurred background used when a series has a single cover */
+.series-single-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(10px) contrast(0.9) brightness(0.7);
+  transform: scale(1.05);
+  z-index: 1;
+}
+
+.series-cover-item .series-cover-image.centered {
+  /* place the single cover centered above the blurred background */
+  width: 192px;
+  height: 192px;
+  object-fit: cover;
+  border-radius: 6px;
+  position: relative;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  border-radius: 6px;
+}
+
 .series-hover-overlay p {
-  font-size: 1rem;
+  font-size: 1.2em;
   color: var(--text-color);
   margin: 0;
   font-weight: 600;

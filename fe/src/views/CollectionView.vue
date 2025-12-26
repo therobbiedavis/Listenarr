@@ -1046,6 +1046,7 @@ defineExpose({
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
+  border-radius: 6px;
 }
 
 .collection-card:hover {
@@ -1061,7 +1062,7 @@ defineExpose({
   overflow: hidden;
   position: relative;
   border-radius: 6px;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.6);
+  box-shadow: inset 0 8px 20px rgba(0,0,0,0.6);
 }
 
 .collection-cover img {

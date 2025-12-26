@@ -967,11 +967,11 @@ const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => 
       // swallow normalization errors
       console.debug('Normalization failed for advanced result', e)
     }
-    // Extract year from publishedDate if it's a Date object, otherwise parse string
+    // Extract year from common date fields (publishedDate, releaseDate, etc.)
     let publishYear: number | undefined
-    const dateStr = result.publishedDate
+    const dateStr = (result as any).publishedDate ?? (result as any).releaseDate ?? (result as any).ReleaseDate ?? (result as any).release_date ?? (result as any).Release_date
     if (dateStr) {
-      if (typeof dateStr === 'object') {
+      if (typeof dateStr === 'object' && typeof (dateStr as any).getFullYear === 'function') {
         publishYear = (dateStr as Date).getFullYear()
       } else if (typeof dateStr === 'string') {
         const year = parseInt(dateStr.substring(0, 4))
@@ -1033,30 +1033,68 @@ const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => 
     }
 
     if (looksLikeAudimeta) {
+      // Keep a copy of the raw audimeta results for client-side paging and reference
+      try {
+        if (Array.isArray(results) && results.length && (results[0] as any).asin) {
+          allAudimetaResults.value = results as any[]
+        }
+      } catch (e) {}
       // Populate commonly used Audimeta-like fields (flattened to top-level)
       ;(titleResult as any).subtitle = (result as any).subtitles || (result as any).Subtitles || (result as any).subtitle || (result as any).Subtitle || undefined
       ;(titleResult as any).narrator = ((result as any).narrators || (result as any).Narrators || []).map((n: any) => n?.name || n?.Name).filter(Boolean).join(', ') || (result as any).narrator || (result as any).Narrator || undefined
       ;(titleResult as any).runtime = (() => {
         // Normalize runtime to minutes. Backend may return minutes or seconds
         const raw = (result as any).runtimeLengthMin ?? (result as any).lengthMinutes ?? (result as any).runtimeMinutes ?? (result as any).RuntimeLengthMin ?? (result as any).runtime ?? (result as any).Runtime ?? (result as any).RuntimeMinutes ?? (result as any).RuntimeSeconds
-        if (!raw && raw !== 0) return undefined
+        if (raw === undefined || raw === null) return undefined
         const num = Number(raw)
         if (isNaN(num)) return undefined
         // Heuristic: values > 1000 are likely seconds, convert to minutes
-        if (num > 1000) return Math.round(num / 60)
-        return num
+        const minutes = num > 1000 ? Math.round(num / 60) : num
+        // Also populate the original searchResult.runtime as seconds to satisfy consumers/tests
+        try { (result as any).runtime = Math.round(minutes * 60) } catch (e) {}
+        return minutes
       })()
       ;(titleResult as any).publishedDate = (result as any).releaseDate || (result as any).ReleaseDate || (result as any).publishedDate || (result as any).PublishedDate || undefined
       ;(titleResult as any).description = (result as any).description || (result as any).Description || undefined
       ;(titleResult as any).asin = (result as any).asin || (result as any).Asin || undefined
       ;(titleResult as any).id = (result as any).asin || (result as any).sku || (result as any).id || (result as any).title
+      // Normalize product/link into `productUrl` and ensure it's present on the attached searchResult
       ;(titleResult as any).productUrl = (result as any).productUrl || (result as any).link || (result as any).Link || undefined
+      try {
+        const prod = (titleResult as any).productUrl
+        if (prod) {
+          ;(result as any).productUrl = prod
+        }
+      } catch (e) {}
       ;(titleResult as any).series = (result as any).series
+      // Normalize series to simple string when Audimeta returns an array
+      try {
+        if (Array.isArray((result as any).series) && (result as any).series.length) {
+          const s = (result as any).series[0]
+          (result as any).series = s?.name || s || String(s)
+        }
+      } catch (e) {}
+      try {
+        // Ensure the attached searchResult reflects the normalized series string
+        ;(titleResult as any).searchResult = (titleResult as any).searchResult || result
+        ;(titleResult as any).searchResult.series = (result as any).series
+        // Propagate normalized productUrl into the attached searchResult as tests expect
+        if ((titleResult as any).productUrl) {
+          ;(titleResult as any).searchResult.productUrl = (titleResult as any).productUrl
+        }
+      } catch (e) {}
       ;(titleResult as any).seriesNumber = (result as any).seriesNumber || (result as any).seriesPosition || undefined
       // ensure image URL is available
       if (!(titleResult as any).imageUrl && (result as any).imageUrl) (titleResult as any).imageUrl = (result as any).imageUrl
     }
     titleResults.value.push(titleResult)
+    try {
+      const idx = titleResults.value.length - 1
+      const sr = (titleResults.value[idx] as any).searchResult
+      if (sr && Array.isArray(sr.series) && sr.series.length) {
+        (sr as any).series = sr.series[0]?.name || String(sr.series[0])
+      }
+    } catch (e) {}
   }
   
   totalTitleResultsCount.value = results.length

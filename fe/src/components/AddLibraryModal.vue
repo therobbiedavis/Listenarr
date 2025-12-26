@@ -1,9 +1,18 @@
 <template>
   <div v-if="visible" class="modal-overlay" @click="closeModal">
-    <div class="modal-content add-library-modal" @click.stop>
+    <div
+      ref="modalRef"
+      class="modal-content add-library-modal"
+      @click.stop
+      tabindex="-1"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-library-title"
+      aria-describedby="add-library-desc"
+    >
       <div class="modal-header">
-        <h2>Add to Library</h2>
-        <button class="close-btn" @click="closeModal">
+        <h2 id="add-library-title">Add to Library</h2>
+        <button class="close-btn" @click="closeModal" aria-label="Close add to library dialog">
           <i class="ph ph-x"></i>
         </button>
       </div>
@@ -11,18 +20,33 @@
       <div class="modal-body">
         <div class="book-layout">
           <!-- Book Image -->
-          <div class="book-image">
-            <img
-              v-if="resolvedImageUrl || enriched?.imageUrl || book.imageUrl"
-              :src="resolvedImageUrl || apiService.getImageUrl(enriched?.imageUrl || book.imageUrl)"
-              :alt="book.title"
-              loading="lazy"
-            />
-            <div v-else class="placeholder-cover">
-              <i class="ph ph-image"></i>
-              <span>No Cover</span>
-            </div>
-          </div>
+                  <div class="book-image">
+                    <div class="image-viewport">
+                      <img
+                        v-if="resolvedImageUrl || enriched?.imageUrl || book.imageUrl"
+                        :src="imageSrc"
+                        :alt="book.title"
+                        loading="lazy"
+                        @error="onImageError"
+                        @load="onImageLoad"
+                        :aria-hidden="!book.title"
+                      />
+                      <div v-else class="placeholder-cover">
+                        <i class="ph ph-image"></i>
+                        <span>No Cover</span>
+                      </div>
+                      <div v-if="imageLoading" class="image-loading-overlay">
+                        <i class="ph ph-spinner ph-spin"></i>
+                      </div>
+                      <div v-if="imageError" class="image-error-overlay">
+                        <div class="error-inner">
+                          <i class="ph ph-image"></i>
+                          <div>Image unavailable</div>
+                          <button class="btn btn-secondary small" @click.stop="retryImage">Retry Image</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
           <!-- Book Details -->
           <div class="book-details">
@@ -41,8 +65,12 @@
               <div class="description" v-html="book.description"></div>
             </div>
 
-            <div class="detail-section">
+            <div class="detail-section" id="add-library-desc">
               <h4>Publication Information</h4>
+              <div class="meta-source-row">
+                <small v-if="metadataLoading">Loading metadata...</small>
+                <small v-else-if="metadataSource">Metadata: {{ metadataSource }}</small>
+              </div>
               <div class="detail-grid">
                 <div v-if="book.publisher" class="detail-item">
                   <span class="label">Publisher:</span>
@@ -78,17 +106,6 @@
           <h4>Library Options</h4>
 
           <div class="option-group">
-            <label class="form-label">Destination</label>
-            <div class="destination-display">
-              <div class="destination-row">
-                <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
-                <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
-              </div>
-              <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
-            </div>
-          </div>
-
-          <div class="option-group">
             <label class="option-label">
               <input
                 type="checkbox"
@@ -118,7 +135,18 @@
             </label>
           </div>
 
-          <div class="option-group">
+            <div class="option-group">
+              <label class="form-label">Destination</label>
+              <div class="destination-display">
+                <div class="destination-row">
+                  <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
+                  <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+                </div>
+                <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
+              </div>
+            </div>
+
+            <div class="option-group">
             <label class="form-label">Quality Profile</label>
             <select v-model="options.qualityProfileId" class="form-select">
               <option :value="null">Use Default Profile</option>
@@ -145,7 +173,7 @@
         <button
           class="btn btn-primary"
           @click="addToLibrary"
-          :disabled="isAdding"
+          :disabled="isAdding || metadataLoading"
         >
           <i v-if="isAdding" class="ph ph-spinner ph-spin"></i>
           <i v-else class="ph ph-plus"></i>
@@ -157,7 +185,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed, onBeforeUnmount, nextTick } from 'vue'
 import type { AudibleBookMetadata, QualityProfile, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -197,6 +225,24 @@ const previewRelative = ref<string>('')
 
 // Hold an enriched metadata object (populate if metadata sources available)
 const enriched = ref<AudibleBookMetadata | null>(null)
+// Image and metadata UI state
+const imageError = ref(false)
+const imageLoading = ref(false)
+const imageRetryCount = ref(0)
+const metadataLoading = ref(false)
+const metadataSource = ref<string | null>(null)
+
+const imageSrc = computed(() => {
+  // prefer resolvedImageUrl passed from parent
+  const base = props.resolvedImageUrl || enriched.value?.imageUrl || props.book?.imageUrl || ''
+  if (!base) return ''
+  // If we retried, append cache-buster to force reload
+  if (imageRetryCount.value > 0) {
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}r=${Date.now()}`
+  }
+  return base
+})
 
 // Local types for audimeta response to avoid `any`
 interface AudimetaPerson { name?: string }
@@ -269,14 +315,18 @@ const seedPreview = async () => {
   // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
   try {
     if (props.book?.asin) {
+      metadataLoading.value = true
       try {
         const resp = await apiService.getMetadata(props.book.asin, 'us', true)
         if (resp && resp.metadata) {
           enriched.value = mapAudimetaToAudible(resp.metadata, resp.source)
+          metadataSource.value = resp.source || null
         }
       } catch (metaErr) {
         // ignore metadata fetch errors - we'll fall back to provided book
         console.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+      } finally {
+        metadataLoading.value = false
       }
     }
 
@@ -297,15 +347,107 @@ onMounted(() => {
   seedPreview()
 })
 
+// Watch for resolvedImageUrl changes to reset image error state
+watch(() => props.resolvedImageUrl, () => {
+  imageError.value = false
+  imageRetryCount.value = 0
+})
+
+function onImageError() {
+  imageLoading.value = false
+  imageError.value = true
+}
+
+function onImageLoad() {
+  imageLoading.value = false
+  imageError.value = false
+}
+
+function retryImage() {
+  imageError.value = false
+  imageRetryCount.value++
+  imageLoading.value = true
+  // The computed imageSrc will include a cache-buster when retryCount>0
+}
+
 // Re-seed preview if the passed book changes after mount (parent may update props)
 watch(() => props.book, (newVal) => {
   if (!newVal) return
   seedPreview()
 })
 
+const modalRef = ref<HTMLElement | null>(null)
+
 const closeModal = () => {
   emit('close')
 }
+
+// Focus management for accessibility: trap focus inside modal and restore on close
+let previousActiveElement: HTMLElement | null = null
+
+const getFocusable = (container: HTMLElement | null): HTMLElement[] => {
+  if (!container) return []
+  const selectors = [
+    'a[href]',
+    'button:not([disabled])',
+    'textarea:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(',')
+  return Array.from(container.querySelectorAll<HTMLElement>(selectors))
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  if (!modalRef.value) return
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    closeModal()
+    return
+  }
+
+  if (e.key === 'Tab') {
+    const focusable = getFocusable(modalRef.value)
+    if (focusable.length === 0) {
+      e.preventDefault()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const active = document.activeElement as HTMLElement | null
+    if (e.shiftKey) {
+      if (!active || active === first) {
+        e.preventDefault()
+        last.focus()
+      }
+    } else {
+      if (!active || active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+  }
+}
+
+watch(() => props.visible, async (val) => {
+  if (val) {
+    previousActiveElement = document.activeElement as HTMLElement | null
+    await nextTick()
+    if (modalRef.value) {
+      modalRef.value.focus()
+    }
+    document.addEventListener('keydown', onKeyDown, { capture: true })
+  } else {
+    document.removeEventListener('keydown', onKeyDown, { capture: true })
+    if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+      previousActiveElement.focus()
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeyDown, { capture: true })
+})
 
 const addToLibrary = async () => {
   if (!props.book) return
@@ -381,6 +523,58 @@ const capitalizeFirst = (str: string): string => {
   display: flex;
   flex-direction: column;
 }
+
+.book-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-viewport {
+  width: 100%;
+  aspect-ratio: 1/1;
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-viewport img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.placeholder-cover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.image-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.25);
+  color: white;
+}
+.image-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  color: white;
+}
+.image-error-overlay .error-inner { text-align:center }
+.image-error-overlay .error-inner .btn.small { margin-top: 0.5rem }
+
+.meta-source-row { margin-bottom: 0.5rem }
 
 .modal-header {
   display: flex;
