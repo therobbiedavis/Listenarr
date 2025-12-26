@@ -279,6 +279,47 @@ namespace Listenarr.Api.Services
             return booksResult;
         }
 
+        /// <summary>
+        /// Lookup a single author by name using the Audimeta /author endpoint and return basic info (ASIN + image if available).
+        /// </summary>
+        public virtual async Task<AuthorLookupItem?> LookupAuthorAsync(string author, string region = "us")
+        {
+            if (string.IsNullOrWhiteSpace(author)) return null;
+
+            try
+            {
+                var authorLookupUrl = $"{BASE_URL}/author?cache=true&region={region}&name={Uri.EscapeDataString(author)}";
+                _logger.LogInformation("Looking up author on audimeta.de: {Url}", authorLookupUrl);
+                var lookupResp = await _httpClient.GetAsync(authorLookupUrl);
+                if (!lookupResp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Author lookup returned status {Status} for author {Author}", lookupResp.StatusCode, author);
+                    return null;
+                }
+
+                var lookupJson = await lookupResp.Content.ReadAsStringAsync();
+                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+                if (!string.IsNullOrWhiteSpace(lookupJson) && lookupJson.TrimStart()[0] == '[')
+                {
+                    var list = JsonSerializer.Deserialize<List<AuthorLookupItem>>(lookupJson, opts);
+                    return list?.FirstOrDefault();
+                }
+                else
+                {
+                    var doc = JsonSerializer.Deserialize<AuthorLookupEnvelope>(lookupJson, opts);
+                    if (doc == null) return null;
+                    if (!string.IsNullOrWhiteSpace(doc.Asin)) return new AuthorLookupItem { Asin = doc.Asin, Name = doc.Results?.FirstOrDefault()?.Name, Image = doc.Results?.FirstOrDefault()?.Image };
+                    return doc.Results?.FirstOrDefault();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to lookup author {Author}", author);
+                return null;
+            }
+        }
+
         public virtual async Task<AudimetaSearchResponse?> SearchByIsbnAsync(string isbn, int page = 1, int limit = 50, string region = "us", string? language = null)
         {
             var url = $"{BASE_URL}/db/book?products_sort_by=BestSellers&cache=true&page={page}&limit={limit}&isbn={Uri.EscapeDataString(isbn)}&region={region}";
@@ -570,6 +611,6 @@ namespace Listenarr.Api.Services
     }
 
     // Helper types for simple author lookup parsing
-    public class AuthorLookupItem { public string? Asin { get; set; } public string? Name { get; set; } }
+    public class AuthorLookupItem { public string? Asin { get; set; } public string? Name { get; set; } public string? Image { get; set; } public string? Region { get; set; } }
     public class AuthorLookupEnvelope { public string? Asin { get; set; } public List<AuthorLookupItem>? Results { get; set; } }
 }

@@ -536,6 +536,7 @@
     <AddLibraryModal
       :visible="showAddLibraryModal"
       :book="selectedBookForLibrary"
+      :resolved-image-url="selectedBookForLibrary ? apiService.getImageUrl((selectedBookForLibrary as any).imageUrl) : ''"
       @close="closeAddLibraryModal"
       @added="handleLibraryAdded"
     />

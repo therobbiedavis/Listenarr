@@ -374,6 +374,11 @@ namespace Listenarr.Api.Tests
             return Task.FromResult<string?>("cache/images/library/test.jpg");
         }
 
+        public Task<string?> MoveToAuthorLibraryStorageAsync(string identifier, string? imageUrl = null)
+        {
+            return Task.FromResult<string?>("cache/images/authors/test.jpg");
+        }
+
         public Task<string?> GetCachedImagePathAsync(string identifier)
         {
             return Task.FromResult<string?>("cache/images/test.jpg");

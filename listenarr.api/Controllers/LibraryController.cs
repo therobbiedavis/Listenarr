@@ -240,6 +240,66 @@ namespace Listenarr.Api.Controllers
 
             await _repo.AddAsync(audiobook);
 
+            // Resolve author ASINs and cache author images via Audimeta when possible
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var audimeta = scope.ServiceProvider.GetRequiredService<AudimetaService>();
+
+                if (audiobook.Authors != null && audiobook.Authors.Any())
+                {
+                    audiobook.AuthorAsins = audiobook.AuthorAsins ?? new List<string>();
+                    foreach (var authorName in audiobook.Authors)
+                    {
+                        try
+                        {
+                            var info = await audimeta.LookupAuthorAsync(authorName);
+                            if (info != null && !string.IsNullOrWhiteSpace(info.Asin))
+                            {
+                                // Avoid duplicates
+                                if (!audiobook.AuthorAsins.Contains(info.Asin))
+                                {
+                                    audiobook.AuthorAsins.Add(info.Asin);
+                                }
+
+                                // Ensure author image is cached in authors folder (will download if necessary)
+                                try
+                                {
+                                    var moved = await _imageCacheService.MoveToAuthorLibraryStorageAsync(info.Asin, info.Image);
+                                    if (moved != null)
+                                    {
+                                        _logger.LogInformation("Cached author image for {Author} (ASIN: {Asin})", authorName, info.Asin);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to cache author image for {Author}", authorName);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Author lookup failed for {Author}", authorName);
+                        }
+                    }
+
+                    // Persist any updated author ASINs
+                    try
+                    {
+                        _dbContext.Audiobooks.Update(audiobook);
+                        await _dbContext.SaveChangesAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to persist author ASINs for audiobook '{Title}'", audiobook.Title);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error resolving author ASINs for audiobook '{Title}'", audiobook.Title);
+            }
+
             // Send notification if configured
             if (_notificationService != null)
             {

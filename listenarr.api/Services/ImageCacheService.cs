@@ -28,6 +28,7 @@ namespace Listenarr.Api.Services
     {
         Task<string?> DownloadAndCacheImageAsync(string imageUrl, string identifier);
         Task<string?> MoveToLibraryStorageAsync(string identifier, string? imageUrl = null);
+        Task<string?> MoveToAuthorLibraryStorageAsync(string identifier, string? imageUrl = null);
         Task<string?> GetCachedImagePathAsync(string identifier);
         Task ClearTempCacheAsync();
     }
@@ -38,6 +39,7 @@ namespace Listenarr.Api.Services
         private readonly HttpClient _httpClient;
         private readonly string _tempCachePath;
         private readonly string _libraryImagePath;
+        private readonly string _authorImagePath;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _downloadLocks = new();
         public ImageCacheService(ILogger<ImageCacheService> logger, IHttpClientFactory httpClientFactory)
         {
@@ -48,10 +50,12 @@ namespace Listenarr.Api.Services
             var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config");
             _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
             _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
+            _authorImagePath = Path.Combine(baseDir, "cache", "images", "authors");
 
             // Ensure directories exist
             Directory.CreateDirectory(_tempCachePath);
             Directory.CreateDirectory(_libraryImagePath);
+            Directory.CreateDirectory(_authorImagePath);
         }
 
         /// <summary>
@@ -73,6 +77,14 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogInformation("Image already in library storage: {Identifier}", identifier);
                     return GetRelativePath(libraryPath);
+                }
+
+                // Also check authors storage (author images may be stored separately)
+                var authorPath = GetImagePath(identifier, _authorImagePath);
+                if (File.Exists(authorPath))
+                {
+                    _logger.LogInformation("Image already in author storage: {Identifier}", identifier);
+                    return GetRelativePath(authorPath);
                 }
 
                 // Check temp cache for a valid (non-placeholder) image
@@ -103,6 +115,14 @@ namespace Listenarr.Api.Services
                     {
                         _logger.LogInformation("Image already in library storage (after wait): {Identifier}", identifier);
                         return GetRelativePath(libraryPath);
+                    }
+
+                    // Also check author storage after lock
+                    authorPath = GetImagePath(identifier, _authorImagePath);
+                    if (File.Exists(authorPath))
+                    {
+                        _logger.LogInformation("Image already in author storage (after wait): {Identifier}", identifier);
+                        return GetRelativePath(authorPath);
                     }
 
                     tempExisting = GetBestTempImagePathIfValid(identifier);
@@ -206,6 +226,71 @@ namespace Listenarr.Api.Services
         }
 
         /// <summary>
+        /// Moves an image from temp cache to permanent authors storage
+        /// </summary>
+        public async Task<string?> MoveToAuthorLibraryStorageAsync(string identifier, string? imageUrl = null)
+        {
+            if (string.IsNullOrWhiteSpace(identifier))
+            {
+                _logger.LogWarning("Cannot move author image: identifier is empty");
+                return null;
+            }
+
+            try
+            {
+                // Check if already in author storage
+                var authorPath = GetImagePath(identifier, _authorImagePath);
+                if (File.Exists(authorPath))
+                {
+                    _logger.LogInformation("Author image already in author storage: {Identifier}", identifier);
+                    return GetRelativePath(authorPath);
+                }
+
+                // Find the temp cached file
+                var tempPath = GetImagePath(identifier, _tempCachePath);
+                if (!File.Exists(tempPath))
+                {
+                    _logger.LogWarning("Temp cached author image not found for {Identifier}", identifier);
+                    // If imageUrl provided, attempt to download to temp cache using the identifier
+                    if (!string.IsNullOrWhiteSpace(imageUrl))
+                    {
+                        _logger.LogInformation("Attempting to download author image for {Identifier} from provided URL", identifier);
+                        var cached = await DownloadAndCacheImageAsync(imageUrl, identifier);
+                        if (string.IsNullOrWhiteSpace(cached))
+                        {
+                            _logger.LogWarning("Download to temp cache failed for {Identifier}", identifier);
+                            return null;
+                        }
+
+                        // Recompute tempPath after download
+                        tempPath = GetImagePath(identifier, _tempCachePath);
+                        if (!File.Exists(tempPath))
+                        {
+                            _logger.LogWarning("Downloaded file not found in temp cache for {Identifier}", identifier);
+                            return null;
+                        }
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
+
+                // Move to author storage
+                Directory.CreateDirectory(_authorImagePath);
+                File.Move(tempPath, authorPath, overwrite: true);
+
+                _logger.LogInformation("Author image moved to author storage: {Identifier}", identifier);
+                return GetRelativePath(authorPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to move author image to author storage for {Identifier}", identifier);
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Gets the cached image path if it exists
         /// </summary>
         public Task<string?> GetCachedImagePathAsync(string identifier)
@@ -221,10 +306,16 @@ namespace Listenarr.Api.Services
                     return Task.FromResult<string?>(GetRelativePath(staticPath));
             }
 
+
             // Check library storage first
             var libraryPath = GetImagePath(identifier, _libraryImagePath);
             if (File.Exists(libraryPath))
                 return Task.FromResult<string?>(GetRelativePath(libraryPath));
+
+            // Check authors storage next
+            var authorPath = GetImagePath(identifier, _authorImagePath);
+            if (File.Exists(authorPath))
+                return Task.FromResult<string?>(GetRelativePath(authorPath));
 
             // Check temp cache and prefer non-placeholder images
             var tempBest = GetBestTempImagePathIfValid(identifier);

@@ -316,6 +316,8 @@ export interface Audiobook {
   }[]
   quality?: string
   qualityProfileId?: number
+  // Optional list of author ASINs (populated by backend when available)
+  authorAsins?: string[]
 }
 
 export interface History {

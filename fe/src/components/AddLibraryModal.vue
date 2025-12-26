@@ -12,7 +12,12 @@
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" />
+            <img
+              v-if="resolvedImageUrl || enriched?.imageUrl || book.imageUrl"
+              :src="resolvedImageUrl || apiService.getImageUrl(enriched?.imageUrl || book.imageUrl)"
+              :alt="book.title"
+              loading="lazy"
+            />
             <div v-else class="placeholder-cover">
               <i class="ph ph-image"></i>
               <span>No Cover</span>
@@ -73,6 +78,17 @@
           <h4>Library Options</h4>
 
           <div class="option-group">
+            <label class="form-label">Destination</label>
+            <div class="destination-display">
+              <div class="destination-row">
+                <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
+                <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+              </div>
+              <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
+            </div>
+          </div>
+
+          <div class="option-group">
             <label class="option-label">
               <input
                 type="checkbox"
@@ -102,18 +118,7 @@
             </label>
           </div>
 
-            <div class="option-group">
-              <label class="form-label">Destination</label>
-              <div class="destination-display">
-                <div class="destination-row">
-                  <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
-                  <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
-                </div>
-                <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
-              </div>
-            </div>
-
-            <div class="option-group">
+          <div class="option-group">
             <label class="form-label">Quality Profile</label>
             <select v-model="options.qualityProfileId" class="form-select">
               <option :value="null">Use Default Profile</option>
@@ -161,6 +166,7 @@ import { useToast } from '@/services/toastService'
 interface Props {
   visible: boolean
   book: AudibleBookMetadata
+  resolvedImageUrl?: string
 }
 
 interface Emits {

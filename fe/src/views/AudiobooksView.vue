@@ -1,5 +1,5 @@
 <template>
-  <div class="audiobooks-view">
+  <div class="audiobooks-view" :class="{ 'details-enabled': showItemDetails }">
     
     <!-- Top Toolbar -->
     <div class="toolbar">
@@ -17,8 +17,8 @@
         >
           <PhInfo />
         </button>
-        <span v-if="(groupBy === 'books' ? audiobooks.length : groupedCollections.length) > 0" class="count-badge">
-          {{ groupBy === 'books' ? audiobooks.length : groupedCollections.length }} {{ groupBy === 'books' ? 'Book' : groupBy === 'authors' ? 'Author' : 'Series' }}{{ (groupBy === 'books' ? audiobooks.length : groupedCollections.length) !== 1 && groupBy !== 'series' ? 's' : '' }}
+        <span v-if="(groupBy === 'books' ? audiobooks.length : (groupedCollections ? groupedCollections.length : 0)) > 0" class="count-badge">
+          {{ groupBy === 'books' ? audiobooks.length : (groupedCollections ? groupedCollections.length : 0) }} {{ groupBy === 'books' ? 'Book' : groupBy === 'authors' ? 'Author' : 'Series' }}{{ (groupBy === 'books' ? audiobooks.length : (groupedCollections ? groupedCollections.length : 0)) !== 1 && groupBy !== 'series' ? 's' : '' }}
         </span>
         <div class="group-dropdown" v-if="audiobooks.length > 0">
           <button class="toolbar-btn group-btn" @click="showGroupMenu = !showGroupMenu">
@@ -164,21 +164,36 @@
     <div v-else-if="groupBy !== 'books'" class="grouped-view">
       <div class="grouped-grid">
         <div
-          v-for="collection in groupedCollections"
+          v-for="collection in (groupedCollections || [])"
           :key="collection.name"
-          class="collection-card"
-          @click="navigateToCollection(collection)"
-        >
+          :class="['collection-card', { 'author-collection': groupBy === 'authors' }]"
+          @click="navigateToCollection(collection)">
+        
           <div class="collection-cover">
             <template v-if="groupBy === 'authors'">
-              <img
-                v-if="collection.coverUrl"
-                :src="apiService.getImageUrl(collection.coverUrl)"
-                :alt="collection.name"
-                @error="handleImageError"
-              />
-              <div v-else class="no-cover">
-                <PhUser />
+              <div class="audiobook-poster-container">
+                <div class="series-count-badge">{{ collection.count }}</div>
+                <img
+                  v-if="collection.coverUrl"
+                  :src="apiService.getImageUrl(collection.coverUrl)"
+                  :alt="collection.name"
+                  class="audiobook-poster"
+                  @error="handleImageError"
+                />
+                <div v-else class="no-cover">
+                  <PhUser />
+                </div>
+
+                <div class="status-overlay">
+                  <div class="audiobook-title">{{ collection.name }}</div>
+                  <div class="audiobook-author">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</div>
+                </div>
+
+                <div class="action-buttons">
+                  <button class="action-btn edit-btn-small" @click.stop="navigateToCollection(collection)" title="Open collection">
+                    <PhEye />
+                  </button>
+                </div>
               </div>
             </template>
             <template v-else-if="groupBy === 'series'">
@@ -218,10 +233,12 @@
               </div>
             </template>
           </div>
-          <!-- Collection content for authors -->
-          <div v-if="groupBy === 'authors'" class="collection-content">
-            <h3 class="collection-title">{{ collection.name }}</h3>
-            <p class="collection-count">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</p>
+          <!-- Collection content for authors (match book grid bottom details) -->
+          <div v-if="groupBy === 'authors'" :class="{'collection-content': true}">
+            <div v-if="showItemDetails" class="grid-bottom-details">
+              <div class="detail-line title">{{ collection.name }}</div>
+              <div class="detail-line small">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</div>
+            </div>
           </div>
           <!-- Bottom placard for series (only show when item details are enabled) -->
           <div v-if="groupBy === 'series' && showItemDetails" class="series-bottom-placard">
@@ -430,7 +447,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
 import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -744,6 +761,44 @@ const filteredAndSortedAudiobooks = computed(() => {
 
 const audiobooks = computed(() => filteredAndSortedAudiobooks.value)
 
+// Reactive map of fetched author cover overrides (keyed by author name)
+const authorCoverOverrides = reactive<Record<string, string>>({})
+
+async function ensureAuthorCover(authorName: string) {
+  if (!authorName) return
+  if (authorCoverOverrides[authorName]) return
+  try {
+    const info = await apiService.getAuthorLookup(authorName)
+    if (!info) return
+    if (info.cachedPath) {
+      authorCoverOverrides[authorName] = info.cachedPath
+    } else if (info.asin) {
+      authorCoverOverrides[authorName] = `/config/cache/images/authors/${info.asin}.jpg`
+    }
+  } catch (e) {
+    // ignore network/lookup failures
+  }
+}
+
+
+// Grouping mode
+const GROUP_BY_KEY = 'listenarr.groupBy'
+const groupBy = ref<'books' | 'authors' | 'series'>('books')
+const showGroupMenu = ref(false)
+
+try {
+  const stored = localStorage.getItem(GROUP_BY_KEY)
+  if (stored && ['books', 'authors', 'series'].includes(stored)) {
+    groupBy.value = stored as 'books' | 'authors' | 'series'
+  }
+} catch {}
+
+watch(groupBy, (v) => {
+  try { localStorage.setItem(GROUP_BY_KEY, v) } catch {}
+})
+
+// (grouping sync handled earlier in file)
+
 const groupedCollections = computed(() => {
   if (groupBy.value === 'books') return []
 
@@ -755,7 +810,32 @@ const groupedCollections = computed(() => {
     if (key) {
       if (!groups.has(key)) {
         if (groupBy.value === 'authors') {
-          groups.set(key, { name: key, count: 0, coverUrl: book.imageUrl })
+          // Prefer override (fetched author image) first, then author ASIN, then book cover
+          let cover: string | undefined = undefined
+          try {
+            // Use override if we've already fetched author image for this name
+            // `authorCoverOverrides` is a reactive map populated asynchronously below
+            // (declared further down in this file via `reactive`).
+            // Access via (global) variable — will be undefined initially.
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            if (authorCoverOverrides && authorCoverOverrides[key]) {
+              // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+              // @ts-ignore
+              cover = authorCoverOverrides[key]
+            }
+          } catch {}
+
+          if (!cover) {
+            try {
+              const asin = (book as any).authorAsins?.[0]
+              if (asin) cover = `/config/cache/images/authors/${asin}.jpg`
+            } catch {}
+          }
+
+          if (!cover) cover = book.imageUrl
+
+          groups.set(key, { name: key, count: 0, coverUrl: cover })
         } else {
           groups.set(key, { name: key, count: 0, coverUrls: [] })
         }
@@ -772,6 +852,22 @@ const groupedCollections = computed(() => {
 
   return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name))
 })
+
+// When grouped collections change (or grouping set to authors), fetch missing author images
+watch(() => groupedCollections.value.map(g => g.name), async (names) => {
+  if (groupBy.value !== 'authors') return
+  for (const g of groupedCollections.value) {
+    try {
+      const hasAuthorImage = !!g.coverUrl && g.coverUrl.includes('/config/cache/images/authors/')
+      if (!authorCoverOverrides[g.name] && !hasAuthorImage) {
+        // Kick off fetch but don't await serially to avoid blocking UI
+        void ensureAuthorCover(g.name)
+      }
+    } catch {}
+  }
+}, { immediate: true })
+
+
 
 // Options for custom selects used in the toolbar
 // Build sort options and attach an up/down caret icon for the currently selected key
@@ -863,35 +959,6 @@ watch(showItemDetails, (v) => {
   try { localStorage.setItem(SHOW_ITEM_DETAILS_KEY, v ? 'true' : 'false') } catch {}
 })
 
-// Grouping mode
-const GROUP_BY_KEY = 'listenarr.groupBy'
-const groupBy = ref<'books' | 'authors' | 'series'>('books')
-const showGroupMenu = ref(false)
-
-try {
-  const stored = localStorage.getItem(GROUP_BY_KEY)
-  if (stored && ['books', 'authors', 'series'].includes(stored)) {
-    groupBy.value = stored as 'books' | 'authors' | 'series'
-  }
-} catch {}
-
-watch(groupBy, (v) => {
-  try { localStorage.setItem(GROUP_BY_KEY, v) } catch {}
-})
-
-// Sync grouping with optional route query: ?group=books|authors|series
-function applyGroupFromQuery() {
-  try {
-    const q = route.query.group as string | undefined
-    if (q && ['books', 'authors', 'series'].includes(q)) {
-      groupBy.value = q as 'books' | 'authors' | 'series'
-    }
-  } catch {}
-}
-
-onMounted(() => {
-  applyGroupFromQuery()
-})
 
 watch(() => route.query.group, (g) => {
   try {
@@ -1584,7 +1651,8 @@ defineExpose({
 
 .grouped-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* Match audiobook grid item minimum size so collection covers align visually */
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 1rem;
 }
 
@@ -1609,6 +1677,8 @@ defineExpose({
 /* Special styling for series cards */
 .collection-card:has(.series-covers-container) {
   margin-bottom: 2rem; /* Extra space for bottom placard */
+  /* Make series cards span two columns so they're visually larger than single-item collections */
+  grid-column: span 2;
 }
 
 .collection-card:has(.series-covers-container) .collection-cover {
@@ -1723,10 +1793,6 @@ defineExpose({
   color: #bfcad6;
   margin: 0;
   text-align: center;
-}
-
-.collection-content {
-  padding: 1rem;
 }
 
 .collection-title {
@@ -2025,16 +2091,25 @@ defineExpose({
   right: 0;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
   padding: 8px;
-  transition: padding 0.2s ease;
+  transition: padding 0.2s ease, opacity 0.2s ease;
+  opacity: 0;
 }
 
 .audiobook-poster-container:hover .status-overlay {
   padding: 80px 8px 8px;
+  opacity: 1;
 }
 
 /* When 'show-details' class is present, render overlay expanded */
 .audiobook-poster-container.show-details .status-overlay {
   padding: 80px 8px 8px;
+  opacity: 1;
+}
+
+/* When global details toggle is enabled, hide status overlay for author collections (only show on hover disabled) */
+.audiobooks-view.details-enabled .collection-card.author-collection .status-overlay {
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 .audiobook-poster-container .audiobook-title,

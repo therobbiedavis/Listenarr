@@ -276,6 +276,15 @@ class ApiService {
     return this.request(`/search/audimeta/${asin}?region=${region}&cache=${cache}`)
   }
 
+    async getAuthorLookup(name: string, region: string = 'us'): Promise<{ asin?: string; name?: string; image?: string; cachedPath?: string } | null> {
+      const params = new URLSearchParams({ name, region })
+      try {
+        return await this.request(`/metadata/author?${params.toString()}`)
+      } catch {
+        return null
+      }
+    }
+
   async getMetadata(asin: string, region: string = 'us', cache: boolean = true): Promise<{ metadata: AudimetaBookResponse, source: string, sourceUrl: string }> {
     return this.request(`/search/metadata/${asin}?region=${region}&cache=${cache}`)
   }
@@ -770,6 +779,31 @@ class ApiService {
     } catch (e) {
       // fall back to default behavior below on any error
       try { console.debug('[ApiService] getImageUrl library-detect error', e) } catch {}
+    }
+
+    // If the stored path is the authors cache path, convert to our images API endpoint
+    // Example stored path: /config/cache/images/authors/AUTHORASIN.jpg
+    try {
+      const authorMatch = imageUrl.match(/\/config\/cache\/images\/authors\/(.+)$/)
+      if (authorMatch && authorMatch[1]) {
+        const filename = authorMatch[1]
+        const identifier = filename.replace(/\.[^.]+$/, '')
+        let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
+
+        const sessionToken = sessionTokenManager.getToken()
+        if (sessionToken) {
+          url += `?access_token=${encodeURIComponent(sessionToken)}`
+        } else {
+          const cfg = getCachedStartupConfig()
+          const apiKey = cfg?.apiKey
+          if (apiKey) {
+            url += `?access_token=${encodeURIComponent(apiKey)}`
+          }
+        }
+        return url
+      }
+    } catch (e) {
+      try { console.debug('[ApiService] getImageUrl authors-detect error', e) } catch {}
     }
 
     // Convert other relative URLs to absolute and append access_token

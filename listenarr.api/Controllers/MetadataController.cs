@@ -10,12 +10,18 @@ namespace Listenarr.Api.Controllers
     {
         private readonly IAudiobookMetadataService _metadataService;
         private readonly ILogger<MetadataController> _logger;
+        private readonly AudimetaService _audimetaService;
+        private readonly IImageCacheService _imageCacheService;
 
         public MetadataController(
             IAudiobookMetadataService metadataService,
+            AudimetaService audimetaService,
+            IImageCacheService imageCacheService,
             ILogger<MetadataController> logger)
         {
             _metadataService = metadataService;
+            _audimetaService = audimetaService;
+            _imageCacheService = imageCacheService;
             _logger = logger;
         }
 
@@ -85,6 +91,55 @@ namespace Listenarr.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching audimeta metadata for ASIN: {Asin}", asin);
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Lookup an author by name via Audimeta and ensure the author image is cached under authors folder.
+        /// Returns an object with `asin`, `name`, `image` and `cachedPath` (relative path under config/cache/images/authors).
+        /// </summary>
+        [HttpGet("author")]
+        [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<object>> LookupAuthor([FromQuery] string name, [FromQuery] string region = "us")
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(name)) return BadRequest("Author name is required");
+
+                var info = await _audimetaService.LookupAuthorAsync(name, region);
+                if (info == null) return NotFound("Author not found");
+
+                string? cached = null;
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(info.Asin))
+                    {
+                        // Attempt to ensure author image is cached under authors storage
+                        cached = await _imageCacheService.MoveToAuthorLibraryStorageAsync(info.Asin, info.Image);
+                        if (!string.IsNullOrWhiteSpace(cached)) cached = "/" + cached.TrimStart('/');
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to cache author image for {Author}", name);
+                }
+
+                var result = new {
+                    asin = info.Asin,
+                    name = info.Name,
+                    image = info.Image,
+                    cachedPath = cached
+                };
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error looking up author: {Name}", name);
                 return StatusCode(500, "Internal server error");
             }
         }
