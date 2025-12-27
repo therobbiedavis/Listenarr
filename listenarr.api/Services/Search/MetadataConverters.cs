@@ -9,10 +9,10 @@ namespace Listenarr.Api.Services.Search;
 /// </summary>
 public class MetadataConverters
 {
-    private readonly IImageCacheService _imageCacheService;
+    private readonly IImageCacheService? _imageCacheService;
     private readonly ILogger<MetadataConverters> _logger;
 
-    public MetadataConverters(IImageCacheService imageCacheService, ILogger<MetadataConverters> logger)
+    public MetadataConverters(IImageCacheService? imageCacheService, ILogger<MetadataConverters> logger)
     {
         _imageCacheService = imageCacheService;
         _logger = logger;
@@ -30,6 +30,27 @@ public class MetadataConverters
             Source = "Amazon",
             Asin = amazonResult.Asin ?? "",
             ImageUrl = amazonResult.ImageUrl ?? ""
+        };
+    }
+
+    /// <summary>
+    /// Converts Amazon search result to MetadataSearchResult.
+    /// </summary>
+    public MetadataSearchResult ConvertAmazonSearchToMetadataResult(AmazonSearchResult amazonResult)
+    {
+        return new MetadataSearchResult
+        {
+            Id = Guid.NewGuid().ToString(),
+            Title = amazonResult.Title ?? "Unknown Title",
+            Artist = amazonResult.Author ?? "Unknown Author",
+            Album = amazonResult.Title ?? "Unknown Title",
+            Category = "Audiobook",
+            Source = "Amazon",
+            Asin = amazonResult.Asin ?? "",
+            ImageUrl = amazonResult.ImageUrl ?? "",
+            ProductUrl = amazonResult.Asin != null ? $"https://www.amazon.com/dp/{amazonResult.Asin}" : null,
+            IsEnriched = false,
+            MetadataSource = "Amazon"
         };
     }
 
@@ -197,24 +218,24 @@ public class MetadataConverters
 
         // If we already have a cached image for this ASIN, use the local API endpoint
         // instead of the external URL so search results serve cached images.
-        if (!string.IsNullOrEmpty(asin))
+        if (!string.IsNullOrEmpty(asin) && _imageCacheService != null)
         {
             try
             {
                 var cachedPath = await _imageCacheService.GetCachedImagePathAsync(asin);
                 if (!string.IsNullOrWhiteSpace(cachedPath))
                 {
-                    // Use the images controller endpoint which serves the cached file
                     imageUrl = $"/api/images/{asin}";
                     _logger.LogInformation("Using cached image for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
                 }
-                else if (!string.IsNullOrEmpty(imageUrl))
+                else
                 {
-                    // Cache the image in background, but don't wait for it or change the URL
-                    // Log the exact URL we are passing to the cache to aid debugging when
-                    // an unexpected placeholder (e.g. grey-pixel.gif) is downloaded.
-                    _logger.LogDebug("Initiating background image cache for ASIN {Asin} with URL: {ImageUrl}", asin, imageUrl);
-                    _ = _imageCacheService.DownloadAndCacheImageAsync(imageUrl, asin);
+                    // Even if not cached, map to API endpoint to ensure consistent serving
+                    // and avoid external URL failures. Background download will populate cache.
+                    imageUrl = $"/api/images/{asin}";
+                    _logger.LogDebug("Mapping to API endpoint for ASIN {Asin} (not yet cached): {ImageUrl}", asin, imageUrl);
+                    _logger.LogDebug("Initiating background image cache for ASIN {Asin} with URL: {OriginalUrl}", asin, metadata.ImageUrl ?? imageUrl);
+                    _ = _imageCacheService.DownloadAndCacheImageAsync(metadata.ImageUrl ?? imageUrl, asin);
                     _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
                 }
             }
@@ -254,7 +275,7 @@ public class MetadataConverters
             Source = metadata.Source ?? "Amazon/Audible", // Use the metadata source (Audible or Amazon) if available
             MetadataSource = metadata.Source, // Set the metadata source for display
             SourceLink = productUrl, // Link to the product page
-            PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? new DateTime(year, 1, 1) : DateTime.MinValue,
+            PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? $"{year}-01-01" : "1970-01-01",
             PublishYear = metadata.PublishYear,
             Subtitle = metadata.Subtitle,
             Quality = metadata.Version ?? "Unknown",
@@ -273,6 +294,123 @@ public class MetadataConverters
         
         _logger.LogInformation("SearchResult for ASIN {Asin}: PublishYear='{PublishYear}', PublishedDate={PublishedDate:yyyy-MM-dd}", 
             asin, metadata.PublishYear, result.PublishedDate);
+        
+        return result;
+    }
+
+    /// <summary>
+    /// Converts AudibleBookMetadata to MetadataSearchResult with fallback handling for missing fields.
+    /// </summary>
+    public async Task<MetadataSearchResult> ConvertMetadataToMetadataSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null, string? fallbackLanguage = null)
+    {
+        // Use metadata if available, otherwise fallback to raw search result, finally to generic fallback
+        var title = metadata.Title;
+        if (string.IsNullOrWhiteSpace(title) || title == "Audible" || title.Contains("English - USD"))
+        {
+            title = fallbackTitle;
+        }
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Unknown Title";
+        }
+
+        var author = metadata.Authors?.FirstOrDefault();
+        if (SearchValidation.IsAuthorNoise(author))
+        {
+            author = fallbackAuthor;
+        }
+        if (SearchValidation.IsAuthorNoise(author))
+        {
+            author = "Unknown Author";
+        }
+
+        var imageUrl = metadata.ImageUrl;
+        // Use fallback image if metadata has no image OR if it's a grey-pixel placeholder
+        if (string.IsNullOrWhiteSpace(imageUrl) || imageUrl.Contains("grey-pixel.gif"))
+        {
+            if (!string.IsNullOrWhiteSpace(fallbackImageUrl))
+            {
+                imageUrl = fallbackImageUrl;
+                _logger.LogInformation("Using fallback image URL for ASIN {Asin}: {ImageUrl} (replaced {OriginalUrl})", 
+                    asin, imageUrl, string.IsNullOrWhiteSpace(metadata.ImageUrl) ? "null" : "grey-pixel");
+            }
+            else if (string.IsNullOrWhiteSpace(imageUrl))
+            {
+                _logger.LogWarning("No image URL available for ASIN {Asin} from metadata or fallback. Metadata source: {Source}", asin, metadata.Source);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("Using metadata image URL for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
+        }
+
+        // If we already have a cached image for this ASIN, use the local API endpoint
+        // instead of the external URL so search results serve cached images.
+        if (!string.IsNullOrEmpty(asin) && _imageCacheService != null)
+        {
+            try
+            {
+                var cachedPath = await _imageCacheService.GetCachedImagePathAsync(asin);
+                if (!string.IsNullOrWhiteSpace(cachedPath))
+                {
+                    imageUrl = $"/api/images/{asin}";
+                    _logger.LogInformation("Using cached image for ASIN {Asin}: {ImageUrl}", asin, imageUrl);
+                }
+                else
+                {
+                    // Even if not cached, map to API endpoint to ensure consistent serving
+                    // and avoid external URL failures. Background download will populate cache.
+                    imageUrl = $"/api/images/{asin}";
+                    _logger.LogDebug("Mapping to API endpoint for ASIN {Asin} (not yet cached): {ImageUrl}", asin, imageUrl);
+                    _logger.LogDebug("Initiating background image cache for ASIN {Asin} with URL: {OriginalUrl}", asin, metadata.ImageUrl ?? imageUrl);
+                    _ = _imageCacheService.DownloadAndCacheImageAsync(metadata.ImageUrl ?? imageUrl, asin);
+                    _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check/initiate image caching for ASIN {Asin}", asin);
+            }
+        }
+
+        // Generate product URL based on source and ASIN. Ensure only HTTP(S) URLs are used
+        string? productUrl = null;
+        if (!string.IsNullOrEmpty(asin))
+        {
+            productUrl = metadata.Source == "Amazon"
+                ? $"https://www.amazon.com/dp/{asin}"
+                : $"https://www.audible.com/pd/{asin}";
+        }
+
+        var result = new MetadataSearchResult
+        {
+            Id = Guid.NewGuid().ToString(),
+            Title = title,
+            Artist = author ?? "Unknown Author",
+            Album = metadata.Series ?? metadata.Title ?? "Unknown Album",
+            Category = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" }),
+            Source = metadata.Source ?? "Amazon/Audible",
+            SourceLink = productUrl,
+            PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? $"{year}-01-01" : "1970-01-01",
+            Format = "Audiobook",
+            Score = 0,
+            Description = metadata.Description,
+            Subtitle = metadata.Subtitle,
+            Publisher = metadata.Publisher,
+            Language = metadata.Language ?? fallbackLanguage,
+            Runtime = metadata.Runtime,
+            Narrator = string.Join(", ", metadata.Narrators ?? new List<string>()),
+            Series = metadata.Series,
+            SeriesNumber = metadata.SeriesNumber,
+            ImageUrl = imageUrl,
+            Asin = asin,
+            ProductUrl = productUrl,
+            IsEnriched = true,
+            MetadataSource = metadata.Source
+        };
+        
+        _logger.LogInformation("MetadataSearchResult for ASIN {Asin}: PublishYear='{PublishYear}'", 
+            asin, metadata.PublishYear);
         
         return result;
     }

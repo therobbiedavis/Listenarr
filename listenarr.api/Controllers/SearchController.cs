@@ -56,6 +56,49 @@ namespace Listenarr.Api.Controllers
             _metadataConverters = metadataConverters ?? new MetadataConverters(imageCacheService, (Microsoft.Extensions.Logging.ILogger<Listenarr.Api.Services.Search.MetadataConverters>)logger);
         }
 
+        private async Task NormalizeSearchResultImagesAsync(List<SearchResult> results)
+        {
+            if (_imageCacheService == null || results == null) return;
+
+            foreach (var r in results)
+            {
+                try
+                {
+                    if (r == null) continue;
+                    if (string.IsNullOrWhiteSpace(r.Asin)) continue;
+
+                    // If we already have a cached path, map to API endpoint
+                    var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
+                    if (!string.IsNullOrWhiteSpace(cached))
+                    {
+                        r.ImageUrl = $"/api/images/{r.Asin}";
+                        continue;
+                    }
+
+                    // If the result includes an external HTTP(S) image URL, try
+                    // to download and cache it using the ASIN as identifier.
+                    if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
+                    {
+                        var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
+                        if (!string.IsNullOrWhiteSpace(downloaded))
+                        {
+                            r.ImageUrl = $"/api/images/{r.Asin}";
+                        }
+                    }
+                    // If no external URL or download failed, still map to API endpoint if ASIN present
+                    // This ensures consistent image serving and avoids external URL failures
+                    else if (!string.IsNullOrWhiteSpace(r.Asin))
+                    {
+                        r.ImageUrl = $"/api/images/{r.Asin}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to normalize image for search result ASIN {Asin}", r?.Asin);
+                }
+            }
+        }
+
 
         [HttpPost]
         public async Task<ActionResult<object>> Search([FromBody] JsonElement reqJson)
@@ -144,6 +187,8 @@ namespace Listenarr.Api.Controllers
                                 var metadata = _metadataConverters.ConvertAudimetaToMetadata(audimeta, req.Asin, source: "Audimeta");
                                 var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, req.Asin, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
                                 SanitizeResultForPublicApi(sr, region);
+                                // Ensure image normalization for ASIN results
+                                await NormalizeSearchResultImagesAsync(new List<SearchResult> { sr });
                                 return Ok(new { results = new List<SearchResult> { sr } });
                             }
                             // If audimeta didn't return a record, fall through to unified search below
@@ -151,6 +196,145 @@ namespace Listenarr.Api.Controllers
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Audimeta lookup failed for ASIN {Asin} in advanced search; falling back to unified search", req.Asin);
+                        }
+                    }
+
+                    // If a series name or series ASIN was provided, prefer Audimeta series endpoints
+                    if (!string.IsNullOrWhiteSpace(req.Series))
+                    {
+                        try
+                        {
+                            string seriesAsin = req.Series.Trim();
+                            // If the provided value does not look like an ASIN, try to search by name
+                            if (!(seriesAsin.StartsWith("B0", StringComparison.OrdinalIgnoreCase) && seriesAsin.Length >= 10))
+                            {
+                                var seriesSearch = await _audimetaService.SearchSeriesByNameAsync(req.Series.Trim(), region);
+                                if (seriesSearch == null)
+                                {
+                                    _logger.LogInformation("No series matches found for '{SeriesName}'", req.Series);
+                                    // Fall through to unified search instead of returning empty
+                                }
+                                else
+                                {
+                                    // Attempt to extract an ASIN from the returned object. Commonly the result
+                                    // is an array of objects containing an 'asin' property.
+                                    try
+                                    {
+                                        var seriesJson = JsonSerializer.Serialize(seriesSearch);
+                                        var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                                        var root = JsonSerializer.Deserialize<JsonElement>(seriesJson, opts);
+                                        if (root.ValueKind == JsonValueKind.Array)
+                                        {
+                                            string? chosenAsin = null;
+                                            foreach (var el in root.EnumerateArray())
+                                            {
+                                                try
+                                                {
+                                                    if (el.ValueKind != JsonValueKind.Object) continue;
+                                                    string? elRegion = null;
+                                                    string? elAsin = null;
+                                                    if (el.TryGetProperty("region", out var pRegion) && pRegion.ValueKind == JsonValueKind.String) elRegion = pRegion.GetString();
+                                                    if (el.TryGetProperty("asin", out var pAsin) && pAsin.ValueKind == JsonValueKind.String) elAsin = pAsin.GetString();
+                                                    if (!string.IsNullOrWhiteSpace(elRegion) && string.Equals(elRegion, region, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(elAsin))
+                                                    {
+                                                        chosenAsin = elAsin;
+                                                        break;
+                                                    }
+                                                    if (string.IsNullOrWhiteSpace(chosenAsin) && !string.IsNullOrWhiteSpace(elAsin)) chosenAsin = elAsin;
+                                                }
+                                                catch { }
+                                            }
+                                            if (!string.IsNullOrWhiteSpace(chosenAsin)) seriesAsin = chosenAsin;
+                                        }
+                                        else if (root.ValueKind == JsonValueKind.Object)
+                                        {
+                                            if (root.TryGetProperty("asin", out var pAsin) && pAsin.ValueKind == JsonValueKind.String)
+                                            {
+                                                seriesAsin = pAsin.GetString() ?? seriesAsin;
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to extract series ASIN from audimeta series search result for '{SeriesName}'", req.Series);
+                                    }
+                                }
+                            }
+
+                            // If we now have a candidate series ASIN, fetch books for the series
+                            if (!string.IsNullOrWhiteSpace(seriesAsin))
+                            {
+                                var booksObj = await _audimetaService.GetBooksBySeriesAsinAsync(seriesAsin, region);
+                                if (booksObj != null)
+                                {
+                                    var json = JsonSerializer.Serialize(booksObj);
+                                    var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                                    List<Listenarr.Api.Services.AudimetaSearchResult>? books = null;
+                                    try
+                                    {
+                                        var resp = JsonSerializer.Deserialize<List<Listenarr.Api.Services.AudimetaSearchResult>>(json, opts);
+                                        books = resp;
+                                    }
+                                    catch { }
+                                    if (books == null)
+                                    {
+                                        try
+                                        {
+                                            var respEnv = JsonSerializer.Deserialize<Listenarr.Api.Services.AudimetaSearchResponse>(json, opts);
+                                            books = respEnv?.Results;
+                                        }
+                                        catch { }
+                                    }
+
+                                    if (books != null && books.Any())
+                                    {
+                                        var converted = new List<SearchResult>();
+                                        foreach (var book in books)
+                                        {
+                                            if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                            var bookResp = new Listenarr.Api.Services.AudimetaBookResponse
+                                            {
+                                                Asin = book.Asin,
+                                                Title = book.Title,
+                                                Subtitle = book.Subtitle,
+                                                Authors = book.Authors,
+                                                ImageUrl = book.ImageUrl,
+                                                Language = book.Language,
+                                                BookFormat = book.BookFormat,
+                                                Genres = book.Genres,
+                                                Series = book.Series,
+                                                Publisher = book.Publisher,
+                                                Narrators = book.Narrators,
+                                                ReleaseDate = book.ReleaseDate,
+                                                Isbn = book.Isbn
+                                            };
+                                            try
+                                            {
+                                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
+                                                sr.IsEnriched = true;
+                                                sr.MetadataSource = "Audimeta";
+                                                SanitizeResultForPublicApi(sr, region);
+                                                converted.Add(sr);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Failed converting audimeta series book to SearchResult for ASIN {Asin}", book.Asin);
+                                            }
+                                        }
+
+                                        if (converted.Any()) {
+                                            // Ensure image normalization for series results
+                                            await NormalizeSearchResultImagesAsync(converted);
+                                            return Ok(new { results = converted });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to perform series lookup for '{Series}' in advanced search; falling back to unified search", req.Series);
                         }
                     }
 
@@ -175,11 +359,51 @@ namespace Listenarr.Api.Controllers
                     var candidateLimit = req.Cap.HasValue ? Math.Clamp(req.Cap.Value, 5, 2000) : 200;
                     var returnLimit = req.Pagination != null && req.Pagination.Limit > 0 ? Math.Clamp(req.Pagination.Limit, 1, 1000) : 50;
                     var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, region: region, language: language, ct: HttpContext.RequestAborted);
-                    foreach (var r in results)
+
+                    // Ensure images for results are served via our API when possible.
+                    // For results that provide an ASIN, prefer the local /api/images/{asin}
+                    // endpoint by checking cached images or attempting to download and cache
+                    // external image URLs. This prevents leaking external Amazon/Audible
+                    // image URLs to the SPA and avoids mixed image sources.
+                    if (_imageCacheService != null && results != null)
                     {
-                        SanitizeResultForPublicApi(r, region);
+                        foreach (var r in results)
+                        {
+                            try
+                            {
+                                if (r == null) continue;
+                                if (string.IsNullOrWhiteSpace(r.Asin)) continue;
+
+                                var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
+                                if (!string.IsNullOrWhiteSpace(cached))
+                                {
+                                    r.ImageUrl = $"/api/images/{r.Asin}";
+                                    continue;
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
+                                {
+                                    var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
+                                    if (!string.IsNullOrWhiteSpace(downloaded))
+                                    {
+                                        r.ImageUrl = $"/api/images/{r.Asin}";
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to normalize image for result with ASIN {Asin}", r.Asin);
+                            }
+                        }
                     }
-                    return Ok(new { results });
+
+                    var response = new SearchResponse
+                    {
+                        MetadataResults = results ?? new List<MetadataSearchResult>(),
+                        IndexerResults = new List<IndexerSearchResult>()
+                    };
+
+                    return Ok(response);
                 }
             }
             catch (Exception ex)
@@ -287,12 +511,76 @@ namespace Listenarr.Api.Controllers
                     catch { query = query ?? string.Empty; }
                 }
 
-                var results = await _searchService.SearchAsync(query, category, apiIds, sortBy, sortDirection);
-                if (enrichedOnly)
+                var searchResults = await _searchService.SearchAsync(query, category, apiIds, sortBy, sortDirection);
+
+                // Convert List<SearchResult> to SearchResponse by separating indexer and metadata results
+                var response = new SearchResponse();
+                foreach (var result in searchResults)
                 {
-                    results = results.Where(r => r.IsEnriched).ToList();
+                    // Determine result type: indexer results have size/seeders, metadata results have description/publisher
+                    if (result.Size > 0 || result.Seeders > 0 || !string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl) || !string.IsNullOrEmpty(result.NzbUrl))
+                    {
+                        response.IndexerResults.Add(SearchResultConverters.ToIndexerSearchResult(result));
+                    }
+                    else
+                    {
+                        response.MetadataResults.Add(SearchResultConverters.ToMetadata(result));
+                    }
                 }
-                return Ok(results);
+
+                // Normalize/canonicalize images for returned search results so the
+                // frontend receives local /api/images/{asin} URLs when possible.
+                var mdResults = response.MetadataResults;
+                var cacheService = _imageCacheService;
+
+                if (cacheService != null && mdResults != null)
+                {
+                    foreach (var r in mdResults)
+                    {
+                        try
+                        {
+                            if (r == null) continue;
+                            if (string.IsNullOrWhiteSpace(r.Asin)) continue;
+
+                            var asin = r.Asin!;
+
+                            // Use a local copy of the service to make control-flow nullability obvious to the analyzer
+                            var svc = cacheService;
+                            if (svc == null) break; // defensive: shouldn't happen because of outer check
+
+                            var cached = await svc.GetCachedImagePathAsync(asin);
+                            if (!string.IsNullOrWhiteSpace(cached))
+                            {
+                                r.ImageUrl = $"/api/images/{asin}";
+                                continue;
+                            }
+
+                            var imageUrl = r.ImageUrl;
+                            if (!string.IsNullOrWhiteSpace(imageUrl))
+                            {
+                                var url = imageUrl!;
+                                if (url.StartsWith("http://") || url.StartsWith("https://"))
+                                {
+                                    var downloaded = await svc.DownloadAndCacheImageAsync(url, asin);
+                                    if (!string.IsNullOrWhiteSpace(downloaded))
+                                    {
+                                        r.ImageUrl = $"/api/images/{asin}";
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to ensure cached image for search result ASIN {Asin}", r?.Asin);
+                        }
+                    }
+                }
+
+                if (enrichedOnly && mdResults != null)
+                {
+                    response.MetadataResults = mdResults.Where(r => (r?.IsEnriched ?? false)).ToList();
+                }
+                return Ok(response);
             }
             catch (Exception ex)
             {
@@ -302,10 +590,10 @@ namespace Listenarr.Api.Controllers
         }
 
         [HttpGet("intelligent")]
-        [ProducesResponseType(typeof(List<SearchResult>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(List<MetadataSearchResult>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<ActionResult<List<SearchResult>>> IntelligentSearch(
+        public async Task<ActionResult<List<MetadataSearchResult>>> IntelligentSearch(
                 [FromQuery] string query,
                 [FromQuery] string? category = null,
                 [FromQuery] int candidateLimit = 50,
@@ -337,6 +625,40 @@ namespace Listenarr.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error performing intelligent search for query: {Query}", LogRedaction.SanitizeText(query));
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        [HttpGet("audimeta/series")]
+        public async Task<ActionResult<object>> SearchAudimetaSeries([FromQuery] string name, [FromQuery] string region = "us")
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(name)) return BadRequest("name query parameter is required");
+                var res = await _audimetaService.SearchSeriesByNameAsync(name, region);
+                if (res == null) return NotFound();
+                return Ok(res);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error proxying audimeta series search for name {Name}", name);
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        [HttpGet("audimeta/series/books/{asin}")]
+        public async Task<ActionResult<object>> GetAudimetaSeriesBooks(string asin, [FromQuery] string region = "us")
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(asin)) return BadRequest("asin is required");
+                var res = await _audimetaService.GetBooksBySeriesAsinAsync(asin, region);
+                if (res == null) return NotFound();
+                return Ok(res);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error proxying audimeta series books for ASIN {Asin}", asin);
                 return StatusCode(500, "Internal server error");
             }
         }
@@ -551,7 +873,7 @@ namespace Listenarr.Api.Controllers
                             ImageUrl = searchResult.ImageUrl,
                             LengthMinutes = searchResult.Runtime,
                             Language = searchResult.Language,
-                            ReleaseDate = searchResult.PublishedDate != DateTime.MinValue ? searchResult.PublishedDate.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") : null,
+                            ReleaseDate = !string.IsNullOrWhiteSpace(searchResult.PublishedDate) ? searchResult.PublishedDate : null,
                             Series = !string.IsNullOrEmpty(searchResult.Series) ? new[] { new { Name = searchResult.Series, Position = searchResult.SeriesNumber } } : null
                         };
 

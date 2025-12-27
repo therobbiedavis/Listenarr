@@ -1,22 +1,29 @@
-export interface SearchResult {
+export interface BaseSearchResult {
   id: string
   title: string
   artist: string
   album: string
   category: string
+  source: string
+  sourceLink?: string
+  publishedDate: string
+  format: string
+  score?: number
+}
+
+export interface IndexerSearchResult extends BaseSearchResult {
   size: number
   seeders: number
   leechers: number
   magnetLink: string
   torrentUrl: string
   nzbUrl: string
-  source: string
-  sourceLink?: string // Direct link to the source (product page, indexer page, etc.)
   downloadType: string // "Torrent", "Usenet", or "DDL"
-  publishedDate: string
   quality: string
-  format: string
-  // Extended audiobook metadata (optional)
+  resultUrl?: string // Canonical indexer page for the result
+}
+
+export interface MetadataSearchResult extends BaseSearchResult {
   description?: string
   subtitle?: string
   publisher?: string
@@ -28,10 +35,38 @@ export interface SearchResult {
   series?: string
   seriesNumber?: string
   productUrl?: string // Direct link to Amazon/Audible product page
-  resultUrl?: string // Canonical indexer page for the result (e.g., archive.org details, myanonamouse item page)
   isEnriched?: boolean
-  score?: number
-  metadataSource?: string // Which metadata API enriched this result (e.g., "Audimeta", "Audnexus")
+  metadataSource?: string // Which metadata API enriched this result
+}
+
+// Legacy SearchResult interface - kept for backwards compatibility
+// Combines both indexer and metadata properties
+export interface SearchResult extends BaseSearchResult {
+  // Indexer-specific properties
+  size: number
+  seeders: number
+  leechers: number
+  magnetLink: string
+  torrentUrl: string
+  nzbUrl: string
+  downloadType: string // "Torrent", "Usenet", or "DDL"
+  quality: string
+  resultUrl?: string // Canonical indexer page for the result
+
+  // Metadata-specific properties
+  description?: string
+  subtitle?: string
+  publisher?: string
+  language?: string
+  runtime?: number
+  narrator?: string
+  imageUrl?: string
+  asin?: string
+  series?: string
+  seriesNumber?: string
+  productUrl?: string // Direct link to Amazon/Audible product page
+  isEnriched?: boolean
+  metadataSource?: string // Which metadata API enriched this result
 }
 
 export interface Download {
@@ -582,4 +617,13 @@ export interface AudimetaSearchResult {
   narrators?: AudimetaNarrator[]
   releaseDate?: string
   link?: string
+}
+
+/**
+ * Response wrapper for search operations that can contain different types of results
+ */
+export interface SearchResponse {
+  indexerResults: IndexerSearchResult[];
+  metadataResults: MetadataSearchResult[];
+  totalCount: number;
 }

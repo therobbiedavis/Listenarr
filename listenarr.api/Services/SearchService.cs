@@ -121,7 +121,7 @@ namespace Listenarr.Api.Services
                 var automaticIndexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
                 if (automaticIndexerResults.Any())
                 {
-                    results.AddRange(automaticIndexerResults);
+                    results.AddRange(automaticIndexerResults.Select((IndexerSearchResult r) => SearchResultConverters.ToSearchResult(r)));
                     _logger.LogInformation("Found {Count} indexer results for automatic search query: {Query}", automaticIndexerResults.Count, query);
                 }
                 else
@@ -135,7 +135,7 @@ namespace Listenarr.Api.Services
             var intelligentResults = await IntelligentSearchAsync(query);
             if (intelligentResults.Any())
             {
-                results.AddRange(intelligentResults);
+                results.AddRange(intelligentResults.Select((MetadataSearchResult r) => SearchResultConverters.ToSearchResult(r)));
                 _logger.LogInformation("Found {Count} valid Amazon/Audible results using intelligent search for query: {Query}", intelligentResults.Count, query);
             }
             else
@@ -147,7 +147,7 @@ namespace Listenarr.Api.Services
                 {
                     var appSettings = await _configurationService.GetApplicationSettingsAsync();
 
-                    var fallback = new ConcurrentBag<SearchResult>();
+                    var fallback = new ConcurrentBag<MetadataSearchResult>();
 
                     // Parallelize Amazon and Audible searches
                     var fallbackTasks = new List<Task>();
@@ -161,8 +161,7 @@ namespace Listenarr.Api.Services
                                 .Where(a => !string.IsNullOrWhiteSpace(a.Author) && !string.IsNullOrWhiteSpace(a.Title))
                                 .Select(a =>
                                 {
-                                    var r = _metadataConverters.ConvertAmazonSearchToResult(a);
-                                    r.IsEnriched = false;
+                                    var r = _metadataConverters.ConvertAmazonSearchToMetadataResult(a);
                                     return r;
                                 });
                             
@@ -184,7 +183,8 @@ namespace Listenarr.Api.Services
                                 {
                                     var r = ConvertAudibleSearchToResult(a);
                                     r.IsEnriched = false;
-                                    return r;
+                                    var meta = SearchResultConverters.ToMetadata(r);
+                                    return meta;
                                 });
                             
                             foreach (var r in validResults)
@@ -198,7 +198,8 @@ namespace Listenarr.Api.Services
 
                     var fallbackList = fallback.ToList();
                     _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallbackList.Count, query);
-                    return ApplySorting(fallbackList, sortBy, sortDirection);
+                    results.AddRange(fallbackList.Select(r => SearchResultConverters.ToSearchResult(r)));
+                    return ApplySorting(results, sortBy, sortDirection);
                 }
                 catch (Exception exFallback)
                 {
@@ -211,7 +212,7 @@ namespace Listenarr.Api.Services
                     
                     var amazonResults = await amazonTask;
                     var audibleResults = await audibleTask;
-                    var fallback = new List<SearchResult>();
+                    var fallback = new List<MetadataSearchResult>();
                     foreach (var a in amazonResults.Take(12))
                     {
                         // Skip results with missing critical information
@@ -220,7 +221,7 @@ namespace Listenarr.Api.Services
                             _logger.LogDebug("Skipping Amazon fallback result with missing author/title: {Title}, {Author}", a.Title, a.Author);
                             continue;
                         }
-                        var r = _metadataConverters.ConvertAmazonSearchToResult(a);
+                        var r = _metadataConverters.ConvertAmazonSearchToMetadataResult(a);
                         r.IsEnriched = false;
                         fallback.Add(r);
                     }
@@ -234,10 +235,11 @@ namespace Listenarr.Api.Services
                         }
                         var r = ConvertAudibleSearchToResult(a);
                         r.IsEnriched = false;
-                        fallback.Add(r);
+                        fallback.Add(SearchResultConverters.ToMetadata(r));
                     }
                     _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
-                    return ApplySorting(fallback, sortBy, sortDirection);
+                    results.AddRange(fallback.Select(r => SearchResultConverters.ToSearchResult(r)));
+                    return ApplySorting(results, sortBy, sortDirection);
                 }
             }
 
@@ -245,28 +247,11 @@ namespace Listenarr.Api.Services
             var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
             if (indexerResults.Any())
             {
-                results.AddRange(indexerResults);
+                results.AddRange(indexerResults.Select(r => SearchResultConverters.ToSearchResult(r)));
                 _logger.LogInformation("Added {Count} indexer results (including DDL downloads) for query: {Query}", indexerResults.Count, query);
             }
 
-            // Apply sorting first so trimming (if configured) keeps the most relevant/desired items
-            var sorted = ApplySorting(results, sortBy, sortDirection);
-
-            try
-            {
-                var appSettings = await _configurationService.GetApplicationSettingsAsync();
-                if (appSettings != null && appSettings.SearchResultCap > 0 && sorted.Count > appSettings.SearchResultCap)
-                {
-                    _logger.LogInformation("Trimming total combined search results from {Before} to SearchResultCap={Cap}", sorted.Count, appSettings.SearchResultCap);
-                    sorted = sorted.Take(appSettings.SearchResultCap).ToList();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to load application settings when enforcing total SearchResultCap; returning full result set");
-            }
-
-            return sorted;
+            return ApplySorting(results, sortBy, sortDirection);
         }
 
         private List<SearchResult> ApplySorting(List<SearchResult> results, SearchSortBy sortBy, SearchSortDirection sortDirection)
@@ -387,9 +372,9 @@ namespace Listenarr.Api.Services
             return 0;
         }
 
-        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
             var indexers = await _dbContext.Indexers
                 .Where(i => i.IsEnabled && (isAutomaticSearch ? i.EnableAutomaticSearch : i.EnableInteractiveSearch))
                 .OrderBy(i => i.Priority)
@@ -417,7 +402,7 @@ namespace Listenarr.Api.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error searching indexer {Name} for query: {Query}", indexer.Name, query);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
             }).ToList();
 
@@ -435,9 +420,9 @@ namespace Listenarr.Api.Services
             return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-        public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, string region = "us", string? language = null, CancellationToken ct = default)
+        public async Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, string region = "us", string? language = null, CancellationToken ct = default)
         {
-            var results = new List<SearchResult>();
+            var results = new List<MetadataSearchResult>();
 
             try
             {
@@ -563,7 +548,7 @@ namespace Listenarr.Api.Services
                                 sr.MetadataSource = "Audimeta";
                                 converted.Add(sr);
                             }
-                            if (converted.Any()) return converted.ToList();
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
                         }
                     }
 
@@ -644,7 +629,7 @@ namespace Listenarr.Api.Services
                                 sr.MetadataSource = "Audimeta";
                                 converted.Add(sr);
                             }
-                            if (converted.Any()) return converted.ToList();
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
                         }
                     }
 
@@ -791,7 +776,7 @@ namespace Listenarr.Api.Services
                                 }
                             }
 
-                            if (converted.Any()) return converted.ToList();
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
                         }
                     }
 
@@ -828,7 +813,7 @@ namespace Listenarr.Api.Services
                                 sr.MetadataSource = "Audimeta";
                                 converted.Add(sr);
                             }
-                            if (converted.Any()) return converted.ToList();
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
                         }
                     }
 
@@ -865,7 +850,7 @@ namespace Listenarr.Api.Services
                                 sr.MetadataSource = "Audimeta";
                                 converted.Add(sr);
                             }
-                            if (converted.Any()) return converted.ToList();
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
                         }
                     }
                 }
@@ -884,7 +869,8 @@ namespace Listenarr.Api.Services
                 {
                     var asin = actualQuery.Trim();
                     var asinMetadataSources = await GetEnabledMetadataSourcesAsync();
-                    return await _asinSearchHandler.SearchByAsinAsync(asin, asinMetadataSources);
+                    var asinSearchResults = await _asinSearchHandler.SearchByAsinAsync(asin, asinMetadataSources);
+                    return asinSearchResults.Select(r => SearchResultConverters.ToMetadata(r)).ToList();
                 }
 
                 // Regular search flow for non-ASIN queries (ISBN, AUTHOR, TITLE, or normal text)
@@ -1215,7 +1201,7 @@ namespace Listenarr.Api.Services
                         break;
                 }
 
-                results.AddRange(finalList);
+                results.AddRange(finalList.Select(r => SearchResultConverters.ToMetadata(r)));
                 await _searchProgressReporter.BroadcastAsync($"Returning {results.Count} final results", null);
 
                 // If still no enriched results, try OpenLibrary derived titles to attempt enrichment again
@@ -1265,7 +1251,8 @@ namespace Listenarr.Api.Services
                                                 {
                                                     var searchResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
                                                     searchResult.IsEnriched = true;
-                                                    results.Add(searchResult);
+                                                    results.Add(SearchResultConverters.ToMetadata(searchResult));
+
                                                 }
                                             }
                                             catch (Exception ex)
@@ -1288,7 +1275,7 @@ namespace Listenarr.Api.Services
                     // Preserve OpenLibrary results regardless of title heuristics
                     (string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase))
                     // For all other results apply the usual title checks AND ensure it looks like an audiobook
-                    || (!string.IsNullOrWhiteSpace(r.Title) && !SearchValidation.IsTitleNoise(r.Title) && r.Title.Length >= 3 && SearchValidation.IsLikelyAudiobook(r))
+                    || (!string.IsNullOrWhiteSpace(r.Title) && !SearchValidation.IsTitleNoise(r.Title) && r.Title.Length >= 3 && SearchValidation.IsLikelyAudiobook(SearchResultConverters.ToSearchResult(r)))
                 ).ToList();
 
                 // Apply progress broadcast for filtering/scoring phase
@@ -1621,7 +1608,7 @@ namespace Listenarr.Api.Services
                 Leechers = 0,
                 MagnetLink = $"audible://asin/{audibleResult.Asin}",
                 Source = "Audible",
-                PublishedDate = DateTime.MinValue,
+                PublishedDate = "1970-01-01",
                 Quality = "Unknown",
                 Format = "Audiobook",
                 Description = null,
@@ -1631,6 +1618,28 @@ namespace Listenarr.Api.Services
                 Narrator = audibleResult.Narrator,
                 ImageUrl = audibleResult.ImageUrl,
                 Asin = audibleResult.Asin
+            };
+        }
+
+        private MetadataSearchResult ConvertAudibleSearchToMetadataResult(AudibleSearchResult audibleResult)
+        {
+            return new MetadataSearchResult
+            {
+                Id = Guid.NewGuid().ToString(),
+                Title = audibleResult.Title ?? "Unknown Title",
+                Artist = audibleResult.Author ?? "Unknown Author",
+                Album = audibleResult.Title ?? "Unknown Album",
+                Category = "Audiobook",
+                Source = "Audible",
+                PublishedDate = "1970-01-01",
+                Format = "Audiobook",
+                Runtime = ParseDuration(audibleResult.Duration),
+                Narrator = audibleResult.Narrator,
+                ImageUrl = audibleResult.ImageUrl,
+                Asin = audibleResult.Asin,
+                ProductUrl = audibleResult.Asin != null ? $"https://www.audible.com/pd/{audibleResult.Asin}" : null,
+                IsEnriched = false,
+                MetadataSource = "Audible"
             };
         }
 
@@ -1754,7 +1763,8 @@ namespace Listenarr.Api.Services
                 }
 
                 // Search using the indexer
-                return await SearchIndexerAsync(indexer, query, category);
+                var idxResults = await SearchIndexerAsync(indexer, query, category);
+                return idxResults.Select(r => SearchResultConverters.ToSearchResult(r)).ToList();
             }
             catch (Exception ex)
             {
@@ -1781,7 +1791,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<List<SearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null)
+        private async Task<List<IndexerSearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null)
         {
             try
             {
@@ -1847,11 +1857,11 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private async Task<List<SearchResult>> SearchTorznabNewznabAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchTorznabNewznabAsync(Indexer indexer, string query, string? category)
         {
             try
             {
@@ -1869,7 +1879,7 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Indexer {Name} returned status {Status}", indexer.Name, response.StatusCode);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 var xmlContent = await response.Content.ReadAsStringAsync();
@@ -1883,11 +1893,11 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching Torznab/Newznab indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private async Task<List<SearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category)
         {
             try
             {
@@ -1899,7 +1909,7 @@ namespace Listenarr.Api.Services
                 if (string.IsNullOrEmpty(mamId))
                 {
                     _logger.LogWarning("MyAnonamouse indexer {Name} missing mam_id", indexer.Name);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 // Build MyAnonamouse API request (mam_id is sent as a cookie)
@@ -2009,7 +2019,7 @@ namespace Listenarr.Api.Services
                     _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
                     var errorContent = await response.Content.ReadAsStringAsync();
                     _logger.LogWarning("MyAnonamouse error response: {Content}", LogRedaction.RedactText(errorContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 var jsonResponse = await response.Content.ReadAsStringAsync();
@@ -2022,13 +2032,13 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching MyAnonamouse indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private List<SearchResult> ParseMyAnonamouseResponse(string jsonResponse, Indexer indexer)
+        private List<IndexerSearchResult> ParseMyAnonamouseResponse(string jsonResponse, Indexer indexer)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
 
             try
             {
@@ -2268,7 +2278,7 @@ namespace Listenarr.Api.Services
                             downloadUrl = $"https://www.myanonamouse.net/tor/download.php/{dlHash}";
                         }
 
-                        var result = new SearchResult
+                        var result = new IndexerSearchResult
                         {
                             Id = id ?? Guid.NewGuid().ToString(),
                             Title = title ?? "Unknown",
@@ -2279,7 +2289,7 @@ namespace Listenarr.Api.Services
                             Seeders = seeders,
                             Leechers = leechers,
                             Source = indexer.Name,
-                            PublishedDate = DateTime.UtcNow,
+                            PublishedDate = DateTime.UtcNow.ToString("o"),
                             Quality = quality,
                             Format = format,
                             TorrentUrl = downloadUrl,
@@ -2577,7 +2587,7 @@ namespace Listenarr.Api.Services
             return cleaned;
         }
 
-        private async Task<List<SearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
         {
             try
             {
@@ -2616,7 +2626,7 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Internet Archive returned status {Status}", response.StatusCode);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 var jsonResponse = await response.Content.ReadAsStringAsync();
@@ -2630,13 +2640,13 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching Internet Archive indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private async Task<List<SearchResult>> ParseInternetArchiveSearchResponse(string jsonResponse, Indexer indexer)
+        private async Task<List<IndexerSearchResult>> ParseInternetArchiveSearchResponse(string jsonResponse, Indexer indexer)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
 
             try
             {
@@ -2711,7 +2721,7 @@ namespace Listenarr.Api.Services
                         _logger.LogDebug("Found audio file for {Title}: {FileName} ({Format}, {Size} bytes)",
                             title, audioFile.FileName, audioFile.Format, audioFile.Size);
 
-                        var iaResult = new SearchResult
+                        var iaResult = new IndexerSearchResult
                         {
                             Id = Guid.NewGuid().ToString(),
                             Title = title,
@@ -2727,7 +2737,8 @@ namespace Listenarr.Api.Services
                             DownloadType = "DDL", // Direct Download Link
                             Format = audioFile.Format,
                             Quality = DetectQualityFromFormat(audioFile.Format),
-                            Source = $"{indexer.Name} (Internet Archive)"
+                            Source = $"{indexer.Name} (Internet Archive)",
+                            PublishedDate = DateTime.UtcNow.ToString("o")
                         };
 
                         // Ensure ResultUrl is present (fallback to item page or archive details)
@@ -2840,9 +2851,9 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private List<SearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
+        private List<IndexerSearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
 
             try
             {
@@ -2879,7 +2890,7 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
-                        var result = new SearchResult
+                        var result = new IndexerSearchResult
                         {
                             Id = item.Element("guid")?.Value ?? Guid.NewGuid().ToString(),
                             Title = item.Element("title")?.Value ?? "Unknown",
@@ -2893,11 +2904,11 @@ namespace Listenarr.Api.Services
                         var pubDateStr = item.Element("pubDate")?.Value;
                         if (DateTime.TryParse(pubDateStr, out var pubDate))
                         {
-                            result.PublishedDate = pubDate;
+                            result.PublishedDate = pubDate.ToString("o");
                         }
                         else
                         {
-                            result.PublishedDate = DateTime.UtcNow;
+                            result.PublishedDate = DateTime.UtcNow.ToString("o");
                         }
 
                         // Parse Torznab/Newznab attributes
@@ -3103,31 +3114,31 @@ namespace Listenarr.Api.Services
             return results;
         }
 
-        private List<SearchResult> GenerateMockIndexerResults(string query)
+        private List<IndexerSearchResult> GenerateMockIndexerResults(string query)
         {
             // Generate multiple mock results to simulate real indexer responses
             // Default to torrent for backwards compatibility
             return GenerateMockIndexerResults(query, "Mock Indexer", "Torrent");
         }
 
-        private List<SearchResult> GenerateMockIndexerResults(string query, string indexerName)
+        private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName)
         {
             // Default to torrent for backwards compatibility
             return GenerateMockIndexerResults(query, indexerName, "Torrent");
         }
 
-        private List<SearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
+        private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
         {
             // Generate multiple mock results to simulate real indexer responses
             var random = new Random();
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
             var isUsenet = indexerType.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
 
             _logger.LogInformation("Generating {Count} mock {Type} results for indexer {IndexerName}", 5, indexerType, indexerName);
 
             for (int i = 0; i < 5; i++)
             {
-                var result = new SearchResult
+                var result = new IndexerSearchResult
                 {
                     Id = Guid.NewGuid().ToString(),
                     Title = $"{query} - Quality {i + 1}",
@@ -3138,7 +3149,7 @@ namespace Listenarr.Api.Services
                     Seeders = isUsenet ? 0 : random.Next(5, 100), // Usenet doesn't have seeders
                     Leechers = isUsenet ? 0 : random.Next(0, 20), // Usenet doesn't have leechers
                     Source = indexerName,
-                    PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)),
+                    PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)).ToString("o"),
                     Quality = i switch
                     {
                         0 => "MP3 64kbps",
@@ -3187,7 +3198,7 @@ namespace Listenarr.Api.Services
                     Leechers = 3,
                     MagnetLink = "magnet:?xt=urn:btih:sample",
                     Source = source,
-                    PublishedDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 365)),
+                    PublishedDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 365)).ToString("o"),
                     Quality = "MP3 128kbps",
                     Format = "MP3"
                 }

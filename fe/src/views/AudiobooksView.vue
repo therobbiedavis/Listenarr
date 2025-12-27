@@ -175,7 +175,7 @@
                 <div class="series-count-badge">{{ collection.count }}</div>
                 <img
                   v-if="collection.coverUrl"
-                  :src="apiService.getImageUrl(collection.coverUrl)"
+                  :src="apiService.getImageUrl(collection.coverUrl) || apiService.getPlaceholderUrl()"
                   :alt="collection.name"
                   class="audiobook-poster"
                   @error="handleImageError"
@@ -203,14 +203,14 @@
                   <template v-if="collection.coverUrls.length === 1">
                     <div
                       class="series-single-bg"
-                      :style="{ backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0])})` }"
+                      :style="{ backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0]) || apiService.getPlaceholderUrl()})` }"
                     />
                     <div
                       class="series-cover-item"
                       :style="getCoverStyle(0, collection.coverUrls.length)"
                     >
                       <img
-                        :src="apiService.getImageUrl(collection.coverUrls[0])"
+                        :src="apiService.getImageUrl(collection.coverUrls[0]) || apiService.getPlaceholderUrl()"
                         :alt="`${collection.name} Cover`"
                         class="series-cover-image centered"
                         @error="handleImageError"
@@ -226,7 +226,7 @@
                       :style="getCoverStyle(index, collection.coverUrls.length)"
                     >
                       <img
-                        :src="apiService.getImageUrl(coverUrl)"
+                        :src="apiService.getImageUrl(coverUrl) || apiService.getPlaceholderUrl()"
                         :alt="`${collection.name} Cover`"
                         class="series-cover-image"
                         @error="handleImageError"
@@ -298,10 +298,11 @@
     </div>
       <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
       <img 
-        :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'" 
+        :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()" 
         :alt="audiobook.title" 
         class="audiobook-poster"
         loading="lazy"
+        @error="handleImageError"
       />
         <div class="status-overlay">
         <div v-if="!showItemDetails" class="audiobook-title">{{ safeText(audiobook.title) }}</div>
@@ -378,9 +379,10 @@
               </div>
               <img
                 class="list-thumb"
-                :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'"
+                :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()"
                 :alt="audiobook.title"
                 loading="lazy"
+                @error="handleImageError"
               />
               <div class="list-details">
                 <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
@@ -1286,8 +1288,22 @@ function navigateToCollection(collection: { name: string }) {
 }
 
 function handleImageError(event: Event) {
-  const img = event.target as HTMLImageElement
-  img.style.display = 'none'
+  try {
+    const img = event.target as HTMLImageElement
+    if (!img) return
+    try { if ((img as any).__imageFallbackDone) return; (img as any).__imageFallbackDone = true } catch {}
+    const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
+    try {
+      const m = (original || '').match(/\/api\/images\/([^?\\/]+)(?:\?|$)/i)
+      if (m && m[1]) {
+        try { apiService.markImageFailed(decodeURIComponent(m[1])) } catch {}
+      }
+    } catch {}
+    try { img.src = apiService.getPlaceholderUrl() } catch {}
+    try { img.removeAttribute('data-src') } catch {}
+    try { img.removeAttribute('data-original-src') } catch {}
+    try { (img as any).onerror = null } catch {}
+  } catch {}
 }
 
 // Series cover layout constants and helper

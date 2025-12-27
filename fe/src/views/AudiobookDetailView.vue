@@ -122,14 +122,15 @@
 
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'})` }"></div>
+      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()})` }"></div>
       <div class="hero-content">
         <div class="poster-container">
           <img 
-            :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'" 
+            :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()" 
             :alt="audiobook.title"
             class="poster"
             loading="lazy"
+            @error="handleImageError"
           />
         </div>
         <div class="info-section">
@@ -564,6 +565,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
+import { handleImageError } from '@/utils/imageFallback'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'

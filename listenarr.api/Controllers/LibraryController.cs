@@ -104,8 +104,15 @@ namespace Listenarr.Api.Controllers
             {
                 try
                 {
-                    metadata.PublishYear = request.SearchResult.PublishedDate.Year.ToString();
-                    _logger.LogInformation("Extracted publish year from search result publishedDate: {Year}", metadata.PublishYear);
+                    if (DateTime.TryParse(request.SearchResult.PublishedDate, out var publishDate))
+                    {
+                        metadata.PublishYear = publishDate.Year.ToString();
+                        _logger.LogInformation("Extracted publish year from search result publishedDate: {Year}", metadata.PublishYear);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Could not parse PublishedDate as DateTime: {PublishedDate}", request.SearchResult.PublishedDate);
+                    }
                 }
                 catch (Exception ex)
                 {

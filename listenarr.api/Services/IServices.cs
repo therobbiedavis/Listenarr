@@ -32,7 +32,7 @@ namespace Listenarr.Api.Services
         /// <param name="language">Optional language code to filter metadata results (e.g. en, de)</param>
         /// <param name="ct">Cancellation token to cancel the intelligent search operation.</param>
         /// <returns>Search results enriched with metadata from Amazon and Audible</returns>
-        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, CancellationToken ct = default);
+        Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, CancellationToken ct = default);
 
         /// <summary>
         /// Searches a specific API/indexer by ID
@@ -59,7 +59,7 @@ namespace Listenarr.Api.Services
         /// <param name="sortDirection">Sort direction (ascending or descending)</param>
         /// <param name="isAutomaticSearch">Whether this is an automatic search</param>
         /// <returns>List of search results from indexers only</returns>
-        Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
+        Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
 
         /// <summary>
         /// Gets all enabled metadata sources (Amazon, Audible, etc.)

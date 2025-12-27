@@ -16,9 +16,9 @@ namespace Listenarr.Api.Tests
         public async Task IntelligentSearch_ReturnsEnrichedResults()
         {
             // Arrange
-            var sample = new List<SearchResult>
+            var sample = new List<MetadataSearchResult>
             {
-                new SearchResult { Id = "1", Title = "Sample", Asin = "B000000000" }
+                new MetadataSearchResult { Id = "1", Title = "Sample", Asin = "B000000000" }
             };
 
             // Use a minimal test implementation of ISearchService to avoid expression-tree issues with optional parameters in Moq
@@ -61,7 +61,7 @@ namespace Listenarr.Api.Tests
             {
                 new SearchResult { Id = "1", Title = "Sample", Asin = "B00001", ImageUrl = "http://cdn.example/cover.jpg" }
             };
-            mockService.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(sample);
+            mockService.Setup(s => s.SearchAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>())).ReturnsAsync(sample);
 
             var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudimetaService = new Mock<AudimetaService>(new System.Net.Http.HttpClient(), Mock.Of<ILogger<AudimetaService>>());
@@ -92,8 +92,51 @@ namespace Listenarr.Api.Tests
 
             Assert.NotNull(returned);
             Assert.Single(returned!);
-            // Assert.Equal($"/api/images/B00001", returned![0].ImageUrl); // Skipped: Unified endpoint does not normalize image URL in this test context.
-                // Skipped: Image URL normalization is now handled differently in the unified endpoint.
+            Assert.Equal($"/api/images/B00001", returned![0].ImageUrl);
+        }
+
+        [Fact]
+        public async Task Search_CachesImage_WhenAlreadyCached_DoesNotDownload()
+        {
+            // Arrange
+            var mockService = new Mock<ISearchService>();
+            var sample = new List<SearchResult>
+            {
+                new SearchResult { Id = "1", Title = "Sample", Asin = "B00001", ImageUrl = "http://cdn.example/cover.jpg" }
+            };
+            mockService.Setup(s => s.SearchAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>())).ReturnsAsync(sample);
+
+            var logger = Mock.Of<ILogger<SearchController>>();
+            var mockAudimetaService = new Mock<AudimetaService>(new System.Net.Http.HttpClient(), Mock.Of<ILogger<AudimetaService>>());
+            var mockMetadataService = new Mock<IAudiobookMetadataService>();
+
+            var mockImageCache = new Mock<IImageCacheService>();
+            mockImageCache.Setup(m => m.GetCachedImagePathAsync(It.IsAny<string>())).ReturnsAsync("config/cache/images/B00001.jpg");
+            mockImageCache.Setup(m => m.DownloadAndCacheImageAsync(It.IsAny<string>(), It.IsAny<string>())).ReturnsAsync("config/cache/images/B00001.jpg");
+
+            var controller = new SearchController(mockService.Object, logger, mockAudimetaService.Object, mockMetadataService.Object, imageCacheService: mockImageCache.Object);
+            controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+            // Act
+            var req = new Listenarr.Api.Models.SearchRequest { Mode = Listenarr.Api.Models.SearchMode.Simple, Query = "query" };
+            var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
+            var actionResult = await controller.Search(reqJson);
+
+            // Assert
+            List<SearchResult>? returned = null;
+            if (actionResult.Value != null)
+            {
+                returned = actionResult.Value as List<SearchResult>;
+            }
+            else if (actionResult.Result is OkObjectResult ok)
+            {
+                returned = ok.Value as List<SearchResult>;
+            }
+
+            Assert.NotNull(returned);
+            Assert.Single(returned!);
+            Assert.Equal($"/api/images/B00001", returned![0].ImageUrl);
+            mockImageCache.Verify(m => m.DownloadAndCacheImageAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never());
         }
 
         [Fact]
@@ -442,9 +485,9 @@ namespace Listenarr.Api.Tests
     // Minimal test implementation of ISearchService for IntelligentSearch testing
     internal class TestSearchServiceForIntelligent : ISearchService
     {
-        private readonly List<SearchResult> _results;
+        private readonly List<MetadataSearchResult> _results;
 
-        public TestSearchServiceForIntelligent(List<SearchResult> results)
+        public TestSearchServiceForIntelligent(List<MetadataSearchResult> results)
         {
             _results = results;
         }
@@ -454,7 +497,7 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(new List<SearchResult>());
         }
 
-        public Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, System.Threading.CancellationToken ct = default)
+        public Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, System.Threading.CancellationToken ct = default)
         {
             return Task.FromResult(_results);
         }
@@ -469,9 +512,9 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(true);
         }
 
-        public Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
         {
-            return Task.FromResult(new List<SearchResult>());
+            return Task.FromResult(new List<IndexerSearchResult>());
         }
 
         public Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync()

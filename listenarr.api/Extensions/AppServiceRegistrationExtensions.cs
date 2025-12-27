@@ -49,7 +49,11 @@ namespace Listenarr.Api.Extensions
             // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
             // Removing duplicate scoped registration to avoid overriding the typed client configuration.
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
-            services.AddScoped<IImageCacheService, ImageCacheService>();
+            services.AddScoped<IImageCacheService>(sp => new ImageCacheService(
+                sp.GetRequiredService<ILogger<ImageCacheService>>(),
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>().ContentRootPath
+            ));
             services.AddScoped<IFileNamingService, FileNamingService>();
             // Centralized import service: handles moving/copying, naming and audiobook registration
             services.AddScoped<IImportService, ImportService>();

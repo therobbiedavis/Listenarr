@@ -326,9 +326,9 @@ namespace Listenarr.Api.Services
 
             // Age hard limit
             double ageDays = 0;
-            if (searchResult.PublishedDate != default(DateTime))
+            if (!string.IsNullOrEmpty(searchResult.PublishedDate) && DateTime.TryParse(searchResult.PublishedDate, out var publishDate))
             {
-                ageDays = (DateTime.UtcNow - searchResult.PublishedDate).TotalDays;
+                ageDays = (DateTime.UtcNow - publishDate).TotalDays;
                 // Apply maximum-age rejection only for non-NZB results (NZB retention/age should be handled in indexer config)
                 if (!isNzb && profile.MaximumAge > 0 && ageDays > profile.MaximumAge)
                 {

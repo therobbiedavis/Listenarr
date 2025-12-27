@@ -41,6 +41,73 @@ const BACKEND_BASE_URL = import.meta.env.DEV
 type ErrorWithStatus = Error & { status?: number; body?: string; retryAfter?: number }
 
 class ApiService {
+  // In-memory cache of image identifiers that previously failed to load
+  private failedImageIds = new Set<string>()
+  private readonly FAILED_IMAGES_KEY = 'listenarr.failedImages'
+
+  constructor() {
+    try {
+      const raw = localStorage.getItem(this.FAILED_IMAGES_KEY)
+      if (raw) {
+        const ids = JSON.parse(raw)
+        if (Array.isArray(ids)) ids.forEach(id => { if (id) this.failedImageIds.add(String(id)) })
+      }
+    } catch {}
+  }
+
+  markImageFailed(identifier: string) {
+    try {
+      if (!identifier) return
+      this.failedImageIds.add(identifier)
+      try { localStorage.setItem(this.FAILED_IMAGES_KEY, JSON.stringify(Array.from(this.failedImageIds))) } catch {}
+    } catch {}
+  }
+
+  isImageFailed(identifier: string) {
+    try { return this.failedImageIds.has(identifier) } catch { return false }
+  }
+
+  // Remove specific ASINs/identifiers from the failed-images cache so the
+  // UI will attempt to refetch them again. This avoids clearing unrelated
+  // failures while allowing results from a search to retry fetching.
+  clearFailedImagesForAsins(asins: string[] | Set<string>) {
+    try {
+      const ids = Array.isArray(asins) ? asins : Array.from(asins)
+      const toRemove = new Set(ids.filter(Boolean).map(i => String(i)))
+      if (toRemove.size === 0) return
+      let changed = false
+      toRemove.forEach(id => {
+        if (this.failedImageIds.has(id)) {
+          this.failedImageIds.delete(id)
+          changed = true
+        }
+      })
+      if (changed) {
+        try { localStorage.setItem(this.FAILED_IMAGES_KEY, JSON.stringify(Array.from(this.failedImageIds))) } catch {}
+      }
+    } catch {}
+  }
+
+  // Convenience: clear failed images for all ASINs present in a search result list
+  clearFailedImagesForSearchResults(results: SearchResult[] | null | undefined) {
+    try {
+      if (!results || !Array.isArray(results)) return
+      const asins = results.map(r => (r?.asin ?? r?.imageUrl ?? '')).filter(Boolean) as string[]
+      if (asins.length === 0) return
+      this.clearFailedImagesForAsins(asins)
+    } catch {}
+  }
+
+  getPlaceholderUrl(): string {
+    try {
+      const base = (import.meta.env.BASE_URL || '/') as string
+      const trimmed = base.endsWith('/') ? base : `${base}/`
+      return `${trimmed}placeholder.svg`
+    } catch {
+      return '/placeholder.svg'
+    }
+  }
+
   private async request<T>(
     endpoint: string, 
     options: RequestInit = {}
@@ -234,7 +301,9 @@ class ApiService {
     const body: any = { mode: 'Simple', query }
     if (category) body.category = category
     const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body), signal })
-    return Array.isArray(resp) ? resp : (resp?.results ?? [])
+    const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
+    try { this.clearFailedImagesForSearchResults(results) } catch {}
+    return results
   }
 
   async searchIndexers(query: string, category?: string, sortBy?: SearchSortBy, sortDirection?: SearchSortDirection): Promise<SearchResult[]> {
@@ -262,6 +331,17 @@ class ApiService {
     const params = new URLSearchParams({ query, page: String(page), limit: String(limit), region })
     if (language) params.append('language', language)
     return this.request<AudimetaSearchResponse>(`/search/audimeta?${params}`)
+  }
+
+  // Audimeta series helpers (proxied through backend)
+  async searchAudimetaSeries(name: string, region: string = 'us'): Promise<any> {
+    const params = new URLSearchParams({ name, region })
+    return this.request<any>(`/search/audimeta/series?${params}`)
+  }
+
+  async getAudimetaSeriesBooks(seriesAsin: string, region: string = 'us'): Promise<any> {
+    const params = new URLSearchParams({ region })
+    return this.request<any>(`/search/audimeta/series/books/${encodeURIComponent(seriesAsin)}?${params}`)
   }
 
   async searchAudimetaByTitleAndAuthor(title: string, author: string, page: number = 1, limit: number = 50, region: string = 'us', language?: string): Promise<AudimetaSearchResponse> {
@@ -294,13 +374,16 @@ class ApiService {
     const body: any = { mode: 'Simple', query, language }
     const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body), ...options })
     // Backend returns either an array or an envelope { results: [...] } depending on mode.
-    return Array.isArray(resp) ? resp : (resp?.results ?? [])
+    const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
+    try { this.clearFailedImagesForSearchResults(results) } catch {}
+    return results
   }
 
   async advancedSearch(params: {
     title?: string
     author?: string
     isbn?: string
+    series?: string
     asin?: string
     language?: string
     pagination?: { page?: number; limit?: number }
@@ -310,12 +393,94 @@ class ApiService {
     if (params.title) body.title = params.title
     if (params.author) body.author = params.author
     if (params.isbn) body.isbn = params.isbn
+    if (params.series) body.series = params.series
     if (params.asin) body.asin = params.asin
     if (params.language) body.language = params.language
     if (params.pagination) body.pagination = params.pagination
     if (typeof params.cap === 'number') body.cap = params.cap
     const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body) })
-    return Array.isArray(resp) ? resp : (resp?.results ?? [])
+    let results = Array.isArray(resp) ? resp : (resp?.results ?? [])
+
+    // If this is a series-based advanced search, apply additional client-side
+    // filtering for non-author inputs (title/isbn/asin) and wait for images
+    // to be cached before returning results so the UI doesn't flash placeholders.
+    const isSeriesSearch = !!params.series
+    if (isSeriesSearch) {
+      try {
+        // Client-side filtering: apply title/isbn/asin filters when provided.
+        if (params.title) {
+          const q = params.title.toLowerCase()
+          results = (results as SearchResult[]).filter((r: SearchResult) => ((r.title || '') as string).toLowerCase().includes(q) || ((r.album || '') as string).toLowerCase().includes(q))
+        }
+        if (params.isbn) {
+          const q = params.isbn.toLowerCase()
+          results = (results as SearchResult[]).filter((r: SearchResult) => (((r.isbn || '') as string).toLowerCase() === q) || (((r.asin || '') as string).toLowerCase() === q))
+        }
+        if (params.asin) {
+          const q = params.asin.toLowerCase()
+          results = (results as SearchResult[]).filter((r: SearchResult) => (((r.asin || '') as string).toLowerCase() === q))
+        }
+
+        // Clear failed-image cache for these ASINs so we allow retries
+        try { this.clearFailedImagesForSearchResults(results) } catch {}
+
+        // Wait for images to be cached (timeout after 10s) before returning.
+        try { await this.waitForImagesCached(results, 10000) } catch {}
+      } catch {}
+    } else {
+      try { this.clearFailedImagesForSearchResults(results) } catch {}
+    }
+
+    return results
+  }
+
+  // Attempt to fetch each result's image to ensure the backend has cached it.
+  // Returns when all images succeed or the overall timeout elapses.
+  private async waitForImagesCached(results: SearchResult[], overallTimeoutMs: number = 10000): Promise<void> {
+    if (!results || results.length === 0) return
+    const asins = results.map(r => (r.asin || '').toString()).filter(Boolean)
+    if (asins.length === 0) return
+
+    const start = Date.now()
+    const perFetchTimeout = 5000
+
+    // Build headers like `request()` would (API key or session token)
+    const sc = await getStartupConfigCached(2000).catch(() => null)
+    const apiKey = sc?.apiKey
+    const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
+    const authEnabled = typeof rawAuth === 'boolean' ? rawAuth : (typeof rawAuth === 'string' ? (rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true') : false)
+    const sessionToken = sessionTokenManager.getToken()
+
+    const fetchWithTimeout = async (url: string, timeoutMs: number) => {
+      const controller = new AbortController()
+      const id = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const headers: Record<string, string> = {}
+        if (apiKey && !authEnabled) headers['X-Api-Key'] = apiKey
+        if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`
+        const resp = await fetch(url, { method: 'GET', credentials: 'include', headers, signal: controller.signal })
+        clearTimeout(id)
+        return resp.ok
+      } catch {
+        clearTimeout(id)
+        return false
+      }
+    }
+
+    const checks = asins.map(async asin => {
+      const url = `${API_BASE_URL}/images/${encodeURIComponent(asin)}`
+      // Try repeatedly until per-fetch timeout or overall timeout
+      const deadline = Date.now() + Math.min(perFetchTimeout, overallTimeoutMs)
+      while (Date.now() < deadline && Date.now() - start < overallTimeoutMs) {
+        const ok = await fetchWithTimeout(url, 2000)
+        if (ok) return
+        // small backoff
+        await new Promise(r => setTimeout(r, 300))
+      }
+    })
+
+    // Wait for all checks to complete or until overall timeout
+    await Promise.race([Promise.all(checks), new Promise<void>(res => setTimeout(res, overallTimeoutMs))])
   }
 
   async searchAudibleLibrary(query?: string, language?: string): Promise<SearchResult[]> {
@@ -725,15 +890,28 @@ class ApiService {
     // If already absolute URL, return as is
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       // Prefer serving images from the backend image cache when referencing
-      // known vendor/product links (Amazon/Audible). Try to extract a 10-char
-      // identifier (ASIN) and map to our `/api/images/{identifier}` endpoint.
+      // known vendor/product links (Amazon/Audible) or common CDN hosts. Try
+      // to extract an ASIN-like identifier and map to our `/api/images/{id}`
+      // endpoint. Fall back to the original URL only if extraction fails.
       try {
         const lower = imageUrl.toLowerCase()
-        if (lower.includes('amazon.') || lower.includes('audible.')) {
-          // Try to extract ASIN-like identifier (10 alphanumeric)
-          const asinMatch = imageUrl.match(/([A-Z0-9]{10})/i)
+
+        const isVendor = lower.includes('amazon.') || lower.includes('audible.') || lower.includes('m.media-amazon.com') || lower.includes('images-amazon.com')
+
+        if (isVendor) {
+          // Try common ASIN patterns: 10 alphanumeric chars, or 10 digits
+          let asinMatch = imageUrl.match(/([A-Z0-9]{10})/i) || imageUrl.match(/(\d{10})/)
+          if (!asinMatch) {
+            // For Amazon image URLs like https://m.media-amazon.com/images/I/9156QjXBIHL.jpg
+            // Extract the identifier after /I/
+            const amazonImageMatch = imageUrl.match(/\/I\/([A-Z0-9]{10,12})\./i)
+            if (amazonImageMatch && amazonImageMatch[1]) {
+              asinMatch = amazonImageMatch
+            }
+          }
           if (asinMatch && asinMatch[1]) {
             const identifier = asinMatch[1]
+            try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
             let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
             const sessionToken = sessionTokenManager.getToken()
             if (sessionToken) {
@@ -745,6 +923,28 @@ class ApiService {
             }
             return url
           }
+
+          // If we couldn't extract ASIN, try to parse filename from path and
+          // use a 10-12 char filename (without extension) as identifier.
+          try {
+            const pathname = new URL(imageUrl).pathname
+            const fname = pathname.split('/').pop() || ''
+            const base = fname.replace(/\.[^.]+$/, '')
+            if (base && base.length >= 10 && base.length <= 12) {
+              const identifier = base
+              try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
+              let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
+              const sessionToken = sessionTokenManager.getToken()
+              if (sessionToken) {
+                url += `?access_token=${encodeURIComponent(sessionToken)}`
+              } else {
+                const cfg = getCachedStartupConfig()
+                const apiKey = cfg?.apiKey
+                if (apiKey) url += `?access_token=${encodeURIComponent(apiKey)}`
+              }
+              return url
+            }
+          } catch {}
         }
       } catch (e) {
         try { console.debug('[ApiService] amazon-image-detect error', e) } catch {}
@@ -774,7 +974,11 @@ class ApiService {
             url += `?access_token=${encodeURIComponent(apiKey)}`
           }
         }
-        return url
+            // If we've previously marked this identifier as failed, return placeholder
+            try {
+              if (this.isImageFailed(identifier)) return this.getPlaceholderUrl()
+            } catch {}
+            return url
       }
     } catch (e) {
       // fall back to default behavior below on any error
@@ -800,7 +1004,9 @@ class ApiService {
             url += `?access_token=${encodeURIComponent(apiKey)}`
           }
         }
-        return url
+            // If we've previously marked this identifier as failed, return placeholder
+            try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
+            return url
       }
     } catch (e) {
       try { console.debug('[ApiService] getImageUrl authors-detect error', e) } catch {}

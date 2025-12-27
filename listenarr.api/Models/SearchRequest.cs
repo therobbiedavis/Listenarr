@@ -27,6 +27,7 @@ namespace Listenarr.Api.Models
         public string? Author { get; set; }
         public string? Asin { get; set; }
         public string? Isbn { get; set; }
+        public string? Series { get; set; }
 
         public Pagination? Pagination { get; set; } = new Pagination();
 

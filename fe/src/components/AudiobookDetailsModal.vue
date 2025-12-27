@@ -12,7 +12,7 @@
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" />
+            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" @error="handleImageError" />
             <div v-else class="placeholder-cover">
               <PhImage />
               <span>No Cover</span>
@@ -170,6 +170,7 @@
 import { ref, computed, watch } from 'vue'
 import type { AudibleBookMetadata, QualityProfile } from '@/types'
 import { getQualityProfiles, apiService } from '@/services/api'
+import { handleImageError } from '@/utils/imageFallback'
 import { useLibraryStore } from '@/stores/library'
 import { PhX, PhImage, PhStar, PhCheck, PhPlus } from '@phosphor-icons/vue'
 

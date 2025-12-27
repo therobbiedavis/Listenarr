@@ -42,6 +42,53 @@ namespace Listenarr.Api.Services
             }
         }
 
+        // Series lookup helpers (proxy audimeta /series endpoints)
+        public virtual async Task<object?> SearchSeriesByNameAsync(string name, string region = "us")
+        {
+            try
+            {
+                var url = $"{BASE_URL}/series?cache=true&name={Uri.EscapeDataString(name)}&region={region}";
+                _logger.LogInformation("Searching audimeta.de for series name {Name}: {Url}", name, url);
+                var resp = await _httpClient.GetAsync(url);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Audimeta series search returned status code {StatusCode} for name {Name}", resp.StatusCode, name);
+                    return null;
+                }
+                var json = await resp.Content.ReadAsStringAsync();
+                var obj = JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return obj;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching audimeta.de series for name {Name}", name);
+                return null;
+            }
+        }
+
+        public virtual async Task<object?> GetBooksBySeriesAsinAsync(string seriesAsin, string region = "us")
+        {
+            try
+            {
+                var url = $"{BASE_URL}/series/books/{Uri.EscapeDataString(seriesAsin)}?cache=true&region={region}";
+                _logger.LogInformation("Fetching audimeta.de series books for ASIN {Asin}: {Url}", seriesAsin, url);
+                var resp = await _httpClient.GetAsync(url);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Audimeta series books returned status code {StatusCode} for series ASIN {Asin}", resp.StatusCode, seriesAsin);
+                    return null;
+                }
+                var json = await resp.Content.ReadAsStringAsync();
+                var obj = JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return obj;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching audimeta.de series books for ASIN {Asin}", seriesAsin);
+                return null;
+            }
+        }
+
         public virtual async Task<AudimetaBookResponse?> GetBookMetadataAsync(string asin, string region = "us", bool useCache = true, string? language = null)
         {
             try
@@ -585,6 +632,8 @@ namespace Listenarr.Api.Services
 
     public class AudimetaSearchResponse { public List<AudimetaSearchResult>? Results { get; set; } public int? TotalResults { get; set; } }
 
+    
+
     public class AudimetaSearchResult
     {
         public string? Asin { get; set; }
@@ -608,6 +657,7 @@ namespace Listenarr.Api.Services
         public List<AudimetaNarrator>? Narrators { get; set; }
         public string? ReleaseDate { get; set; }
         public string? Link { get; set; }
+        public string? Isbn { get; set; }
     }
 
     // Helper types for simple author lookup parsing

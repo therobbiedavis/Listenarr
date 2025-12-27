@@ -28,7 +28,7 @@ namespace Listenarr.Api.Tests
             // Build controller directly to avoid in-memory HTTP binding issues in CI environment
             var mockSearch = new Moq.Mock<ISearchService>();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "B0TESTASIN", Title = "Clean Title" } });
+                .Returns(Task.FromResult(new System.Collections.Generic.List<MetadataSearchResult> { new MetadataSearchResult { Asin = "B0TESTASIN", Title = "Clean Title" } } as System.Collections.Generic.List<MetadataSearchResult>));
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
@@ -37,9 +37,9 @@ namespace Listenarr.Api.Tests
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("test-query");
-            List<SearchResult>? returned = null;
+            List<MetadataSearchResult>? returned = null;
             if (actionResult.Value != null) returned = actionResult.Value;
-            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<SearchResult>;
+            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<MetadataSearchResult>;
 
             Assert.NotNull(returned);
             Assert.Single(returned);
@@ -52,7 +52,7 @@ namespace Listenarr.Api.Tests
         {
             var mockSearch = new Moq.Mock<ISearchService>();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "B000000001", Title = "Ingram: A Novel" }, new SearchResult { Asin = "B000000002", Title = "Different Book", Author = "Ingram" } });
+                .Returns(Task.FromResult(new System.Collections.Generic.List<MetadataSearchResult> { new MetadataSearchResult { Asin = "B000000001", Title = "Ingram: A Novel" }, new MetadataSearchResult { Asin = "B000000002", Title = "Different Book", Author = "Ingram" } } as System.Collections.Generic.List<MetadataSearchResult>));
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
@@ -61,9 +61,9 @@ namespace Listenarr.Api.Tests
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("TITLE:Ingram");
-            List<SearchResult>? returned = null;
+            List<MetadataSearchResult>? returned = null;
             if (actionResult.Value != null) returned = actionResult.Value;
-            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<SearchResult>;
+            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<MetadataSearchResult>;
 
             Assert.NotNull(returned);
             Assert.NotEmpty(returned);
@@ -76,7 +76,7 @@ namespace Listenarr.Api.Tests
             var mockSearch = new Moq.Mock<ISearchService>();
             // Return empty intelligent-search results when Amazon/Audible are empty
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync(new System.Collections.Generic.List<SearchResult>());
+                .Returns(Task.FromResult(new System.Collections.Generic.List<MetadataSearchResult>() as System.Collections.Generic.List<MetadataSearchResult>));
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
@@ -85,9 +85,9 @@ namespace Listenarr.Api.Tests
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("9780261103573");
-            List<SearchResult>? returned = null;
+            List<MetadataSearchResult>? returned = null;
             if (actionResult.Value != null) returned = actionResult.Value;
-            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<SearchResult>;
+            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<MetadataSearchResult>;
 
             Assert.NotNull(returned);
             Assert.Empty(returned);
@@ -98,7 +98,7 @@ namespace Listenarr.Api.Tests
         {
             var mockSearch = new Moq.Mock<ISearchService>();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "0563528885", Title = "The Lord of the Rings: The Trilogy", ImageUrl = "http://example.com/audio_cd.jpg" } });
+                .Returns(Task.FromResult(new System.Collections.Generic.List<MetadataSearchResult> { new MetadataSearchResult { Asin = "0563528885", Title = "The Lord of the Rings: The Trilogy", ImageUrl = "http://example.com/audio_cd.jpg" } } as System.Collections.Generic.List<MetadataSearchResult>));
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
@@ -107,9 +107,9 @@ namespace Listenarr.Api.Tests
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("9780261103573");
-            List<SearchResult>? returned = null;
+            List<MetadataSearchResult>? returned = null;
             if (actionResult.Value != null) returned = actionResult.Value;
-            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<SearchResult>;
+            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<MetadataSearchResult>;
 
             Assert.NotNull(returned);
             Assert.Contains(returned!, r => string.Equals(r.Asin, "0563528885", StringComparison.OrdinalIgnoreCase));
@@ -120,7 +120,7 @@ namespace Listenarr.Api.Tests
         {
             var mockSearch = new Moq.Mock<ISearchService>();
             mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
-                .ReturnsAsync(new System.Collections.Generic.List<SearchResult> { new SearchResult { Asin = "B0TESTASIN", Title = "Clean Title", MetadataSource = "Audible" } });
+                .Returns(Task.FromResult(new System.Collections.Generic.List<MetadataSearchResult> { new MetadataSearchResult { Asin = "B0TESTASIN", Title = "Clean Title", MetadataSource = "Audible" } } as System.Collections.Generic.List<MetadataSearchResult>));
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
@@ -129,9 +129,9 @@ namespace Listenarr.Api.Tests
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("test-query");
-            List<SearchResult>? returned = null;
+            List<MetadataSearchResult>? returned = null;
             if (actionResult.Value != null) returned = actionResult.Value;
-            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<SearchResult>;
+            else if (actionResult.Result is Microsoft.AspNetCore.Mvc.OkObjectResult ok) returned = ok.Value as List<MetadataSearchResult>;
 
             Assert.NotNull(returned);
             Assert.NotEmpty(returned!);

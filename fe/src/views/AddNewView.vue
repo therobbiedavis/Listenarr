@@ -120,6 +120,17 @@
                       class="form-input"
                     />
                   </div>
+                  <div class="form-group">
+                    <label for="adv-series">Series</label>
+                    <input
+                      id="adv-series"
+                      aria-label="Series"
+                      v-model="advancedSearchParams.series"
+                      type="text"
+                      placeholder="e.g., The Empyrean"
+                      class="form-input"
+                    />
+                  </div>
               </div>
               
               <div class="form-row">
@@ -245,14 +256,14 @@
                 class="lazy-search-img"
                 :data-src="apiService.getImageUrl(audibleResult.imageUrl)"
                 :data-original-src="audibleResult.imageUrl"
-                src="/placeholder.svg"
+                :src="getPlaceholderUrl()"
                 :alt="audibleResult.title"
                 loading="lazy"
                 decoding="async"
                 @error="handleLazyImageError"
               />
               <template v-else>
-                <img src="/placeholder.svg" alt="Cover unavailable" loading="lazy" class="placeholder-cover-image" decoding="async" />
+                <img :src="getPlaceholderUrl()" alt="Cover unavailable" loading="lazy" class="placeholder-cover-image" decoding="async" />
               </template>
             </div>
             <div class="result-info">
@@ -380,14 +391,14 @@
                 class="lazy-search-img"
                 :data-src="getCoverUrl(book)"
                 :data-original-src="book.imageUrl || book.searchResult?.imageUrl || ''"
-                src="/placeholder.svg"
+                :src="getPlaceholderUrl()"
                 :alt="book.title"
                 loading="lazy"
                 decoding="async"
                 @error="handleLazyImageError"
               />
               <template v-else>
-                <img src="/placeholder.svg" alt="Cover unavailable" loading="lazy" class="placeholder-cover-image" decoding="async" />
+                <img :src="getPlaceholderUrl()" alt="Cover unavailable" loading="lazy" class="placeholder-cover-image" decoding="async" />
               </template>
             </div>
             <div class="result-info">
@@ -550,6 +561,8 @@ import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, Ph
 import { useRoute, useRouter } from 'vue-router'
 import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre } from '@/types'
 import { apiService } from '@/services/api'
+import { getPlaceholderUrl } from '@/utils/placeholder'
+import { handleImageError } from '@/utils/imageFallback'
 import type { OpenLibraryBook } from '@/services/openlibrary'
 import { openLibraryService } from '@/services/openlibrary'
 
@@ -629,6 +642,7 @@ const advancedSearchParams = ref({
   title: '',
   author: '',
   isbn: '',
+  series: '',
   asin: '',
   language: ''
 })
@@ -647,10 +661,11 @@ const allAudimetaResults = ref<any[]>([])
 const isValidAdvancedSearch = computed(() => {
   // If advanced UI is visible, validate the advanced form fields directly
   if (showAdvancedSearch.value) {
-    const p = advancedSearchParams.value as { title?: string; author?: string; isbn?: string; asin?: string }
+    const p = advancedSearchParams.value as { title?: string; author?: string; series?: string; isbn?: string; asin?: string }
     return Boolean(
       (p.title && p.title.trim()) ||
       (p.author && p.author.trim()) ||
+      (p.series && p.series.trim()) ||
       (p.isbn && p.isbn.trim()) ||
       (p.asin && p.asin.trim())
     )
@@ -1109,8 +1124,8 @@ const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => 
 const performAdvancedSearch = async () => {
   // If advanced UI is visible, use the advanced form fields directly
   if (showAdvancedSearch.value) {
-    const p = advancedSearchParams.value as { title?: string; author?: string; isbn?: string; asin?: string; language?: string }
-    const hasAny = Boolean((p.title && p.title.trim()) || (p.author && p.author.trim()) || (p.isbn && p.isbn.trim()) || (p.asin && p.asin.trim()))
+    const p = advancedSearchParams.value as { title?: string; author?: string; series?: string; isbn?: string; asin?: string; language?: string }
+    const hasAny = Boolean((p.title && p.title.trim()) || (p.author && p.author.trim()) || (p.series && p.series.trim()) || (p.isbn && p.isbn.trim()) || (p.asin && p.asin.trim()))
     if (!hasAny) {
       advancedSearchError.value = 'Please enter a search term'
       return
@@ -1132,10 +1147,72 @@ const performAdvancedSearch = async () => {
       if (p.asin && p.asin.trim()) params.asin = p.asin.trim()
       if (p.language) params.language = p.language
 
+      const seriesName = p.series ? p.series.trim() : ''
+
+      // If the user only provided a series, use the unified advanced search POST
+      // so the backend performs the Audimeta series lookup and conversion.
+      if (seriesName && !params.title && !params.author && !params.isbn && !params.asin) {
+        try {
+          const resp = await apiService.advancedSearch({ series: seriesName, language: p.language, pagination: { page: 1, limit: resultsPerPage.value } })
+          // backend returns enriched SearchResult objects
+          await handleAdvancedSearchResults(resp as Partial<SearchResult>[])
+        } catch (e) {
+          throw e
+        }
+
+        return
+      }
+
       // Include pagination and candidate limits so the backend can adjust candidate/return caps
       params.pagination = { page: 1, limit: resultsPerPage.value }
 
       currentAdvancedPage.value = 1
+
+      // If both author and series provided, author takes priority; perform author search then filter by series
+      if (params.author && seriesName) {
+        const results = await apiService.advancedSearch(params)
+        // lookup series asins to match against results
+        try {
+          const seriesList = await apiService.searchAudimetaSeries(seriesName)
+          const seriesAsins = Array.isArray(seriesList) ? (seriesList as any[]).map((s: any) => s.asin || s.Asin || s.ASIN).filter(Boolean) : []
+
+          const filtered = (results as any[]).filter(r => {
+            try {
+              const sr = r.searchResult || r
+              // If searchResult.series is an array of objects with asin fields
+              if (Array.isArray(sr.series) && sr.series.length) {
+                for (const s of sr.series) {
+                  const a = (s && (s.asin || s.Asin || s.ASIN)) || (typeof s === 'string' ? s : undefined)
+                  if (a && seriesAsins.includes(a)) return true
+                  if (a && String(a).toLowerCase().includes(seriesName.toLowerCase())) return true
+                }
+              }
+              // If series is a string
+              if (sr.series && typeof sr.series === 'string' && sr.series.toLowerCase().includes(seriesName.toLowerCase())) return true
+              // Fallback: check top-level result.series
+              if (r.series && typeof r.series === 'string' && r.series.toLowerCase().includes(seriesName.toLowerCase())) return true
+            } catch (e) {}
+            return false
+          })
+
+          await handleAdvancedSearchResults(filtered)
+        } catch (e) {
+          // If series lookup fails, just return author search results
+          const results = await apiService.advancedSearch(params)
+          await handleAdvancedSearchResults(results)
+        }
+
+        // done
+        nextTick(() => {
+          const titleResultsElement = document.querySelector('.title-results')
+          if (titleResultsElement) {
+            const elementTop = titleResultsElement.getBoundingClientRect().top + window.scrollY
+            window.scrollTo({ top: elementTop - 125, behavior: 'smooth' })
+          }
+        })
+        return
+      }
+
       const results = await apiService.advancedSearch(params)
       await handleAdvancedSearchResults(results)
       
@@ -1208,6 +1285,7 @@ const clearAdvancedSearch = () => {
   advancedSearchParams.value = {
     title: '',
     author: '',
+    series: '',
     isbn: '',
     asin: '',
     language: ''
@@ -1277,6 +1355,7 @@ const updateSearchQueryFromAdvanced = () => {
   
   if (params.title) parts.push(`TITLE:${params.title}`)
   if (params.author) parts.push(`AUTHOR:${params.author}`)
+  if (params.series) parts.push(`SERIES:${params.series}`)
   if (params.isbn) parts.push(`ISBN:${params.isbn}`)
   if (params.asin) parts.push(`ASIN:${params.asin}`)
   
@@ -1288,6 +1367,7 @@ const updateAdvancedParamsFromQuery = () => {
   const params = {
     title: '',
     author: '',
+    series: '',
     isbn: '',
     asin: '',
     language: advancedSearchParams.value.language // preserve language
@@ -1303,6 +1383,8 @@ const updateAdvancedParamsFromQuery = () => {
       params.isbn = part.substring(5).trim()
     } else if (part.toUpperCase().startsWith('ASIN:')) {
       params.asin = part.substring(5).trim()
+    } else if (part.toUpperCase().startsWith('SERIES:')) {
+      params.series = part.substring(7).trim()
     }
   }
   
@@ -1663,29 +1745,9 @@ const pickBestCoverForBook = async (book: TitleSearchResult): Promise<void> => {
   }
 }
 
+// Use shared image error handler to keep behavior consistent across views
 const handleLazyImageError = (ev: Event) => {
-  try {
-    const img = ev.target as HTMLImageElement
-    if (!img) return
-    // Try original/unproxied source first (stored on data-original-src)
-    const orig = img.dataset.originalSrc || ''
-    if (orig) {
-      // If orig looks like an absolute URL, use it directly; otherwise convert via apiService
-      const useUrl = (/^https?:\/\//i.test(orig)) ? orig : apiService.getImageUrl(orig)
-      if (useUrl && useUrl !== img.src) {
-        img.src = useUrl
-        // Remove data-src so our lazy loader won't try to reset it later
-        try { img.removeAttribute('data-src') } catch {}
-        return
-      }
-    }
-
-    // Last resort: set placeholder
-    img.src = '/placeholder.svg'
-    try { img.removeAttribute('data-src') } catch {}
-  } catch (e) {
-    // swallow
-  }
+  try { return handleImageError(ev) } catch { /* swallow */ }
 }
 
 const measureImageAspectRatio = (url: string, timeoutMs = 3000): Promise<number | null> => {

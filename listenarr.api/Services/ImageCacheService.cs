@@ -40,23 +40,25 @@ namespace Listenarr.Api.Services
         private readonly string _tempCachePath;
         private readonly string _libraryImagePath;
         private readonly string _authorImagePath;
-        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _downloadLocks = new();
-        public ImageCacheService(ILogger<ImageCacheService> logger, IHttpClientFactory httpClientFactory)
-        {
-            _logger = logger;
-            _httpClient = httpClientFactory.CreateClient();
+    private readonly string _contentRootPath;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> _downloadLocks = new();
+    public ImageCacheService(ILogger<ImageCacheService> logger, IHttpClientFactory httpClientFactory, string contentRootPath)
+    {
+        _logger = logger;
+        _httpClient = httpClientFactory.CreateClient();
+        _contentRootPath = contentRootPath;
 
-            // Set up cache directories
-            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "config");
-            _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
-            _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
-            _authorImagePath = Path.Combine(baseDir, "cache", "images", "authors");
+        // Set up cache directories relative to content root
+        var baseDir = Path.Combine(contentRootPath, "config");
+        _tempCachePath = Path.Combine(baseDir, "cache", "images", "temp");
+        _libraryImagePath = Path.Combine(baseDir, "cache", "images", "library");
+        _authorImagePath = Path.Combine(baseDir, "cache", "images", "authors");
 
-            // Ensure directories exist
-            Directory.CreateDirectory(_tempCachePath);
-            Directory.CreateDirectory(_libraryImagePath);
-            Directory.CreateDirectory(_authorImagePath);
-        }
+        // Ensure directories exist
+        Directory.CreateDirectory(_tempCachePath);
+        Directory.CreateDirectory(_libraryImagePath);
+        Directory.CreateDirectory(_authorImagePath);
+    }
 
         /// <summary>
         /// Downloads an image from a URL and caches it temporarily
@@ -412,8 +414,7 @@ namespace Listenarr.Api.Services
 
         private string GetRelativePath(string fullPath)
         {
-            var baseDir = Directory.GetCurrentDirectory();
-            var relativePath = fullPath.Replace(baseDir, "").Replace("\\", "/").TrimStart('/');
+            var relativePath = Path.GetRelativePath(_contentRootPath, fullPath).Replace("\\", "/");
             return relativePath;
         }
 

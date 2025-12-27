@@ -1005,6 +1005,40 @@ app.UseForwardedHeaders();
 
 // Serve frontend static files from wwwroot (index.html + assets)
 // DefaultFiles enables serving index.html when requesting '/'
+// Map `/placeholder.svg` to the frontend `fe/public/placeholder.svg` so the API
+// serves the exact same placeholder image used by the frontend without
+// modifying any frontend files.
+var frontendPlaceholderPath = Path.Combine(app.Environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
+app.MapGet("/placeholder.svg", async context =>
+{
+    try
+    {
+        if (File.Exists(frontendPlaceholderPath))
+        {
+            context.Response.ContentType = "image/svg+xml";
+            context.Response.Headers["Cache-Control"] = "public, max-age=300";
+            await context.Response.SendFileAsync(frontendPlaceholderPath);
+            return;
+        }
+
+        // Fallback to backend wwwroot placeholder if the frontend file is not present
+        var fallback = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "placeholder.svg");
+        if (File.Exists(fallback))
+        {
+            context.Response.ContentType = "image/svg+xml";
+            context.Response.Headers["Cache-Control"] = "public, max-age=300";
+            await context.Response.SendFileAsync(fallback);
+            return;
+        }
+
+        context.Response.StatusCode = 404;
+    }
+    catch
+    {
+        context.Response.StatusCode = 500;
+    }
+});
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 

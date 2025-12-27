@@ -42,7 +42,7 @@ namespace Listenarr.Api.Tests
                 Language = "English",
                 DownloadType = "torrent",
                 Seeders = 5,
-                PublishedDate = DateTime.UtcNow
+                PublishedDate = DateTime.UtcNow.ToString("o")
             };
 
             var score = await service.ScoreSearchResult(result, profile);
@@ -73,7 +73,7 @@ namespace Listenarr.Api.Tests
                 Language = "English",
                 DownloadType = "torrent",
                 Seeders = 2,
-                PublishedDate = DateTime.UtcNow
+                PublishedDate = DateTime.UtcNow.ToString("o")
             };
 
             var score = await service.ScoreSearchResult(result, profile);
@@ -106,7 +106,7 @@ namespace Listenarr.Api.Tests
                 DownloadType = "nzb",
                 NzbUrl = "http://example.com/test.nzb",
                 Seeders = 0,
-                PublishedDate = DateTime.UtcNow
+                PublishedDate = DateTime.UtcNow.ToString("o")
             };
 
             var score = await service.ScoreSearchResult(result, profile);
@@ -140,7 +140,7 @@ namespace Listenarr.Api.Tests
                 DownloadType = "nzb",
                 NzbUrl = "http://example.com/old.nzb",
                 Seeders = 0,
-                PublishedDate = DateTime.UtcNow.AddDays(-365) // 1 year old
+                PublishedDate = DateTime.UtcNow.AddDays(-365).ToString("o") // 1 year old
             };
 
             var score = await service.ScoreSearchResult(result, profile);
@@ -176,7 +176,7 @@ namespace Listenarr.Api.Tests
                 DownloadType = "nzb",
                 NzbUrl = "http://example.com/test.nzb",
                 Seeders = 0,
-                PublishedDate = DateTime.UtcNow.AddDays(-60)
+                PublishedDate = DateTime.UtcNow.AddDays(-60).ToString("o")
             };
 
             var score = await service.ScoreSearchResult(result, profile);
@@ -221,7 +221,7 @@ namespace Listenarr.Api.Tests
                 Language = "Spanish",
                 DownloadType = "torrent",
                 Seeders = 2,
-                PublishedDate = DateTime.UtcNow
+                PublishedDate = DateTime.UtcNow.ToString("o")
             };
 
             var score = await service.ScoreSearchResult(result, profile);
@@ -253,7 +253,7 @@ namespace Listenarr.Api.Tests
                 Language = "English",
                 DownloadType = "torrent",
                 Seeders = 2,
-                PublishedDate = DateTime.UtcNow
+                PublishedDate = DateTime.UtcNow.ToString("o")
             };
 
             var score = await service.ScoreSearchResult(result, profile);

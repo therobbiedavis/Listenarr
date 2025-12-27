@@ -61,9 +61,10 @@
           >
         <div class="wanted-poster">
           <img 
-            :src="apiService.getImageUrl(item.imageUrl) || '/placeholder.svg'" 
+            :src="apiService.getImageUrl(item.imageUrl) || apiService.getPlaceholderUrl()" 
             :alt="item.title"
             loading="lazy"
+            @error="handleImageError"
           />
         </div>
         <div class="wanted-info">
@@ -159,6 +160,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
+import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
 import CustomSelect from '@/components/CustomSelect.vue'

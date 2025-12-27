@@ -39,6 +39,18 @@
         </div>
 
         <div class="form-group">
+          <label for="series">Series</label>
+          <input
+            id="series"
+            v-model="searchParams.series"
+            type="text"
+            placeholder="e.g., The Empyrean"
+            class="form-input"
+            @keyup.enter="performSearch"
+          />
+        </div>
+
+        <div class="form-group">
           <label for="isbn">ISBN</label>
           <input
             id="isbn"
@@ -119,6 +131,7 @@ const emit = defineEmits<{
 const searchParams = ref({
   title: '',
   author: '',
+  series: '',
   isbn: '',
   asin: '',
   language: ''
@@ -129,7 +142,7 @@ const error = ref('')
 
 const isValidSearch = computed(() => {
   return !!(searchParams.value.title || searchParams.value.author || 
-            searchParams.value.isbn || searchParams.value.asin)
+            searchParams.value.isbn || searchParams.value.asin || searchParams.value.series)
 })
 
 const closeModal = () => {
@@ -142,6 +155,7 @@ const clearForm = () => {
   searchParams.value = {
     title: '',
     author: '',
+    series: '',
     isbn: '',
     asin: '',
     language: ''
@@ -162,6 +176,7 @@ const performSearch = async () => {
     const params: Record<string, string> = {}
     if (searchParams.value.title) params.title = searchParams.value.title
     if (searchParams.value.author) params.author = searchParams.value.author
+    if (searchParams.value.series) params.series = searchParams.value.series
     if (searchParams.value.isbn) params.isbn = searchParams.value.isbn
     if (searchParams.value.asin) params.asin = searchParams.value.asin
     if (searchParams.value.language) params.language = searchParams.value.language

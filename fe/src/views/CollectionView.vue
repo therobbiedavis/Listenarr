@@ -148,9 +148,10 @@
 
           <img
             class="list-thumb"
-            :src="apiService.getImageUrl(audiobook.imageUrl) || '/placeholder.svg'"
+            :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()"
             :alt="audiobook.title"
             loading="lazy"
+            @error="handleImageError"
           />
 
           <div class="list-details">
@@ -534,8 +535,27 @@ const onAudiobookSaved = () => {
 }
 
 const handleImageError = (event: Event) => {
-  const img = event.target as HTMLImageElement
-  img.style.display = 'none'
+  try {
+    const img = event.target as HTMLImageElement
+    if (!img) return
+    // prevent repeated handling on same element
+    try { if ((img as any).__imageFallbackDone) return; (img as any).__imageFallbackDone = true } catch {}
+
+    // try to extract identifier from src or data-original-src
+    const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
+    try {
+      const m = (original || '').match(/\/api\/images\/([^?\\/]+)(?:\?|$)/i)
+      if (m && m[1]) {
+        try { apiService.markImageFailed(decodeURIComponent(m[1])) } catch {}
+      }
+    } catch {}
+
+    // set placeholder and clear lazy attributes
+    try { img.src = apiService.getPlaceholderUrl() } catch {}
+    try { img.removeAttribute('data-src') } catch {}
+    try { img.removeAttribute('data-original-src') } catch {}
+    try { (img as any).onerror = null } catch {}
+  } catch {}
 }
 
 const formatDuration = (duration?: number) => {
