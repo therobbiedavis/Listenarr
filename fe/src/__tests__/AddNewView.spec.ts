@@ -167,4 +167,84 @@ describe('AddNewView pagination', () => {
     const tr = vm.titleResults[0]
     expect(tr.searchResult.runtime).toBe(12 * 60)
   })
+
+  it('shows metadata badge linking to internal Audimeta endpoint and source badge linking to Audible product', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm: any = wrapper.vm
+
+    // Simulate an ASIN-based audimeta result (single result view)
+    vm.searchType = 'asin'
+    vm.audibleResult = {
+      asin: 'BAUD1',
+      title: 'Title',
+      authors: [{ name: 'Author Name' }],
+      narrators: [{ name: 'Narrator Name' }],
+      imageUrl: 'http://example.com/cover.jpg',
+      metadataSource: 'Audimeta',
+      source: 'Audible',
+      sourceLink: 'https://www.audible.com/pd/BAUD1',
+      series: 'Series Name',
+      seriesList: ['Series Name', 'Other Series']
+    }
+
+    await wrapper.vm.$nextTick()
+
+    // Metadata badge should link to /api/metadata/audimeta/{asin}
+    const metaLink = wrapper.find('.result-meta .metadata-source-link')
+    expect(metaLink.exists()).toBe(true)
+    expect(metaLink.attributes('href')).toBe('https://audimeta.de/book/BAUD1')
+    expect(metaLink.text()).toContain('Audimeta')
+
+    // Source link should prefer Audible product URL and show 'Audible'
+    const sourceLink = wrapper.find('.result-meta .source-link')
+    expect(sourceLink.exists()).toBe(true)
+    expect(sourceLink.attributes('href')).toBe('https://www.audible.com/pd/BAUD1')
+    expect(sourceLink.text()).toContain('Audible')
+  })
+
+  it('shows full series list on hover (title and asin result views)', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm: any = wrapper.vm
+
+    // Title-list item case
+    vm.searchType = 'title'
+    vm.titleResults = [{ title: 'Book', key: 'k1', searchResult: { series: 'Main Series', seriesList: ['Main Series', 'Alt Series'] } }]
+
+    await wrapper.vm.$nextTick()
+
+    const seriesBadge = wrapper.find('.title-results .title-result-card .series-badge[title]')
+    expect(seriesBadge.exists()).toBe(true)
+    expect(seriesBadge.attributes('title')).toBe('Main Series, Alt Series')
+
+    // ASIN result case
+    vm.searchType = 'asin'
+    vm.audibleResult = { asin: 'BAUD2', title: 'B', series: 'X', seriesList: ['X', 'Y'] }
+    await wrapper.vm.$nextTick()
+    const seriesBadgeAsin = wrapper.find('.search-results .title-result-card .series-badge[title]')
+    expect(seriesBadgeAsin.exists()).toBe(true)
+    expect(seriesBadgeAsin.attributes('title')).toBe('X, Y')
+  })
+
+  it('shows "Added" and disables add button when result is already in library', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm: any = wrapper.vm
+
+    // Simulate library already containing the ASIN
+    const lib = useLibraryStore()
+    lib.audiobooks = [{ id: '1', asin: 'BEXIST', title: 'Already In Library' }]
+
+    vm.searchType = 'asin'
+    vm.audibleResult = { asin: 'BEXIST', title: 'Already In Library' }
+
+    await vm.checkExistingInLibrary()
+    await wrapper.vm.$nextTick()
+
+    const addBtn = wrapper.find('.search-results .result-actions .btn')
+    expect(addBtn.exists()).toBe(true)
+    expect(addBtn.text()).toContain('Added')
+    expect(addBtn.attributes('disabled')).toBeDefined()
+  })
 })

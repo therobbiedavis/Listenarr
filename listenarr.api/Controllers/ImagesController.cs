@@ -54,6 +54,25 @@ namespace Listenarr.Api.Controllers
                 identifier = identifier.Substring(0, queryIndex);
             }
 
+            // Check for url parameter to download on demand
+            var url = Request.Query["url"].ToString();
+            if (!string.IsNullOrWhiteSpace(url) && (url.StartsWith("http://") || url.StartsWith("https://")))
+            {
+                // Try to download and cache the image
+                try
+                {
+                    var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(url, identifier);
+                    if (!string.IsNullOrWhiteSpace(downloaded))
+                    {
+                        _logger.LogInformation("Downloaded image on demand for identifier: {Identifier}", identifier);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to download image on demand for identifier: {Identifier}", identifier);
+                }
+            }
+
             try
             {
                 // Get the cached image path (checks library first, then temp)

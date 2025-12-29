@@ -984,32 +984,16 @@ function getScoreClass(score: number): string {
 }
 
 .source-badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #adb5bd;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
   border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.source-badge.nzb {
-  background-color: #3498db;
-  color: white;
-}
-
-.source-badge.torrent {
-  background-color: #2ecc71;
-  color: white;
-}
-
-.source-badge.ddl {
-  background-color: #9b59b6;
-  color: white;
-}
-
-.source-badge.usenet {
-  background-color: #3498db;
-  color: white;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .title-cell {

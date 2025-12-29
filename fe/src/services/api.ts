@@ -913,14 +913,18 @@ class ApiService {
             const identifier = asinMatch[1]
             try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
             let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
+            const params = new URLSearchParams()
             const sessionToken = sessionTokenManager.getToken()
             if (sessionToken) {
-              url += `?access_token=${encodeURIComponent(sessionToken)}`
+              params.append('access_token', sessionToken)
             } else {
               const cfg = getCachedStartupConfig()
               const apiKey = cfg?.apiKey
-              if (apiKey) url += `?access_token=${encodeURIComponent(apiKey)}`
+              if (apiKey) params.append('access_token', apiKey)
             }
+            params.append('url', imageUrl)
+            const query = params.toString()
+            if (query) url += `?${query}`
             return url
           }
 
@@ -934,14 +938,18 @@ class ApiService {
               const identifier = base
               try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
               let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
+              const params = new URLSearchParams()
               const sessionToken = sessionTokenManager.getToken()
               if (sessionToken) {
-                url += `?access_token=${encodeURIComponent(sessionToken)}`
+                params.append('access_token', sessionToken)
               } else {
                 const cfg = getCachedStartupConfig()
                 const apiKey = cfg?.apiKey
-                if (apiKey) url += `?access_token=${encodeURIComponent(apiKey)}`
+                if (apiKey) params.append('access_token', apiKey)
               }
+              params.append('url', imageUrl)
+              const query = params.toString()
+              if (query) url += `?${query}`
               return url
             }
           } catch {}

@@ -290,35 +290,76 @@
                   <PhGlobe />
                   {{ capitalizeLanguage(audibleResult.language) }}
                 </span>
-                <span v-if="audibleResult.series" class="stat-item">
+              </div>
+
+              <!-- Series badges on separate line -->
+              <div v-if="(audibleResult.seriesList && audibleResult.seriesList.length > 0) || (audibleResult.searchResult?.seriesList && audibleResult.searchResult.seriesList.length > 0)" class="result-series">
+                <span v-for="seriesName in (audibleResult.seriesList || audibleResult.searchResult?.seriesList || [])" :key="seriesName" class="series-badge" :title="(audibleResult.seriesList || audibleResult.searchResult?.seriesList || []).join(', ')">
                   <PhBook />
-                  {{ safeText(audibleResult.series) }}<span v-if="audibleResult.seriesNumber"> #{{ audibleResult.seriesNumber }}</span>
+                  {{ safeText(seriesName) }}
+                </span>
+              </div>
+
+              <!-- Metadata badges -->
+              <div class="metadata-badges">
+                <span v-if="audibleResult.publisher" class="metadata-badge">
+                  <PhBuilding />
+                  {{ safeText(audibleResult.publisher) }}
+                </span>
+                <span v-if="audibleResult.publishYear" class="metadata-badge">
+                  <PhCalendar />
+                  {{ audibleResult.publishYear }}
+                </span>
+                <span v-else-if="audibleResult.publishedDate" class="metadata-badge">
+                  <PhCalendar />
+                  {{ new Date(audibleResult.publishedDate).getFullYear() }}
+                </span>
+                <span v-if="audibleResult.asin" class="metadata-badge">
+                  <PhBarcode />
+                  {{ audibleResult.asin }}
+                </span>
+                <span v-if="audibleResult.isbn" class="metadata-badge">
+                  <PhBarcode />
+                  {{ audibleResult.isbn }}
                 </span>
               </div>
               
-              <p v-if="audibleResult.publishYear" class="result-year">Published: {{ audibleResult.publishYear }}</p>
-              <p v-else-if="audibleResult.publishedDate" class="result-year">Published: {{ new Date(audibleResult.publishedDate).getFullYear() }}</p>
-              <p v-if="audibleResult.publisher" class="result-publisher">
-                Publisher: {{ safeText(audibleResult.publisher) }}
-              </p>
-              
               <div class="result-meta">
+
+                <a v-if="audibleResult.asin && ((audibleResult.metadataSource && audibleResult.metadataSource.toLowerCase().includes('audimeta')) || (audibleResult.searchResult && audibleResult.searchResult.metadataSource && audibleResult.searchResult.metadataSource.toLowerCase().includes('audimeta')))"
+                   :href="`https://audimeta.de/book/${audibleResult.asin}`"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   class="metadata-source-link"
+                   :data-source="audibleResult.metadataSource || (audibleResult.searchResult && audibleResult.searchResult.metadataSource)">
+                  <PhGlobe />
+                  Audimeta
+                </a>
+                <span v-else-if="audibleResult.metadataSource" class="metadata-source-badge" :data-source="audibleResult.metadataSource">
+                  <PhGlobe />
+                  Metadata: {{ audibleResult.metadataSource }}
+                </span>
+
                 <a v-if="audibleResult.sourceLink"
                    :href="audibleResult.sourceLink" 
                    target="_blank" 
                    rel="noopener noreferrer"
                    class="source-link">
                   <PhCloud />
-                  Source: {{ audibleResult.source }}
+                  {{ audibleResult.sourceLink.includes('audible.com') ? 'Audible' : `Source: ${audibleResult.source}` }}
                 </a>
                 <span v-else-if="audibleResult.source" class="source-badge">
                   <PhCloud />
                   Source: {{ audibleResult.source }}
                 </span>
-                <span v-if="audibleResult.asin">ASIN: {{ audibleResult.asin }}</span>
-                <span v-if="audibleResult.isbn">ISBN: {{ audibleResult.isbn }}</span>
-                <span v-if="audibleResult.explicit">Explicit</span>
-                <span v-if="audibleResult.abridged">Abridged</span>
+                <span v-if="audibleResult.explicit" class="metadata-badge">
+                  <PhWarning />
+                  Explicit
+                </span>
+                <span v-if="audibleResult.abridged" class="metadata-badge">
+                  <PhScissors />
+                  Abridged
+                </span>
               </div>
             </div>
             <div class="result-actions">
@@ -424,42 +465,67 @@
                   <PhGlobe />
                   {{ capitalizeLanguage(book.searchResult.language) }}
                 </span>
-                <span v-if="book.searchResult?.series" class="stat-item">
+              </div>
+
+              <!-- Series badges on separate line -->
+              <div v-if="(book.seriesList && book.seriesList.length > 0) || (book.searchResult?.seriesList && book.searchResult.seriesList.length > 0)" class="result-series">
+                <span v-for="seriesName in (book.seriesList || book.searchResult?.seriesList || [])" :key="seriesName" class="series-badge" :title="(book.seriesList || book.searchResult?.seriesList || []).join(', ')">
                   <PhBook />
-                  {{ safeText(book.searchResult.series) }}<span v-if="book.searchResult.seriesNumber"> #{{ book.searchResult.seriesNumber }}</span>
+                  {{ safeText(seriesName) }}
                 </span>
               </div>
-              
-              <p v-if="book.first_publish_year" class="result-year">Published: {{ book.first_publish_year }}</p>
-              <p v-if="book.publisher?.length" class="result-publisher">
-                Publisher: {{ safeText(book.publisher[0]) }}
-              </p>
-              <p v-if="getAsin(book)" class="result-asin">ASIN: {{ getAsin(book) }}</p>
-              <p v-else-if="book.searchResult?.id && ((book.metadataSource && book.metadataSource.toLowerCase().includes('openlibrary')) || (book.searchResult?.metadataSource && book.searchResult.metadataSource.toLowerCase().includes('openlibrary')))" class="result-asin">OpenLibrary ID: {{ book.searchResult.id }}</p>
+
+              <!-- Metadata badges -->
+              <div class="metadata-badges">
+                <span v-if="book.publisher?.length" class="metadata-badge">
+                  <PhBuilding />
+                  {{ safeText(book.publisher[0]) }}
+                </span>
+                <span v-if="book.first_publish_year" class="metadata-badge">
+                  <PhCalendar />
+                  {{ book.first_publish_year }}
+                </span>
+                <span v-if="getAsin(book)" class="metadata-badge">
+                  <PhBarcode />
+                  {{ getAsin(book) }}
+                </span>
+                <span v-else-if="book.searchResult?.id && ((book.metadataSource && book.metadataSource.toLowerCase().includes('openlibrary')) || (book.searchResult?.metadataSource && book.searchResult.metadataSource.toLowerCase().includes('openlibrary')))" class="metadata-badge">
+                  <PhBarcode />
+                  {{ book.searchResult.id }}
+                </span>
+              </div>
 
               <div class="result-meta">
                 <a v-if="book.metadataSource && getMetadataSourceUrl(book)" 
-                   :href="getMetadataSourceUrl(book)!" 
+                   :href="getMetadataSourceUrl(book)" 
                    target="_blank" 
                    rel="noopener noreferrer"
                    class="metadata-source-link"
                    :data-source="book.metadataSource">
-                  Metadata: {{ book.metadataSource }}
+                  <PhGlobe />
+                  {{ book.metadataSource && book.metadataSource.toLowerCase().includes('audimeta') ? 'Audimeta' : `Metadata: ${book.metadataSource}` }}
                 </a>
                 <span v-else-if="book.metadataSource" class="metadata-source-badge" :data-source="book.metadataSource">
+                  <PhGlobe />
                   Metadata: {{ book.metadataSource }}
                 </span>
 
+                <!-- Prefer to show Audible as product source when metadata comes from Audimeta -->
                 <a v-if="getSourceUrl(book)"
-                   :href="getSourceUrl(book)!" 
-                   target="_blank" 
+                   :href="getSourceUrl(book)"
+                   target="_blank"
                    rel="noopener noreferrer"
                    class="source-link">
-                  Source: {{ book.searchResult?.source || book.metadataSource || 'OpenLibrary' }}
+                  <PhCloud />
+                  {{ getSourceUrl(book)?.includes('audible.com') ? 'Audible' : (book.searchResult?.source || book.metadataSource || 'OpenLibrary') }}
                 </a>
-                <span v-else-if="book.searchResult?.source">Source: {{ book.searchResult.source }}</span>
+                <span v-else-if="book.searchResult?.source" class="source-badge">
+                  <PhCloud />
+                  Source: {{ book.searchResult.source }}
+                </span>
               </div>
             </div>
+
             <div class="result-actions">
               <button 
                 :class="['btn', (!!(getAsin(book) && addedAsins.has(getAsin(book)!)) || (!!book.searchResult?.id && addedOpenLibraryIds.has(book.searchResult.id))) ? 'btn-success' : 'btn-primary']"
@@ -513,7 +579,7 @@
       </div>
       <h2 v-if="!asinFilteringApplied">No Books Found</h2>
       <h2 v-else>No Audiobook Matches</h2>
-      <p v-if="!asinFilteringApplied">No books were found matching "{{ titleQuery }}"{{ authorQuery ? ` by ${authorQuery}` : '' }}. Try different search terms.</p>
+      <p v-if="!asinFilteringApplied">No books were found matching "{{ titleQuery }}"{{ authorQuery ? ' by ' + authorQuery : '' }}. Try different search terms.</p>
       <p v-else>No audiobooks found. Try refining your search terms.</p>
     </div>
 
@@ -533,7 +599,6 @@
     </div>
 
     </div>
-
 
     <!-- Audiobook Details Modal -->
     <AudiobookDetailsModal
@@ -557,9 +622,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhImage, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud, PhFunnelSimple } from '@phosphor-icons/vue'
+import { PhPlusCircle, PhSpinner, PhMagnifyingGlass, PhInfo, PhWarningCircle, PhClock, PhGlobe, PhCheck, PhPlus, PhEye, PhBook, PhArrowDown, PhArrowClockwise, PhCloud, PhFunnelSimple, PhCalendar, PhBuilding, PhBarcode, PhWarning, PhScissors } from '@phosphor-icons/vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre } from '@/types'
+import type { AudibleBookMetadata, SearchResult, Audiobook, AudimetaAuthor, AudimetaNarrator, AudimetaGenre, AudimetaSearchResult, AudimetaBookResponse } from '@/types' 
 import { apiService } from '@/services/api'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { handleImageError } from '@/utils/imageFallback'
@@ -591,6 +656,9 @@ type TitleSearchResult = OpenLibraryBook & {
   imageUrl?: string // For results that have direct image URLs
   metadataSource?: string // Store which metadata source was used
 }
+
+// Loose result type used for normalization of diverse backend shapes
+type LooseResult = Partial<SearchResult> & Record<string, unknown>
 
 const route = useRoute()
 const router = useRouter()
@@ -656,7 +724,7 @@ const audimetaPage = ref(1)
 const audimetaLimit = ref(50)
 const audimetaTotal = ref(0)
 const isAudimetaPaged = ref(false)
-const allAudimetaResults = ref<any[]>([])
+const allAudimetaResults = ref<AudimetaSearchResult[]>([])
 
 const isValidAdvancedSearch = computed(() => {
   // If advanced UI is visible, validate the advanced form fields directly
@@ -947,44 +1015,44 @@ const canLoadMore = computed(() => {
 
 // Unified Search Methods - now handled by useSearch composable
 
-const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => {
+const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> | LooseResult>) => {
   // Convert search results to title results format
   titleResults.value = []
   audibleResult.value = null
   searchType.value = 'title'
   
   for (const result of results) {
+    const r = result as LooseResult
+
     // Normalize common metadata keys from backend variations so the template
     // consistently finds `subtitle`/`subtitles`, `narrator` and `source`.
     try {
-      const r = result as any
       // subtitles may be provided as `subtitle`, `Subtitle`, `Subtitles` or `subtitles`
-      r.subtitles = r.subtitles || r.subtitle || r.Subtitle || r.Subtitles || undefined
-      r.subtitle = r.subtitle || r.subtitles || r.Subtitle || r.Subtitles || undefined
+      ;(r as any).subtitles = (r as any).subtitles || (r as any).subtitle || (r as any).Subtitle || (r as any).Subtitles || undefined
+      ;(r as any).subtitle = (r as any).subtitle || (r as any).subtitles || (r as any).Subtitle || (r as any).Subtitles || undefined
 
       // narrators may be provided as array or single string
-      if (!r.narrator) {
-        if (Array.isArray(r.narrators) && r.narrators.length) {
-          r.narrator = r.narrators.map((n: any) => n?.name || n?.Name || n).filter(Boolean).join(', ')
-        } else if (r.Narrators && Array.isArray(r.Narrators) && r.Narrators.length) {
-          r.narrator = r.Narrators.map((n: any) => n?.name || n?.Name || n).filter(Boolean).join(', ')
-        } else if (r.Narrator) {
-          r.narrator = r.Narrator
+      if (!(r as any).narrator) {
+        if (Array.isArray((r as any).narrators) && (r as any).narrators.length) {
+          ;(r as any).narrator = (r as any).narrators.map((n: unknown) => typeof n === 'object' && n ? ((n as any).name || (n as any).Name) : String(n)).filter(Boolean).join(', ')
+        } else if ((r as any).Narrators && Array.isArray((r as any).Narrators) && (r as any).Narrators.length) {
+          ;(r as any).narrator = (r as any).Narrators.map((n: unknown) => typeof n === 'object' && n ? ((n as any).name || (n as any).Name) : String(n)).filter(Boolean).join(', ')
+        } else if ((r as any).Narrator) {
+          ;(r as any).narrator = (r as any).Narrator
         }
       }
 
       // If backend indicates audimeta as metadataSource, present the user-facing
       // source label as 'Audible' to match expectations
-      if (r.metadataSource && String(r.metadataSource).toLowerCase().includes('audimeta')) {
-        r.source = 'Audible'
+      if ((r as any).metadataSource && String((r as any).metadataSource).toLowerCase().includes('audimeta')) {
+        ;(r as any).source = 'Audible'
       }
-    } catch (e) {
+    } catch {
       // swallow normalization errors
-      console.debug('Normalization failed for advanced result', e)
     }
     // Extract year from common date fields (publishedDate, releaseDate, etc.)
     let publishYear: number | undefined
-    const dateStr = (result as any).publishedDate ?? (result as any).releaseDate ?? (result as any).ReleaseDate ?? (result as any).release_date ?? (result as any).Release_date
+    const dateStr = (r as any).publishedDate ?? (r as any).releaseDate ?? (r as any).ReleaseDate ?? (r as any).release_date ?? (r as any).Release_date
     if (dateStr) {
       if (typeof dateStr === 'object' && typeof (dateStr as any).getFullYear === 'function') {
         publishYear = (dateStr as Date).getFullYear()
@@ -996,36 +1064,31 @@ const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => 
     
     const authorsFromResult = ((): string[] => {
       // Prefer normalized author field (flattened by earlier conversion)
-      if ((result as any).author && typeof (result as any).author === 'string' && (result as any).author.trim().length) return [(result as any).author.trim()]
+      if ((r as any).author && typeof (r as any).author === 'string' && (r as any).author.trim().length) return [(r as any).author.trim()]
 
       // Check for Artist field (capital A, from SearchResult.Artist)
-      if ((result as any).Artist && typeof (result as any).Artist === 'string' && (result as any).Artist.trim().length) {
-        console.log('Found Artist field:', (result as any).Artist)
-        return [(result as any).Artist.trim()]
+      if ((r as any).Artist && typeof (r as any).Artist === 'string' && (r as any).Artist.trim().length) {
+        return [ (r as any).Artist.trim() ]
       }
 
       // Check for artist field (used in advanced search results)
-      if (result.artist && typeof result.artist === 'string' && result.artist.trim().length) {
-        console.log('Found artist field:', result.artist)
-        return [result.artist.trim()]
+      if ((r as any).artist && typeof (r as any).artist === 'string' && (r as any).artist.trim().length) {
+        return [(r as any).artist.trim()]
       }
 
       // If result contains an authors array (from Audimeta), extract names
-      const maybeAuthors = (result as any).authors || (result as any).Authors
+      const maybeAuthors = ((r as any).authors ?? (r as any).Authors) as ({ name?: string; Name?: string } | string)[] | undefined
       if (Array.isArray(maybeAuthors) && maybeAuthors.length) {
-        console.log('Found authors array:', maybeAuthors)
-        return maybeAuthors.map((a: any) => (a?.name || a?.Name || '')).filter((n: any) => !!n)
+        return maybeAuthors.map((a) => (typeof a === 'object' && a ? ((a as any).name || (a as any).Name || '') : String(a))).filter((n) => !!n)
       }
 
       // If the original searchResult contains authors, use those
-      const sr = (result as any).searchResult
-      const srAuthors = sr ? (sr.authors || sr.Authors) : null
+      const sr = (r as any).searchResult
+      const srAuthors = sr ? ((sr as any).authors ?? (sr as any).Authors) as ({ name?: string } | string)[] | undefined : undefined
       if (Array.isArray(srAuthors) && srAuthors.length) {
-        console.log('Found searchResult authors:', srAuthors)
-        return srAuthors.map((a: any) => (a?.name || a?.Name || '')).filter((n: any) => !!n)
+        return srAuthors.map((a) => (typeof a === 'object' && a ? ((a as any).name || (a as any).Name || '') : String(a))).filter((n) => !!n)
       }
 
-      console.log('No authors found in result:', result)
       return []
     })()
 
@@ -1042,7 +1105,8 @@ const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => 
       key: String(result.asin || result.id || ''),
       searchResult: result as unknown as SearchResult,
       imageUrl: result.imageUrl,
-      metadataSource: result.metadataSource,
+      // prefer explicit metadataSource, but fall back to attached searchResult metadata when present
+      metadataSource: looksLikeAudimeta ? 'audimeta' : (result.metadataSource || (result.searchResult && (result.searchResult as any).metadataSource)),
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher) ? result.publisher : (result.publisher ? [result.publisher] : undefined)
     }
@@ -1081,23 +1145,41 @@ const handleAdvancedSearchResults = async (results: Partial<SearchResult>[]) => 
           ;(result as any).productUrl = prod
         }
       } catch (e) {}
-      ;(titleResult as any).series = (result as any).series
-      // Normalize series to simple string when Audimeta returns an array
+      ;(titleResult as any).series = (r as any).series
+      // Preserve the raw series array as `seriesList` when present and normalize a display string
       try {
-        if (Array.isArray((result as any).series) && (result as any).series.length) {
-          const s = (result as any).series[0]
-          (result as any).series = s?.name || s || String(s)
+        const rawSeries = (r as any).series
+        if (Array.isArray(rawSeries) && rawSeries.length) {
+          // store the raw list for tooltip display
+          const list = rawSeries.map((s: any) => {
+            if (typeof s === 'object' && s) {
+              const name = s.name || s.Name || String(s)
+              const position = s.position || s.Position
+              return position ? `${name} #${position}` : name
+            }
+            return String(s)
+          }).filter(Boolean)
+          ;(titleResult as any).seriesList = list
+          ;(titleResult as any).searchResult = (titleResult as any).searchResult || r
+          ;(titleResult as any).searchResult.seriesList = list
+          // pick first for visible series string
+          const s = rawSeries[0] as ({ name?: string } | string)
+          ;(r as any).series = typeof s === 'object' && s ? ((s as any).name || String(s)) : String(s)
+        } else if (rawSeries) {
+          ;(titleResult as any).seriesList = [String(rawSeries)]
+          ;(titleResult as any).searchResult = (titleResult as any).searchResult || r
+          ;(titleResult as any).searchResult.seriesList = [String(rawSeries)]
         }
-      } catch (e) {}
+      } catch { }
       try {
         // Ensure the attached searchResult reflects the normalized series string
-        ;(titleResult as any).searchResult = (titleResult as any).searchResult || result
-        ;(titleResult as any).searchResult.series = (result as any).series
+        ;(titleResult as any).searchResult = (titleResult as any).searchResult || r
+        ;(titleResult as any).searchResult.series = (r as any).series
         // Propagate normalized productUrl into the attached searchResult as tests expect
         if ((titleResult as any).productUrl) {
           ;(titleResult as any).searchResult.productUrl = (titleResult as any).productUrl
         }
-      } catch (e) {}
+      } catch { }
       ;(titleResult as any).seriesNumber = (result as any).seriesNumber || (result as any).seriesPosition || undefined
       // ensure image URL is available
       if (!(titleResult as any).imageUrl && (result as any).imageUrl) (titleResult as any).imageUrl = (result as any).imageUrl
@@ -1168,41 +1250,38 @@ const performAdvancedSearch = async () => {
 
       currentAdvancedPage.value = 1
 
-      // If both author and series provided, author takes priority; perform author search then filter by series
+      // If both author and series provided, author takes priority; perform author search then filter by series (no extra Audimeta series lookup)
       if (params.author && seriesName) {
         const results = await apiService.advancedSearch(params)
-        // lookup series asins to match against results
-        try {
-          const seriesList = await apiService.searchAudimetaSeries(seriesName)
-          const seriesAsins = Array.isArray(seriesList) ? (seriesList as any[]).map((s: any) => s.asin || s.Asin || s.ASIN).filter(Boolean) : []
 
-          const filtered = (results as any[]).filter(r => {
-            try {
-              const sr = r.searchResult || r
-              // If searchResult.series is an array of objects with asin fields
-              if (Array.isArray(sr.series) && sr.series.length) {
-                for (const s of sr.series) {
-                  const a = (s && (s.asin || s.Asin || s.ASIN)) || (typeof s === 'string' ? s : undefined)
-                  if (a && seriesAsins.includes(a)) return true
-                  if (a && String(a).toLowerCase().includes(seriesName.toLowerCase())) return true
-                }
+        const filtered = (results as any[]).filter(r => {
+          try {
+            const sr = r.searchResult || r
+
+            // If searchResult.series is an array of objects with asin fields, check asin or name
+            if (Array.isArray(sr.series) && sr.series.length) {
+              for (const s of sr.series) {
+                const a = (s && (s.asin || s.Asin || s.ASIN)) || (typeof s === 'string' ? s : undefined)
+                if (a && (String(a).toLowerCase().includes(seriesName.toLowerCase()) || String(a) === seriesName)) return true
+                const n = (s && (s.name || s.Name)) || undefined
+                if (n && String(n).toLowerCase().includes(seriesName.toLowerCase())) return true
               }
-              // If series is a string
-              if (sr.series && typeof sr.series === 'string' && sr.series.toLowerCase().includes(seriesName.toLowerCase())) return true
-              // Fallback: check top-level result.series
-              if (r.series && typeof r.series === 'string' && r.series.toLowerCase().includes(seriesName.toLowerCase())) return true
-            } catch (e) {}
-            return false
-          })
+            }
 
-          await handleAdvancedSearchResults(filtered)
-        } catch (e) {
-          // If series lookup fails, just return author search results
-          const results = await apiService.advancedSearch(params)
-          await handleAdvancedSearchResults(results)
-        }
+            // If series is a string
+            if (sr.series && typeof sr.series === 'string' && sr.series.toLowerCase().includes(seriesName.toLowerCase())) return true
 
-        // done
+            // Fallback: check top-level result.series
+            if (r.series && typeof r.series === 'string' && r.series.toLowerCase().includes(seriesName.toLowerCase())) return true
+
+          } catch (e) {}
+          return false
+        })
+
+        // If filtering produced no matches, fall back to returning the unfiltered author results
+        await handleAdvancedSearchResults(filtered.length ? filtered : results)
+
+        // done: scroll into view
         nextTick(() => {
           const titleResultsElement = document.querySelector('.title-results')
           if (titleResultsElement) {
@@ -1459,6 +1538,7 @@ const searchByAsin = async (asin: string) => {
           language: result.language,
           series: result.series,
           seriesNumber: result.seriesNumber,
+          seriesList: result.seriesList || (result.series ? [result.series + (result.seriesNumber ? ` #${result.seriesNumber}` : '')] : undefined),
           isbn: undefined,
           source: result.source,
           sourceLink: result.sourceLink
@@ -1796,7 +1876,7 @@ const getAsin = (book: TitleSearchResult): string | null => {
 }
 
 const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
-  const source = book.metadataSource
+  const source = book.metadataSource || (book.searchResult && (book.searchResult as any).metadataSource)
   if (!source) return null
 
   // OpenLibrary metadata does not require an ASIN; prefer resultUrl (JSON) then productUrl or OL work URL
@@ -1847,7 +1927,8 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
 
   // Map metadata source to URL for ASIN-based providers
   if (source.toLowerCase().includes('audimeta')) {
-    return `https://audimeta.de/book/${asin}`
+    // Link the metadata badge to the external Audimeta website for the book
+    return `https://audimeta.de/book/${encodeURIComponent(asin)}`
   } else if (source.toLowerCase().includes('audnex')) {
     // Audnexus API format
     return `https://api.audnex.us/books/${asin}`
@@ -1865,8 +1946,15 @@ const getSourceUrl = (book: TitleSearchResult): string | null => {
   // Prefer explicit productUrl from the enriched SearchResult
   if (book.searchResult?.productUrl) return book.searchResult.productUrl
 
+  // If metadata indicates Audimeta (either top-level or attached searchResult), link to Audible product page for ASIN when available
+  const asin = getAsin(book)
+  const metaSource = ((book.metadataSource || (book.searchResult && (book.searchResult as any).metadataSource)) || '').toString().toLowerCase()
+  if (metaSource.includes('audimeta') && asin) {
+    return buildAudibleProductUrl(asin)
+  }
+
   // If provider/source is OpenLibrary or we have an OL key, link to the OL work page
-  if (book.searchResult?.source?.toLowerCase().includes('openlibrary') || book.metadataSource?.toLowerCase().includes('openlibrary')) {
+  if (book.searchResult?.source?.toLowerCase().includes('openlibrary') || metaSource.includes('openlibrary')) {
     const olBook = book as OpenLibraryBook
     const candidateKey = (olBook.key || '').toString()
     const looksLikeLocalKey = candidateKey.startsWith('search-') || candidateKey.startsWith('search-unknown-')
@@ -2090,8 +2178,9 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes : undefined,
         language: audimetaData.language,
         genres: audimetaData.genres?.map((g: AudimetaGenre) => g.name).filter((n: string | undefined) => n) as string[] || [],
-        series: audimetaData.series?.[0]?.name,
-        seriesNumber: audimetaData.series?.[0]?.position,
+        series: audimetaData.series?.length ? audimetaData.series.map(s => `${s.name}${s.position ? ` #${s.position}` : ''}`).join(', ') : undefined,
+        seriesList: audimetaData.series?.map(s => `${s.name}${s.position ? ` #${s.position}` : ''}`) || [],
+        seriesNumber: undefined, // Series info now included in series field
         abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
         isbn: audimetaData.isbn,
         source: response.source
@@ -2198,8 +2287,9 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
         runtime: audimetaData.lengthMinutes ? audimetaData.lengthMinutes : undefined,
         language: audimetaData.language,
         genres: audimetaData.genres?.map((g: AudimetaGenre) => g.name).filter((n: string | undefined) => n) as string[] || [],
-        series: audimetaData.series?.[0]?.name,
-        seriesNumber: audimetaData.series?.[0]?.position,
+        series: audimetaData.series?.length ? audimetaData.series.map(s => `${s.name}${s.position ? ` #${s.position}` : ''}`).join(', ') : undefined,
+        seriesList: audimetaData.series?.map(s => `${s.name}${s.position ? ` #${s.position}` : ''}`) || [],
+        seriesNumber: undefined, // Series info now included in series field
         abridged: audimetaData.bookFormat?.toLowerCase().includes('abridged') || false,
         isbn: audimetaData.isbn,
         source: response.source
@@ -2365,7 +2455,8 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       key: String(result.asin || result.id || ''),
       searchResult: result,
       imageUrl: result.imageUrl,
-      metadataSource: result.metadataSource,
+      // prefer explicit metadataSource, but mark audimeta when detected so UI shows Audimeta-specific badges
+      metadataSource: looksLikeAudimeta ? 'audimeta' : (result.metadataSource || (result.searchResult && (result.searchResult as any).metadataSource)),
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher) ? result.publisher : (result.publisher ? [result.publisher] : undefined)
     }
@@ -2390,6 +2481,25 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       ;(titleResult as any).id = (result as any).asin || (result as any).sku || (result as any).id || (result as any).title
       ;(titleResult as any).productUrl = (result as any).productUrl || (result as any).link || (result as any).Link || undefined
       ;(titleResult as any).series = (result as any).series
+      // preserve seriesList for tooltip display when provided as an array
+      try {
+        const rawSeries = (result as any).series
+        if (Array.isArray(rawSeries) && rawSeries.length) {
+          const list = rawSeries.map((s: any) => {
+            if (typeof s === 'object' && s) {
+              const name = s.name || s.Name || String(s)
+              const position = s.position || s.Position
+              return position ? `${name} #${position}` : name
+            }
+            return String(s)
+          }).filter(Boolean)
+          ;(titleResult as any).seriesList = list
+          ;(titleResult as any).searchResult = (titleResult as any).searchResult || result
+          ;(titleResult as any).searchResult.seriesList = list
+          // and choose first element as visible series string
+          ;(titleResult as any).series = list[0]
+        }
+      } catch {}
       ;(titleResult as any).seriesNumber = (result as any).seriesNumber || (result as any).seriesPosition || undefined
       // ensure image URL is available
       if (!(titleResult as any).imageUrl && (result as any).imageUrl) (titleResult as any).imageUrl = (result as any).imageUrl
@@ -3512,17 +3622,19 @@ select.form-input:focus {
   height: 140px;
   flex-shrink: 0;
   background-color: #555;
-  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: transform 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.result-card:hover .result-poster {
+.title-result-card:hover .result-poster {
   transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .result-poster img {
@@ -3612,7 +3724,65 @@ select.form-input:focus {
   padding: 0.35rem 0.7rem;
   border-radius: 6px;
   white-space: nowrap;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.result-series {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.series-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #adb5bd;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.series-badge:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.series-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.metadata-badges {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.metadata-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #adb5bd;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.metadata-badge:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.metadata-badge svg {
+  width: 14px;
+  height: 14px;
 }
 
 .stat-item:hover {
@@ -3652,18 +3822,22 @@ select.form-input:focus {
 
 .result-meta span,
 .result-meta a.source-link {
-  background-color: rgba(255, 255, 255, 0.05);
-  padding: 0.35rem 0.7rem;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: rgba(33, 150, 243, 0.15) !important;
+  color: #4dabf7 !important;
+  font-weight: 500;
+  padding: 0.35rem 0.7rem !important;
+  border-radius: 6px !important;
   text-decoration: none;
-  color: #adb5bd;
-  transition: all 0.2s ease;
   white-space: nowrap;
+  transition: all 0.2s ease;
 }
 
 .result-meta span:hover,
 .result-meta a.source-link:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(33, 150, 243, 0.25) !important;
 }
 
 .metadata-source-badge,
@@ -3706,15 +3880,24 @@ select.form-input:focus {
 }
 
 .result-meta a.source-link:hover {
-  background-color: rgba(33, 150, 243, 0.15);
-  color: #4dabf7;
-  transform: translateY(-1px);
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .result-meta .source-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  color: #adb5bd;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.result-meta .source-badge:hover {
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .result-meta .source-badge svg,
@@ -3765,10 +3948,19 @@ select.form-input:focus {
 .title-result-card {
   display: flex;
   background-color: #2a2a2a;
-  border-radius: 6px;
-  padding: 1rem;
-  gap: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 1.25rem;
+  gap: 1.25rem;
   align-items: flex-start;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.title-result-card:hover {
+  border-color: rgba(33, 150, 243, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px);
 }
 
 .title-result-card .result-info {
@@ -3780,22 +3972,35 @@ select.form-input:focus {
   flex-direction: column;
   gap: 0.5rem;
   min-width: 150px;
+  align-self: flex-start;
 }
 
-.result-year, .result-publisher, .result-asin {
-  color: #868e96;
-  margin: 0;
-  font-size: 0.875rem;
-  line-height: 1.5;
+.title-result-card .result-actions .btn {
+  padding: 0.6rem 1rem;
+  font-weight: 500;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
 
- .result-subtitle {
-   color: #bfc7cc;
-   margin: 0;
-   font-size: 0.95rem;
-   font-style: italic;
-   margin-top: 0.25rem;
- }
+.title-result-card .result-actions .btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.title-result-card h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.3;
+}
+
+.result-author {
+  color: #bfc7cc;
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 500;
+}
 
 /* Empty States */
 .getting-started, .empty-state, .error-state {

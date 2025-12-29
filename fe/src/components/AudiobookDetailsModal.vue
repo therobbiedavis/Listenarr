@@ -68,12 +68,9 @@
             <div class="detail-section">
               <h4>Identifiers</h4>
               <div class="detail-grid">
-                <div v-if="book.source" class="detail-item metadata-source-item">
+                <div v-if="book.source" class="detail-item">
                   <span class="label">Metadata Source:</span>
-                  <span class="value metadata-source-badge">
-                    <i class="ph ph-cloud"></i>
-                    {{ book.source }}
-                  </span>
+                  <span class="value">{{ book.source }}</span>
                 </div>
                 <div v-if="book.asin" class="detail-item">
                   <span class="label">ASIN:</span>
@@ -106,10 +103,6 @@
                 <div v-if="book.series" class="detail-item">
                   <span class="label">Series:</span>
                   <span class="value">{{ book.series }}</span>
-                </div>
-                <div v-if="book.seriesNumber" class="detail-item">
-                  <span class="label">Book Number:</span>
-                  <span class="value">{{ book.seriesNumber }}</span>
                 </div>
                 <div v-if="book.genres?.length" class="detail-item">
                   <span class="label">Genres:</span>

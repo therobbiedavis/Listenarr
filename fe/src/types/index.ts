@@ -34,9 +34,17 @@ export interface MetadataSearchResult extends BaseSearchResult {
   asin?: string
   series?: string
   seriesNumber?: string
+  seriesList?: string[]
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
+  // Audimeta-style fields (when backend returns Audimeta-shaped JSON)
+  authors?: AudimetaAuthor[]
+  narrators?: AudimetaNarrator[]
+  lengthMinutes?: number
+  link?: string
+  releaseDate?: string
+  publishDate?: string
 }
 
 // Legacy SearchResult interface - kept for backwards compatibility
@@ -64,9 +72,17 @@ export interface SearchResult extends BaseSearchResult {
   asin?: string
   series?: string
   seriesNumber?: string
+  seriesList?: string[]
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
+  // Audimeta-style fields
+  authors?: AudimetaAuthor[]
+  narrators?: AudimetaNarrator[]
+  lengthMinutes?: number
+  link?: string
+  releaseDate?: string
+  publishDate?: string
 }
 
 export interface Download {
@@ -289,6 +305,7 @@ export interface AudibleBookMetadata {
   publishedDate?: string
   series?: string
   seriesNumber?: string
+  seriesList?: string[]
   description?: string
   genres?: string[]
   tags?: string[]
@@ -305,6 +322,8 @@ export interface AudibleBookMetadata {
   source?: string
   sourceLink?: string
   openLibraryId?: string
+  metadataSource?: string
+  searchResult?: SearchResult
   // Optional local mapping to a quality profile ID when viewing in the UI
   qualityProfileId?: number
 }

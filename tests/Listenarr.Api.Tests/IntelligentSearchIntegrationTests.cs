@@ -32,8 +32,8 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
-            var metadata = new TestAudibleMetadataService();
-            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, (IAudiobookMetadataService)metadata);
+            var metadata = Mock.Of<IAudiobookMetadataService>();
+            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, metadata);
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("test-query");
@@ -56,8 +56,8 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
-            var metadata = new TestAudibleMetadataService();
-            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, (IAudiobookMetadataService)metadata);
+            var metadata = Mock.Of<IAudiobookMetadataService>();
+            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, metadata);
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("TITLE:Ingram");
@@ -80,8 +80,8 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
-            var metadata = new TestEmptyAudibleMetadataService();
-            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, (IAudiobookMetadataService)metadata);
+            var metadata = Mock.Of<IAudiobookMetadataService>();
+            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, metadata);
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("9780261103573");
@@ -102,7 +102,7 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
-            var metadata = new TestEmptyAudibleMetadataService();
+            var metadata = Mock.Of<IAudiobookMetadataService>();
             var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, (IAudiobookMetadataService)metadata);
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
@@ -124,8 +124,8 @@ namespace Listenarr.Api.Tests
 
             var logger = Mock.Of<Microsoft.Extensions.Logging.ILogger<SearchController>>();
             var audimeta = new TestEmptyAudimetaService();
-            var metadata = new TestAudibleMetadataService();
-            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, (IAudiobookMetadataService)metadata);
+            var metadata = Mock.Of<IAudiobookMetadataService>();
+            var controller = new Listenarr.Api.Controllers.SearchController(mockSearch.Object, logger, audimeta, metadata);
             controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
 
             var actionResult = await controller.IntelligentSearch("test-query");

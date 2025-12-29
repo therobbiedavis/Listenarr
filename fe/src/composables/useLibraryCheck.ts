@@ -58,6 +58,21 @@ export function useLibraryCheck() {
       }
     }
 
+    // Mark current library items as added so existing books show as "Added" in the Add New UI
+    for (const asin of Array.from(libraryAsins)) {
+      if (!addedAsins.value.has(asin)) {
+        logger.debug('Marking ASIN as present in library:', asin)
+        addedAsins.value.add(asin)
+      }
+    }
+
+    for (const olid of Array.from(libraryOlIds)) {
+      if (!addedOpenLibraryIds.value.has(olid)) {
+        logger.debug('Marking OpenLibrary ID as present in library:', olid)
+        addedOpenLibraryIds.value.add(olid)
+      }
+    }
+
     logger.debug('Added ASINs after cleanup and marking:', Array.from(addedAsins.value))
   }
 

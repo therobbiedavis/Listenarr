@@ -53,7 +53,7 @@ namespace Listenarr.Api.Controllers
             _audimetaService = audimetaService;
             _metadataService = metadataService;
             _imageCacheService = imageCacheService;
-            _metadataConverters = metadataConverters ?? new MetadataConverters(imageCacheService, (Microsoft.Extensions.Logging.ILogger<Listenarr.Api.Services.Search.MetadataConverters>)logger);
+            _metadataConverters = metadataConverters ?? new MetadataConverters(imageCacheService, Microsoft.Extensions.Logging.Abstractions.NullLogger<Listenarr.Api.Services.Search.MetadataConverters>.Instance);
         }
 
         private async Task NormalizeSearchResultImagesAsync(List<SearchResult> results)
@@ -115,14 +115,52 @@ namespace Listenarr.Api.Controllers
 
                 var req = JsonSerializer.Deserialize<Listenarr.Api.Models.SearchRequest>(reqJson.GetRawText(), options);
                 if (req == null) return BadRequest("SearchRequest body is required");
+                _logger.LogDebug("[DBG] Search received mode={Mode}, query='{Query}'", req.Mode, req.Query ?? "<null>");
 
                 if (req.Mode == Listenarr.Api.Models.SearchMode.Simple)
                 {
                     var q = req.Query ?? string.Empty;
                     var region = string.IsNullOrWhiteSpace(req.Region) ? "us" : req.Region;
                     var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
-                    var results = await _searchService.IntelligentSearchAsync(q, region: region, language: language, ct: HttpContext.RequestAborted);
-                    return Ok(new { results });
+                    var results = await _searchService.IntelligentSearchAsync(q, region: region, language: language, ct: HttpContext.RequestAborted) ?? new List<MetadataSearchResult>();
+
+                    // Normalize images for metadata results so the SPA receives local /api/images/{asin} when possible
+                    if (_imageCacheService != null && results != null)
+                    {
+                        foreach (var r in results)
+                        {
+                            try
+                            {
+                                if (r == null) continue;
+                                if (string.IsNullOrWhiteSpace(r.Asin)) continue;
+
+                                var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
+                                if (!string.IsNullOrWhiteSpace(cached))
+                                {
+                                    r.ImageUrl = $"/api/images/{r.Asin}";
+                                    continue;
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
+                                {
+                                    var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
+                                    if (!string.IsNullOrWhiteSpace(downloaded))
+                                    {
+                                        r.ImageUrl = $"/api/images/{r.Asin}";
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to normalize image for metadata result ASIN {Asin}", r?.Asin);
+                            }
+                        }
+                    }
+
+                    // Map metadata results into Audimeta-like objects for public API consumers
+                    var mapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => MapMetadataResultToAudimetaAsync(r, region))).ConfigureAwait(false);
+                    _logger.LogDebug("[DBG] Search(simple) returning {Count} metadata results", mapped?.Length ?? 0);
+                    return Ok(mapped);
                 }
                 else // Advanced
                 {
@@ -170,8 +208,19 @@ namespace Listenarr.Api.Controllers
                     var region = string.IsNullOrWhiteSpace(req.Region) ? "us" : req.Region;
                     var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language;
 
+                    // If no advanced search parameters were provided, signal BadRequest to caller
+                    if (string.IsNullOrWhiteSpace(req.Title)
+                        && string.IsNullOrWhiteSpace(req.Author)
+                        && string.IsNullOrWhiteSpace(req.Query)
+                        && string.IsNullOrWhiteSpace(req.Isbn)
+                        && string.IsNullOrWhiteSpace(req.Asin)
+                        && string.IsNullOrWhiteSpace(req.Series))
+                    {
+                        return BadRequest("At least one advanced search parameter (title, author, isbn, asin, series, or query) is required");
+                    }
                     // Debug: log incoming advanced parameters for diagnostics
                     try { _logger.LogInformation("[DBG] Advanced search request: Author='{Author}', Title='{Title}', Isbn='{Isbn}', Asin='{Asin}', Query='{Query}', Region='{Region}', Language='{Language}'", req.Author, req.Title, req.Isbn, req.Asin, req.Query, region, language); } catch {}
+                    try { _logger.LogDebug("[DBG] Advanced params: Title='{Title}', Author='{Author}', Isbn='{Isbn}'", req.Title, req.Author, req.Isbn); } catch {}
 
                     // If the advanced request contains an ASIN, prefer a direct Audimeta metadata
                     // lookup and return a single enriched SearchResult. ASIN searches should
@@ -187,9 +236,33 @@ namespace Listenarr.Api.Controllers
                                 var metadata = _metadataConverters.ConvertAudimetaToMetadata(audimeta, req.Asin, source: "Audimeta");
                                 var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, req.Asin, req.Title, req.Author, fallbackImageUrl: null, fallbackLanguage: language);
                                 SanitizeResultForPublicApi(sr, region);
-                                // Ensure image normalization for ASIN results
-                                await NormalizeSearchResultImagesAsync(new List<SearchResult> { sr });
-                                return Ok(new { results = new List<SearchResult> { sr } });
+                                // Convert to metadata result and normalize images for API response
+                                var md = SearchResultConverters.ToMetadata(sr);
+                                if (_imageCacheService != null && !string.IsNullOrWhiteSpace(md.Asin))
+                                {
+                                    try
+                                    {
+                                        var cached = await _imageCacheService.GetCachedImagePathAsync(md.Asin);
+                                        if (!string.IsNullOrWhiteSpace(cached))
+                                        {
+                                            md.ImageUrl = $"/api/images/{md.Asin}";
+                                        }
+                                        else if (!string.IsNullOrWhiteSpace(md.ImageUrl) && (md.ImageUrl.StartsWith("http://") || md.ImageUrl.StartsWith("https://")))
+                                        {
+                                            var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(md.ImageUrl, md.Asin);
+                                            if (!string.IsNullOrWhiteSpace(downloaded)) md.ImageUrl = $"/api/images/{md.Asin}";
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Failed to normalize image for ASIN metadata {Asin}", md?.Asin);
+                                    }
+                                }
+                                if (md != null)
+                                {
+                                    var result = SearchResultConverters.ToSearchResult(md);
+                                    return Ok(new List<SearchResult> { result });
+                                }
                             }
                             // If audimeta didn't return a record, fall through to unified search below
                         }
@@ -199,8 +272,11 @@ namespace Listenarr.Api.Controllers
                         }
                     }
 
+
+
                     // If a series name or series ASIN was provided, prefer Audimeta series endpoints
-                    if (!string.IsNullOrWhiteSpace(req.Series))
+                    // If series is provided and no author is supplied, take the series-specialized path. If an author is present, prefer the author flow and later filter by series.
+                    if (!string.IsNullOrWhiteSpace(req.Series) && string.IsNullOrWhiteSpace(req.Author))
                     {
                         try
                         {
@@ -235,6 +311,39 @@ namespace Listenarr.Api.Controllers
                                                     string? elAsin = null;
                                                     if (el.TryGetProperty("region", out var pRegion) && pRegion.ValueKind == JsonValueKind.String) elRegion = pRegion.GetString();
                                                     if (el.TryGetProperty("asin", out var pAsin) && pAsin.ValueKind == JsonValueKind.String) elAsin = pAsin.GetString();
+
+                                                    // Fallbacks: try 'id', 'slug', 'url'/'link' fields to extract an ASIN-like token if asin is missing
+                                                    if (string.IsNullOrWhiteSpace(elAsin))
+                                                    {
+                                                        if (el.TryGetProperty("id", out var pId) && pId.ValueKind == JsonValueKind.String)
+                                                        {
+                                                            var idStr = pId.GetString();
+                                                            if (!string.IsNullOrWhiteSpace(idStr) && System.Text.RegularExpressions.Regex.IsMatch(idStr, @"B0[A-Z0-9]{8,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                                                                elAsin = idStr;
+                                                        }
+
+                                                        if (string.IsNullOrWhiteSpace(elAsin) && el.TryGetProperty("slug", out var pSlug) && pSlug.ValueKind == JsonValueKind.String)
+                                                        {
+                                                            var slug = pSlug.GetString();
+                                                            // slug may contain ASIN-like token; search for it
+                                                            if (!string.IsNullOrWhiteSpace(slug))
+                                                            {
+                                                                var m = System.Text.RegularExpressions.Regex.Match(slug, @"B0[A-Z0-9]{8,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                                if (m.Success) elAsin = m.Value;
+                                                            }
+                                                        }
+
+                                                        if (string.IsNullOrWhiteSpace(elAsin) && (el.TryGetProperty("url", out var pUrl) || el.TryGetProperty("link", out pUrl) || el.TryGetProperty("href", out pUrl)) && pUrl.ValueKind == JsonValueKind.String)
+                                                        {
+                                                            var urlStr = pUrl.GetString();
+                                                            if (!string.IsNullOrWhiteSpace(urlStr))
+                                                            {
+                                                                var m = System.Text.RegularExpressions.Regex.Match(urlStr, @"B0[A-Z0-9]{8,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                                if (m.Success) elAsin = m.Value;
+                                                            }
+                                                        }
+                                                    }
+
                                                     if (!string.IsNullOrWhiteSpace(elRegion) && string.Equals(elRegion, region, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(elAsin))
                                                     {
                                                         chosenAsin = elAsin;
@@ -324,9 +433,37 @@ namespace Listenarr.Api.Controllers
                                         }
 
                                         if (converted.Any()) {
-                                            // Ensure image normalization for series results
-                                            await NormalizeSearchResultImagesAsync(converted);
-                                            return Ok(new { results = converted });
+                                            // Convert to metadata results and ensure images are normalized for API consumers
+                                            var mdList = converted.Select(r => SearchResultConverters.ToMetadata(r)).ToList();
+
+                                            if (_imageCacheService != null)
+                                            {
+                                                foreach (var md in mdList)
+                                                {
+                                                    try
+                                                    {
+                                                        if (string.IsNullOrWhiteSpace(md.Asin)) continue;
+                                                        var cached = await _imageCacheService.GetCachedImagePathAsync(md.Asin);
+                                                        if (!string.IsNullOrWhiteSpace(cached))
+                                                        {
+                                                            md.ImageUrl = $"/api/images/{md.Asin}";
+                                                            continue;
+                                                        }
+                                                        if (!string.IsNullOrWhiteSpace(md.ImageUrl) && (md.ImageUrl.StartsWith("http://") || md.ImageUrl.StartsWith("https://")))
+                                                        {
+                                                            var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(md.ImageUrl, md.Asin);
+                                                            if (!string.IsNullOrWhiteSpace(downloaded)) md.ImageUrl = $"/api/images/{md.Asin}";
+                                                        }
+                                                    }
+                                                    catch (Exception ex)
+                                                    {
+                                                        _logger.LogWarning(ex, "Failed to normalize image for series metadata ASIN {Asin}", md?.Asin);
+                                                    }
+                                                }
+                                            }
+
+                                            var flatSeries = mdList.Select(SearchResultConverters.ToSearchResult).ToList();
+                                            return Ok(flatSeries);
                                         }
                                     }
                                 }
@@ -397,13 +534,33 @@ namespace Listenarr.Api.Controllers
                         }
                     }
 
-                    var response = new SearchResponse
+                    // If both Author and Series were provided in the advanced request, prefer the author flow
+                    // and apply a series filter on the resulting candidates using the `Series` key so
+                    // advanced author searches can be constrained to a specific series.
+                    if (!string.IsNullOrWhiteSpace(req.Author) && !string.IsNullOrWhiteSpace(req.Series) && results != null)
                     {
-                        MetadataResults = results ?? new List<MetadataSearchResult>(),
-                        IndexerResults = new List<IndexerSearchResult>()
-                    };
+                        try
+                        {
+                            var seriesFilter = req.Series.Trim();
+                            if (System.Text.RegularExpressions.Regex.IsMatch(seriesFilter, @"^B0[A-Z0-9]{8,}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                            {
+                                results = results.Where(r => (!string.IsNullOrWhiteSpace(r.Series) && r.Series.IndexOf(seriesFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                                                            || (!string.IsNullOrWhiteSpace(r.Asin) && string.Equals(r.Asin, seriesFilter, StringComparison.OrdinalIgnoreCase))).ToList();
+                            }
+                            else
+                            {
+                                results = results.Where(r => !string.IsNullOrWhiteSpace(r.Series) && r.Series.IndexOf(seriesFilter, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to apply series filter '{Series}' to advanced author search results", req.Series);
+                        }
+                    }
 
-                    return Ok(response);
+                    // Flatten metadata results into Audimeta-like objects for public POST /api/search response
+                    var flatMapped = await Task.WhenAll((results ?? new List<MetadataSearchResult>()).Select(r => MapMetadataResultToAudimetaAsync(r, region))).ConfigureAwait(false);
+                    return Ok(flatMapped);
                 }
             }
             catch (Exception ex)
@@ -425,6 +582,170 @@ namespace Listenarr.Api.Controllers
                 }
             }
             catch { }
+        }
+
+        // Map our internal MetadataSearchResult to a lightweight Audimeta-shaped object (async)
+        private async Task<object> MapMetadataResultToAudimetaAsync(MetadataSearchResult md, string region)
+        {
+            // If we have an ASIN and the metadata was enriched, try to fetch the canonical Audimeta payload
+            Listenarr.Api.Services.AudimetaBookResponse? aud = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(md?.Asin))
+                {
+                    aud = await _metadataService.GetAudimetaMetadataAsync(md.Asin, region, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to retrieve audimeta metadata for ASIN {Asin}", md?.Asin);
+            }
+
+            // If audimeta provided a rich response, prefer it (but normalize image URLs to local /api/images/{asin} when possible)
+            if (aud != null)
+            {
+                string? imageUrl = aud.ImageUrl;
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(aud.Asin) && _imageCacheService != null)
+                    {
+                        var cached = await _imageCacheService.GetCachedImagePathAsync(aud.Asin);
+                        if (!string.IsNullOrWhiteSpace(cached))
+                        {
+                            imageUrl = $"/api/images/{aud.Asin}";
+                        }
+                        else if (!string.IsNullOrWhiteSpace(imageUrl) && (imageUrl.StartsWith("http://") || imageUrl.StartsWith("https://")))
+                        {
+                            var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(imageUrl, aud.Asin);
+                            if (!string.IsNullOrWhiteSpace(downloaded)) imageUrl = $"/api/images/{aud.Asin}";
+                        }
+                        else
+                        {
+                            // Map to API endpoint even if not cached to keep behaviour consistent
+                            imageUrl = $"/api/images/{aud.Asin}";
+                            _ = _imageCacheService.DownloadAndCacheImageAsync(aud.ImageUrl ?? imageUrl, aud.Asin);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to normalize audimeta image for {Asin}", aud.Asin);
+                }
+
+                var authors = (aud.Authors ?? new List<Listenarr.Api.Services.AudimetaAuthor>()).Where(a => a != null).Select(a => new
+                {
+                    asin = a!.Asin,
+                    name = a!.Name,
+                    region = a!.Region ?? region,
+                    regions = new[] { a!.Region ?? region },
+                    image = (string?)null,
+                    updatedAt = DateTime.UtcNow.ToString("o")
+                }).ToList();
+
+                var narrators = (aud.Narrators ?? new List<Listenarr.Api.Services.AudimetaNarrator>()).Where(n => n != null).Select(n => new { name = n!.Name, updatedAt = DateTime.UtcNow.ToString("o") }).ToList();
+
+                var genres = (aud.Genres ?? new List<Listenarr.Api.Services.AudimetaGenre>()).Where(g => g != null).Select(g => new
+                {
+                    asin = g!.Asin,
+                    name = g!.Name,
+                    type = g!.Type,
+                    betterType = (string?)null,
+                    updatedAt = DateTime.UtcNow.ToString("o")
+                }).ToList();
+
+                var series = (aud.Series ?? new List<Listenarr.Api.Services.AudimetaSeries>()).Where(s => s != null).Select(s => new
+                {
+                    asin = s!.Asin,
+                    name = s!.Name,
+                    region = region,
+                    position = s!.Position,
+                    updatedAt = DateTime.UtcNow.ToString("o")
+                }).ToList();
+
+                return new
+                {
+                    asin = aud.Asin ?? md?.Asin,
+                    title = aud.Title ?? md?.Title,
+                    subtitle = aud.Subtitle ?? md?.Subtitle,
+                    region = aud.Region ?? region,
+                    regions = new[] { aud.Region ?? region },
+                    description = aud.Description ?? md?.Description,
+                    summary = aud.Description ?? md?.Description,
+                    copyright = (string?)null,
+                    bookFormat = aud.BookFormat,
+                    imageUrl = imageUrl,
+                    lengthMinutes = aud.LengthMinutes ?? md?.Runtime,
+                    whisperSync = false,
+                    publisher = aud.Publisher ?? md?.Publisher,
+                    isbn = aud.Isbn,
+                    language = aud.Language ?? md?.Language,
+                    rating = (double?)null,
+                    releaseDate = aud.ReleaseDate ?? aud.PublishDate ?? md?.PublishedDate,
+                    @explicit = aud.Explicit ?? false,
+                    hasPdf = false,
+                    link = (string.IsNullOrWhiteSpace(md?.ProductUrl) ? null : md?.ProductUrl) ?? (!string.IsNullOrWhiteSpace(aud.Asin) ? $"https://www.audible.com/pd/{aud.Asin}" : null),
+                    sku = aud.Sku,
+                    skuGroup = (string?)null,
+                    isListenable = !string.IsNullOrWhiteSpace(aud.Asin ?? md?.Asin),
+                    isAvailable = true,
+                    isBuyable = true,
+                    contentType = aud.ContentType ?? (string?)null,
+                    contentDeliveryType = aud.ContentDeliveryType,
+                    authors = authors,
+                    narrators = narrators,
+                    genres = genres,
+                    series = series,
+                    // Indicate this was mapped from Audimeta and expose a simple series name list for the client tooltip
+                    metadataSource = "audimeta",
+                    seriesList = series?.Select(s => $"{s.name}{(s.position != null ? $" #{s.position}" : "")}").ToList(),
+                    updatedAt = DateTime.UtcNow.ToString("o")
+                };
+            }
+
+            // Fallback: build a permissive Audimeta-like object from available MetadataSearchResult fields
+            var fallbackAuthors = new List<object>();
+            var fallbackNarrators = new List<object>();
+            if (!string.IsNullOrWhiteSpace(md?.Narrator)) fallbackNarrators.Add(new { name = md.Narrator, updatedAt = (string?)null });
+            if (!string.IsNullOrWhiteSpace(md?.Author)) fallbackAuthors.Add(new { asin = (string?)null, name = md.Author, region = region, regions = new[] { region }, image = (string?)null, updatedAt = (string?)null });
+
+            var fallbackSeries = new List<object>();
+            if (!string.IsNullOrWhiteSpace(md?.Series)) fallbackSeries.Add(new { asin = md.Series, name = md.Series, region = region, position = md.SeriesNumber, updatedAt = (string?)null });
+
+            return new
+            {
+                asin = md?.Asin,
+                title = md?.Title,
+                subtitle = md?.Subtitle,
+                region = region,
+                regions = new[] { region },
+                description = md?.Description,
+                summary = md?.Description,
+                copyright = (string?)null,
+                bookFormat = (string?)null,
+                imageUrl = md?.ImageUrl,
+                lengthMinutes = md?.Runtime,
+                whisperSync = false,
+                publisher = md?.Publisher,
+                isbn = (string?)null,
+                language = md?.Language,
+                rating = (double?)null,
+                releaseDate = md?.PublishedDate,
+                @explicit = false,
+                hasPdf = false,
+                link = md?.ProductUrl,
+                sku = (string?)null,
+                skuGroup = (string?)null,
+                isListenable = !string.IsNullOrWhiteSpace(md?.Asin),
+                isAvailable = true,
+                isBuyable = true,
+                contentType = "Product",
+                contentDeliveryType = (string?)null,
+                authors = fallbackAuthors,
+                narrators = fallbackNarrators,
+                genres = new List<object>(),
+                series = fallbackSeries,
+                updatedAt = (string?)null
+            };
         }
 
         private static string? ConvertIsbn10ToIsbn13(string isbn10)
@@ -605,7 +926,7 @@ namespace Listenarr.Api.Controllers
             try
             {
                 // Debug: log raw incoming query to help integration-test diagnostics
-                try { System.Console.WriteLine($"[DEBUG] IntelligentSearch called with query='{query ?? "<null>"}'"); } catch { }
+                try { _logger.LogDebug("[DEBUG] IntelligentSearch called with query='{Query}'", query ?? "<null>"); } catch { }
 
                 // Also emit a warning-level log so test output captures the value
                 try { _logger.LogWarning("[DBG] IntelligentSearch called with query='{Query}'", query ?? "<null>"); } catch { }
@@ -619,8 +940,37 @@ namespace Listenarr.Api.Controllers
                 var region = Request.Query.ContainsKey("region") ? Request.Query["region"].ToString() ?? "us" : "us";
                 var language = Request.Query.ContainsKey("language") ? Request.Query["language"].ToString() : null;
                 var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold, region, language, HttpContext.RequestAborted);
-                _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
-                return Ok(results);
+                // Normalize images for metadata results so the SPA receives local /api/images/{asin} when possible
+                if (_imageCacheService != null && results != null)
+                {
+                    foreach (var r in results)
+                    {
+                        try
+                        {
+                            if (r == null) continue;
+                            if (string.IsNullOrWhiteSpace(r.Asin)) continue;
+
+                            var cached = await _imageCacheService.GetCachedImagePathAsync(r.Asin);
+                            if (!string.IsNullOrWhiteSpace(cached))
+                            {
+                                r.ImageUrl = $"/api/images/{r.Asin}";
+                                continue;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(r.ImageUrl) && (r.ImageUrl.StartsWith("http://") || r.ImageUrl.StartsWith("https://")))
+                            {
+                                var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(r.ImageUrl, r.Asin);
+                                if (!string.IsNullOrWhiteSpace(downloaded)) r.ImageUrl = $"/api/images/{r.Asin}";
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to normalize image for metadata result ASIN {Asin}", r?.Asin);
+                        }
+                    }
+                }
+                _logger.LogInformation("IntelligentSearch returning {Count} results for query: {Query}", results?.Count ?? 0, LogRedaction.SanitizeText(query));
+                return Ok(results ?? new List<MetadataSearchResult>());
             }
             catch (Exception ex)
             {

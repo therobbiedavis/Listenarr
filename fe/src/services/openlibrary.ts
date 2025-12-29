@@ -18,6 +18,7 @@ export interface OpenLibraryBook {
   ebook_access?: 'public' | 'borrowable' | 'printdisabled' | 'no_ebook';
   has_fulltext?: boolean;
   public_scan_b?: boolean;
+  seriesList?: string[];
 }
 
 export interface OpenLibrarySearchResponse {

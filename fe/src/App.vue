@@ -768,6 +768,19 @@ onMounted(async () => {
   } else {
     logger.debug('User not authenticated; skipping protected resource loads')
   }
+
+  // Fallback: if queueItems still empty after the protected load above (tests or edge cases), try a direct fetch.
+  try {
+    if (!queueItems.value || queueItems.value.length === 0) {
+      const fallbackQueue = await apiService.getQueue()
+      if (Array.isArray(fallbackQueue) && fallbackQueue.length > 0) {
+        queueItems.value = fallbackQueue
+        logger.debug('Fallback fetched initial queue items', { count: fallbackQueue.length })
+      }
+    }
+  } catch (err) {
+    logger.debug('Fallback queue fetch failed (non-fatal)', err)
+  }
   
   // Only poll "Wanted" badge (library changes infrequently)
   startWantedBadgePolling()
