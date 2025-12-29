@@ -339,6 +339,7 @@
       <div class="detail-line small">{{ (audiobook.authors || []).slice(0,2).map(a => safeText(a)).join(', ') || 'Unknown Author' }}
         <div v-if="(audiobook.narrators || []).length">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') }}</div>
       </div>
+      <div v-if="audiobook.series" class="detail-line small">Series: {{ safeText(audiobook.series) }}<span v-if="audiobook.seriesNumber"> #{{ audiobook.seriesNumber }}</span></div>
       <div class="detail-line small">{{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span></div>
       <div class="detail-line small">{{ statusText(getAudiobookStatus(audiobook)) }}</div>
     </div>
@@ -388,6 +389,7 @@
                 <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
                 <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
                 <div v-if="showItemDetails" class="list-extra-details">
+                  <div v-if="audiobook.series" class="detail-line small">Series: {{ safeText(audiobook.series) }}<span v-if="audiobook.seriesNumber"> #{{ audiobook.seriesNumber }}</span></div>
                   <div class="detail-line small">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') || '' }}
                     <span v-if="audiobook.narrators && audiobook.narrators.length && (audiobook.publisher || audiobook.publishYear)"> • </span>
                     {{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span>
