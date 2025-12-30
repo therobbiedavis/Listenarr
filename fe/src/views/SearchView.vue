@@ -101,9 +101,9 @@
                     <PhXCircle />
                     Rejected
                   </span>
-                  <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
+                  <span v-else :class="['score-badge', getVisibleScoreClass(result.id)]">
                     <PhStar />
-                    Score: {{ getResultScore(result.id)?.totalScore }}
+                    Score: {{ getVisibleScoreValue(result.id) ?? '-' }}
                   </span>
                 </template>
               </ScorePopover>
@@ -443,7 +443,19 @@ const getResultScore = (resultId: string): QualityScore | undefined => {
 function getResultLink(result: SearchResult): string | undefined {
   if (!result) return undefined
   const r = result as unknown as Record<string, unknown>
-  if (typeof r.resultUrl === 'string') return r.resultUrl
+  const src = !result ? '' : (result.downloadType || '').toLowerCase()
+
+  if (src === 'usenet' || src === 'nzb') {
+    // For Usenet results prefer the ID URL if present and looks like a URL (guid/info page), otherwise prefer details page before NZB download
+    if (typeof (result as any).id === 'string' && /^(https?:)?\/\//.test((result as any).id)) return (result as any).id
+    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
+    if (result.productUrl) return result.productUrl
+    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0) return r.sourceLink as string
+    if (result.nzbUrl) return result.nzbUrl
+    return undefined
+  }
+
+  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
@@ -456,6 +468,29 @@ const getScoreClass = (score: number): string => {
   if (score >= 60) return 'good'
   if (score >= 40) return 'fair'
   return 'poor'
+}
+
+// Visible score value for the UI: prefer smartScore when available and normalize to 0-100
+import { computeNormalizedSmart } from '@/composables/useScore'
+
+function getVisibleScoreValue(resultId: string): number | undefined {
+  const q = getResultScore(resultId)
+  if (!q) return undefined
+
+  // Prefer breakdown-based normalized total when available
+  if (q.smartScoreBreakdown && Object.keys(q.smartScoreBreakdown).length > 0) {
+    return computeNormalizedSmart(q.smartScoreBreakdown).total
+  }
+
+  // Fallback to smartScore numeric normalization
+  if (typeof q.smartScore === 'number' && !isNaN(q.smartScore)) return Math.round(Math.min(100, q.smartScore / 100))
+  if (typeof q.totalScore === 'number') return q.totalScore
+  return undefined
+}
+
+function getVisibleScoreClass(resultId: string): string {
+  const val = getVisibleScoreValue(resultId) ?? 0
+  return getScoreClass(val)
 }
 
 // getScoreBreakdownTooltip is provided by the useScore composable

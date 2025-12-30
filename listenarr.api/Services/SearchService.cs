@@ -264,15 +264,25 @@ namespace Listenarr.Api.Services
             if (!results.Any())
                 return results;
 
-            IOrderedEnumerable<SearchResult> orderedResults;
+            IEnumerable<SearchResult> orderedResults;
 
             // Primary sort
             switch (sortBy)
             {
                 case SearchSortBy.Seeders:
+                    // Enhanced seeders sort: consider Prowlarr-inspired composite scoring
+                    var seedScored = results.Select(r =>
+                    {
+                        Indexer? idx = null;
+                        if (r.IndexerId.HasValue)
+                            idx = _dbContext.Indexers.FirstOrDefault(i => i.Id == r.IndexerId.Value);
+                        var score = CalculateProwlarrStyleScore(r, idx);
+                        return new { Result = r, Score = score };
+                    }).ToList();
+
                     orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Seeders ?? 0)
-                        : results.OrderBy(r => r.Seeders ?? 0);
+                        ? seedScored.OrderByDescending(x => x.Score).Select(x => x.Result)
+                        : seedScored.OrderBy(x => x.Score).Select(x => x.Result);
                     break;
 
                 case SearchSortBy.Size:
@@ -299,10 +309,38 @@ namespace Listenarr.Api.Services
                         : results.OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase);
                     break;
 
+                case SearchSortBy.Language:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Language ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                        : results.OrderBy(r => r.Language ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+                    break;
+
                 case SearchSortBy.Quality:
                     orderedResults = sortDirection == SearchSortDirection.Descending
                         ? results.OrderByDescending(r => GetQualityScore(r.Quality))
                         : results.OrderBy(r => GetQualityScore(r.Quality));
+                    break;
+
+                case SearchSortBy.Smart:
+                    // Prowlarr-style mult-tier scoring
+                    var scored = results.Select(r =>
+                    {
+                        Indexer? idx = null;
+                        if (r.IndexerId.HasValue)
+                            idx = _dbContext.Indexers.FirstOrDefault(i => i.Id == r.IndexerId.Value);
+                        var score = CalculateProwlarrStyleScore(r, idx);
+                        return new { Result = r, Score = score };
+                    }).ToList();
+
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? scored.OrderByDescending(x => x.Score).Select(x => x.Result)
+                        : scored.OrderBy(x => x.Score).Select(x => x.Result);
+                    break;
+
+                case SearchSortBy.Grabs:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Grabs)
+                        : results.OrderBy(r => r.Grabs);
                     break;
 
                 default:
@@ -375,6 +413,84 @@ namespace Listenarr.Api.Services
                 return 40;
 
             return 0;
+        }
+
+        // Prowlarr-style composite scoring helpers adapted for Listenarr
+        internal double CalculateProwlarrStyleScore(SearchResult result, Indexer? indexer = null)
+        {
+            var composite = Scoring.CompositeScorer.CalculateProwlarrStyleScore(result, indexer, _logger);
+            return composite.Total;
+        }
+
+        private double CalculateSeedScore(SearchResult result)
+        {
+            var downloadType = (result.DownloadType ?? string.Empty).ToLower();
+
+            if (downloadType.Contains("usenet") || downloadType.Contains("ddl") || !string.IsNullOrEmpty(result.NzbUrl))
+            {
+                var grabs = result.Grabs;
+                if (grabs > 0)
+                {
+                    return Math.Min(100.0, 20.0 + (Math.Log10(grabs) * 20.0));
+                }
+                return 0.0;
+            }
+
+            // Torrent
+            var seeders = result.Seeders ?? 0;
+            if (seeders <= 0) return 0.0;
+
+            var seederScore = Math.Min(100.0, 20.0 + (Math.Log10(seeders) * 20.0));
+            var leechers = result.Leechers ?? 0;
+            if (leechers > 0)
+            {
+                var ratio = (double)seeders / Math.Max(1, leechers);
+                if (ratio > 2.0) seederScore += 10.0;
+                else if (ratio > 1.0) seederScore += 5.0;
+            }
+
+            return Math.Min(100.0, seederScore);
+        }
+
+        private double CalculateAgeScore(DateTime publishedDate)
+        {
+            if (publishedDate == DateTime.MinValue) return 50.0;
+            var age = DateTime.UtcNow - publishedDate;
+            if (age.TotalDays < 1) return 100.0;
+            if (age.TotalDays < 7) return 90.0;
+            if (age.TotalDays < 30) return 75.0;
+            if (age.TotalDays < 90) return 60.0;
+            if (age.TotalDays < 365) return 40.0;
+            return 20.0;
+        }
+
+        private double CalculateSizeScore(long sizeBytes)
+        {
+            if (sizeBytes <= 0) return 50.0;
+            var sizeMB = sizeBytes / (1024.0 * 1024.0);
+            if (sizeMB >= 100 && sizeMB <= 800) return 100.0;
+            if (sizeMB >= 50 && sizeMB < 100) return 80.0;
+            if (sizeMB > 800 && sizeMB <= 1500) return 80.0;
+            if (sizeMB >= 10 && sizeMB < 50) return 50.0;
+            if (sizeMB > 1500 && sizeMB <= 3000) return 50.0;
+            if (sizeMB < 10) return 20.0;
+            if (sizeMB > 3000) return 30.0;
+            return 50.0;
+        }
+
+        private double GetFormatScore(string? format)
+        {
+            if (string.IsNullOrEmpty(format)) return 50.0;
+            var fmt = format.ToLower();
+            if (fmt.Contains("m4b")) return 100.0;
+            if (fmt.Contains("flac")) return 95.0;
+            if (fmt.Contains("opus")) return 90.0;
+            if (fmt.Contains("m4a") || fmt.Contains("aac")) return 85.0;
+            if (fmt.Contains("mp3")) return 75.0;
+            if (fmt.Contains("ogg") || fmt.Contains("vorbis")) return 70.0;
+            if (fmt.Contains("wma")) return 40.0;
+            if (fmt.Contains("ra") || fmt.Contains("realaudio")) return 30.0;
+            return 50.0;
         }
 
         public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null)
@@ -2427,6 +2543,18 @@ namespace Listenarr.Api.Services
                         var firstRaw = dataArrayElement[0].ToString();
                         var preview = firstRaw.Length > 400 ? firstRaw.Substring(0, 400) + "..." : firstRaw;
                         _logger.LogDebug("First MyAnonamouse item preview: {Preview}", LogRedaction.RedactText(preview, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+
+                        // Log full property list for the first item to aid debugging field names
+                        try
+                        {
+                            var firstItem = dataArrayElement[0];
+                            var fields = string.Join(", ", firstItem.EnumerateObject().Select(p => $"{p.Name}={p.Value}"));
+                            _logger.LogInformation("First MyAnonamouse result fields: {Fields}", LogRedaction.RedactText(fields, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+                        }
+                        catch (Exception exFields)
+                        {
+                            _logger.LogDebug(exFields, "Failed to enumerate fields of first MyAnonamouse item");
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -2439,6 +2567,20 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
+                        // Log property names for first few items to aid debugging
+                        if (_mamDebugIndex < 3)
+                        {
+                            try
+                            {
+                                var propertyNames = item.EnumerateObject().Select(p => p.Name).ToList();
+                                _logger.LogInformation("MyAnonamouse result #{Index} has properties: {Properties}", _mamDebugIndex, string.Join(", ", propertyNames));
+                            }
+                            catch (Exception exNames)
+                            {
+                                _logger.LogDebug(exNames, "Failed to enumerate property names for MyAnonamouse result #{Index}", _mamDebugIndex);
+                            }
+                        }
+
                         string id;
                         if (item.TryGetProperty("id", out var idElem))
                         {
@@ -2453,11 +2595,11 @@ namespace Listenarr.Api.Services
                         var title = "";
                         if (item.TryGetProperty("title", out var titleElem))
                         {
-                            title = titleElem.GetString() ?? "";
+                            title = titleElem.ValueKind == JsonValueKind.String ? titleElem.GetString() ?? "" : titleElem.ToString();
                         }
                         else if (item.TryGetProperty("name", out titleElem))
                         {
-                            title = titleElem.GetString() ?? "";
+                            title = titleElem.ValueKind == JsonValueKind.String ? titleElem.GetString() ?? "" : titleElem.ToString();
                         }
                         var sizeStr = "";
                         if (item.TryGetProperty("size", out var sizeElem))
@@ -2477,7 +2619,12 @@ namespace Listenarr.Api.Services
                         }
                         var seeders = item.TryGetProperty("seeders", out var seedElem) ? seedElem.GetInt32() : 0;
                         var leechers = item.TryGetProperty("leechers", out var leechElem) ? leechElem.GetInt32() : 0;
-                        var dlHash = item.TryGetProperty("dl", out var dlElem) ? dlElem.GetString() : "";
+                        string dlHash = string.Empty;
+                        if (item.TryGetProperty("dl", out var dlElem))
+                        {
+                            dlHash = dlElem.ValueKind == JsonValueKind.String ? dlElem.GetString() ?? string.Empty : dlElem.ToString();
+                        }
+
                         // New: explicit downloadUrl / infoUrl / fileName fields commonly provided by Prowlarr
                         string? downloadUrlField = null;
                         string? infoUrlField = null;
@@ -2494,37 +2641,68 @@ namespace Listenarr.Api.Services
                                 fileNameField = prop.Value.GetString();
                         }
 
-                        var category = item.TryGetProperty("catname", out var catElem) ? catElem.GetString() : "";
-                        var tags = item.TryGetProperty("tags", out var tagsElem) ? tagsElem.GetString() : "";
-                        var description = item.TryGetProperty("description", out var descElem) ? descElem.GetString() : "";
+                        string category = string.Empty;
+                        if (item.TryGetProperty("catname", out var catElem))
+                        {
+                            category = catElem.ValueKind == JsonValueKind.String ? catElem.GetString() ?? string.Empty : catElem.ToString();
+                        }
+
+                        string tags = string.Empty;
+                        if (item.TryGetProperty("tags", out var tagsElem))
+                        {
+                            tags = tagsElem.ValueKind == JsonValueKind.String ? tagsElem.GetString() ?? string.Empty : tagsElem.ToString();
+                        }
+
+                        string description = string.Empty;
+                        if (item.TryGetProperty("description", out var descElem))
+                        {
+                            description = descElem.ValueKind == JsonValueKind.String ? descElem.GetString() ?? string.Empty : descElem.ToString();
+                        }
 
                         // Parse grabs/files when present (Prowlarr exposes these directly for MyAnonamouse)
                         var grabs = 0;
-                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count" };
-                        foreach (var k in grabKeys)
+                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count", "times_completed", "completed", "downloaded", "times_downloaded" };
+                        foreach (var prop in item.EnumerateObject())
                         {
-                            if (item.TryGetProperty(k, out var ge))
+                            // Case-insensitive match against known grab keys
+                            if (grabKeys.Any(k => string.Equals(k, prop.Name, StringComparison.OrdinalIgnoreCase)))
                             {
+                                var ge = prop.Value;
+                                _logger.LogInformation("Found grabs candidate field '{Field}' (kind={Kind}) for '{Title}': {Value}", prop.Name, ge.ValueKind, ge.ToString(), title);
                                 if (ge.ValueKind == JsonValueKind.Number)
                                 {
                                     grabs = ge.GetInt32();
+                                    _logger.LogInformation("Parsed grabs for '{Title}' from field '{Field}': {Grabs}", title, prop.Name, grabs);
                                     break;
                                 }
                                 else if (ge.ValueKind == JsonValueKind.String && int.TryParse(ge.GetString(), out var gtmp))
                                 {
                                     grabs = gtmp;
+                                    _logger.LogInformation("Parsed grabs (string) for '{Title}' from field '{Field}': {Grabs}", title, prop.Name, grabs);
                                     break;
                                 }
                             }
                         }
 
                         var files = 0;
-                        if (item.TryGetProperty("files", out var filesElem))
+                        foreach (var prop in item.EnumerateObject())
                         {
-                            if (filesElem.ValueKind == JsonValueKind.Number)
-                                files = filesElem.GetInt32();
-                            else if (filesElem.ValueKind == JsonValueKind.String && int.TryParse(filesElem.GetString(), out var ftmp))
-                                files = ftmp;
+                            if (string.Equals(prop.Name, "files", StringComparison.OrdinalIgnoreCase) || string.Equals(prop.Name, "numfiles", StringComparison.OrdinalIgnoreCase) || string.Equals(prop.Name, "num_files", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var fe = prop.Value;
+                                _logger.LogInformation("Found files candidate field '{Field}' (kind={Kind}) for '{Title}': {Value}", prop.Name, fe.ValueKind, fe.ToString(), title);
+                                if (fe.ValueKind == JsonValueKind.Number)
+                                {
+                                    files = fe.GetInt32();
+                                    _logger.LogInformation("Parsed files for '{Title}' from field '{Field}': {Files}", title, prop.Name, files);
+                                }
+                                else if (fe.ValueKind == JsonValueKind.String && int.TryParse(fe.GetString(), out var ftmp))
+                                {
+                                    files = ftmp;
+                                    _logger.LogInformation("Parsed files (string) for '{Title}' from field '{Field}': {Files}", title, prop.Name, files);
+                                }
+                                break;
+                            }
                         }
 
                         // Prefer explicit 'added' timestamp when present (MyAnonamouse uses "yyyy-MM-dd HH:mm:ss")
@@ -2703,6 +2881,12 @@ namespace Listenarr.Api.Services
                         var formatFromField = !string.IsNullOrEmpty(rawFormatField) ? DetectFormatFromTags(rawFormatField) : null;
                         var finalFormat = (formatFromField != null && formatFromField != "MP3") ? formatFromField : formatFromTags;
 
+                        // Log explicit filetype when present
+                        if (!string.IsNullOrEmpty(rawFormatField))
+                        {
+                            _logger.LogDebug("MyAnonamouse: found explicit filetype '{Filetype}' for item {Id}", rawFormatField, id);
+                        }
+
                         // Detect quality: prefer tags, then explicit format field, then description/title
                         var qualityFromTags = DetectQualityFromTags(tags ?? "");
                         var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : ( !string.IsNullOrEmpty(rawFormatField) ? DetectQualityFromFormat(rawFormatField) : "Unknown" );
@@ -2758,6 +2942,10 @@ namespace Listenarr.Api.Services
                             downloadUrl = $"https://www.myanonamouse.net/tor/download.php/{dlHash}";
                         }
 
+                        // Preserve raw language code for later flagging/flags list
+                        string rawLangCode = string.Empty;
+                        _logger.LogDebug("MyAnonamouse: rawFormat='{Raw}', finalFormat='{Final}', rawLang='{LangCode}'", rawFormatField, finalFormat, rawLangCode);
+
                         var result = new IndexerSearchResult
                         {
                             Id = id ?? Guid.NewGuid().ToString(),
@@ -2778,7 +2966,12 @@ namespace Listenarr.Api.Services
                             MagnetLink = "",
                             NzbUrl = ""
                         };
-                        result.IndexerId = indexer.Id;
+                        // If we have a parsed language code, map to name and preserve raw code
+                        if (!string.IsNullOrEmpty(rawLangCode) && string.IsNullOrEmpty(result.Language))
+                        {
+                            result.Language = ParseLanguageFromCode(rawLangCode) ?? ParseLanguageFromText(rawLangCode);
+                            if (!string.IsNullOrEmpty(result.Language)) rawLangCode = rawLangCode.ToUpperInvariant();
+                        }                        result.IndexerId = indexer.Id;
                         result.IndexerImplementation = indexer.Implementation;
                         // Robust link detection: prefer magnet/hash/torrent indicators, only treat as NZB when explicit NZB fields exist
                         try
@@ -2881,11 +3074,11 @@ namespace Listenarr.Api.Services
                                 result.TorrentFileName = fileNameField;
                             }
 
-                            // Prefer marking as Torrent when either magnet or torrent URL exists
+                            // Prefer marking the download type when either magnet/torrent or NZB URL exists
                             if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
-                                result.Format = "Torrent";
+                                result.DownloadType = "Torrent";
                             else if (!string.IsNullOrEmpty(result.NzbUrl))
-                                result.Format = "NZB";
+                                result.DownloadType = "nzb";
 
                             _logger.LogDebug("MyAnonamouse parsed item #{Index} link-disposition: magnet={MagnetPresent}, torrent={TorrentPresent}, nzb={NzbPresent}", _mamDebugIndex, !string.IsNullOrEmpty(result.MagnetLink), !string.IsNullOrEmpty(result.TorrentUrl), !string.IsNullOrEmpty(result.NzbUrl));
                         }
@@ -2896,7 +3089,6 @@ namespace Listenarr.Api.Services
 
                         // Prefer explicit language fields when present (lang_code, language_code, lang, language) - case-insensitive search
                         string explicitLang = string.Empty;
-                        string rawLangCode = string.Empty; // preserve raw code for flags
                         foreach (var prop in item.EnumerateObject())
                         {
                             if ((prop.Name.Equals("lang_code", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("language_code", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("lang", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("language", StringComparison.OrdinalIgnoreCase)) && prop.Value.ValueKind == JsonValueKind.String)
@@ -2918,9 +3110,14 @@ namespace Listenarr.Api.Services
 
                         if (!string.IsNullOrWhiteSpace(explicitLang))
                         {
-                            var parsed = ParseLanguageFromText(explicitLang);
-                            if (!string.IsNullOrWhiteSpace(parsed))
-                                result.Language = parsed;
+                            // Prefer direct code mapping (e.g., ENG -> English) when a short code is provided
+                            var parsedLang = ParseLanguageFromCode(explicitLang) ?? ParseLanguageFromText(explicitLang);
+                            if (!string.IsNullOrWhiteSpace(parsedLang))
+                            {
+                                result.Language = parsedLang;
+                                // store normalized code for flags
+                                rawLangCode = explicitLang.ToUpperInvariant();
+                            }
                         }
 
                         // Fallback: parse title, tags and description for language codes (e.g. '[ENG / M4B]')
@@ -3142,11 +3339,24 @@ namespace Listenarr.Api.Services
                         }
                         
                         var grabs = 0;
-                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count" };
+                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count", "times_completed", "time_completed", "downloaded", "times_downloaded", "completed" };
                         foreach (var key in grabKeys)
                         {
-                            grabs = detail.GetPropertyOrDefault(key, 0);
-                            if (grabs > 0) break;
+                            if (detail.TryGetProperty(key, out var gEl))
+                            {
+                                if (gEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                {
+                                    grabs = gEl.GetInt32();
+                                    _logger.LogDebug("Enrichment: found grabs field '{Field}'={Value} for {Id}", key, grabs, r.Id);
+                                    break;
+                                }
+                                else if (gEl.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(gEl.GetString(), out var gtmp))
+                                {
+                                    grabs = gtmp;
+                                    _logger.LogDebug("Enrichment: parsed grabs (string) field '{Field}'={Value} for {Id}", key, grabs, r.Id);
+                                    break;
+                                }
+                            }
                         }
                         var files = detail.GetPropertyOrDefault("files", 0);
                         var format = detail.GetPropertyOrDefault("filetype", "");

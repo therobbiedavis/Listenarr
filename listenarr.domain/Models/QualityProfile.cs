@@ -145,6 +145,11 @@ namespace Listenarr.Domain.Models
         public int TotalScore { get; set; }
         public Dictionary<string, int> ScoreBreakdown { get; set; } = new();
         public List<string> RejectionReasons { get; set; } = new();
+
+        // Prowlarr-style composite smart scoring (optional)
+        public double SmartScore { get; set; }
+        public Dictionary<string, int> SmartScoreBreakdown { get; set; } = new();
+
         public bool IsRejected => RejectionReasons.Count > 0;
     }
 }

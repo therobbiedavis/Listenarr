@@ -60,5 +60,42 @@ namespace Listenarr.Api.Tests
             var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
             Assert.Null(sr.Language);
         }
+
+        [Fact]
+        public void ToSearchResult_DoesNot_Preserve_Unknown_Language_From_Metadata()
+        {
+            var md = new MetadataSearchResult
+            {
+                Id = "m1",
+                Title = "Metadata Title",
+                Language = "Unknown",
+                Source = "Audible",
+                PublishYear = "2020"
+            };
+
+            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(md);
+            Assert.Null(sr.Language);
+        }
+
+        [Fact]
+        public void ToSearchResult_DoesNot_Preserve_Unknown_Quality_From_Indexer()
+        {
+            var idx = new IndexerSearchResult
+            {
+                Id = "i1",
+                Title = "Quality Test",
+                Size = 1000,
+                Seeders = 10,
+                Leechers = 2,
+                Quality = "Unknown",
+                Grabs = 0,
+                Files = 0,
+                DownloadType = "Torrent",
+                Source = "test"
+            };
+
+            var sr = Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(idx);
+            Assert.Null(sr.Quality);
+        }
     }
 }

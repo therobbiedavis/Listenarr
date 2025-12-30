@@ -403,6 +403,65 @@ namespace Listenarr.Api.Tests
             Assert.Equal("English", r.Language);
             Assert.Equal("Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP]", r.Title);
         }
+
+        [Fact]
+        public void ParseMyAnonamouse_Exposes_Filetype_And_Lang_In_DTO()
+        {
+            var json = @"[
+  {
+    ""guid"": ""https://www.myanonamouse.net/t/600"",
+    ""title"": ""Frank Herbert - Collection by Frank Herbert"",
+    ""filetype"": ""mp3"",
+    ""lang_code"": ""ENG"",
+    ""vip"": true,
+    ""fileName"": ""Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP].torrent""
+  }
+]";
+
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+            // Use reflection to call the private parser
+            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
+
+            Assert.Single(results);
+            var r = results[0];
+
+            var dto = Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r);
+            Assert.Equal("MP3", dto.FileType);
+            Assert.Equal("English", dto.Language);
+        }
+
+        [Fact]
+        public void ParseMyAnonamouse_Preserves_Filetype_When_Torrent_Urls_Present()
+        {
+            var json = @"[
+  {
+    ""guid"": ""https://www.myanonamouse.net/t/601"",
+    ""title"": ""Torrent With Filetype"",
+    ""filetype"": ""mp3"",
+    ""hash"": ""abcdef1234567890"",
+    ""fileName"": ""Torrent With Filetype [ENG / MP3].torrent""
+  }
+]";
+
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
+
+            Assert.Single(results);
+            var r = results[0];
+
+            Assert.Equal("MP3", r.Format);
+            Assert.Equal("Torrent", r.DownloadType);
+
+            var dto = Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r);
+            Assert.Equal("MP3", dto.FileType);
+            Assert.Equal("torrent", dto.Protocol);
+        }
         [Fact]
         public async Task EnrichMyAnonamouse_Populates_Fields_When_Enabled()
         {
@@ -426,7 +485,8 @@ namespace Listenarr.Api.Tests
                 }
                 else if (path.Contains("loadTorrentJSONBasic.php"))
                 {
-                    var detailJson = "{ \"grabs\": 15, \"files\": 4, \"filetype\": \"mp3\", \"lang_code\": \"ENG\" }";
+                    // MyAnonamouse can expose the completed/snatches count as 'time_completed'
+                    var detailJson = "{ \"time_completed\": 15, \"files\": 4, \"filetype\": \"mp3\", \"lang_code\": \"ENG\" }";
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(detailJson, System.Text.Encoding.UTF8, "application/json") };
                 }
                 return new HttpResponseMessage(HttpStatusCode.NotFound);

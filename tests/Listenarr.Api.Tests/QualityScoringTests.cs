@@ -78,6 +78,12 @@ namespace Listenarr.Api.Tests
             Assert.Equal(65, score.ScoreBreakdown["Quality"]);
             Assert.Equal(-10, score.ScoreBreakdown["Language"]);
             Assert.Equal(-8, score.ScoreBreakdown["Format"]);
+
+            // Smart composite should be present and contain expected breakdown keys
+            Assert.True(score.SmartScore > 0);
+            Assert.True(score.SmartScoreBreakdown.ContainsKey("Quality"));
+            Assert.True(score.SmartScoreBreakdown.ContainsKey("Format"));
+            Assert.True(score.SmartScoreBreakdown.ContainsKey("Seed"));
         }
     }
 }

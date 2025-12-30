@@ -116,7 +116,7 @@
                 >
                   {{ format }}
                   <button type="button" @click="removeFormat(index)" class="tag-remove">
-                    <i class="ph ph-x"></i>
+                    <PhX />
                   </button>
                 </div>
               </div>
@@ -186,7 +186,7 @@
                   >
                     {{ word }}
                     <button type="button" @click="removePreferredWord(index)" class="tag-remove">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                     </button>
                   </div>
                 </div>
@@ -220,7 +220,7 @@
                   >
                     {{ word }}
                     <button type="button" @click="removeMustContain(index)" class="tag-remove">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                     </button>
                   </div>
                 </div>
@@ -254,7 +254,7 @@
                   >
                     {{ word }}
                     <button type="button" @click="removeMustNotContain(index)" class="tag-remove">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                     </button>
                   </div>
                 </div>
@@ -290,7 +290,7 @@
                 >
                   {{ lang }}
                   <button type="button" @click="removeLanguage(index)" class="tag-remove">
-                    <i class="ph ph-x"></i>
+                    <PhX />
                   </button>
                 </div>
               </div>
@@ -373,6 +373,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { PhX } from '@phosphor-icons/vue'
 import type { QualityProfile } from '@/types'
 
 const props = defineProps<{

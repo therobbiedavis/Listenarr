@@ -194,6 +194,12 @@ namespace Listenarr.Domain.Models
         public int? Leechers { get; set; }
         public string? Protocol { get; set; }
         public string? FileName { get; set; }
+        // Filetype as provided/derived from indexer (e.g., MP3, M4B)
+        [System.Text.Json.Serialization.JsonPropertyName("filetype")]
+        public string? FileType { get; set; }
+        // Language code or parsed language (lang_code / ENG -> English)
+        [System.Text.Json.Serialization.JsonPropertyName("lang_code")]
+        public string? Language { get; set; }
     }
 
     /// <summary>
@@ -222,6 +228,24 @@ namespace Listenarr.Domain.Models
             if (System.Text.RegularExpressions.Regex.IsMatch(t, "\\b(GER|DE)\\b")) return "German";
             if (System.Text.RegularExpressions.Regex.IsMatch(t, "\\b(DUT|NL)\\b")) return "Dutch";
             return null;
+        }
+
+        // Normalize language tokens that should be treated as absent (e.g., unknown)
+        private static string? NormalizeLanguage(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var v = value.Trim();
+            if (string.Equals(v, "unknown", StringComparison.OrdinalIgnoreCase)) return null;
+            return v;
+        }
+
+        // Normalize quality tokens that should be treated as absent (e.g., unknown)
+        private static string? NormalizeQuality(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var v = value.Trim();
+            if (string.Equals(v, "unknown", StringComparison.OrdinalIgnoreCase)) return null;
+            return v;
         }
 
         public static MetadataSearchResult ToMetadata(SearchResult result)
@@ -276,11 +300,11 @@ namespace Listenarr.Domain.Models
                 TorrentUrl = result.TorrentUrl,
                 NzbUrl = result.NzbUrl,
                 DownloadType = result.DownloadType,
-                // Only set quality when it was actually parsed / non-empty
-                Quality = string.IsNullOrWhiteSpace(result.Quality) ? null : result.Quality,
-                // Preserve parsed language from indexer responses (e.g., MyAnonamouse); leave null if not available.
+                // Only set quality when it was actually parsed / non-empty; treat 'unknown' as absent
+                Quality = NormalizeQuality(result.Quality),
+                // Preserve parsed language from indexer responses (e.g., MyAnonamouse); normalize empty/unknown values and leave null if not available.
                 // Only attempt lightweight detection for Torrent results; do not infer language for Usenet/DDL results.
-                Language = !string.IsNullOrWhiteSpace(result.Language) ? result.Language : (string.Equals(result.DownloadType, "Torrent", System.StringComparison.OrdinalIgnoreCase) ? DetectLanguageFromText(result.Title + " " + (result.Description ?? string.Empty)) : null),
+                Language = NormalizeLanguage(result.Language) ?? (string.Equals(result.DownloadType, "Torrent", System.StringComparison.OrdinalIgnoreCase) ? DetectLanguageFromText(result.Title + " " + (result.Description ?? string.Empty)) : null),
                 ResultUrl = result.ResultUrl,
                 Grabs = result.Grabs,
                 Files = result.Files
@@ -334,7 +358,9 @@ namespace Listenarr.Domain.Models
                 Seeders = result.Seeders,
                 Leechers = result.Leechers,
                 Protocol = !string.IsNullOrWhiteSpace(result.DownloadType) ? result.DownloadType.ToLowerInvariant() : null,
-                FileName = result.TorrentFileName
+                FileName = result.TorrentFileName,
+                FileType = string.IsNullOrWhiteSpace(result.Format) ? null : result.Format,
+                Language = NormalizeLanguage(result.Language)
             };
 
             // Derive age fields from publishDate if available
@@ -378,7 +404,8 @@ namespace Listenarr.Domain.Models
                 Description = result.Description,
                 Subtitle = result.Subtitle,
                 Publisher = result.Publisher,
-                Language = result.Language,
+                // Normalize language tokens (e.g., "unknown") to null so UI doesn't render 'Unknown'
+                Language = NormalizeLanguage(result.Language),
                 Runtime = result.Runtime,
                 Narrator = result.Narrator,
                 ImageUrl = result.ImageUrl,

@@ -529,9 +529,12 @@ export interface QualityScore {
   scoreBreakdown: Record<string, number>
   rejectionReasons: string[]
   isRejected: boolean
+  // Optional Prowlarr-style composite smart score and breakdown
+  smartScore?: number
+  smartScoreBreakdown?: Record<string, number>
 }
 
-export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Source' | 'Quality'
+export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Source' | 'Language' | 'Quality' | 'Grabs' 
 
 export type SearchSortDirection = 'Ascending' | 'Descending'
 

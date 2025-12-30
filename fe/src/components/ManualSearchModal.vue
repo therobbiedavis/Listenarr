@@ -112,8 +112,18 @@
                       <component :is="getSortIcon('Seeders')" class="sort-icon" />
                     </span>
                   </th>
-                  <th class="col-grabs">Grabs</th>
-                  <th v-if="anyHasLanguage" class="col-language">Languages</th>
+                  <th class="col-grabs sortable" @click="setSort('Grabs')">
+                    <span class="header-content">
+                      Grabs
+                      <component :is="getSortIcon('Grabs')" class="sort-icon" />
+                    </span>
+                  </th>
+                  <th v-if="anyHasLanguage" class="col-language sortable" @click="setSort('Language')">
+                    <span class="header-content">
+                      Languages
+                      <component :is="getSortIcon('Language')" class="sort-icon" />
+                    </span>
+                  </th>
                   <th v-if="anyHasQuality" class="col-quality sortable" @click="setSort('Quality')">
                     <span class="header-content">
                       Quality
@@ -177,13 +187,19 @@
                     <span v-else class="grabs unknown">-</span>
                   </td>
                   <td v-if="anyHasLanguage" class="col-language">
-                    <span v-if="result.language" class="language-badge">
-                      {{ result.language }}
+                    <span v-if="normalizeLanguage(result.language)" class="language-badge">
+                      {{ normalizeLanguage(result.language) }}
                     </span>
                   </td>
                   <td v-if="anyHasQuality" class="col-quality">
                     <span v-if="result.quality" class="quality-badge">
                       {{ result.quality }}
+                      <template v-if="shouldShowFormatFallback(result)">
+                        <small class="format-fallback"> · {{ result.format }}</small>
+                      </template>
+                    </span>
+                    <span v-else-if="result.format" class="quality-badge format-only">
+                      {{ result.format }}
                     </span>
                   </td>
                   <td class="col-score">
@@ -198,8 +214,8 @@
                             <PhXCircle />
                             Rejected
                           </span>
-                          <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
-                            {{ getResultScore(result.id)?.totalScore }}
+                          <span v-else :class="['score-badge', getVisibleScoreClass(result.id)]">
+                            {{ getVisibleScoreValue(result.id) ?? '-' }}
                           </span>
                         </template>
                       </ScorePopover>
@@ -237,7 +253,7 @@ import { PhMagnifyingGlass, PhX, PhSpinner, PhArrowClockwise, PhArrowUp, PhArrow
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
-import { getScoreBreakdownTooltip } from '@/composables/useScore'
+import { getScoreBreakdownTooltip, computeNormalizedSmart } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
 import { safeText } from '@/utils/textUtils'
 
@@ -288,13 +304,15 @@ const displayResults = computed(() => {
     const rejectedB = Boolean(qb?.isRejected)
     if (rejectedA !== rejectedB) return rejectedA ? 1 : -1
 
-    const hasA = typeof qa?.totalScore === 'number'
-    const hasB = typeof qb?.totalScore === 'number'
+    // Use the visible score (what the UI shows) for sorting so order matches display
+    const scoreA = getVisibleScoreValue(a.id)
+    const scoreB = getVisibleScoreValue(b.id)
+
+    const hasA = typeof scoreA === 'number'
+    const hasB = typeof scoreB === 'number'
     if (hasA !== hasB) return hasA ? -1 : 1
     if (!hasA && !hasB) return 0
 
-    const scoreA = qa!.totalScore
-    const scoreB = qb!.totalScore
     if (scoreA === scoreB) return 0
     return asc ? (scoreA - scoreB) : (scoreB - scoreA)
   })
@@ -302,8 +320,27 @@ const displayResults = computed(() => {
 })
 
 const anyHasPeers = computed(() => displayResults.value.some(r => r.seeders !== undefined && r.seeders !== null))
-const anyHasLanguage = computed(() => displayResults.value.some(r => !!r.language))
-const anyHasQuality = computed(() => displayResults.value.some(r => !!r.quality))
+const anyHasLanguage = computed(() => displayResults.value.some(r => !!normalizeLanguage(r.language)))
+
+// Normalize language values from DTOs/indexers: treat explicit 'unknown' strings as absent
+const normalizeLanguage = (value?: string | null): string | undefined => {
+  if (!value) return undefined
+  const v = value.toString().trim()
+  if (v.length === 0) return undefined
+  if (v.toLowerCase() === 'unknown') return undefined
+  return v
+}
+const anyHasQuality = computed(() => displayResults.value.some(r => !!r.quality || !!r.format))
+
+function shouldShowFormatFallback(result: SearchResult): boolean {
+  if (!result) return false
+  const fmt = (result.format || '').toString().toLowerCase().trim()
+  const qual = (result.quality || '').toString().toLowerCase().trim()
+  if (!fmt) return false
+  if (!qual) return true
+  // Only show fallback when format token isn't already included in quality
+  return !qual.includes(fmt)
+}
 
 function setSort(column: SearchSortBy | 'Score') {
   if (sortBy.value === column) {
@@ -429,7 +466,7 @@ async function search() {
             publisher: undefined,
             subtitle: undefined,
             publishYear: undefined,
-            language: dto.language ?? dto.lang_code ?? dto.languageCode ?? undefined,
+            language: normalizeLanguage(dto.language ?? dto.lang_code ?? dto.languageCode),
             runtime: undefined,
             narrator: undefined,
             imageUrl: undefined,
@@ -446,7 +483,8 @@ async function search() {
             source: dto.indexer ?? indexer.name,
             sourceLink: dto.infoUrl ?? dto.guid ?? '',
             publishedDate: dto.publishDate ?? dto.added ?? dto.publish_date ?? '',
-            format: dto.protocol ?? '',
+            // Use filetype when available (MP3/M4B/etc), fallback to protocol (torrent/nzb)
+            format: dto.filetype ?? dto.protocol ?? '',
             score: 0
           }))
         } else {
@@ -454,6 +492,8 @@ async function search() {
           normalized = (indexerResultsRaw as SearchResult[])
         }
 
+        // Normalize any 'unknown' language tokens to undefined so Usenet/DDL results don't show 'Unknown' in UI
+        normalized.forEach(r => { r.language = normalizeLanguage((r as any).language) })
         allResults.push(...normalized)
         searchedIndexers.value++
       } catch (error) {
@@ -475,6 +515,10 @@ async function search() {
             return sortDirection.value === 'Ascending' 
               ? (a.seeders ?? 0) - (b.seeders ?? 0)
               : (b.seeders ?? 0) - (a.seeders ?? 0)
+          case 'Grabs':
+            return sortDirection.value === 'Ascending'
+              ? (a.grabs ?? 0) - (b.grabs ?? 0)
+              : (b.grabs ?? 0) - (a.grabs ?? 0)
           case 'Size':
             return sortDirection.value === 'Ascending' 
               ? a.size - b.size 
@@ -491,6 +535,11 @@ async function search() {
             return sortDirection.value === 'Ascending' 
               ? a.source.localeCompare(b.source) 
               : b.source.localeCompare(a.source)
+          case 'Language':
+            // Normalize undefined/unknown languages to empty string for comparison
+            return sortDirection.value === 'Ascending'
+              ? (a.language ?? '').localeCompare(b.language ?? '')
+              : (b.language ?? '').localeCompare(a.language ?? '')
           case 'Quality':
             return sortDirection.value === 'Ascending' 
               ? (a.quality ?? '').localeCompare(b.quality ?? '') 
@@ -680,25 +729,75 @@ function formatSize(bytes: number): string {
 }
 
 function getResultScore(resultId: string): QualityScore | undefined {
-  return qualityScores.value.get(resultId)
+  // Support both runtime shapes (ref<Map>) and test runner proxied Map (unwrapped)
+  const qsRef: any = qualityScores
+  if (qsRef && qsRef.value && typeof qsRef.value.get === 'function') {
+    return qsRef.value.get(resultId)
+  }
+  if (qsRef && typeof qsRef.get === 'function') {
+    return qsRef.get(resultId)
+  }
+  return undefined
+}
+
+// Visible score value for the UI: prefer smartScore when available
+function getVisibleScoreValue(resultId: string): number | undefined {
+  const q = getResultScore(resultId)
+  if (!q) return undefined
+
+  // Prefer breakdown-based normalized total when available
+  if (q.smartScoreBreakdown && Object.keys(q.smartScoreBreakdown).length > 0) {
+    return computeNormalizedSmart(q.smartScoreBreakdown).total
+  }
+
+  // Fallback to smartScore numeric normalization
+  if (typeof q.smartScore === 'number' && !isNaN(q.smartScore)) {
+    // smartScore may be provided as fraction (0..1) or percentage (0..100). Normalize to 0..100.
+    let ss = q.smartScore
+    if (ss <= 1) ss = ss * 100
+    return Math.round(Math.min(100, ss))
+  }
+
+  if (typeof q.totalScore === 'number') return q.totalScore
+  return undefined
+}
+
+function getVisibleScoreClass(resultId: string): string {
+  const val = getVisibleScoreValue(resultId) ?? 0
+  return getScoreClass(val)
 }
 
 // Return the best available external link for a search result
 function getResultLink(result: SearchResult): string | undefined {
   if (!result) return undefined
   const r = result as unknown as Record<string, unknown>
-  if (typeof r.resultUrl === 'string') return r.resultUrl
+  const src = getSourceType(result)
+
+  if (src === 'nzb' || src === 'usenet') {
+    // For Usenet results prefer the ID URL if it is a URL (some indexers populate guid as an informational link),
+    // otherwise fall back to the indexer/details page (resultUrl / sourceLink / productUrl) before the NZB download.
+    if (typeof r.id === 'string' && /^(https?:)?\/\//.test(r.id)) return r.id as string
+    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
+    if (result.productUrl) return result.productUrl
+    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0) return r.sourceLink as string
+    if (result.nzbUrl) return result.nzbUrl
+    return undefined
+  }
+
+  // Torrent / DDL fallback behavior
+  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
   if (result.magnetLink) return result.magnetLink
   return undefined
-}
+} 
 
 function getScoreClass(score: number): string {
-  if (score >= 80) return 'excellent'
-  if (score >= 60) return 'good'
-  if (score >= 40) return 'fair'
+  const s = score
+  if (s >= 80) return 'excellent'
+  if (s >= 60) return 'good'
+  if (s >= 40) return 'fair'
   return 'poor'
 }
 

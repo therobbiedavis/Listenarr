@@ -3,16 +3,7 @@
  * Copyright (C) 2024-2025 Robbie Davis
  * 
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero Gen            // Check age limit
-            if (profile.MaximumAge > 0 && result.PublishedDate != default(DateTime))
-            {
-                var ageInDays = (DateTime.Now - result.PublishedDate).TotalDays;
-                if (ageInDays > profile.MaximumAge)
-                {
-                    score.RejectionReasons.Add($"Too old ({ageInDays:F0} days > {profile.MaximumAge} days)");
-                    return score;
-                }
-            }c License as published
+ * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
@@ -258,322 +249,34 @@ namespace Listenarr.Api.Services
             }
         }
 
-        public Task<QualityScore> ScoreSearchResult(SearchResult searchResult, QualityProfile profile)
+        public async Task<QualityScore> ScoreSearchResult(SearchResult searchResult, QualityProfile profile)
         {
-            var score = new QualityScore
-            {
-                SearchResult = searchResult,
-                TotalScore = 100, // start at 100
-                ScoreBreakdown = new Dictionary<string, int>(),
-                RejectionReasons = new List<string>()
-            };
+            var scorer = new Scoring.SearchResultScorer(_dbContext, _logger);
+            var score = await scorer.Score(searchResult, profile);
 
-            // Instant rejection: must-not-contain (forbidden words)
-            foreach (var forbidden in profile.MustNotContain)
+            // Also calculate the Prowlarr-style composite (Smart) score so the UI
+            // can display the same composite ranking details used for Smart sorting.
+            try
             {
-                if (!string.IsNullOrEmpty(forbidden) &&
-                    searchResult.Title.Contains(forbidden, StringComparison.OrdinalIgnoreCase))
-                {
-                    score.RejectionReasons.Add($"Contains forbidden word: '{forbidden}'");
-                    score.TotalScore = -1; // negative value to indicate rejection (lowest)
-                    return Task.FromResult(score);
-                }
+                var composite = Scoring.CompositeScorer.CalculateProwlarrStyleScore(searchResult, null, _logger);
+                score.SmartScore = composite.Total;
+                score.SmartScoreBreakdown = composite.Breakdown.ToDictionary(kv => kv.Key, kv => (int)Math.Round(kv.Value));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to compute composite smart score for search result {Id}", searchResult.Id);
             }
 
-            // Instant rejection: required words not present
-            foreach (var required in profile.MustContain)
-            {
-                if (!string.IsNullOrEmpty(required) &&
-                    !searchResult.Title.Contains(required, StringComparison.OrdinalIgnoreCase))
-                {
-                    score.RejectionReasons.Add($"Missing required word: '{required}'");
-                    score.TotalScore = -1;
-                    return Task.FromResult(score);
-                }
-            }
-
-            // Detect NZB/Usenet results - for NZB indexers we should not factor quality or age into scoring
-            var isNzb = !string.IsNullOrEmpty(searchResult.NzbUrl) ||
-                         string.Equals(searchResult.DownloadType, "nzb", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(searchResult.DownloadType, "usenet", StringComparison.OrdinalIgnoreCase);
-
-            // Size checks: reject if outside hard limits (skip for NZB/Usenet indexer results)
-            if (!isNzb && searchResult.Size > 0)
-            {
-                if (profile.MinimumSize > 0 && searchResult.Size < profile.MinimumSize * 1024 * 1024)
-                {
-                    score.RejectionReasons.Add($"File too small (< {profile.MinimumSize} MB)");
-                    score.TotalScore = -1;
-                    return Task.FromResult(score);
-                }
-
-                if (profile.MaximumSize > 0 && searchResult.Size > profile.MaximumSize * 1024 * 1024)
-                {
-                    score.RejectionReasons.Add($"File too large (> {profile.MaximumSize} MB)");
-                    score.TotalScore = -1;
-                    return Task.FromResult(score);
-                }
-            }
-
-            // Seeders hard requirement for torrents
-            if (searchResult.DownloadType == "torrent" && searchResult.Seeders < profile.MinimumSeeders)
-            {
-                score.RejectionReasons.Add($"Not enough seeders ({searchResult.Seeders} < {profile.MinimumSeeders})");
-                score.TotalScore = -1;
-                return Task.FromResult(score);
-            }
+            return score;
+        }
 
 
-            // Age hard limit
-            double ageDays = 0;
-            if (!string.IsNullOrEmpty(searchResult.PublishedDate) && DateTime.TryParse(searchResult.PublishedDate, out var publishDate))
-            {
-                ageDays = (DateTime.UtcNow - publishDate).TotalDays;
-                // Apply maximum-age rejection only for non-NZB results (NZB retention/age should be handled in indexer config)
-                if (!isNzb && profile.MaximumAge > 0 && ageDays > profile.MaximumAge)
-                {
-                    score.RejectionReasons.Add($"Too old ({(int)ageDays} days > {profile.MaximumAge} days)");
-                    score.TotalScore = -1;
-                    return Task.FromResult(score);
-                }
-            }
-
-            // Unknown size penalty (when profile has size requirements) - skip for NZB
-            if (!isNzb && searchResult.Size <= 0 && (profile.MinimumSize > 0 || profile.MaximumSize > 0))
-            {
-                var sizePenalty = -20;
-                score.TotalScore += sizePenalty;
-                score.ScoreBreakdown["Size"] = sizePenalty;
-            }
-
-            // Prepare titleLower for potential detection
-            var titleLower = (searchResult.Title ?? string.Empty).ToLower();
-
-            // For NZB results, attempt to detect language from the title *before* applying language penalties
-            if (isNzb && string.IsNullOrEmpty(searchResult.Language) && HasPreferredLanguages(profile))
-            {
-                var detectedLang = DetectLanguageFromTitle(titleLower, profile.PreferredLanguages);
-                if (!string.IsNullOrEmpty(detectedLang))
-                {
-                    searchResult.Language = detectedLang;
-                    _logger.LogDebug("Detected language from NZB title: {Language} for title '{Title}'", detectedLang, searchResult.Title);
-                }
-            }
-
-            // Language: missing or mismatched
-            if (HasPreferredLanguages(profile))
-            {
-                if (string.IsNullOrEmpty(searchResult.Language))
-                {
-                    var langPenalty = -10;
-                    score.TotalScore += langPenalty;
-                    score.ScoreBreakdown["Language"] = langPenalty;
-                }
-                else
-                {
-                    var matches = profile.PreferredLanguages.Any(l => searchResult.Language.Equals(l, StringComparison.OrdinalIgnoreCase));
-                    if (!matches)
-                    {
-                        var langMismatchPenalty = -15;
-                        score.TotalScore += langMismatchPenalty;
-                        score.ScoreBreakdown["LanguageMismatch"] = langMismatchPenalty;
-                    }
-                }
-            }
-
-            // Format: missing or mismatched
             // For NZB indexers we may be able to detect format and language from the title when not provided
             // If NZB and format is missing, attempt to detect a format token in the title
-            if (isNzb && string.IsNullOrEmpty(searchResult.Format) && HasPreferredFormats(profile))
-            {
-                var detectedFormat = DetectFormatFromTitle(titleLower, profile.PreferredFormats);
-                if (!string.IsNullOrEmpty(detectedFormat))
-                {
-                    searchResult.Format = detectedFormat; // annotate result so subsequent checks can see it
-                    // award a small bonus and record detection source
-                    var titleFormatBonus = 1;
-                    score.TotalScore += titleFormatBonus;
-                    score.ScoreBreakdown["FormatMatchedInTitle"] = titleFormatBonus;
-                    _logger.LogDebug("Detected format from NZB title: {Format} for title '{Title}'", detectedFormat, searchResult.Title);
-                }
-            }
-            if (HasPreferredFormats(profile))
-            {
-                if (string.IsNullOrEmpty(searchResult.Format))
-                {
-                    var formatPenalty = -8;
-                    score.TotalScore += formatPenalty;
-                    score.ScoreBreakdown["Format"] = formatPenalty;
-                }
-                else
-                {
-                    // Make format matching more robust:
-                    // - Check if any preferred token appears in the reported format string
-                    // - Or appears in the detected quality token (e.g. Quality="M4B")
-                    // - Or appears as a file extension or token in the torrent/DDL URL or source
-                    var formatMatches = false;
-                    var formatLower = (searchResult.Format ?? string.Empty).ToLower();
-                    var qualityLower = (searchResult.Quality ?? string.Empty).ToLower();
-                    var urlLower = (searchResult.TorrentUrl ?? searchResult.Source ?? string.Empty).ToLower();
+            
 
-                    foreach (var f in profile.PreferredFormats)
-                    {
-                        if (string.IsNullOrWhiteSpace(f)) continue;
-                        var token = f.ToLower().Trim();
 
-                        if (formatLower.Contains(token) || qualityLower.Contains(token))
-                        {
-                            formatMatches = true;
-                            if (formatLower.Contains(token))
-                            {
-                                score.ScoreBreakdown["FormatMatchedInFormat"] = 1;
-                                score.TotalScore += 1; // credit for matching format
-                            }
-                            if (qualityLower.Contains(token))
-                            {
-                                score.ScoreBreakdown["FormatMatchedInQuality"] = 1;
-                                score.TotalScore += 1; // credit for matching quality token
-                            }
-                            break;
-                        }
 
-                        // check url for ".{token}" extension or token inside url (e.g., ".m4b" or "m4b")
-                        if (!string.IsNullOrEmpty(urlLower) && (urlLower.Contains("." + token) || urlLower.Contains(token)))
-                        {
-                            formatMatches = true;
-                            score.ScoreBreakdown["FormatMatchedInUrl"] = 1;
-                            score.TotalScore += 1; // credit for matching token in URL/source
-                            break;
-                        }
-                        // also check title tokens (helpful for NZB results which often encode format in title)
-                        if (!formatMatches && !string.IsNullOrEmpty(titleLower) && titleLower.Contains(token))
-                        {
-                            formatMatches = true;
-                            score.ScoreBreakdown["FormatMatchedInTitle"] = 1;
-                            score.TotalScore += 1; // credit for matching token in Title
-                            break;
-                        }
-                    }
-
-                    if (!formatMatches)
-                    {
-                        var formatMismatchPenalty = -12;
-                        score.TotalScore += formatMismatchPenalty;
-                        score.ScoreBreakdown["FormatMismatch"] = formatMismatchPenalty;
-                    }
-                }
-            }
-
-            // Quality: if missing, apply flat penalty; else deduct based on distance from perfect
-            // For NZB/Usenet indexers we intentionally ignore quality as it is often not provided by indexers
-            // For NZB/Usenet indexers we intentionally ignore quality as it is often not provided by indexers
-            if (!isNzb)
-                if (string.IsNullOrEmpty(searchResult.Quality))
-                {
-                    var missingQualityPenalty = -25;
-                    score.TotalScore += missingQualityPenalty;
-                    score.ScoreBreakdown["QualityMissing"] = missingQualityPenalty;
-                }
-                else
-                {
-                    int qualityScore = GetQualityScore(searchResult.Quality);
-                    var qualityDeduction = 100 - qualityScore; // how far from perfect
-                    score.TotalScore -= qualityDeduction;
-                    // Record the raw quality score (positive) so callers can reason about "what quality was detected"
-                    score.ScoreBreakdown["Quality"] = qualityScore;
-                    _logger.LogDebug("Quality scored using GetQualityScore: SearchResult.Quality='{SearchQuality}' => {Score}", searchResult.Quality, qualityScore);
-
-                    // If quality not allowed by profile, add a deduction note (but don't auto-reject here)
-                    if (profile.Qualities != null && profile.Qualities.Count > 0)
-                    {
-                        // Build allowed qualities from explicit Quality definitions
-                        var allowedQualities = profile.Qualities.Where(q => q.Allowed).Select(q => (q.Quality ?? string.Empty).ToLower()).ToList();
-
-                        // Also include any PreferredFormats (e.g., "m4b") as allowed tokens so formats configured
-                        // in PreferredFormats are not incorrectly rejected when they aren't present in Qualities.
-                        if (profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
-                        {
-                            foreach (var fmt in profile.PreferredFormats)
-                            {
-                                var f = (fmt ?? string.Empty).Trim().ToLower();
-                                if (!string.IsNullOrEmpty(f) && !allowedQualities.Contains(f))
-                                    allowedQualities.Add(f);
-                            }
-                        }
-
-                        // Match allowed qualities robustly: either the search quality contains a known allowed token
-                        // or an allowed quality string contains the detected quality token (handles numeric-only tokens like "320").
-                        var detectedQualityLower = (searchResult.Quality ?? string.Empty).ToLower();
-                        if (!allowedQualities.Any(q => detectedQualityLower.Contains(q) || q.Contains(detectedQualityLower)))
-                        {
-                            var notAllowedPenalty = -20;
-                            score.TotalScore += notAllowedPenalty; // deduct further
-                            score.ScoreBreakdown["QualityNotAllowed"] = notAllowedPenalty;
-                            score.RejectionReasons.Add($"Quality '{searchResult.Quality}' not allowed by profile");
-                        }
-                    }
-                }
-
-            // Preferred words: small bonus per preferred word found
-            if (profile.PreferredWords != null && profile.PreferredWords.Count > 0)
-            {
-                var bonus = 0;
-                foreach (var word in profile.PreferredWords)
-                {
-                    if (!string.IsNullOrWhiteSpace(word) && (searchResult.Title ?? string.Empty).Contains(word, StringComparison.OrdinalIgnoreCase))
-                    {
-                        bonus += 5;
-                    }
-                }
-                if (bonus != 0)
-                {
-                    score.TotalScore += bonus;
-                    score.ScoreBreakdown["PreferredWords"] = bonus;
-                }
-            }
-
-            // Seeders small bonus
-            if ((searchResult.Seeders ?? 0) > 0)
-            {
-                var seedersBonus = Math.Min(10, searchResult.Seeders ?? 0);
-                if (seedersBonus > 0)
-                {
-                    score.TotalScore += seedersBonus;
-                    score.ScoreBreakdown["Seeders"] = seedersBonus;
-                }
-            }
-
-            // Age penalty: 2 points per month (30 days), capped at 60
-            // Skip age penalties for NZB results - retention and age filtering should be handled by indexer settings
-            if (!isNzb && ageDays > 0)
-            {
-                var agePenalty = (int)Math.Floor(ageDays / 30.0) * 2;
-                agePenalty = Math.Min(agePenalty, 60);
-                if (agePenalty > 0)
-                {
-                    score.TotalScore -= agePenalty;
-                    score.ScoreBreakdown["Age"] = -agePenalty;
-                }
-            }
-
-            // If the computed total is less than or equal to zero, treat this as a rejection
-            // but keep the ScoreBreakdown so the UI can still display the tooltip details.
-            if (score.TotalScore <= 0)
-            {
-                score.RejectionReasons.Add("Computed score <= 0 (rejected)");
-                // Keep the numeric TotalScore (may be <= 0) so the UI can display the computed value.
-                // Sorting will ensure rejected items appear last.
-                return Task.FromResult(score);
-            }
-
-            // Clamp final score between 0 and 100 for non-rejected results
-            // Clamp final score between 0 and 100 for non-rejected results
-            if (!score.IsRejected)
-            {
-                score.TotalScore = Math.Clamp(score.TotalScore, 0, 100);
-            }
-            return Task.FromResult(score);
-        }
 
         // Manual search scoring logic for quality
         private int GetQualityScore(string? quality)
