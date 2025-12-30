@@ -23,12 +23,15 @@ using Listenarr.Api.Hubs;
 using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using HtmlAgilityPack;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Api.Services.Search;
 using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
+using Microsoft.Extensions.Caching.Memory;
+using Listenarr.Api.Extensions;
 
 namespace Listenarr.Api.Services
 {
@@ -57,6 +60,7 @@ namespace Listenarr.Api.Services
         private readonly FallbackScraper _fallbackScraper;
         private readonly SearchResultScorer _searchResultScorer;
         private readonly AsinSearchHandler _asinSearchHandler;
+        private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _cache;
 
         public SearchService(
             HttpClient httpClient,
@@ -81,7 +85,7 @@ namespace Listenarr.Api.Services
             AsinEnricher asinEnricher,
             FallbackScraper fallbackScraper,
             SearchResultScorer searchResultScorer,
-            AsinSearchHandler asinSearchHandler)
+            AsinSearchHandler asinSearchHandler, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -106,6 +110,7 @@ namespace Listenarr.Api.Services
             _fallbackScraper = fallbackScraper;
             _searchResultScorer = searchResultScorer;
             _asinSearchHandler = asinSearchHandler;
+            _cache = cache;
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -266,8 +271,8 @@ namespace Listenarr.Api.Services
             {
                 case SearchSortBy.Seeders:
                     orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Seeders)
-                        : results.OrderBy(r => r.Seeders);
+                        ? results.OrderByDescending(r => r.Seeders ?? 0)
+                        : results.OrderBy(r => r.Seeders ?? 0);
                     break;
 
                 case SearchSortBy.Size:
@@ -302,7 +307,7 @@ namespace Listenarr.Api.Services
 
                 default:
                     // Default to seeders descending
-                    orderedResults = results.OrderByDescending(r => r.Seeders);
+                    orderedResults = results.OrderByDescending(r => r.Seeders ?? 0);
                     break;
             }
 
@@ -372,7 +377,7 @@ namespace Listenarr.Api.Services
             return 0;
         }
 
-        public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null)
         {
             var results = new List<IndexerSearchResult>();
             var indexers = await _dbContext.Indexers
@@ -395,7 +400,19 @@ namespace Listenarr.Api.Services
                 try
                 {
                     _logger.LogInformation("Searching indexer {Name} ({Type}) for query: {Query}", indexer.Name, indexer.Type, query);
-                    var indexerResults = await SearchIndexerAsync(indexer, query, category);
+                    // Apply indexer-level MyAnonamouse options if not provided explicitly on the request
+                    var perIndexerRequest = request;
+                    if (perIndexerRequest?.MyAnonamouse == null)
+                    {
+                        var mam = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
+                        if (mam != null)
+                        {
+                            perIndexerRequest ??= new Listenarr.Api.Models.SearchRequest();
+                            perIndexerRequest.MyAnonamouse = mam;
+                        }
+                    }
+
+                    var indexerResults = await SearchIndexerAsync(indexer, query, category, perIndexerRequest);
                     _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
                     return indexerResults;
                 }
@@ -416,8 +433,8 @@ namespace Listenarr.Api.Services
 
             _logger.LogInformation("Total {Count} results from all indexers for query: {Query}", results.Count, query);
 
-            // Sort by seeders (descending) then by date
-            return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
+            // Sort by seeders (descending) then by date - treat missing/null seeders as 0 so usenet results sort consistently
+            return results.OrderByDescending(r => r.Seeders ?? 0).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
         public async Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, string region = "us", string? language = null, CancellationToken ct = default)
@@ -1762,14 +1779,140 @@ namespace Listenarr.Api.Services
                     return new List<SearchResult>();
                 }
 
-                // Search using the indexer
-                var idxResults = await SearchIndexerAsync(indexer, query, category);
+                // By default, reuse existing SearchIndexerAsync for a SearchResult response
+                var req = new Listenarr.Api.Models.SearchRequest();
+                // If this indexer has MyAnonamouse options encoded in AdditionalSettings, apply them
+                var mamOpts = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
+                if (mamOpts != null) req.MyAnonamouse = mamOpts;
+
+                var idxResults = await SearchIndexerAsync(indexer, query, category, req);
                 return idxResults.Select(r => SearchResultConverters.ToSearchResult(r)).ToList();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
                 return new List<SearchResult>();
+            }
+        }
+
+        public async Task<List<Listenarr.Domain.Models.IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null)
+        {
+            try
+            {
+                Indexer? indexer = null;
+
+                if (int.TryParse(apiId, out var indexerId))
+                {
+                    indexer = await _dbContext.Indexers.FindAsync(indexerId);
+                }
+                else
+                {
+                    indexer = await _dbContext.Indexers
+                        .Where(i => i.Name.Equals(apiId, StringComparison.OrdinalIgnoreCase))
+                        .FirstOrDefaultAsync();
+                }
+
+                if (indexer == null || !indexer.IsEnabled)
+                {
+                    _logger.LogWarning("Indexer not found or disabled for apiId: {ApiId}", apiId);
+                    return new List<Listenarr.Domain.Models.IndexerSearchResult>();
+                }
+
+                // Apply MyAnonamouse options from indexer if not provided explicitly
+                if (request?.MyAnonamouse == null)
+                {
+                    var mam = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
+                    if (mam != null)
+                    {
+                        request ??= new Listenarr.Api.Models.SearchRequest();
+                        request.MyAnonamouse = mam;
+                    }
+                }
+
+                var idxResults = await SearchIndexerAsync(indexer, query, category, request);
+                return idxResults;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
+                return new List<Listenarr.Domain.Models.IndexerSearchResult>();
+            }
+        }
+
+        private Listenarr.Api.Models.MyAnonamouseOptions? ParseMamOptionsFromAdditionalSettings(string? additional)
+        {
+            if (string.IsNullOrWhiteSpace(additional)) return null;
+            try
+            {
+                using var doc = JsonDocument.Parse(additional);
+                var root = doc.RootElement;
+                // Expect either { mam_id: '...', mam_options: { ... } } or { mam_id: '...', ...flat options... }
+                if (root.ValueKind != JsonValueKind.Object) return null;
+
+                var opts = new Listenarr.Api.Models.MyAnonamouseOptions();
+                if (root.TryGetProperty("mam_options", out var mo) && mo.ValueKind == JsonValueKind.Object)
+                {
+                    if (mo.TryGetProperty("searchInDescription", out var sid) && sid.ValueKind == JsonValueKind.True || sid.ValueKind == JsonValueKind.False)
+                        opts.SearchInDescription = sid.GetBoolean();
+                    if (mo.TryGetProperty("searchInSeries", out var sis) && (sis.ValueKind == JsonValueKind.True || sis.ValueKind == JsonValueKind.False))
+                        opts.SearchInSeries = sis.GetBoolean();
+                    if (mo.TryGetProperty("searchInFilenames", out var sif) && (sif.ValueKind == JsonValueKind.True || sif.ValueKind == JsonValueKind.False))
+                        opts.SearchInFilenames = sif.GetBoolean();
+                    if (mo.TryGetProperty("language", out var lang) && lang.ValueKind == JsonValueKind.String)
+                        opts.SearchLanguage = lang.GetString();
+                    if (mo.TryGetProperty("filter", out var filter) && filter.ValueKind == JsonValueKind.String)
+                    {
+                        if (Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(filter.GetString() ?? string.Empty, true, out var f)) opts.Filter = f;
+                    }
+                    if (mo.TryGetProperty("freeleechWedge", out var wedge) && wedge.ValueKind == JsonValueKind.String)
+                    {
+                        if (Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(wedge.GetString() ?? string.Empty, true, out var w)) opts.FreeleechWedge = w;
+                    }
+                    if (mo.TryGetProperty("enrichResults", out var enrich) && (enrich.ValueKind == JsonValueKind.True || enrich.ValueKind == JsonValueKind.False))
+                        opts.EnrichResults = enrich.GetBoolean();
+                    if (mo.TryGetProperty("enrichTopResults", out var enrichTop) && (enrichTop.ValueKind == JsonValueKind.Number || enrichTop.ValueKind == JsonValueKind.String))
+                    {
+                        if (enrichTop.ValueKind == JsonValueKind.Number) opts.EnrichTopResults = enrichTop.GetInt32();
+                        else if (int.TryParse(enrichTop.GetString(), out var etmp)) opts.EnrichTopResults = etmp;
+                    }
+                    return opts;
+                }
+
+                // Fallback: check for flat properties directly on root
+                if (root.TryGetProperty("searchInDescription", out var sid2) && (sid2.ValueKind == JsonValueKind.True || sid2.ValueKind == JsonValueKind.False))
+                    opts.SearchInDescription = sid2.GetBoolean();
+                if (root.TryGetProperty("searchInSeries", out var sis2) && (sis2.ValueKind == JsonValueKind.True || sis2.ValueKind == JsonValueKind.False))
+                    opts.SearchInSeries = sis2.GetBoolean();
+                if (root.TryGetProperty("searchInFilenames", out var sif2) && (sif2.ValueKind == JsonValueKind.True || sif2.ValueKind == JsonValueKind.False))
+                    opts.SearchInFilenames = sif2.GetBoolean();
+                if (root.TryGetProperty("language", out var lang2) && lang2.ValueKind == JsonValueKind.String)
+                    opts.SearchLanguage = lang2.GetString();
+                if (root.TryGetProperty("filter", out var filter2) && filter2.ValueKind == JsonValueKind.String)
+                {
+                    if (Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(filter2.GetString() ?? string.Empty, true, out var f2)) opts.Filter = f2;
+                }
+                if (root.TryGetProperty("freeleechWedge", out var wedge2) && wedge2.ValueKind == JsonValueKind.String)
+                {
+                    if (Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(wedge2.GetString() ?? string.Empty, true, out var w2)) opts.FreeleechWedge = w2;
+                }
+                if (root.TryGetProperty("enrichResults", out var enrich2) && (enrich2.ValueKind == JsonValueKind.True || enrich2.ValueKind == JsonValueKind.False))
+                    opts.EnrichResults = enrich2.GetBoolean();
+                if (root.TryGetProperty("enrichTopResults", out var enrichTop2) && (enrichTop2.ValueKind == JsonValueKind.Number || enrichTop2.ValueKind == JsonValueKind.String))
+                {
+                    if (enrichTop2.ValueKind == JsonValueKind.Number) opts.EnrichTopResults = enrichTop2.GetInt32();
+                    else if (int.TryParse(enrichTop2.GetString(), out var etmp2)) opts.EnrichTopResults = etmp2;
+                }
+
+                // If no properties were found, return null
+                if (opts.SearchInDescription == null && opts.SearchInSeries == null && opts.SearchInFilenames == null && opts.SearchLanguage == null && opts.Filter == null && opts.FreeleechWedge == null && opts.EnrichResults == null && opts.EnrichTopResults == null)
+                    return null;
+
+                return opts;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse AdditionalSettings JSON for MAM options");
+                return null;
             }
         }
 
@@ -1791,7 +1934,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<List<IndexerSearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null)
+        private async Task<List<IndexerSearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null)
         {
             try
             {
@@ -1837,7 +1980,7 @@ namespace Listenarr.Api.Services
                 }
                 else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
                 {
-                    var mamResults = await SearchMyAnonamouseAsync(indexer, query, category);
+                    var mamResults = await SearchMyAnonamouseAsync(indexer, query, category, request);
                     foreach (var r in mamResults)
                     {
                         if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
@@ -1885,7 +2028,7 @@ namespace Listenarr.Api.Services
                 var xmlContent = await response.Content.ReadAsStringAsync();
 
                 // Parse Torznab/Newznab XML response
-                var results = ParseTorznabResponse(xmlContent, indexer);
+                var results = await ParseTorznabResponseAsync(xmlContent, indexer);
 
                 _logger.LogInformation("Indexer {Name} returned {Count} results", indexer.Name, results.Count);
                 return results;
@@ -1897,7 +2040,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<List<IndexerSearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category, Listenarr.Api.Models.SearchRequest? request = null)
         {
             try
             {
@@ -1926,19 +2069,33 @@ namespace Listenarr.Api.Services
 
                 // Build JSON payload according to new MyAnonamouse structure
                 // Build tor object to mirror the browse.php parameter shapes (tor[text], tor[srchIn][field]=true, tor[cat][]=...)
+                var srchInDict = new Dictionary<string, bool>
+                {
+                    ["title"] = true,
+                    ["author"] = true,
+                    ["narrator"] = true,
+                    ["series"] = true,
+                    ["description"] = false, // default off (Prowlarr default)
+                    ["filenames"] = true,     // search filenames by default (Prowlarr default)
+                    ["filetype"] = true
+                };
+
+                // Apply request overrides if present
+                if (request?.MyAnonamouse != null)
+                {
+                    var opts = request.MyAnonamouse;
+                    if (opts.SearchInDescription.HasValue)
+                        srchInDict["description"] = opts.SearchInDescription.Value;
+                    if (opts.SearchInSeries.HasValue)
+                        srchInDict["series"] = opts.SearchInSeries.Value;
+                    if (opts.SearchInFilenames.HasValue)
+                        srchInDict["filename"] = opts.SearchInFilenames.Value;
+                }
+
                 var torObject = new Dictionary<string, object>
                 {
                     ["text"] = query,
-                    // Use field->true mapping like browse.php (e.g. tor[srchIn][title]=true)
-                    ["srchIn"] = new Dictionary<string, bool>
-                    {
-                        ["title"] = true,
-                        ["author"] = true,
-                        ["narrator"] = true,
-                        ["series"] = true,
-                        ["description"] = true,
-                        ["filetype"] = true
-                    },
+                    ["srchIn"] = srchInDict,
                     ["searchType"] = searchType,
                     ["searchIn"] = "torrents",
                     // Keep explicit cat[] list copied from the browse URL
@@ -1957,6 +2114,16 @@ namespace Listenarr.Api.Services
                     ["perpage"] = "100"
                 };
 
+                // If SearchLanguage specified in options, override the default
+                if (request?.MyAnonamouse?.SearchLanguage != null)
+                {
+                    torObject["browse_lang"] = new[] { request.MyAnonamouse.SearchLanguage };
+                }
+
+                // Apply filter mappings for Prowlarr-like options
+                // e.g. onlyActive, onlyFreeleech, freeleechOrVip, onlyVip, notVip
+
+                // Try to parse title/author from the query to give MyAnonamouse more targeted fields
                 if (!string.IsNullOrWhiteSpace(parsedTitle))
                 {
                     torObject["title"] = parsedTitle;
@@ -1967,64 +2134,186 @@ namespace Listenarr.Api.Services
                     torObject["author"] = parsedAuthor;
                 }
 
-                // Build form-encoded content following the example for loadSearchJSONbasic.php
-                // Example: tor[cat][]=0&tor[sortType]=default&tor[browseStart]=true&tor[startNumber]=0&bannerLink&bookmarks&dlLink&description&tor[text]=mp3%20m4a
-                var formPairs = new List<KeyValuePair<string, string>>();
-                // Minimal/required fields per example
-                formPairs.Add(new KeyValuePair<string, string>("tor[cat][]", "0"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[sortType]", "default"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[browseStart]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[startNumber]", "0"));
 
-                // Keys present without explicit values in the example; represent them with empty string
-                formPairs.Add(new KeyValuePair<string, string>("bannerLink", string.Empty));
-                formPairs.Add(new KeyValuePair<string, string>("bookmarks", string.Empty));
-                formPairs.Add(new KeyValuePair<string, string>("dlLink", string.Empty));
-                formPairs.Add(new KeyValuePair<string, string>("description", string.Empty));
 
-                // tor[text] is the search query (example uses 'mp3 m4a')
-                formPairs.Add(new KeyValuePair<string, string>("tor[text]", query ?? string.Empty));
+                // Additional browse options seen on browse.php - build indexed querystring params to match Prowlarr's shape
+                var queryParams = new List<KeyValuePair<string, string>>();
 
-                // Preserve audiobook filtering if available: include main_cat
-                formPairs.Add(new KeyValuePair<string, string>("tor[main_cat][]", "13"));
-
-                // Add searchIn and srchIn fields so we request torrents and relevant fields
-                formPairs.Add(new KeyValuePair<string, string>("tor[searchIn]", "torrents"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][title]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][author]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][narrator]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][series]", "true"));
-
-                var content = new FormUrlEncodedContent(formPairs);
-                var formString = await content.ReadAsStringAsync();
-                _logger.LogInformation("MyAnonamouse outgoing form (loadSearchJSONbasic): {Form}", formString);
-
-                var request = new HttpRequestMessage(HttpMethod.Post, url)
+                if (torObject.TryGetValue("browse_lang", out var blObj) && blObj is string[] browseLangs)
                 {
-                    Content = content
-                };
-
-                // Add browser-like headers to avoid "invalid request" errors
-                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-
-                using var httpClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
-                _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-
-                var response = await httpClient.SendAsync(request);
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("MyAnonamouse error response: {Content}", LogRedaction.RedactText(errorContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-                    return new List<IndexerSearchResult>();
+                    for (int i = 0; i < browseLangs.Length; i++)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[browse_lang][{i}]", browseLangs[i]));
+                    }
                 }
 
-                var jsonResponse = await response.Content.ReadAsStringAsync();
-                _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
-                var results = ParseMyAnonamouseResponse(jsonResponse, indexer);
+                if (torObject.TryGetValue("browseFlagsHideVsShow", out var hideShowObj))
+                {
+                    var hideShowVal = hideShowObj?.ToString() ?? string.Empty;
+                    queryParams.Add(new KeyValuePair<string, string>("tor[browseFlagsHideVsShow]", hideShowVal));
+                }
+
+                if (torObject.TryGetValue("unit", out var unitObj))
+                {
+                    var unitVal = unitObj?.ToString() ?? string.Empty;
+                    queryParams.Add(new KeyValuePair<string, string>("tor[unit]", unitVal));
+                }
+
+                // Optional: perpage to control number of results (default to 100 if present)
+                if (torObject.TryGetValue("perpage", out var perpageObj))
+                {
+                    var perpageVal = perpageObj?.ToString() ?? string.Empty;
+                    queryParams.Add(new KeyValuePair<string, string>("tor[perpage]", perpageVal));
+                }
+
+                // Add all explicit categories from torObject using indexed keys (mirrors Prowlarr)
+                if (torObject.TryGetValue("cat", out var catObj) && catObj is string[] cats)
+                {
+                    for (int i = 0; i < cats.Length; i++)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[cat][{i}]", cats[i]));
+                    }
+                }
+                else
+                {
+                    // No cat specified: send explicit 0 (Prowlarr uses tor[cat][] = 0)
+                    queryParams.Add(new KeyValuePair<string, string>("tor[cat][]", "0"));
+                }
+
+                // Add search-related and paging parameters (safely coalesce to empty strings)
+                var sortTypeVal = torObject.TryGetValue("sortType", out var sortTypeObj) ? sortTypeObj?.ToString() ?? string.Empty : string.Empty;
+                queryParams.Add(new KeyValuePair<string, string>("tor[sortType]", sortTypeVal));
+                queryParams.Add(new KeyValuePair<string, string>("tor[browseStart]", "true"));
+                var startNumberVal = torObject.TryGetValue("startNumber", out var startNumberObj) ? startNumberObj?.ToString() ?? string.Empty : string.Empty;
+                queryParams.Add(new KeyValuePair<string, string>("tor[startNumber]", startNumberVal));
+
+                // Keys present without explicit values in the example; represent them with empty string
+                queryParams.Add(new KeyValuePair<string, string>("bannerLink", string.Empty));
+                queryParams.Add(new KeyValuePair<string, string>("bookmarks", string.Empty));
+                queryParams.Add(new KeyValuePair<string, string>("dlLink", string.Empty));
+                queryParams.Add(new KeyValuePair<string, string>("description", string.Empty));
+
+                // tor[text] is the search query
+                queryParams.Add(new KeyValuePair<string, string>("tor[text]", query ?? string.Empty));
+
+                // Preserve audiobook filtering if available: include main_cat values
+                if (torObject.TryGetValue("main_cat", out var mainCatObj) && mainCatObj is string[] mainCats)
+                {
+                    for (int i = 0; i < mainCats.Length; i++)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[main_cat][{i}]", mainCats[i]));
+                    }
+                }
+
+                // Add searchIn and srchIn fields so we request torrents and relevant fields
+                var searchInVal = torObject.TryGetValue("searchIn", out var searchInObj) ? searchInObj?.ToString() ?? string.Empty : string.Empty;
+                queryParams.Add(new KeyValuePair<string, string>("tor[searchIn]", searchInVal));
+                // srchIn fields: ensure the same fields we set above are present
+                if (torObject.TryGetValue("srchIn", out var srchInObj) && srchInObj is Dictionary<string, bool> srchInValues)
+                {
+                    foreach (var kv in srchInValues)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[srchIn][{kv.Key}]", kv.Value ? "true" : "false"));
+                    }
+                }
+                // Add explicit searchType (title/author/all)
+                queryParams.Add(new KeyValuePair<string, string>("tor[searchType]", searchType));
+
+                // Apply filter flags based on request options (e.g., active, freeleech, vip)
+                if (request?.MyAnonamouse?.Filter != null)
+                {
+                    switch (request.MyAnonamouse.Filter)
+                    {
+                        case Listenarr.Api.Models.MamTorrentFilter.Active:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[onlyActive]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.Freeleech:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[onlyFreeleech]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.FreeleechOrVip:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[freeleechOrVip]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.Vip:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[onlyVip]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.NotVip:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[notVip]", "1"));
+                            break;
+                    }
+                }
+
+                // Apply freeleech wedge preference
+                if (request?.MyAnonamouse?.FreeleechWedge != null)
+                {
+                    queryParams.Add(new KeyValuePair<string, string>("tor[freeleechWedge]", request.MyAnonamouse.FreeleechWedge.ToString().ToLowerInvariant()));
+                }
+
+                var qs = string.Join("&", queryParams.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value ?? string.Empty)}"));
+                var fullUrl = url + (qs.Length > 0 ? "?" + qs : string.Empty);
+
+                _logger.LogInformation("MyAnonamouse outgoing query (loadSearchJSONbasic): {Query}", qs);
+
+                var mamRequest = new HttpRequestMessage(HttpMethod.Get, fullUrl);
+                // Add browser-like headers to avoid "invalid request" errors
+                mamRequest.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                mamRequest.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                mamRequest.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                mamRequest.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
+
+                // Prefer using the injected HttpClient in tests (so DelegatingHandler stubs can capture requests)
+                HttpClient? disposableClient = null;
+                HttpClient httpClientToUse = _httpClient;
+                List<IndexerSearchResult> results = new List<IndexerSearchResult>();
+                try
+                {
+                    var indexerUri = new Uri(indexer.Url);
+                    if (_httpClient?.BaseAddress == null || !string.Equals(_httpClient.BaseAddress.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
+                    {
+                        httpClientToUse = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
+                        disposableClient = httpClientToUse;
+                    }
+                    else
+                    {
+                        // Add cookie header for injected client so the request is authenticated for MAM
+                        if (!string.IsNullOrEmpty(mamId))
+                            mamRequest.Headers.Add("Cookie", $"mam_id={mamId}");
+                    }
+
+                    _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+
+                    var response = await httpClientToUse.SendAsync(mamRequest);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("MyAnonamouse error response: {Content}", LogRedaction.RedactText(errorContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+                        return new List<IndexerSearchResult>();
+                    }
+
+                    var jsonResponse = await response.Content.ReadAsStringAsync();
+                    _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
+                    results = ParseMyAnonamouseResponse(jsonResponse, indexer);
+
+                    // Optional per-result enrichment: fetch individual item pages to populate missing fields
+                    try
+                    {
+                        // Respect global IncludeEnrichment and per-indexer MyAnonamouse options
+                        var shouldEnrich = (request?.IncludeEnrichment ?? false) && (request?.MyAnonamouse?.EnrichResults == true);
+                        if (shouldEnrich)
+                        {
+                            var enrichTop = request?.MyAnonamouse?.EnrichTopResults ?? 3;
+                            await EnrichMyAnonamouseResultsAsync(indexer, results, enrichTop, mamId, httpClientToUse);
+                        }
+                    }
+                    catch (Exception exEnrich)
+                    {
+                        _logger.LogWarning(exEnrich, "MyAnonamouse enrichment step failed");
+                    }
+                }
+                finally
+                {
+                    disposableClient?.Dispose();
+                }
 
                 _logger.LogInformation("MyAnonamouse returned {Count} results", results.Count);
                 return results;
@@ -2189,9 +2478,135 @@ namespace Listenarr.Api.Services
                         var seeders = item.TryGetProperty("seeders", out var seedElem) ? seedElem.GetInt32() : 0;
                         var leechers = item.TryGetProperty("leechers", out var leechElem) ? leechElem.GetInt32() : 0;
                         var dlHash = item.TryGetProperty("dl", out var dlElem) ? dlElem.GetString() : "";
+                        // New: explicit downloadUrl / infoUrl / fileName fields commonly provided by Prowlarr
+                        string? downloadUrlField = null;
+                        string? infoUrlField = null;
+                        string? fileNameField = null;
+                        // Use case-insensitive property lookup for robustness against differing casing in tracker responses
+                        foreach (var prop in item.EnumerateObject())
+                        {
+                            var name = prop.Name;
+                            if (downloadUrlField == null && string.Equals(name, "downloadUrl", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                                downloadUrlField = prop.Value.GetString();
+                            if (infoUrlField == null && string.Equals(name, "infoUrl", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                                infoUrlField = prop.Value.GetString();
+                            if (fileNameField == null && string.Equals(name, "fileName", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                                fileNameField = prop.Value.GetString();
+                        }
+
                         var category = item.TryGetProperty("catname", out var catElem) ? catElem.GetString() : "";
                         var tags = item.TryGetProperty("tags", out var tagsElem) ? tagsElem.GetString() : "";
                         var description = item.TryGetProperty("description", out var descElem) ? descElem.GetString() : "";
+
+                        // Parse grabs/files when present (Prowlarr exposes these directly for MyAnonamouse)
+                        var grabs = 0;
+                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count" };
+                        foreach (var k in grabKeys)
+                        {
+                            if (item.TryGetProperty(k, out var ge))
+                            {
+                                if (ge.ValueKind == JsonValueKind.Number)
+                                {
+                                    grabs = ge.GetInt32();
+                                    break;
+                                }
+                                else if (ge.ValueKind == JsonValueKind.String && int.TryParse(ge.GetString(), out var gtmp))
+                                {
+                                    grabs = gtmp;
+                                    break;
+                                }
+                            }
+                        }
+
+                        var files = 0;
+                        if (item.TryGetProperty("files", out var filesElem))
+                        {
+                            if (filesElem.ValueKind == JsonValueKind.Number)
+                                files = filesElem.GetInt32();
+                            else if (filesElem.ValueKind == JsonValueKind.String && int.TryParse(filesElem.GetString(), out var ftmp))
+                                files = ftmp;
+                        }
+
+                        // Prefer explicit 'added' timestamp when present (MyAnonamouse uses "yyyy-MM-dd HH:mm:ss")
+                        DateTime? publishDate = null;
+                        if (item.TryGetProperty("added", out var addedElem) && addedElem.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(addedElem.GetString()))
+                        {
+                            try
+                            {
+                                publishDate = DateTime.ParseExact(addedElem.GetString(), "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).ToLocalTime();
+                            }
+                            catch (Exception)
+                            {
+                                // ignore and fallback to other fields below
+                            }
+                        }
+
+                        // Parse publish date when present; fallback to 'age' if necessary
+                        if (!publishDate.HasValue)
+                        {
+                            string? publishDateStr = null;
+                            if (item.TryGetProperty("publishDate", out var pdElem) && pdElem.ValueKind == JsonValueKind.String)
+                                publishDateStr = pdElem.GetString();
+                            else if (item.TryGetProperty("publish_date", out var pd2) && pd2.ValueKind == JsonValueKind.String)
+                                publishDateStr = pd2.GetString();
+                            else if (item.TryGetProperty("publishdate", out var pd3) && pd3.ValueKind == JsonValueKind.String)
+                                publishDateStr = pd3.GetString();
+
+                            if (!string.IsNullOrWhiteSpace(publishDateStr))
+                            {
+                                if (System.DateTimeOffset.TryParse(publishDateStr, out var dto))
+                                {
+                                    publishDate = dto.UtcDateTime;
+                                }
+                                else if (DateTime.TryParse(publishDateStr, out var pdv))
+                                {
+                                    publishDate = DateTime.SpecifyKind(pdv, DateTimeKind.Utc);
+                                }
+                            }
+                            else
+                            {
+                                // Support multiple representations of "age": days, hours, minutes, or alternate keys (ageHours, ageMinutes)
+                                int? days = null;
+                                double? hours = null;
+                                double? minutes = null;
+
+                                // Prefer explicit ageHours/ageMinutes if present
+                                if (item.TryGetProperty("ageHours", out var ah) && (ah.ValueKind == JsonValueKind.Number || ah.ValueKind == JsonValueKind.String))
+                                {
+                                    if (ah.ValueKind == JsonValueKind.Number) hours = ah.GetDouble();
+                                    else if (double.TryParse(ah.GetString(), out var htmp)) hours = htmp;
+                                }
+                                if (item.TryGetProperty("ageMinutes", out var am) && (am.ValueKind == JsonValueKind.Number || am.ValueKind == JsonValueKind.String))
+                                {
+                                    if (am.ValueKind == JsonValueKind.Number) minutes = am.GetDouble();
+                                    else if (double.TryParse(am.GetString(), out var mtmp)) minutes = mtmp;
+                                }
+
+                                // Fallback to 'age' if present. Heuristic: small values (<=48) likely hours; otherwise treat as days.
+                                if ((hours == null && minutes == null) && item.TryGetProperty("age", out var ageElem))
+                                {
+                                    if (ageElem.ValueKind == JsonValueKind.Number)
+                                    {
+                                        var a = ageElem.GetDouble();
+                                        if (a <= 48) hours = a;
+                                        else days = (int)Math.Floor(a);
+                                    }
+                                    else if (ageElem.ValueKind == JsonValueKind.String && double.TryParse(ageElem.GetString(), out var adtmp))
+                                    {
+                                        var a = adtmp;
+                                        if (a <= 48) hours = a;
+                                        else days = (int)Math.Floor(a);
+                                    }
+                                }
+
+                                if (minutes.HasValue && minutes.Value > 0)
+                                    publishDate = DateTime.UtcNow.AddMinutes(-minutes.Value);
+                                else if (hours.HasValue && hours.Value > 0)
+                                    publishDate = DateTime.UtcNow.AddHours(-hours.Value);
+                                else if (days.HasValue && days.Value > 0)
+                                    publishDate = DateTime.UtcNow.AddDays(-days.Value);
+                            }
+                        }
 
                         if (string.IsNullOrEmpty(title))
                             continue;
@@ -2267,9 +2682,74 @@ namespace Listenarr.Api.Services
                             }
                         }
 
-                        // Detect quality and format from tags
-                        var quality = DetectQualityFromTags(tags ?? "");
-                        var format = DetectFormatFromTags(tags ?? "");
+                        // Detect quality and format with robust fallbacks:
+                        // 1) Prefer explicit format/filetype fields when present
+                        // 2) Use tags when available
+                        // 3) Fallback to description and title (filename) parsing
+
+                        // Try to read explicit format/filetype fields from the item (case-insensitive)
+                        string rawFormatField = string.Empty;
+                        foreach (var prop in item.EnumerateObject())
+                        {
+                            if (prop.Value.ValueKind == JsonValueKind.String && (string.Equals(prop.Name, "format", StringComparison.OrdinalIgnoreCase) || string.Equals(prop.Name, "filetype", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                rawFormatField = prop.Value.GetString() ?? string.Empty;
+                                break;
+                            }
+                        }
+
+                        // Detect format from tags and from explicit field
+                        var formatFromTags = DetectFormatFromTags(tags ?? "");
+                        var formatFromField = !string.IsNullOrEmpty(rawFormatField) ? DetectFormatFromTags(rawFormatField) : null;
+                        var finalFormat = (formatFromField != null && formatFromField != "MP3") ? formatFromField : formatFromTags;
+
+                        // Detect quality: prefer tags, then explicit format field, then description/title
+                        var qualityFromTags = DetectQualityFromTags(tags ?? "");
+                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : ( !string.IsNullOrEmpty(rawFormatField) ? DetectQualityFromFormat(rawFormatField) : "Unknown" );
+
+                        // Fallback: try to detect quality from description or title (filename-like text)
+                        if (finalQuality == "Unknown")
+                        {
+                            if (!string.IsNullOrEmpty(description))
+                            {
+                                var q = DetectQualityFromTags(description);
+                                if (q != "Unknown") finalQuality = q;
+                                else
+                                {
+                                    var q2 = DetectQualityFromFormat(description);
+                                    if (q2 != "Unknown") finalQuality = q2;
+                                }
+                            }
+
+                            if (finalQuality == "Unknown")
+                            {
+                                var probeText = title ?? string.Empty;
+                                var q = DetectQualityFromTags(probeText);
+                                if (q != "Unknown") finalQuality = q;
+                                else
+                                {
+                                    var q2 = DetectQualityFromFormat(probeText);
+                                    if (q2 != "Unknown") finalQuality = q2;
+                                }
+                            }
+                        }
+
+                        // Additional fallback: if format still looks generic MP3, probe description/title
+                        if (finalFormat == "MP3")
+                        {
+                            if (!string.IsNullOrEmpty(description))
+                            {
+                                var f = DetectFormatFromTags(description);
+                                if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
+                            }
+
+                            if (finalFormat == "MP3")
+                            {
+                                var probeText = title ?? string.Empty;
+                                var f = DetectFormatFromTags(probeText);
+                                if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
+                            }
+                        }
 
                         // Build download URL
                         var downloadUrl = "";
@@ -2289,9 +2769,9 @@ namespace Listenarr.Api.Services
                             Seeders = seeders,
                             Leechers = leechers,
                             Source = indexer.Name,
-                            PublishedDate = DateTime.UtcNow.ToString("o"),
-                            Quality = quality,
-                            Format = format,
+                            PublishedDate = publishDate.HasValue ? publishDate.Value.ToString("o") : string.Empty,
+                            Quality = finalQuality,
+                            Format = finalFormat,
                             TorrentUrl = downloadUrl,
                             // Use MyAnonamouse public item page pattern: https://myanonamouse.net/t/{id}
                             ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : indexer.Url,
@@ -2364,6 +2844,43 @@ namespace Listenarr.Api.Services
                             if (!string.IsNullOrEmpty(torrentUrlDetected)) result.TorrentUrl = torrentUrlDetected;
                             if (!string.IsNullOrEmpty(nzbUrlDetected)) result.NzbUrl = nzbUrlDetected;
 
+                            // If a direct downloadUrl was provided by the API, prefer that as the torrent/nzb URL
+                            if (!string.IsNullOrEmpty(downloadUrlField))
+                            {
+                                // Choose disposition based on common hints and protocol
+                                if ((downloadUrlField ?? string.Empty).EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) || (item.TryGetProperty("protocol", out var protoElem) && protoElem.ValueKind == JsonValueKind.String && protoElem.GetString()?.Equals("torrent", StringComparison.OrdinalIgnoreCase) == true))
+                                {
+                                    result.TorrentUrl = downloadUrlField;
+                                }
+                                else if ((downloadUrlField ?? string.Empty).EndsWith(".nzb", StringComparison.OrdinalIgnoreCase) || (item.TryGetProperty("protocol", out var proto2Elem) && proto2Elem.ValueKind == JsonValueKind.String && proto2Elem.GetString()?.Equals("usenet", StringComparison.OrdinalIgnoreCase) == true))
+                                {
+                                    result.NzbUrl = downloadUrlField;
+                                }
+                                else
+                                {
+                                    // Unknown, prefer TorrentUrl by default
+                                    result.TorrentUrl = downloadUrlField;
+                                }
+                            }
+
+                            // If guid is present and looks like a URL, prefer it as the canonical link
+                            if (item.TryGetProperty("guid", out var guidElem) && guidElem.ValueKind == JsonValueKind.String && Uri.IsWellFormedUriString(guidElem.GetString(), UriKind.Absolute))
+                            {
+                                result.ResultUrl = guidElem.GetString();
+                            }
+
+                            // If infoUrl is present, use it as the canonical page link when available
+                            if (!string.IsNullOrEmpty(infoUrlField))
+                            {
+                                result.ResultUrl = infoUrlField;
+                            }
+
+                            // Use filename field to populate TorrentFileName when available
+                            if (!string.IsNullOrEmpty(fileNameField))
+                            {
+                                result.TorrentFileName = fileNameField;
+                            }
+
                             // Prefer marking as Torrent when either magnet or torrent URL exists
                             if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
                                 result.Format = "Torrent";
@@ -2377,19 +2894,103 @@ namespace Listenarr.Api.Services
                             _logger.LogDebug(exLink, "Failed to detect links for MyAnonamouse item {Id}", id);
                         }
 
-                        // Attempt to parse language codes from title or tags (e.g. [ENG / M4B])
-                        var detectedLang = ParseLanguageFromText(title + " " + (tags ?? ""));
-                        if (!string.IsNullOrEmpty(detectedLang))
+                        // Prefer explicit language fields when present (lang_code, language_code, lang, language) - case-insensitive search
+                        string explicitLang = string.Empty;
+                        string rawLangCode = string.Empty; // preserve raw code for flags
+                        foreach (var prop in item.EnumerateObject())
                         {
-                            result.Language = detectedLang;
+                            if ((prop.Name.Equals("lang_code", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("language_code", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("lang", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("language", StringComparison.OrdinalIgnoreCase)) && prop.Value.ValueKind == JsonValueKind.String)
+                            {
+                                explicitLang = prop.Value.GetString() ?? string.Empty;
+                                rawLangCode = explicitLang;
+                                _logger.LogDebug("MyAnonamouse: found language field '{Field}'='{Lang}' for item {Id}", prop.Name, explicitLang, id);
+                                break;
+                            }
                         }
+
+                        // Numeric language id fallback (case-insensitive check)
+                        if (string.IsNullOrEmpty(explicitLang) && item.TryGetProperty("language", out var langNumElem) && langNumElem.ValueKind == JsonValueKind.Number)
+                        {
+                            var numeric = langNumElem.GetInt32();
+                            if (numeric == 1) { explicitLang = "ENG"; rawLangCode = "ENG"; }
+                            _logger.LogDebug("MyAnonamouse: found numeric language id={Num} mapped to '{Lang}' for item {Id}", numeric, explicitLang, id);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(explicitLang))
+                        {
+                            var parsed = ParseLanguageFromText(explicitLang);
+                            if (!string.IsNullOrWhiteSpace(parsed))
+                                result.Language = parsed;
+                        }
+
+                        // Fallback: parse title, tags and description for language codes (e.g. '[ENG / M4B]')
+                        if (string.IsNullOrWhiteSpace(result.Language))
+                        {
+                            var probe = string.Join(" ", new[] { title ?? string.Empty, tags ?? string.Empty, description ?? string.Empty }).Trim();
+                            var detectedLang = ParseLanguageFromText(probe);
+                            if (!string.IsNullOrEmpty(detectedLang))
+                            {
+                                result.Language = detectedLang;
+                            }
+                        }
+
+                        // Build flags list similar to Prowlarr: include raw language code and filetype (uppercase)
+                        var flagsList = new List<string>();
+                        if (!string.IsNullOrEmpty(rawLangCode)) flagsList.Add(rawLangCode);
+                        if (!string.IsNullOrEmpty(rawFormatField)) flagsList.Add(rawFormatField.ToUpperInvariant());
+
+                        // Append flags to the title if not already present (try to use raw lang/filetype first)
+                        if (flagsList.Count > 0)
+                        {
+                            // Avoid duplicating if title already contains bracketed flags
+                            if (!System.Text.RegularExpressions.Regex.IsMatch(title ?? string.Empty, "\\[.*\\]$"))
+                            {
+                                title = (title ?? string.Empty) + " [" + string.Join(" / ", flagsList) + "]";
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(fileNameField))
+                        {
+                            // Fallback: extract trailing bracketed flags from filename (before extension) and append them as-is
+                            try
+                            {
+                                var fname = fileNameField;
+                                var dotIdx = fname.LastIndexOf('.');
+                                var nameOnly = dotIdx > 0 ? fname.Substring(0, dotIdx) : fname;
+                                var bracketStart = nameOnly.IndexOf(" [");
+                                if (bracketStart >= 0)
+                                {
+                                    var suffix = nameOnly.Substring(bracketStart);
+                                    if (!System.Text.RegularExpressions.Regex.IsMatch(title ?? string.Empty, "\\[.*\\]$") && !(title ?? string.Empty).Contains(suffix))
+                                    {
+                                        title = (title ?? string.Empty) + suffix;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Failed to extract bracketed flags from filename for MyAnonamouse item {Id}", id);
+                            }
+                        }
+
+                        // Append VIP marker when the item is flagged as VIP
+                        if (item.TryGetProperty("vip", out var vipElem))
+                        {
+                            if (vipElem.ValueKind == JsonValueKind.True || (vipElem.ValueKind == JsonValueKind.String && string.Equals(vipElem.GetString(), "true", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                if (!title.EndsWith(" [VIP]")) title = (title ?? string.Empty) + " [VIP]";
+                            }
+                        }
+
+                        // Apply grabs/files to the result when available
+                        result.Grabs = grabs;
+                        result.Files = files;
 
                         try
                         {
                             if (_mamDebugIndex < 5)
                             {
-                                _logger.LogDebug("ParseMyAnonamouse: constructed SearchResult #{Index} -> Id='{Id}', Title='{Title}', Size={Size}, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Artist='{Artist}', Album='{Album}', Category='{Category}', Source='{Source}'",
-                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "");
+                                _logger.LogDebug("ParseMyAnonamouse: constructed SearchResult #{Index} -> Id='{Id}', Title='{Title}', Size={Size}, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Artist='{Artist}', Album='{Album}', Category='{Category}', Source='{Source}', Grabs={Grabs}, Files={Files}, PublishedDate={PublishedDate}'",
+                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "", result.Grabs, result.Files, result.PublishedDate);
                             }
                         }
                         catch (Exception ex)
@@ -2398,6 +2999,30 @@ namespace Listenarr.Api.Services
                         }
 
                         _mamDebugIndex++;
+                        // Final best-effort: if title lacks bracketed flags but we have a TorrentFileName with them, append the filename's suffix
+                        if (!string.IsNullOrEmpty(result.TorrentFileName) && !System.Text.RegularExpressions.Regex.IsMatch(result.Title ?? string.Empty, "\\[.*\\]$") )
+                        {
+                            try
+                            {
+                                var fname = result.TorrentFileName;
+                                var dotIdx2 = fname.LastIndexOf('.');
+                                var nameOnly2 = dotIdx2 > 0 ? fname.Substring(0, dotIdx2) : fname;
+                                var bracketStart2 = nameOnly2.IndexOf(" [");
+                                if (bracketStart2 >= 0)
+                                {
+                                    var suffix2 = nameOnly2.Substring(bracketStart2);
+                                    if (!(result.Title ?? string.Empty).Contains(suffix2))
+                                    {
+                                        result.Title = (result.Title ?? string.Empty) + suffix2;
+                                    }
+                                }
+                            }
+                            catch (Exception ex2)
+                            {
+                                _logger.LogDebug(ex2, "Failed to append filename flags to title for MyAnonamouse item {Id}", id);
+                            }
+                        }
+
 
                         results.Add(result);
                     }
@@ -2453,6 +3078,119 @@ namespace Listenarr.Api.Services
             }
 
             return null;
+        }
+
+        // Optional enrichment step: fetch individual item pages to populate missing grabs/files/format/language
+        private async Task EnrichMyAnonamouseResultsAsync(Indexer indexer, List<IndexerSearchResult> results, int topN, string? mamId, HttpClient httpClient)
+        {
+            if (results == null || results.Count == 0) return;
+            if (topN <= 0) return;
+
+            var candidates = results.Where(r => (r.Grabs == 0 || r.Files == 0 || string.IsNullOrEmpty(r.Format) || string.IsNullOrEmpty(r.Language))).Take(topN).ToList();
+            if (!candidates.Any()) return;
+
+            _logger.LogDebug("Enriching {Count} MyAnonamouse results (topN={TopN})", candidates.Count, topN);
+
+            var sem = new SemaphoreSlim(4);
+            var tasks = candidates.Select(async r =>
+            {
+                await sem.WaitAsync();
+                try
+                {
+                    var cacheKey = $"mam:enrich:{r.ResultUrl}";
+                    if (_cache != null && _cache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IndexerSearchResult cached)
+                    {
+                        // Apply cached values
+                        if (cached.Grabs > 0) r.Grabs = cached.Grabs;
+                        if (cached.Files > 0) r.Files = cached.Files;
+                        if (!string.IsNullOrEmpty(cached.Format) && string.IsNullOrEmpty(r.Format)) r.Format = cached.Format;
+                        if (!string.IsNullOrEmpty(cached.Language) && string.IsNullOrEmpty(r.Language)) r.Language = cached.Language;
+                        return;
+                    }
+
+                    if (string.IsNullOrEmpty(r.ResultUrl)) return;
+
+                    // Extract torrent ID from result URL (e.g., https://www.myanonamouse.net/t/28972 -> 28972)
+                    var idMatch = System.Text.RegularExpressions.Regex.Match(r.ResultUrl, @"/t/(\d+)");
+                    if (!idMatch.Success) return;
+                    var torrentId = idMatch.Groups[1].Value;
+
+                    // Request JSON detail endpoint
+                    var detailUrl = $"{indexer.Url.TrimEnd('/')}/tor/js/loadTorrentJSONBasic.php?id={torrentId}";
+                    var req = new HttpRequestMessage(HttpMethod.Get, detailUrl);
+                    req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    req.Headers.Accept.ParseAdd("application/json");
+                    if (!string.IsNullOrEmpty(mamId)) req.Headers.Add("Cookie", $"mam_id={mamId}");
+
+                    var resp = await httpClient.SendAsync(req);
+                    if (!resp.IsSuccessStatusCode) return;
+                    var json = await resp.Content.ReadAsStringAsync();
+
+                    // Parse JSON for enrichment fields
+                    try
+                    {
+                        var detail = System.Text.Json.JsonDocument.Parse(json).RootElement;
+                        
+                        // Handle potential wrapper objects (e.g., { "data": {...} } or { "response": {...} })
+                        if (detail.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            detail = dataProp;
+                        }
+                        else if (detail.TryGetProperty("response", out var respProp) && respProp.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            detail = respProp;
+                        }
+                        
+                        var grabs = 0;
+                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count" };
+                        foreach (var key in grabKeys)
+                        {
+                            grabs = detail.GetPropertyOrDefault(key, 0);
+                            if (grabs > 0) break;
+                        }
+                        var files = detail.GetPropertyOrDefault("files", 0);
+                        var format = detail.GetPropertyOrDefault("filetype", "");
+                        var langCode = detail.GetPropertyOrDefault("lang_code", "");
+
+                        // Apply values
+                        if (grabs > 0) r.Grabs = grabs;
+                        if (files > 0) r.Files = files;
+                        if (!string.IsNullOrEmpty(format) && string.IsNullOrEmpty(r.Format)) r.Format = format.ToUpper();
+                        if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = ParseLanguageFromCode(langCode);
+                        
+                        _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
+                    }
+                    catch (Exception exParse)
+                    {
+                        _logger.LogDebug(exParse, "Failed to parse MyAnonamouse detail JSON for {Id}", r.Id);
+                        return;
+                    }
+
+                    // Cache the enriched values
+                    if (_cache != null)
+                    {
+                        try
+                        {
+                            var entryOptions = new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions() { SlidingExpiration = TimeSpan.FromHours(1) };
+                            _cache.Set(cacheKey, (object)new IndexerSearchResult { Grabs = r.Grabs, Files = r.Files, Format = r.Format, Language = r.Language }, entryOptions);
+                        }
+                        catch (Exception exCache)
+                        {
+                            _logger.LogDebug(exCache, "Failed to set enrichment cache for {Key}", cacheKey);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to enrich MyAnonamouse result {Id}", r.Id);
+                }
+                finally
+                {
+                    sem.Release();
+                }
+            }).ToArray();
+
+            await Task.WhenAll(tasks);
         }
 
         // Try to heuristically split a user query into (title, author).
@@ -2527,6 +3265,12 @@ namespace Listenarr.Api.Services
 
             // Add limit
             queryParams.Add("limit=100");
+
+            // Request extended info for Newznab/Torznab indexers to include grabs/snatches and other attributes when available
+            if (!string.IsNullOrEmpty(indexer.Implementation) && (indexer.Implementation.Equals("newznab", StringComparison.OrdinalIgnoreCase) || indexer.Implementation.Equals("torznab", StringComparison.OrdinalIgnoreCase)))
+            {
+                queryParams.Add("extended=1");
+            }
 
             return $"{url}{apiPath}?{string.Join("&", queryParams)}";
         }
@@ -2738,7 +3482,7 @@ namespace Listenarr.Api.Services
                             Format = audioFile.Format,
                             Quality = DetectQualityFromFormat(audioFile.Format),
                             Source = $"{indexer.Name} (Internet Archive)",
-                            PublishedDate = DateTime.UtcNow.ToString("o")
+                            PublishedDate = string.Empty
                         };
 
                         // Ensure ResultUrl is present (fallback to item page or archive details)
@@ -2851,7 +3595,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private List<IndexerSearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
+        internal async Task<List<IndexerSearchResult>> ParseTorznabResponseAsync(string xmlContent, Indexer indexer)
         {
             var results = new List<IndexerSearchResult>();
 
@@ -2908,12 +3652,13 @@ namespace Listenarr.Api.Services
                         }
                         else
                         {
-                            result.PublishedDate = DateTime.UtcNow.ToString("o");
+                            result.PublishedDate = string.Empty;
                         }
 
-                        // Parse Torznab/Newznab attributes
-                        var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
-                        var attributes = item.Elements(torznabNs + "attr").ToList();
+// Parse Torznab/Newznab attributes (support both torznab and newznab namespaces)
+                var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
+                var newznabNs = System.Xml.Linq.XNamespace.Get("http://www.newznab.com/DTD/2010/feeds/attributes/");
+                var attributes = item.Elements(torznabNs + "attr").Concat(item.Elements(newznabNs + "attr")).ToList();
 
                         foreach (var attr in attributes)
                         {
@@ -2948,9 +3693,151 @@ namespace Listenarr.Api.Services
                                 case "magneturl":
                                     result.MagnetLink = value;
                                     break;
-                                case "grabs":
-                                    // Usenet grabs can be used as a quality indicator
+                                case "filetype":
+                                case "format":
+                                    // Prefer explicit filetype/format attributes
+                                    var normalizedFmt = value?.ToLowerInvariant() ?? string.Empty;
+                                    if (normalizedFmt.Contains("m4b")) result.Format = "M4B";
+                                    else if (normalizedFmt.Contains("flac")) result.Format = "FLAC";
+                                    else if (normalizedFmt.Contains("opus")) result.Format = "OPUS";
+                                    else if (normalizedFmt.Contains("aac")) result.Format = "AAC";
+                                    else if (normalizedFmt.Contains("mp3")) result.Format = "MP3";
+
+                                    // Also set Quality from format where possible
+                                    if (string.IsNullOrEmpty(result.Quality))
+                                    {
+                                        if (normalizedFmt.Contains("320")) result.Quality = "MP3 320kbps";
+                                        else if (normalizedFmt.Contains("256")) result.Quality = "MP3 256kbps";
+                                        else if (normalizedFmt.Contains("192")) result.Quality = "MP3 192kbps";
+                                        else if (normalizedFmt.Contains("128")) result.Quality = "MP3 128kbps";
+                                        else if (normalizedFmt.Contains("m4b")) result.Quality = "M4B";
+                                    }
                                     break;
+                                case "lang_code":
+                                case "language_code":
+                                case "lang":
+                                    // Standardized language codes (e.g., ENG, FR)
+                                    try
+                                    {
+                                        var parsedLang = ParseLanguageFromText(value ?? string.Empty);
+                                        if (!string.IsNullOrEmpty(parsedLang)) result.Language = parsedLang;
+                                    }
+                                    catch { }
+                                    break;
+                                case "language":
+                                    // Some indexers use numeric language IDs (e.g., 1 -> ENG)
+                                    if (int.TryParse(value, out var langNum))
+                                    {
+                                        if (langNum == 1) result.Language = "English";
+                                        // Add other mappings if required in the future
+                                    }
+                                    else
+                                    {
+                                        try
+                                        {
+                                            var pl = ParseLanguageFromText(value ?? string.Empty);
+                                            if (!string.IsNullOrEmpty(pl)) result.Language = pl;
+                                        }
+                                        catch { }
+                                    }
+                                    break;
+                                case "grabs":
+                                    if (int.TryParse(value, out var grabs))
+                                        result.Grabs = grabs;
+                                    break;
+                                case "files":
+                                    if (int.TryParse(value, out var files))
+                                        result.Files = files;
+                                    break;
+                                case "usenetdate":
+                                    // Some indexers expose a usenet-specific date attribute; prefer it if parseable
+                                    if (long.TryParse(value, out var unixSec))
+                                    {
+                                        try
+                                        {
+                                            var dt = DateTimeOffset.FromUnixTimeSeconds(unixSec).UtcDateTime;
+                                            result.PublishedDate = dt.ToString("o");
+                                        }
+                                        catch { }
+                                    }
+                                    else if (DateTime.TryParse(value, out var udt))
+                                    {
+                                        result.PublishedDate = udt.ToString("o");
+                                    }
+                                    break;
+                            }
+                        }
+
+                        // Fallback: some indexers don't expose "grabs" as a standard torznab/newznab attr.
+                        // Attempt a few common alternate attribute names and elements (snatches, comments, etc.)
+                        if (result.Grabs == 0)
+                        {
+                            var altNames = new[] { "snatches", "snatched", "numgrabs", "num_grabs", "grab_count" };
+                            foreach (var alt in altNames)
+                            {
+                                var altAttr = attributes.FirstOrDefault(a => string.Equals(a.Attribute("name")?.Value, alt, System.StringComparison.OrdinalIgnoreCase));
+                                if (altAttr != null)
+                                {
+                                    var av = altAttr.Attribute("value")?.Value ?? altAttr.Value;
+                                    if (!string.IsNullOrEmpty(av) && int.TryParse(av, out var g2))
+                                    {
+                                        result.Grabs = g2;
+                                        _logger.LogDebug("Set grabs from alternate attr '{Alt}' for {Title}: {Grabs}", alt, result.Title, g2);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // If still zero, and a comments element points to a details URL (althub-style), attempt to scrape comment count
+                            if (result.Grabs == 0)
+                            {
+                                var commentsVal = item.Element("comments")?.Value;
+                                if (!string.IsNullOrEmpty(commentsVal))
+                                {
+                                    // If comments is a URL, try scraping the page for a numeric comments count (only for known indexers to avoid many extra requests)
+                                    if (Uri.TryCreate(commentsVal, UriKind.Absolute, out var commentsUri) && indexer.Url != null && indexer.Url.Contains("althub", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        try
+                                        {
+                                            var commentsPageUrl = new Uri(commentsUri.GetLeftPart(UriPartial.Path));
+                                            _logger.LogDebug("Fetching comments page to extract grabs for {Title}: {Url}", result.Title, commentsPageUrl);
+                                            using var resp = await _httpClient.GetAsync(commentsPageUrl);
+                                            if (resp.IsSuccessStatusCode)
+                                            {
+                                                var html = await resp.Content.ReadAsStringAsync();
+                                                var htmlDoc = new HtmlAgilityPack.HtmlDocument();
+                                                htmlDoc.LoadHtml(html);
+
+                                                // Look for common comment count patterns in page text
+                                                var text = htmlDoc.DocumentNode.InnerText;
+                                                var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d{1,6})\\s+comments?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                if (!m.Success)
+                                                {
+                                                    m = System.Text.RegularExpressions.Regex.Match(text, "Comments\\s*[:\\(]?\\s*(\\d{1,6})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                }
+
+                                                if (m.Success && int.TryParse(m.Groups[1].Value, out var scrapedComments))
+                                                {
+                                                    result.Grabs = scrapedComments;
+                                                    _logger.LogDebug("Scraped comments count for {Title}: {Grabs}", result.Title, scrapedComments);
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Failed to scrape comments page for {Title}", result.Title);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Some feeds put a numeric comments value directly; parse that
+                                        if (int.TryParse(commentsVal, out var commVal))
+                                        {
+                                            result.Grabs = commVal;
+                                            _logger.LogDebug("Set grabs from <comments> element for {Title}: {Grabs}", result.Title, commVal);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -2968,6 +3855,18 @@ namespace Listenarr.Api.Services
                                 else
                                 {
                                     result.TorrentUrl = enclosureUrl;
+                                }
+                            }
+
+                            // If the indexer provides an enclosure length, use it as a size fallback
+                            var lengthStr = enclosure.Attribute("length")?.Value;
+                            if (!string.IsNullOrEmpty(lengthStr) && result.Size == 0)
+                            {
+                                var parsedLen = ParseSizeString(lengthStr);
+                                if (parsedLen > 0)
+                                {
+                                    result.Size = parsedLen;
+                                    _logger.LogDebug("Set size from enclosure length for {Title}: {Size} bytes", result.Title, parsedLen);
                                 }
                             }
                         }
@@ -3329,6 +4228,22 @@ namespace Listenarr.Api.Services
                 if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
             }
 
+            return null;
+        }
+
+        private string? ParseLanguageFromCode(string? code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return null;
+
+            var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "ENG", "English" }, { "EN", "English" },
+                { "DUT", "Dutch" },    { "NL", "Dutch" },
+                { "GER", "German" },   { "DE", "German" },
+                { "FRE", "French" },   { "FR", "French" }
+            };
+
+            if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
             return null;
         }
 

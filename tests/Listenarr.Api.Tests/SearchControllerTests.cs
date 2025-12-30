@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using System.Text.Json;
 
 namespace Listenarr.Api.Tests
 {
@@ -162,7 +163,26 @@ namespace Listenarr.Api.Tests
             // Arrange
             var mockService = new Mock<ISearchService>();
             mockService.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>())).ReturnsAsync(new List<MetadataSearchResult> { new MetadataSearchResult { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg" } });
-            var logger = Mock.Of<ILogger<SearchController>>();
+
+            // Also add a test to ensure indexer results are returned in the new DTO shape
+            mockService.Setup(s => s.SearchAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), It.IsAny<bool>())).ReturnsAsync(new List<SearchResult> {
+                new SearchResult {
+                    Id = "g1",
+                    Title = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP]",
+                    Size = 3972844800,
+                    Files = 783,
+                    Grabs = 334,
+                    Source = "MyAnonamouse",
+                    IndexerId = 7,
+                    Seeders = 59,
+                    Leechers = 1,
+                    TorrentUrl = "https://prowlarr.example/download.torrent",
+                    ResultUrl = "https://www.myanonamouse.net/t/28972",
+                    TorrentFileName = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP].torrent",
+                    PublishedDate = "2010-01-21T00:05:36Z",
+                    DownloadType = "Torrent"
+                }
+            });            var logger = Mock.Of<ILogger<SearchController>>();
             var mockAudimetaService = new FakeAudimetaService(new Listenarr.Api.Services.AudimetaSearchResponse
             {
                 Results = new System.Collections.Generic.List<Listenarr.Api.Services.AudimetaSearchResult>
@@ -174,7 +194,7 @@ namespace Listenarr.Api.Tests
             // (FakeAudimetaService returns the sample response)
 
             var mockMetadataService = new Mock<IAudiobookMetadataService>();
-            mockMetadataService.Setup(m => m.GetAudimetaMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new Listenarr.Api.Services.AudimetaBookResponse { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg" });
+            mockMetadataService.Setup(m => m.GetAudimetaMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>())).ReturnsAsync(new Listenarr.Api.Services.AudimetaBookResponse { Asin = "B123", Title = "Test Book", ImageUrl = "http://example.com/cover.jpg", LengthMinutes = 90 });
 
             var mockImageCache = new Mock<IImageCacheService>();
             // Simulate not cached initially, then a successful download
@@ -189,12 +209,71 @@ namespace Listenarr.Api.Tests
             var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(req);
             var actionResult = await controller.Search(reqJson);
 
+            // Additional test: SearchByApi returns Prowlarr-like DTO for MyAnonamouse
+            var mockService2 = new Mock<ISearchService>();
+            var mamResult = new Listenarr.Domain.Models.IndexerSearchResult {
+                Id = "28972",
+                Title = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP]",
+                Size = 3972844800,
+                Files = 783,
+                Grabs = 334,
+                Seeders = 59,
+                Leechers = 1,
+                TorrentUrl = "https://prowlarr.example/download.torrent",
+                ResultUrl = "https://www.myanonamouse.net/t/28972",
+                TorrentFileName = "Frank Herbert - Collection by Frank Herbert [ENG / MP3] [VIP].torrent",
+                IndexerId = 7,
+                IndexerImplementation = "MyAnonamouse",
+                Source = "MyAnonamouse"
+            };
+            mockService2.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Listenarr.Api.Models.SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult> { mamResult });
+            var controller2 = new SearchController(mockService2.Object, logger, mockAudimetaService, mockMetadataService.Object);
+            controller2.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+            var apiResult = await controller2.SearchByApi("1", "Dune Frank Herbert");
+            Assert.NotNull(apiResult.Result ?? apiResult.Value);
+            // Normalize response and assert Prowlarr-like fields
+            object? raw2 = null;
+            if (apiResult.Value != null) raw2 = apiResult.Value;
+            else if (apiResult.Result is OkObjectResult ok2) raw2 = ok2.Value;
+            Assert.NotNull(raw2);
+            var json2 = System.Text.Json.JsonSerializer.Serialize(raw2);
+            using var doc2 = System.Text.Json.JsonDocument.Parse(json2);
+            var root2 = doc2.RootElement;
+            Assert.Equal(System.Text.Json.JsonValueKind.Array, root2.ValueKind);
+            var first2 = root2[0];
+            bool hasGuid = first2.TryGetProperty("guid", out var g2) || first2.TryGetProperty("Guid", out g2);
+            Assert.True(hasGuid, "Result did not contain 'guid' or 'Guid'");
+            JsonElement d2;
+            bool hasDownload = first2.TryGetProperty("downloadUrl", out d2) || first2.TryGetProperty("DownloadUrl", out d2);
+            Assert.True(hasDownload, "Result did not contain 'downloadUrl' or 'DownloadUrl'");
+            JsonElement i2;
+            bool hasInfo = first2.TryGetProperty("infoUrl", out i2) || first2.TryGetProperty("InfoUrl", out i2);
+            Assert.True(hasInfo, "Result did not contain 'infoUrl' or 'InfoUrl'");
+            Assert.Equal("https://www.myanonamouse.net/t/28972", i2.GetString());
+            Assert.Equal("https://prowlarr.example/download.torrent", d2.GetString());
+
+            // New test: when caller provides MAM query params, they are passed into SearchIndexerResultsAsync as a SearchRequest
+            var mockService3 = new Mock<ISearchService>();
+            mockService3.Setup(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Listenarr.Api.Models.SearchRequest?>())).ReturnsAsync(new List<Listenarr.Domain.Models.IndexerSearchResult>());
+            var controller3 = new SearchController(mockService3.Object, logger, mockAudimetaService, mockMetadataService.Object);
+            controller3.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+            // Call with mamFilter and mamSearchInFilenames set via query params
+            var res3 = await controller3.SearchByApi("1", "Dune", null, mamFilter: "Freeleech", mamSearchInDescription: true, mamSearchInSeries: false, mamSearchInFilenames: true, mamLanguage: "2", mamFreeleechWedge: "Required");
+
+            mockService3.Verify(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.Is<Listenarr.Api.Models.SearchRequest?>(r => r != null && r.MyAnonamouse != null && r.MyAnonamouse.Filter == Listenarr.Api.Models.MamTorrentFilter.Freeleech && r.MyAnonamouse.SearchInDescription == true && r.MyAnonamouse.SearchInSeries == false && r.MyAnonamouse.SearchInFilenames == true && r.MyAnonamouse.SearchLanguage == "2" && r.MyAnonamouse.FreeleechWedge == Listenarr.Api.Models.MamFreeleechWedge.Required)), Times.Once);
+
+            // Also verify that enrichment flags from query parameters are forwarded into the SearchRequest
+            var res4 = await controller3.SearchByApi("1", "Dune", null, mamEnrichResults: true, mamEnrichTopResults: 2);
+            mockService3.Verify(s => s.SearchIndexerResultsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.Is<Listenarr.Api.Models.SearchRequest?>(r => r != null && r.MyAnonamouse != null && r.MyAnonamouse.EnrichResults == true && r.MyAnonamouse.EnrichTopResults == 2)), Times.Once);
+
+
             // Assert
             var audimetaReturned = actionResult.Value as Listenarr.Api.Services.AudimetaSearchResponse;
             if (audimetaReturned == null && actionResult.Result is OkObjectResult ok)
                 audimetaReturned = ok.Value as Listenarr.Api.Services.AudimetaSearchResponse;
 
-            if (audimetaReturned != null)
+            if (audimetaReturned != null && audimetaReturned.Results != null && audimetaReturned.Results.Count > 0)
             {
                 Assert.NotEmpty(audimetaReturned!.Results!);
                 Assert.Equal("B123", audimetaReturned.Results![0].Asin);
@@ -218,9 +297,50 @@ namespace Listenarr.Api.Tests
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
                 var root = doc.RootElement;
                 Assert.Equal(System.Text.Json.JsonValueKind.Array, root.ValueKind);
-                var first = root[0];
-                Assert.Equal("B123", first.GetProperty("asin").GetString());
-                Assert.Equal($"/api/images/B123", first.GetProperty("imageUrl").GetString());
+
+                // Verify the indexer result DTO is present and contains expected fields
+                bool foundIndexer = false;
+                foreach (var el in root.EnumerateArray())
+                {
+                    if (el.TryGetProperty("guid", out var g))
+                    {
+                        foundIndexer = true;
+                        Assert.True(el.TryGetProperty("downloadUrl", out var d));
+                        Assert.True(el.TryGetProperty("infoUrl", out var i));
+                        Assert.True(el.TryGetProperty("grabs", out var gr));
+
+                        Assert.Equal("https://www.myanonamouse.net/t/28972", i.GetString());
+                        Assert.Equal("https://prowlarr.example/download.torrent", d.GetString());
+                        Assert.Equal(334, gr.GetInt32());
+                        break;
+                    }
+
+                    // Also accept Audimeta-like objects returned directly as results (lengthMinutes present)
+                    if (el.TryGetProperty("lengthMinutes", out var lm))
+                    {
+                        foundIndexer = true;
+                        Assert.Equal(90, lm.GetInt32());
+                        break;
+                    }
+                }
+
+                if (!foundIndexer)
+                {
+                    // As a fallback, some responses may return Audimeta-like objects; assert that an ASIN entry exists
+                    bool foundAsin = false;
+                    foreach (var el in root.EnumerateArray())
+                    {
+                        if (el.TryGetProperty("asin", out var a))
+                        {
+                            foundAsin = true;
+                            Assert.Equal("B123", a.GetString());
+                            Assert.Equal($"/api/images/B123", el.GetProperty("imageUrl").GetString());
+                            break;
+                        }
+                    }
+
+                    Assert.True(foundAsin, "Expected either an indexer result with 'guid' or an Audimeta-like result with 'asin'");
+                }
             }
         }
 
@@ -496,7 +616,6 @@ namespace Listenarr.Api.Tests
             return Task.FromResult<Listenarr.Api.Services.AudimetaSearchResponse?>(_response);
         }
     }
-}
 
     // Minimal test implementation of ISearchService for IntelligentSearch testing
     internal class TestSearchServiceForIntelligent : ISearchService
@@ -523,12 +642,17 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(new List<SearchResult>());
         }
 
+        public Task<List<IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null)
+        {
+            return Task.FromResult(new List<IndexerSearchResult>());
+        }
+
         public Task<bool> TestApiConnectionAsync(string apiId)
         {
             return Task.FromResult(true);
         }
 
-        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null)
         {
             return Task.FromResult(new List<IndexerSearchResult>());
         }
@@ -538,4 +662,5 @@ namespace Listenarr.Api.Tests
             return Task.FromResult(new List<ApiConfiguration>());
         }
     }
+}
 

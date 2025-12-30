@@ -42,6 +42,10 @@ namespace Listenarr.Api.Services
         /// <param name="category">Optional category filter</param>
         /// <returns>Search results from the specified API</returns>
         Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null);
+        /// <summary>
+        /// Search a specific indexer and return raw indexer search results (IndexerSearchResult) for indexer-specific consumers.
+        /// </summary>
+        Task<List<Listenarr.Domain.Models.IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null);
 
         /// <summary>
         /// Tests connectivity and authentication for a specific API
@@ -59,7 +63,7 @@ namespace Listenarr.Api.Services
         /// <param name="sortDirection">Sort direction (ascending or descending)</param>
         /// <param name="isAutomaticSearch">Whether this is an automatic search</param>
         /// <returns>List of search results from indexers only</returns>
-        Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
+        Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null);
 
         /// <summary>
         /// Gets all enabled metadata sources (Amazon, Audible, etc.)

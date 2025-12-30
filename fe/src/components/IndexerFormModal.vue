@@ -50,9 +50,9 @@
               />
             </div>
 
-            <!-- MyAnonamouse Authentication -->
+                    <!-- MyAnonamouse Authentication & Options -->
             <div v-if="formData.implementation === 'MyAnonamouse'" class="form-section">
-              <h4>Authentication</h4>
+              <h4>MyAnonamouse Settings</h4>
               <div class="form-group">
                 <label for="mam-id">MAM ID *</label>
                 <input 
@@ -67,6 +67,59 @@
                 <i class="ph ph-info"></i>
                 MyAnonamouse requires your MAM ID for authentication. This is a unique identifier for your account. These are stored securely and only used to search the indexer.
               </small>
+
+              <div class="form-row mam-options">
+                <label class="form-group">
+                  <span>Filter</span>
+                  <select v-model="mamFilter">
+                    <option value="">Search everything</option>
+                    <option value="Active">Active</option>
+                    <option value="Freeleech">Freeleech</option>
+                    <option value="FreeleechOrVip">Freeleech or VIP</option>
+                    <option value="Vip">VIP only</option>
+                    <option value="NotVip">Not VIP</option>
+                  </select>
+                </label>
+
+                <label class="form-group">
+                  <input type="checkbox" v-model="mamSearchInDescription" />
+                  <span>Search in description</span>
+                </label>
+
+                <label class="form-group">
+                  <input type="checkbox" v-model="mamSearchInSeries" />
+                  <span>Search in series</span>
+                </label>
+
+                <label class="form-group">
+                  <input type="checkbox" v-model="mamSearchInFilenames" />
+                  <span>Search in filenames</span>
+                </label>
+
+                <label class="form-group">
+                  <span>Language (numeric id)</span>
+                  <input type="text" v-model="mamLanguage" placeholder="e.g., 1" />
+                </label>
+
+                <label class="form-group">
+                  <span>Freeleech wedge</span>
+                  <select v-model="mamFreeleechWedge">
+                    <option value="">Never</option>
+                    <option value="Preferred">Preferred</option>
+                    <option value="Required">Required</option>
+                  </select>
+                </label>
+
+                <label class="form-group">
+                  <input type="checkbox" v-model="mamEnrichResults" />
+                  <span>Enrich results (fetch item page for missing fields)</span>
+                </label>
+
+                <label class="form-group">
+                  <span>Enrich top results</span>
+                  <input type="number" v-model.number="mamEnrichTopResults" min="1" max="20" />
+                </label>
+              </div>
             </div>
 
             <!-- Internet Archive Collection Selection -->
@@ -246,6 +299,15 @@ const testing = ref(false)
 
 // MyAnonamouse authentication field
 const mamId = ref('')
+// MyAnonamouse options
+const mamFilter = ref('')
+const mamSearchInDescription = ref(false)
+const mamSearchInSeries = ref(true)
+const mamSearchInFilenames = ref(true)
+const mamLanguage = ref('')
+const mamFreeleechWedge = ref('')
+const mamEnrichResults = ref(false)
+const mamEnrichTopResults = ref(3)
 
 // Internet Archive collection field
 const iaCollection = ref('librivoxaudio')
@@ -278,7 +340,17 @@ const buildIndexerPayload = (): IndexerPayload => {
   payload.additionalSettings = payload.additionalSettings || ''
 
   if (payload.implementation === 'MyAnonamouse') {
-    payload.additionalSettings = JSON.stringify({ mam_id: mamId.value })
+    const mamOpts: any = {
+      searchInDescription: mamSearchInDescription.value,
+      searchInSeries: mamSearchInSeries.value,
+      searchInFilenames: mamSearchInFilenames.value,
+      language: mamLanguage.value || undefined,
+      filter: mamFilter.value || undefined,
+      freeleechWedge: mamFreeleechWedge.value || undefined,
+      enrichResults: mamEnrichResults.value,
+      enrichTopResults: mamEnrichTopResults.value
+    }
+    payload.additionalSettings = JSON.stringify({ mam_id: mamId.value, mam_options: mamOpts })
     payload.apiKey = ''
   } else if (payload.implementation === 'InternetArchive') {
     payload.additionalSettings = JSON.stringify({ collection: iaCollection.value })
@@ -321,6 +393,27 @@ watch(() => props.editingIndexer, (newIndexer) => {
       try {
         const settings = JSON.parse(newIndexer.additionalSettings)
         mamId.value = settings.mam_id || ''
+        // Parse options if present
+        if (settings.mam_options) {
+          mamSearchInDescription.value = settings.mam_options.searchInDescription ?? mamSearchInDescription.value
+          mamSearchInSeries.value = settings.mam_options.searchInSeries ?? mamSearchInSeries.value
+          mamSearchInFilenames.value = settings.mam_options.searchInFilenames ?? mamSearchInFilenames.value
+          mamLanguage.value = settings.mam_options.language ?? mamLanguage.value
+          mamFilter.value = settings.mam_options.filter ?? mamFilter.value
+          mamFreeleechWedge.value = settings.mam_options.freeleechWedge ?? mamFreeleechWedge.value
+          mamEnrichResults.value = settings.mam_options.enrichResults ?? mamEnrichResults.value
+          mamEnrichTopResults.value = settings.mam_options.enrichTopResults ?? mamEnrichTopResults.value
+        } else {
+          // Also allow flat properties for backward compatibility
+          mamSearchInDescription.value = settings.searchInDescription ?? mamSearchInDescription.value
+          mamSearchInSeries.value = settings.searchInSeries ?? mamSearchInSeries.value
+          mamSearchInFilenames.value = settings.searchInFilenames ?? mamSearchInFilenames.value
+          mamLanguage.value = settings.language ?? mamLanguage.value
+          mamFilter.value = settings.filter ?? mamFilter.value
+          mamFreeleechWedge.value = settings.freeleechWedge ?? mamFreeleechWedge.value
+          mamEnrichResults.value = settings.enrichResults ?? mamEnrichResults.value
+          mamEnrichTopResults.value = settings.enrichTopResults ?? mamEnrichTopResults.value
+        }
       } catch (e) {
         console.error('Failed to parse MyAnonamouse settings:', e)
         mamId.value = ''

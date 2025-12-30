@@ -47,6 +47,8 @@
                   Search
                 </button>
               </div>
+
+
             </div>
             
             <div class="results-controls">
@@ -104,14 +106,15 @@
                       <component :is="getSortIcon('Size')" class="sort-icon" />
                     </span>
                   </th>
-                  <th class="col-peers sortable" @click="setSort('Seeders')">
+                  <th v-if="anyHasPeers" class="col-peers sortable" @click="setSort('Seeders')">
                     <span class="header-content">
                       Peers
                       <component :is="getSortIcon('Seeders')" class="sort-icon" />
                     </span>
                   </th>
-                  <th class="col-language">Languages</th>
-                  <th class="col-quality sortable" @click="setSort('Quality')">
+                  <th class="col-grabs">Grabs</th>
+                  <th v-if="anyHasLanguage" class="col-language">Languages</th>
+                  <th v-if="anyHasQuality" class="col-quality sortable" @click="setSort('Quality')">
                     <span class="header-content">
                       Quality
                       <component :is="getSortIcon('Quality')" class="sort-icon" />
@@ -159,27 +162,29 @@
                     <span class="indexer-name">{{ result.source }}</span>
                   </td>
                   <td class="col-size">{{ formatSize(result.size) }}</td>
-                  <td class="col-peers">
-                    <div class="peers-cell">
-                      <span class="seeders" :class="{ 'good': result.seeders > 10, 'medium': result.seeders > 0 && result.seeders <= 10 }">
+                  <td v-if="anyHasPeers" class="col-peers">
+                    <div class="peers-cell" v-if="result.seeders !== undefined && result.seeders !== null">
+                      <span class="seeders" :class="{ 'good': (result.seeders ?? 0) > 10, 'medium': (result.seeders ?? 0) > 0 && (result.seeders ?? 0) <= 10 }">
                         <PhArrowUp /> {{ result.seeders }}
                       </span>
-                      <span class="leechers">
+                      <span class="leechers" v-if="result.leechers !== undefined && result.leechers !== null">
                         <PhArrowDown /> {{ result.leechers }}
                       </span>
                     </div>
                   </td>
-                  <td class="col-language">
+                  <td class="col-grabs">
+                    <span v-if="result.grabs !== undefined" class="grabs">✚ {{ result.grabs }}</span>
+                    <span v-else class="grabs unknown">-</span>
+                  </td>
+                  <td v-if="anyHasLanguage" class="col-language">
                     <span v-if="result.language" class="language-badge">
                       {{ result.language }}
                     </span>
-                    <span v-else class="language-badge unknown">Unknown</span>
                   </td>
-                  <td class="col-quality">
+                  <td v-if="anyHasQuality" class="col-quality">
                     <span v-if="result.quality" class="quality-badge">
                       {{ result.quality }}
                     </span>
-                    <span v-else class="quality-badge unknown">-</span>
                   </td>
                   <td class="col-score">
                     <div v-if="getResultScore(result.id)" class="score-cell">
@@ -258,6 +263,7 @@ const sortBy = ref<SearchSortBy | 'Score'>('Score')
 const sortDirection = ref<SearchSortDirection>('Descending')
 const searchQuery = ref('')
 
+
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen && props.audiobook) {
     // Initialize search query with default query and auto-search
@@ -294,6 +300,10 @@ const displayResults = computed(() => {
   })
   return copy
 })
+
+const anyHasPeers = computed(() => displayResults.value.some(r => r.seeders !== undefined && r.seeders !== null))
+const anyHasLanguage = computed(() => displayResults.value.some(r => !!r.language))
+const anyHasQuality = computed(() => displayResults.value.some(r => !!r.quality))
 
 function setSort(column: SearchSortBy | 'Score') {
   if (sortBy.value === column) {
@@ -373,8 +383,78 @@ async function search() {
     const allResults: SearchResult[] = []
     const searchPromises = enabledIndexers.map(async (indexer) => {
       try {
-        const indexerResults = await apiService.searchByApi(indexer.id.toString(), query)
-        allResults.push(...indexerResults)
+        // Map MyAnonamouse indexer options (if present on the indexer) to searchByApi opts so backend can apply them
+    let opts: any = undefined
+    if (indexer.implementation === 'MyAnonamouse') {
+      try {
+        const settings = indexer.additionalSettings ? JSON.parse(indexer.additionalSettings) : {}
+        const mam = settings.mam_options ?? settings
+        opts = {
+          mamFilter: mam?.filter || undefined,
+          mamSearchInDescription: mam?.searchInDescription !== undefined ? mam?.searchInDescription : undefined,
+          mamSearchInSeries: mam?.searchInSeries !== undefined ? mam?.searchInSeries : undefined,
+          mamSearchInFilenames: mam?.searchInFilenames !== undefined ? mam?.searchInFilenames : undefined,
+          mamLanguage: mam?.language || undefined,
+          mamFreeleechWedge: mam?.freeleechWedge || undefined,
+          mamEnrichResults: mam?.enrichResults !== undefined ? mam?.enrichResults : undefined,
+          mamEnrichTopResults: mam?.enrichTopResults !== undefined ? mam?.enrichTopResults : undefined
+        }
+      } catch (e) {
+        console.warn('Failed to parse MyAnonamouse options from indexer.additionalSettings', e)
+      }
+    }
+
+    const indexerResultsRaw: any[] = await apiService.searchByApi(indexer.id.toString(), query, undefined, opts)
+
+        // Normalize Prowlarr-like IndexerResultDto into local SearchResult shape for the UI
+        let normalized: SearchResult[] = []
+        if (indexerResultsRaw && indexerResultsRaw.length > 0 && (indexerResultsRaw[0] as any).guid !== undefined) {
+          normalized = indexerResultsRaw.map((dto: any) => ({
+            id: dto.guid ?? dto.infoUrl ?? dto.fileName ?? String(Math.random()),
+            title: dto.title ?? '',
+            size: typeof dto.size === 'string' ? Number(dto.size) || 0 : dto.size ?? 0,
+            seeders: dto.seeders ?? null,
+            leechers: dto.leechers ?? null,
+            grabs: typeof dto.grabs === 'string' ? Number(dto.grabs) || 0 : dto.grabs ?? 0,
+            files: typeof dto.files === 'string' ? Number(dto.files) || 0 : dto.files ?? 0,
+            magnetLink: '',
+            torrentUrl: dto.downloadUrl ?? '',
+            nzbUrl: '',
+            downloadType: dto.protocol ?? '',
+            quality: undefined,
+            indexerId: dto.indexerId ?? indexer.id,
+            indexerImplementation: dto.indexer ?? indexer.name,
+            resultUrl: dto.infoUrl ?? dto.guid ?? '',
+            description: undefined,
+            publisher: undefined,
+            subtitle: undefined,
+            publishYear: undefined,
+            language: dto.language ?? dto.lang_code ?? dto.languageCode ?? undefined,
+            runtime: undefined,
+            narrator: undefined,
+            imageUrl: undefined,
+            asin: undefined,
+            series: undefined,
+            seriesNumber: undefined,
+            productUrl: undefined,
+            isEnriched: false,
+            metadataSource: undefined,
+            subtitles: undefined,
+            artist: '',
+            album: '',
+            category: '',
+            source: dto.indexer ?? indexer.name,
+            sourceLink: dto.infoUrl ?? dto.guid ?? '',
+            publishedDate: dto.publishDate ?? dto.added ?? dto.publish_date ?? '',
+            format: dto.protocol ?? '',
+            score: 0
+          }))
+        } else {
+          // Already in SearchResult shape
+          normalized = (indexerResultsRaw as SearchResult[])
+        }
+
+        allResults.push(...normalized)
         searchedIndexers.value++
       } catch (error) {
         console.warn(`Failed to search indexer ${indexer.name}:`, error)
@@ -393,8 +473,8 @@ async function search() {
         switch (backendSortBy) {
           case 'Seeders':
             return sortDirection.value === 'Ascending' 
-              ? a.seeders - b.seeders 
-              : b.seeders - a.seeders
+              ? (a.seeders ?? 0) - (b.seeders ?? 0)
+              : (b.seeders ?? 0) - (a.seeders ?? 0)
           case 'Size':
             return sortDirection.value === 'Ascending' 
               ? a.size - b.size 
@@ -413,8 +493,8 @@ async function search() {
               : b.source.localeCompare(a.source)
           case 'Quality':
             return sortDirection.value === 'Ascending' 
-              ? a.quality.localeCompare(b.quality) 
-              : b.quality.localeCompare(a.quality)
+              ? (a.quality ?? '').localeCompare(b.quality ?? '') 
+              : (b.quality ?? '').localeCompare(a.quality ?? '')
           default:
             return 0
         }
@@ -972,6 +1052,18 @@ function getScoreClass(score: number): string {
 
 .col-language {
   width: 100px;
+}
+
+.col-grabs {
+  width: 80px;
+}
+
+.grabs {
+  margin-left: 8px;
+  color: var(--muted);
+}
+.grabs.unknown {
+  color: #7f8c8d;
 }
 
 .col-quality {

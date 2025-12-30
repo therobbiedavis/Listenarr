@@ -1106,7 +1106,7 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
       searchResult: result as unknown as SearchResult,
       imageUrl: result.imageUrl,
       // prefer explicit metadataSource, but fall back to attached searchResult metadata when present
-      metadataSource: looksLikeAudimeta ? 'audimeta' : (result.metadataSource || (result.searchResult && (result.searchResult as any).metadataSource)),
+      metadataSource: looksLikeAudimeta ? 'audimeta' : (result.metadataSource || (((result as any).searchResult && (result as any).searchResult.metadataSource))),
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher) ? result.publisher : (result.publisher ? [result.publisher] : undefined)
     }
@@ -1875,9 +1875,9 @@ const getAsin = (book: TitleSearchResult): string | null => {
   return book.searchResult?.asin || resolvedAsins.value[book.key] || null
 }
 
-const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
+const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
   const source = book.metadataSource || (book.searchResult && (book.searchResult as any).metadataSource)
-  if (!source) return null
+  if (!source) return undefined
 
   // OpenLibrary metadata does not require an ASIN; prefer resultUrl (JSON) then productUrl or OL work URL
   if (source.toLowerCase().includes('openlibrary')) {
@@ -1919,11 +1919,11 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
     }
     // No key: fall back to search by title
     if (book.title) return openLibraryService.getSearchUrl(book.title)
-    return null
+    return undefined
   }
 
   const asin = getAsin(book)
-  if (!asin) return null
+  if (!asin) return undefined
 
   // Map metadata source to URL for ASIN-based providers
   if (source.toLowerCase().includes('audimeta')) {
@@ -1938,11 +1938,11 @@ const getMetadataSourceUrl = (book: TitleSearchResult): string | null => {
     return buildAudibleProductUrl(asin)
   }
 
-  return null
+  return undefined
 }
 
 // Get a sensible 'source' URL for the book (indexer/product or OpenLibrary work page)
-const getSourceUrl = (book: TitleSearchResult): string | null => {
+const getSourceUrl = (book: TitleSearchResult): string | undefined => {
   // Prefer explicit productUrl from the enriched SearchResult
   if (book.searchResult?.productUrl) return book.searchResult.productUrl
 
@@ -1968,7 +1968,7 @@ const getSourceUrl = (book: TitleSearchResult): string | null => {
     if (book.title) return openLibraryService.getSearchUrl(book.title)
   }
 
-  return null
+  return undefined
 }
 
 // Extract ISBN candidates from an OpenLibrary-derived TitleSearchResult
@@ -2456,7 +2456,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       searchResult: result,
       imageUrl: result.imageUrl,
       // prefer explicit metadataSource, but mark audimeta when detected so UI shows Audimeta-specific badges
-      metadataSource: looksLikeAudimeta ? 'audimeta' : (result.metadataSource || (result.searchResult && (result.searchResult as any).metadataSource)),
+      metadataSource: looksLikeAudimeta ? 'audimeta' : (result.metadataSource || (((result as any).searchResult && (result as any).searchResult.metadataSource))),
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher) ? result.publisher : (result.publisher ? [result.publisher] : undefined)
     }

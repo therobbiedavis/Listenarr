@@ -13,13 +13,13 @@ export interface BaseSearchResult {
 
 export interface IndexerSearchResult extends BaseSearchResult {
   size: number
-  seeders: number
-  leechers: number
+  seeders?: number
+  leechers?: number
   magnetLink: string
   torrentUrl: string
   nzbUrl: string
   downloadType: string // "Torrent", "Usenet", or "DDL"
-  quality: string
+  quality?: string
   resultUrl?: string // Canonical indexer page for the result
 }
 
@@ -52,13 +52,15 @@ export interface MetadataSearchResult extends BaseSearchResult {
 export interface SearchResult extends BaseSearchResult {
   // Indexer-specific properties
   size: number
-  seeders: number
-  leechers: number
+  seeders?: number
+  leechers?: number
+  grabs?: number
+  files?: number
   magnetLink: string
   torrentUrl: string
   nzbUrl: string
   downloadType: string // "Torrent", "Usenet", or "DDL"
-  quality: string
+  quality?: string
   resultUrl?: string // Canonical indexer page for the result
 
   // Metadata-specific properties
@@ -70,6 +72,7 @@ export interface SearchResult extends BaseSearchResult {
   narrator?: string
   imageUrl?: string
   asin?: string
+  isbn?: string
   series?: string
   seriesNumber?: string
   seriesList?: string[]
@@ -312,6 +315,7 @@ export interface AudibleBookMetadata {
   narrators?: string[]
   isbn?: string
   asin: string
+  searchResult?: SearchResult
   publisher?: string
   language?: string
   runtime?: number
@@ -323,7 +327,6 @@ export interface AudibleBookMetadata {
   sourceLink?: string
   openLibraryId?: string
   metadataSource?: string
-  searchResult?: SearchResult
   // Optional local mapping to a quality profile ID when viewing in the UI
   qualityProfileId?: number
 }

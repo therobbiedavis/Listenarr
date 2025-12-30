@@ -315,10 +315,20 @@ class ApiService {
     return this.request<SearchResult[]>(`/search/indexers?${params}`)
   }
 
-  async searchByApi(apiId: string, query: string, category?: string): Promise<SearchResult[]> {
+  async searchByApi(apiId: string, query: string, category?: string, opts?: { mamFilter?: string, mamSearchInDescription?: boolean, mamSearchInSeries?: boolean, mamSearchInFilenames?: boolean, mamLanguage?: string, mamFreeleechWedge?: string, mamEnrichResults?: boolean, mamEnrichTopResults?: number }): Promise<SearchResult[]> {
     const params = new URLSearchParams({ query })
     if (category) params.append('category', category)
-    
+
+    // Map MyAnonamouse frontend options to backend query params
+    if (opts?.mamFilter) params.append('mamFilter', opts.mamFilter)
+    if (opts?.mamSearchInDescription !== undefined) params.append('mamSearchInDescription', String(opts.mamSearchInDescription))
+    if (opts?.mamSearchInSeries !== undefined) params.append('mamSearchInSeries', String(opts.mamSearchInSeries))
+    if (opts?.mamSearchInFilenames !== undefined) params.append('mamSearchInFilenames', String(opts.mamSearchInFilenames))
+    if (opts?.mamLanguage) params.append('mamLanguage', opts.mamLanguage)
+    if (opts?.mamFreeleechWedge) params.append('mamFreeleechWedge', opts.mamFreeleechWedge)
+    if (opts?.mamEnrichResults !== undefined) params.append('mamEnrichResults', String(opts.mamEnrichResults))
+    if (opts?.mamEnrichTopResults !== undefined) params.append('mamEnrichTopResults', String(opts.mamEnrichTopResults))
+
     return this.request<SearchResult[]>(`/search/${apiId}?${params}`)
   }
 

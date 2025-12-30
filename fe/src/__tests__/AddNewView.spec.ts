@@ -234,7 +234,7 @@ describe('AddNewView pagination', () => {
 
     // Simulate library already containing the ASIN
     const lib = useLibraryStore()
-    lib.audiobooks = [{ id: '1', asin: 'BEXIST', title: 'Already In Library' }]
+    lib.audiobooks = [{ id: 1, asin: 'BEXIST', title: 'Already In Library' }]
 
     vm.searchType = 'asin'
     vm.audibleResult = { asin: 'BEXIST', title: 'Already In Library' }

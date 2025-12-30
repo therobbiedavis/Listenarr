@@ -126,12 +126,17 @@
             
             <div class="result-meta">
               <span class="result-size">{{ formatFileSize(result.size) }}</span>
-              <span class="result-quality">{{ result.quality }}</span>
+              <span v-if="result.quality" class="result-quality">{{ result.quality }}</span>
               <span class="result-source">{{ result.source }}</span>
+              <span v-if="result.language" class="result-language">
+                <PhGlobe /> {{ capitalizeLanguage(result.language) }}
+              </span>
             </div>
             <div class="result-stats">
-              <span class="seeders">↑ {{ result.seeders }}</span>
-              <span class="leechers">↓ {{ result.leechers }}</span>
+              <span v-if="result.seeders !== undefined && result.seeders !== null" class="seeders">↑ {{ result.seeders }}</span>
+              <span v-if="result.leechers !== undefined && result.leechers !== null" class="leechers">↓ {{ result.leechers }}</span>
+              <span v-if="result.grabs !== undefined" class="grabs">✚ {{ result.grabs }}</span>
+              <span v-if="result.files !== undefined" class="files">📁 {{ result.files }}</span>
             </div>
           </div>
           <div class="result-actions">
@@ -161,7 +166,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus } from '@phosphor-icons/vue'
+import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus, PhGlobe } from '@phosphor-icons/vue'
 import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
@@ -213,6 +218,11 @@ const fetchRawDebug = async (q: string) => {
       console.error('[SearchView] Raw debug fetch failed (apiService)', e)
       rawDebugResults.value = null
     }
+}
+
+const capitalizeLanguage = (language: string | undefined): string => {
+  if (!language) return ''
+  return language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
 }
 
 const fetchRawDebugWindow = async (q: string) => {
@@ -700,6 +710,20 @@ const getScoreClass = (score: number): string => {
 }
 
 .seeders {
+}
+
+.leechers {
+}
+
+.grabs {
+  margin-left: 8px;
+  color: var(--muted);
+}
+
+.files {
+  margin-left: 8px;
+  color: var(--muted);
+}
   color: #27ae60;
   font-weight: 600;
 }

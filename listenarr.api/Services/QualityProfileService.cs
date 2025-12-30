@@ -533,9 +533,9 @@ namespace Listenarr.Api.Services
             }
 
             // Seeders small bonus
-            if (searchResult.Seeders > 0)
+            if ((searchResult.Seeders ?? 0) > 0)
             {
-                var seedersBonus = Math.Min(10, searchResult.Seeders);
+                var seedersBonus = Math.Min(10, searchResult.Seeders ?? 0);
                 if (seedersBonus > 0)
                 {
                     score.TotalScore += seedersBonus;

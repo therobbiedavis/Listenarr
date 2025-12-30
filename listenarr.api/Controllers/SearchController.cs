@@ -839,9 +839,10 @@ namespace Listenarr.Api.Controllers
                 foreach (var result in searchResults)
                 {
                     // Determine result type: indexer results have size/seeders, metadata results have description/publisher
-                    if (result.Size > 0 || result.Seeders > 0 || !string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl) || !string.IsNullOrEmpty(result.NzbUrl))
+                    if (result.Size > 0 || (result.Seeders ?? 0) > 0 || !string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl) || !string.IsNullOrEmpty(result.NzbUrl))
                     {
-                        response.IndexerResults.Add(SearchResultConverters.ToIndexerSearchResult(result));
+                        var idx = SearchResultConverters.ToIndexerSearchResult(result);
+                        response.IndexerResults.Add(SearchResultConverters.ToIndexerResultDto(idx));
                     }
                     else
                     {
@@ -1032,7 +1033,19 @@ namespace Listenarr.Api.Controllers
                 }
 
                 _logger.LogInformation("IndexersSearch called for query: {Query}, isAutomaticSearch={IsAutomatic}", LogRedaction.SanitizeText(query), isAutomaticSearch);
-                var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+
+                // Support MyAnonamouse query string toggles (mamFilter, mamSearchInDescription, mamSearchInSeries, mamSearchInFilenames, mamLanguage, mamFreeleechWedge)
+                var mamOptions = new Listenarr.Api.Models.MyAnonamouseOptions();
+                if (Request.Query.ContainsKey("mamFilter") && Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(Request.Query["mamFilter"].ToString() ?? string.Empty, true, out var mamFilter))
+                    mamOptions.Filter = mamFilter;
+                if (Request.Query.ContainsKey("mamSearchInDescription") && bool.TryParse(Request.Query["mamSearchInDescription"], out var sd)) mamOptions.SearchInDescription = sd;
+                if (Request.Query.ContainsKey("mamSearchInSeries") && bool.TryParse(Request.Query["mamSearchInSeries"], out var ss)) mamOptions.SearchInSeries = ss;
+                if (Request.Query.ContainsKey("mamSearchInFilenames") && bool.TryParse(Request.Query["mamSearchInFilenames"], out var sf)) mamOptions.SearchInFilenames = sf;
+                if (Request.Query.ContainsKey("mamLanguage")) mamOptions.SearchLanguage = Request.Query["mamLanguage"].ToString();
+                if (Request.Query.ContainsKey("mamFreeleechWedge") && Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(Request.Query["mamFreeleechWedge"].ToString() ?? string.Empty, true, out var mw)) mamOptions.FreeleechWedge = mw;
+
+                var req = new Listenarr.Api.Models.SearchRequest { MyAnonamouse = mamOptions };
+                var results = await _searchService.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, req);
                 _logger.LogInformation("IndexersSearch returning {Count} results for query: {Query}", results.Count, LogRedaction.SanitizeText(query));
                 return Ok(results);
             }
@@ -1326,10 +1339,18 @@ namespace Listenarr.Api.Controllers
         /// Note: This route uses a parameter and must come after all specific routes to avoid conflicts
         /// </summary>
         [HttpGet("{apiId}")]
-        public async Task<ActionResult<List<SearchResult>>> SearchByApi(
+        public async Task<ActionResult<object>> SearchByApi(
             string apiId,
             [FromQuery] string query,
-            [FromQuery] string? category = null)
+            [FromQuery] string? category = null,
+            [FromQuery] string? mamFilter = null,
+            [FromQuery] bool? mamSearchInDescription = null,
+            [FromQuery] bool? mamSearchInSeries = null,
+            [FromQuery] bool? mamSearchInFilenames = null,
+            [FromQuery] string? mamLanguage = null,
+            [FromQuery] string? mamFreeleechWedge = null,
+            [FromQuery] bool? mamEnrichResults = null,
+            [FromQuery] int? mamEnrichTopResults = null)
         {
             try
             {
@@ -1340,7 +1361,40 @@ namespace Listenarr.Api.Controllers
                     return BadRequest("Query parameter is required");
                 }
 
-                var results = await _searchService.SearchByApiAsync(apiId, query, category);
+                // If the caller provided explicit MyAnonamouse query params, construct a SearchRequest that will be passed to the service.
+                Listenarr.Api.Models.SearchRequest? request = null;
+                if (mamFilter != null || mamSearchInDescription.HasValue || mamSearchInSeries.HasValue || mamSearchInFilenames.HasValue || mamLanguage != null || mamFreeleechWedge != null || mamEnrichResults.HasValue || mamEnrichTopResults.HasValue)
+                {
+                    request = new Listenarr.Api.Models.SearchRequest();
+                    request.MyAnonamouse = new Listenarr.Api.Models.MyAnonamouseOptions();
+
+                    if (mamSearchInDescription.HasValue) request.MyAnonamouse.SearchInDescription = mamSearchInDescription.Value;
+                    if (mamSearchInSeries.HasValue) request.MyAnonamouse.SearchInSeries = mamSearchInSeries.Value;
+                    if (mamSearchInFilenames.HasValue) request.MyAnonamouse.SearchInFilenames = mamSearchInFilenames.Value;
+                    if (!string.IsNullOrWhiteSpace(mamLanguage)) request.MyAnonamouse.SearchLanguage = mamLanguage;
+
+                    if (!string.IsNullOrWhiteSpace(mamFilter) && Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(mamFilter, true, out var mf))
+                        request.MyAnonamouse.Filter = mf;
+
+                    if (!string.IsNullOrWhiteSpace(mamFreeleechWedge) && Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(mamFreeleechWedge, true, out var fw))
+                        request.MyAnonamouse.FreeleechWedge = fw;
+                    if (mamEnrichResults.HasValue) request.MyAnonamouse.EnrichResults = mamEnrichResults.Value;
+                    if (mamEnrichTopResults.HasValue) request.MyAnonamouse.EnrichTopResults = mamEnrichTopResults.Value;
+                }
+
+                // Use the raw indexer results when the caller expects indexer-specific fields. SearchIndexerResultsAsync will
+                // apply any MyAnonamouse options found in the indexer's AdditionalSettings if no explicit request was supplied.
+                var idxResults = await _searchService.SearchIndexerResultsAsync(apiId, query, category, request);
+
+                // If the underlying indexer implementation indicates MyAnonamouse (set on results by SearchIndexerAsync), return Prowlarr-like DTO shape
+                if (idxResults.Count > 0 && !string.IsNullOrWhiteSpace(idxResults[0].IndexerImplementation) && string.Equals(idxResults[0].IndexerImplementation, "MyAnonamouse", StringComparison.OrdinalIgnoreCase))
+                {
+                    var dtos = idxResults.Select(r => Listenarr.Domain.Models.SearchResultConverters.ToIndexerResultDto(r)).ToList();
+                    return Ok(dtos);
+                }
+
+                // Otherwise, return the legacy SearchResult shape
+                var results = idxResults.Select(r => Listenarr.Domain.Models.SearchResultConverters.ToSearchResult(r)).ToList();
                 _logger.LogInformation("SearchByApi returning {Count} results for apiId: {ApiId}", results.Count, apiId);
                 return Ok(results);
             }

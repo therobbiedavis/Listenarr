@@ -45,8 +45,10 @@ namespace Listenarr.Domain.Models
     public class IndexerSearchResult : BaseSearchResult
     {
         public long Size { get; set; }
-        public int Seeders { get; set; }
-        public int Leechers { get; set; }
+        public int? Seeders { get; set; }
+        public int? Leechers { get; set; }
+        public int Grabs { get; set; }
+        public int Files { get; set; }
         public string MagnetLink { get; set; } = string.Empty;
         public string TorrentUrl { get; set; } = string.Empty;
         public string NzbUrl { get; set; } = string.Empty;
@@ -55,7 +57,7 @@ namespace Listenarr.Domain.Models
         [JsonIgnore]
         public string? TorrentFileName { get; set; }
         public string DownloadType { get; set; } = string.Empty; // "Torrent", "Usenet", or "DDL"
-        public string Quality { get; set; } = string.Empty;
+        public string? Quality { get; set; }
 
         // Indexer metadata used to resolve tracker-specific downloads
         public int? IndexerId { get; set; }
@@ -96,6 +98,10 @@ namespace Listenarr.Domain.Models
         // Tracks which metadata API was used to enrich this result
         public string? MetadataSource { get; set; }
         public string? Subtitles { get; set; }
+        
+        // New indexer-derived properties
+        public int Grabs { get; set; }
+        public int Files { get; set; }
     }
 
     /// <summary>
@@ -106,8 +112,10 @@ namespace Listenarr.Domain.Models
     {
         // Indexer-specific properties
         public long Size { get; set; }
-        public int Seeders { get; set; }
-        public int Leechers { get; set; }
+        public int? Seeders { get; set; }
+        public int? Leechers { get; set; }
+        public int Grabs { get; set; }
+        public int Files { get; set; }
         public string MagnetLink { get; set; } = string.Empty;
         public string TorrentUrl { get; set; } = string.Empty;
         public string NzbUrl { get; set; } = string.Empty;
@@ -116,7 +124,7 @@ namespace Listenarr.Domain.Models
         [JsonIgnore]
         public string? TorrentFileName { get; set; }
         public string DownloadType { get; set; } = string.Empty; // "Torrent", "Usenet", or "DDL"
-        public string Quality { get; set; } = string.Empty;
+        public string? Quality { get; set; }
 
         // Indexer metadata used to resolve tracker-specific downloads
         public int? IndexerId { get; set; }
@@ -158,12 +166,43 @@ namespace Listenarr.Domain.Models
     }
 
     /// <summary>
+    /// DTO representing indexer results in a Prowlarr-like shape for the public API
+    /// </summary>
+    public class IndexerResultDto
+    {
+        public string? Guid { get; set; }
+        public int? Age { get; set; }
+        public double? AgeHours { get; set; }
+        public double? AgeMinutes { get; set; }
+        public long Size { get; set; }
+        public int Files { get; set; }
+        public int Grabs { get; set; }
+        public int? IndexerId { get; set; }
+        public string? Indexer { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string? SortTitle { get; set; }
+        public int ImdbId { get; set; }
+        public int TmdbId { get; set; }
+        public int TvdbId { get; set; }
+        public int TvMazeId { get; set; }
+        public string? PublishDate { get; set; }
+        public string? DownloadUrl { get; set; }
+        public string? InfoUrl { get; set; }
+        public List<string> IndexerFlags { get; set; } = new();
+        public List<object> Categories { get; set; } = new();
+        public int? Seeders { get; set; }
+        public int? Leechers { get; set; }
+        public string? Protocol { get; set; }
+        public string? FileName { get; set; }
+    }
+
+    /// <summary>
     /// <summary>
     /// Response wrapper for search operations that can contain different types of results
     /// </summary>
     public class SearchResponse
     {
-        public List<IndexerSearchResult> IndexerResults { get; set; } = new();
+        public List<IndexerResultDto> IndexerResults { get; set; } = new();
         public List<MetadataSearchResult> MetadataResults { get; set; } = new();
         public int TotalCount => IndexerResults.Count + MetadataResults.Count;
     }
@@ -173,6 +212,18 @@ namespace Listenarr.Domain.Models
     /// </summary>
     public static class SearchResultConverters
     {
+        // Helper: do a lightweight language detection on a text block when Indexer did not provide language
+        private static string? DetectLanguageFromText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var t = text.ToUpperInvariant();
+            if (System.Text.RegularExpressions.Regex.IsMatch(t, "\\b(ENG|EN)\\b")) return "English";
+            if (System.Text.RegularExpressions.Regex.IsMatch(t, "\\b(FRE|FR)\\b")) return "French";
+            if (System.Text.RegularExpressions.Regex.IsMatch(t, "\\b(GER|DE)\\b")) return "German";
+            if (System.Text.RegularExpressions.Regex.IsMatch(t, "\\b(DUT|NL)\\b")) return "Dutch";
+            return null;
+        }
+
         public static MetadataSearchResult ToMetadata(SearchResult result)
         {
             return new MetadataSearchResult
@@ -218,14 +269,21 @@ namespace Listenarr.Domain.Models
                 Format = result.Format,
                 Score = result.Score,
                 Size = result.Size,
-                Seeders = result.Seeders,
-                Leechers = result.Leechers,
+                // Only populate peer counts for torrent results; usenet/ddl should not show peers
+                Seeders = string.Equals(result.DownloadType, "Torrent", StringComparison.OrdinalIgnoreCase) ? result.Seeders : null,
+                Leechers = string.Equals(result.DownloadType, "Torrent", StringComparison.OrdinalIgnoreCase) ? result.Leechers : null,
                 MagnetLink = result.MagnetLink,
                 TorrentUrl = result.TorrentUrl,
                 NzbUrl = result.NzbUrl,
                 DownloadType = result.DownloadType,
-                Quality = result.Quality,
-                ResultUrl = result.ResultUrl
+                // Only set quality when it was actually parsed / non-empty
+                Quality = string.IsNullOrWhiteSpace(result.Quality) ? null : result.Quality,
+                // Preserve parsed language from indexer responses (e.g., MyAnonamouse); leave null if not available.
+                // Only attempt lightweight detection for Torrent results; do not infer language for Usenet/DDL results.
+                Language = !string.IsNullOrWhiteSpace(result.Language) ? result.Language : (string.Equals(result.DownloadType, "Torrent", System.StringComparison.OrdinalIgnoreCase) ? DetectLanguageFromText(result.Title + " " + (result.Description ?? string.Empty)) : null),
+                ResultUrl = result.ResultUrl,
+                Grabs = result.Grabs,
+                Files = result.Files
             };
         }
 
@@ -251,8 +309,55 @@ namespace Listenarr.Domain.Models
                 NzbUrl = result.NzbUrl,
                 DownloadType = result.DownloadType,
                 Quality = result.Quality,
-                ResultUrl = result.ResultUrl
+                ResultUrl = result.ResultUrl,
+                Grabs = result.Grabs,
+                Files = result.Files,
+                TorrentFileName = result.TorrentFileName
             };
+        }
+
+        // Map an IndexerSearchResult into an API-friendly Prowlarr-like DTO
+        public static IndexerResultDto ToIndexerResultDto(IndexerSearchResult result)
+        {
+            var dto = new IndexerResultDto
+            {
+                Guid = !string.IsNullOrWhiteSpace(result.ResultUrl) ? result.ResultUrl : (!string.IsNullOrWhiteSpace(result.TorrentUrl) ? result.TorrentUrl : result.Id),
+                Size = result.Size,
+                Files = result.Files,
+                Grabs = result.Grabs,
+                IndexerId = result.IndexerId,
+                Indexer = result.Source,
+                Title = result.Title ?? string.Empty,
+                PublishDate = result.PublishedDate,
+                DownloadUrl = !string.IsNullOrWhiteSpace(result.TorrentUrl) ? result.TorrentUrl : (!string.IsNullOrWhiteSpace(result.NzbUrl) ? result.NzbUrl : null),
+                InfoUrl = result.ResultUrl,
+                Seeders = result.Seeders,
+                Leechers = result.Leechers,
+                Protocol = !string.IsNullOrWhiteSpace(result.DownloadType) ? result.DownloadType.ToLowerInvariant() : null,
+                FileName = result.TorrentFileName
+            };
+
+            // Derive age fields from publishDate if available
+            if (!string.IsNullOrWhiteSpace(dto.PublishDate) && DateTimeOffset.TryParse(dto.PublishDate, out var dtoPub))
+            {
+                var ageSpan = DateTimeOffset.UtcNow - dtoPub;
+                dto.Age = (int)Math.Floor(ageSpan.TotalDays);
+                dto.AgeHours = ageSpan.TotalHours;
+                dto.AgeMinutes = ageSpan.TotalMinutes;
+            }
+
+            // SortTitle: normalized lower-case, remove punctuation
+            dto.SortTitle = System.Text.RegularExpressions.Regex.Replace(dto.Title?.ToLowerInvariant() ?? string.Empty, "[^a-z0-9 ]", "").Trim();
+
+            // IndexerFlags and Categories: best-effort mapping (not always present in result); keep empty lists if not available
+            dto.IndexerFlags = new List<string>();
+            if (!string.IsNullOrWhiteSpace(result.Category))
+            {
+                // Keep a simple category object with name
+                dto.Categories.Add(new { id = 0, name = result.Category ?? string.Empty, subCategories = new object[0] });
+            }
+
+            return dto;
         }
 
         public static SearchResult ToSearchResult(MetadataSearchResult result)
