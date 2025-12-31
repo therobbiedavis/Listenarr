@@ -39,6 +39,8 @@ namespace Listenarr.Api.Services
 
                     var candidates = await db.AudiobookFiles
                         .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null)
+                        // Ensure deterministic ordering when using Take() to avoid EF Core warnings
+                        .OrderBy(f => f.Id)
                         .Take(20)
                         .ToListAsync(stoppingToken);
 

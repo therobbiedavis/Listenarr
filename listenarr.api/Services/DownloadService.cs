@@ -642,7 +642,7 @@ namespace Listenarr.Api.Services
                 Metadata = new Dictionary<string, object>
                 {
                     ["Source"] = searchResult.Source ?? string.Empty,
-                    ["Seeders"] = searchResult.Seeders,
+                    ["Seeders"] = searchResult.Seeders ?? 0,
                     ["Quality"] = searchResult.Quality ?? string.Empty,
                     ["DownloadType"] = searchResult.DownloadType ?? (IsTorrentResult(searchResult) ? "Torrent" : "Usenet")
                 }

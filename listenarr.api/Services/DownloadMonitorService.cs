@@ -25,6 +25,7 @@ using System.Runtime.InteropServices;
 using Listenarr.Api.Hubs;
 using Listenarr.Domain.Models;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Listenarr.Api.Services
 {
@@ -48,6 +49,13 @@ namespace Listenarr.Api.Services
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _missingSourceRetryAttempts = new();
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _missingSourceRetryScheduled = new();
 
+        // Per-client polling controls to avoid overloading download clients
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _nextClientPoll = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _clientFailureCounts = new();
+
+        // Simple memory cache for per-torrent properties fetched from qBittorrent
+        private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _memoryCache;
+
         // Backward-compatible constructor to avoid breaking existing tests that instantiate
         // DownloadMonitorService without providing an IDbContextFactory. This resolves the
         // IDbContextFactory from the IServiceScopeFactory and delegates to the primary ctor.
@@ -57,18 +65,30 @@ namespace Listenarr.Api.Services
             ILogger<DownloadMonitorService> logger,
             IHttpClientFactory httpClientFactory,
             IAppMetricsService? appMetrics = null)
-            : this(
-                  serviceScopeFactory,
-                  // Resolve IDbContextFactory from a temporary scope so tests and older registrations work.
-                  // Use GetService instead of GetRequiredService and provide a fallback factory when only a
-                  // ListenArrDbContext singleton is registered (helps unit tests that register a single
-                  // ListenArrDbContext instance instead of an IDbContextFactory).
-                  CreateFallbackDbFactoryIfNeeded(serviceScopeFactory),
-                  hubContext,
-                  logger,
-                  httpClientFactory,
-                  appMetrics)
         {
+            // Backward-compatible resolution of IMemoryCache for older tests/registrations
+            Microsoft.Extensions.Caching.Memory.IMemoryCache? memCache = null;
+            try
+            {
+                using var scope = serviceScopeFactory.CreateScope();
+                memCache = scope.ServiceProvider.GetService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+            }
+            catch { }
+
+            if (memCache == null)
+            {
+                memCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+            }
+
+            // Delegate to primary ctor
+            var dbFactory = CreateFallbackDbFactoryIfNeeded(serviceScopeFactory);
+            _serviceScopeFactory = serviceScopeFactory;
+            _dbFactory = dbFactory;
+            _hubContext = hubContext;
+            _logger = logger;
+            _httpClientFactory = httpClientFactory;
+            _memoryCache = memCache;
+            _metrics = appMetrics ?? new NoopAppMetricsService();
         }
 
         public DownloadMonitorService(
@@ -77,6 +97,7 @@ namespace Listenarr.Api.Services
             IHubContext<DownloadHub> hubContext,
             ILogger<DownloadMonitorService> logger,
             IHttpClientFactory httpClientFactory,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache memoryCache,
             IAppMetricsService? appMetrics = null)
         {
             _serviceScopeFactory = serviceScopeFactory;
@@ -84,6 +105,7 @@ namespace Listenarr.Api.Services
             _hubContext = hubContext;
             _logger = logger;
             _httpClientFactory = httpClientFactory;
+            _memoryCache = memoryCache;
             _metrics = appMetrics ?? new NoopAppMetricsService();
         }
 
@@ -209,13 +231,78 @@ namespace Listenarr.Api.Services
             var invalid = Path.GetInvalidFileNameChars();
             var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray());
             // Replace sequences of non-alphanumeric characters with single space
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "[^A-Za-z0-9 _-]+", " ");
-            // Collapse whitespace and trim
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "\\s+", " ").Trim();
-            // If nothing left, fallback
-            if (string.IsNullOrWhiteSpace(cleaned)) return "unknown";
-            return cleaned;
+            var normalized = System.Text.RegularExpressions.Regex.Replace(cleaned, "[^A-Za-z0-9]+", " ");
+            normalized = normalized.Trim();
+            return normalized.Length == 0 ? "unknown" : normalized;
         }
+
+        // Cache entry for qbittorrent per-torrent properties
+        private sealed class QbittorrentPropertiesCacheEntry
+        {
+            public long? SeedingTimeSeconds { get; set; }
+            public string SavePath { get; set; } = string.Empty;
+        }
+
+        // Schedule next poll for a client after a successful interaction
+        private void ScheduleNextClientPollOnSuccess(string clientId, int activeDownloadsForClient)
+        {
+            try
+            {
+                // Prefer client-specific setting if provided (PollingIntervalSeconds >= 15)
+                int interval = (int)_pollingInterval.TotalSeconds;
+                try
+                {
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                    var client = db.DownloadClientConfigurations.FirstOrDefault(c => c.Id == clientId);
+                    if (client != null && client.Settings != null && client.Settings.TryGetValue("PollingIntervalSeconds", out var v) && int.TryParse(v?.ToString() ?? string.Empty, out var custom) && custom >= 15)
+                    {
+                        interval = custom;
+                    }
+                }
+                catch { }
+
+                // If no active downloads for client, back off to a longer interval
+                if (activeDownloadsForClient == 0)
+                {
+                    interval = Math.Max(interval * 4, 120);
+                }
+
+                // Add small jitter to avoid synchronized polls: +/- 5s
+                var jitter = (int)(new Random().NextDouble() * 10 - 5);
+                var next = DateTime.UtcNow.AddSeconds(Math.Max(15, interval + jitter));
+                _nextClientPoll.AddOrUpdate(clientId, next, (_, __) => next);
+
+                // Reset failure count
+                _clientFailureCounts.TryRemove(clientId, out _);
+
+                _logger.LogDebug("Scheduled next poll for client {ClientId} at {Next} (interval {Interval}s)", clientId, next, interval);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to schedule next client poll for {ClientId}", clientId);
+            }
+        }
+
+        // Schedule next poll for a client after a failure using exponential backoff
+        private void ScheduleNextClientPollOnFailure(string clientId)
+        {
+            try
+            {
+                var count = _clientFailureCounts.AddOrUpdate(clientId, 1, (_, old) => old + 1);
+                // base backoff 30s, exponential, cap at 15min
+                var backoff = Math.Min(900, 30 * Math.Pow(2, count - 1));
+                var jitter = (int)(new Random().NextDouble() * 5);
+                var next = DateTime.UtcNow.AddSeconds(backoff + jitter);
+                _nextClientPoll.AddOrUpdate(clientId, next, (_, __) => next);
+                _logger.LogWarning("Scheduled next poll for client {ClientId} after failure in {Seconds}s (attempt {Attempt})", clientId, backoff, count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to schedule next client poll on failure for {ClientId}", clientId);
+            }
+        }
+
 
         /// <summary>
         /// Attempt to move a directory with retries and exponential backoff. Emits diagnostics (file listing and ACLs)
@@ -544,10 +631,19 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Polling qBittorrent client {ClientName}", client.Name);
                 try
                 {
+                    var now = DateTime.UtcNow;
+
+                    // Respect per-client poll schedules to avoid overloading qbittorrent
+                    if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && now < scheduled)
+                    {
+                        _logger.LogDebug("Skipping qBittorrent poll for {ClientName}, next scheduled at {Next}", client.Name, scheduled);
+                        return;
+                    }
+
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
 
                     using var http = _httpClientFactory.CreateClient("DownloadClient");
-                    _logger.LogInformation("Created HttpClient from factory for SABnzbd polling. BaseAddress={BaseAddress}", http.BaseAddress);
+                    _logger.LogInformation("Created HttpClient from factory for qbittorrent polling. BaseAddress={BaseAddress}", http.BaseAddress);
 
                     // Login
                     using var loginData = new FormUrlEncodedContent(new[]
@@ -559,49 +655,101 @@ namespace Listenarr.Api.Services
                     if (!loginResp.IsSuccessStatusCode)
                     {
                         _logger.LogWarning("qBittorrent login failed for client {ClientName}", client.Name);
+                        // Schedule a retry with backoff
+                        ScheduleNextClientPollOnFailure(client.Id);
                         return;
                     }
 
                     // Ask qBittorrent for a limited set of fields to reduce memory usage
                     var fields = "hash,name,save_path,content_path,progress,amount_left,state,size,category";
 
-                    // Prefer querying only the hashes we are tracking (if available) to avoid fetching all torrents
+                        // Prefer querying only the hashes we are tracking (if available) to avoid fetching all torrents
                     var trackedHashes = downloads
                         .Select(d => d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var h) ? h?.ToString() : null)
                         .Where(h => !string.IsNullOrEmpty(h))
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
-                    string query = $"?fields={Uri.EscapeDataString(fields)}";
+                    // If we have tracked hashes, chunk them into batches to avoid very large queries and to allow
+                    // slight delays between requests to prevent overwhelming qBittorrent.
+                    List<Dictionary<string, System.Text.Json.JsonElement>> allTorrents = new();
 
                     if (trackedHashes.Any())
                     {
-                        // Cap the number of hashes to keep the query reasonable
-                        var hashesParam = Uri.EscapeDataString(string.Join("|", trackedHashes.Take(200)));
-                        query = $"?hashes={hashesParam}&fields={Uri.EscapeDataString(fields)}";
-                        _logger.LogDebug("Querying qBittorrent for specific hashes (count={Count})", trackedHashes.Count);
+                        const int batchSize = 100; // safe default batch size
+                        _logger.LogDebug("Querying qBittorrent for specific hashes (total={Count}), using batches of {BatchSize}", trackedHashes.Count, batchSize);
+
+                        var batches = Enumerable.Range(0, (trackedHashes.Count + batchSize - 1) / batchSize)
+                            .Select(i => trackedHashes.Skip(i * batchSize).Take(batchSize).ToList())
+                            .ToList();
+
+                        foreach (var batch in batches)
+                        {
+                            var hashesParam = Uri.EscapeDataString(string.Join("|", batch));
+                            var query = $"?hashes={hashesParam}&fields={Uri.EscapeDataString(fields)}";
+
+                            var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
+                            if (!torrentsResp.IsSuccessStatusCode)
+                            {
+                                _logger.LogWarning("Failed to fetch torrent batch from qBittorrent for {ClientName} (batch size={Size})", client.Name, batch.Count);
+                                // Respect remote failure - stop processing further batches and let failure handling back off
+                                ScheduleNextClientPollOnFailure(client.Id);
+                                return;
+                            }
+
+                            var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
+                            var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
+                            if (torrents != null)
+                            {
+                                allTorrents.AddRange(torrents);
+                            }
+
+                            // Small delay between batches to avoid hammering the client
+                            await Task.Delay(150, cancellationToken);
+                        }
                     }
                     else if (client.Settings != null && client.Settings.TryGetValue("category", out var catObj) && !string.IsNullOrEmpty(catObj?.ToString()))
                     {
                         var cat = Uri.EscapeDataString(catObj!.ToString()!);
-                        query = $"?category={cat}&fields={Uri.EscapeDataString(fields)}";
+                        var query = $"?category={cat}&fields={Uri.EscapeDataString(fields)}";
                         _logger.LogDebug("Querying qBittorrent by category: {Category}", cat);
-                    }
 
-                    var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
-                    if (!torrentsResp.IsSuccessStatusCode)
+                        var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
+                        if (!torrentsResp.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);
+                            ScheduleNextClientPollOnFailure(client.Id);
+                            return;
+                        }
+
+                        var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
+                        var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
+                        if (torrents == null) return;
+
+                        allTorrents.AddRange(torrents);
+                    }
+                    else
                     {
-                        _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);
-                        return;
-                    }
+                        // Default: fetch a limited set of recent torrents
+                        var query = $"?fields={Uri.EscapeDataString(fields)}";
+                        var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
+                        if (!torrentsResp.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);
+                            ScheduleNextClientPollOnFailure(client.Id);
+                            return;
+                        }
 
-                    var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
-                    var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
-                    if (torrents == null) return;
+                        var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
+                        var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
+                        if (torrents == null) return;
+
+                        allTorrents.AddRange(torrents);
+                    }
 
                     // Build comprehensive lookup with all torrent info we need
                     var torrentLookup = new List<(string Hash, string Name, string SavePath, string ContentPath, double Progress, long AmountLeft, string State, long Size, string Category)>();
-                    foreach (var t in torrents)
+                    foreach (var t in allTorrents)
                     {
                         var hash = t.ContainsKey("hash") ? t["hash"].GetString() ?? "" : "";
                         var name = t.ContainsKey("name") ? t["name"].GetString() ?? "" : "";
@@ -614,6 +762,7 @@ namespace Listenarr.Api.Services
                         var category = t.ContainsKey("category") ? t["category"].GetString() ?? "" : "";
                         torrentLookup.Add((hash, name, savePath, contentPath, progress, amountLeft, state, size, category));
                     }
+
 
                     _logger.LogDebug("Found {TorrentCount} torrents in qBittorrent for client {ClientName}", torrentLookup.Count, client.Name);
 
@@ -702,11 +851,80 @@ namespace Listenarr.Api.Services
                                         changed = true;
                                     }
 
+                                    // Additionally, fetch torrent properties for richer info (seeding_time, authoritative save_path)
+                                    try
+                                    {
+                                        // Cache key for per-hash properties
+                                        var cacheKey = $"qb:props:{matched.Hash}";
+
+                                        // Try to read from cache (non-generic TryGetValue returns object)
+                                        QbittorrentPropertiesCacheEntry? cached = null;
+                                        if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is QbittorrentPropertiesCacheEntry cEntry)
+                                        {
+                                            cached = cEntry;
+                                        }
+                                        else
+                                        {
+                                            // Fetch properties from qBittorrent and populate cache entry
+                                            var propResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/properties?hash={Uri.EscapeDataString(matched.Hash)}", cancellationToken);
+                                            if (propResp.IsSuccessStatusCode)
+                                            {
+                                                var propJson = await propResp.Content.ReadAsStringAsync(cancellationToken);
+                                                var propDoc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(propJson);
+                                                if (propDoc.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                                                {
+                                                    long? seedingSeconds = null;
+                                                    string authoritativeSavePath = string.Empty;
+
+                                                    if (propDoc.TryGetProperty("seeding_time", out var st) && st.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                                    {
+                                                        seedingSeconds = st.GetInt64();
+                                                    }
+
+                                                    if (propDoc.TryGetProperty("save_path", out var sp) && sp.ValueKind == System.Text.Json.JsonValueKind.String)
+                                                    {
+                                                        authoritativeSavePath = sp.GetString() ?? string.Empty;
+                                                    }
+
+                                                    cached = new QbittorrentPropertiesCacheEntry
+                                                    {
+                                                        SeedingTimeSeconds = seedingSeconds,
+                                                        SavePath = authoritativeSavePath
+                                                    };
+
+                                                    // Cache for short TTL to avoid hammering the API
+                                                    _memoryCache.Set(cacheKey, cached, TimeSpan.FromMinutes(2));
+                                                }
+                                            }
+                                        }
+
+                                        if (cached != null)
+                                        {
+                                            if (cached.SeedingTimeSeconds.HasValue)
+                                            {
+                                                dbDownload.Metadata["SeedingTimeSeconds"] = cached.SeedingTimeSeconds.Value;
+                                                changed = true;
+                                                _logger.LogDebug("Using cached seeding_time for torrent {Hash}: {Seconds}s", matched.Hash, cached.SeedingTimeSeconds.Value);
+                                            }
+
+                                            if (!string.IsNullOrEmpty(cached.SavePath) && dbDownload.DownloadPath != cached.SavePath)
+                                            {
+                                                dbDownload.DownloadPath = cached.SavePath;
+                                                changed = true;
+                                                _logger.LogDebug("Using cached authoritative save_path for {Hash}: {SavePath}", matched.Hash, cached.SavePath);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to fetch torrent properties for {Hash}", matched.Hash);
+                                    }
+
                                     if (changed)
                                     {
                                         dbContext.Downloads.Update(dbDownload);
                                         await dbContext.SaveChangesAsync(cancellationToken);
-                                        _logger.LogDebug("Persisted client paths for download {DownloadId}: DownloadPath={DownloadPath}, ClientContentPath={ClientContentPath}", dl.Id, dbDownload.DownloadPath, matched.ContentPath);
+                                        _logger.LogDebug("Persisted client paths/props for download {DownloadId}: DownloadPath={DownloadPath}, ClientContentPath={ClientContentPath}", dl.Id, dbDownload.DownloadPath, matched.ContentPath);
                                     }
                                 }
                             }
@@ -803,10 +1021,14 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning(ex, "Error processing download {DownloadId} while polling qBittorrent", dl.Id);
                         }
                     }
+
+                    // Schedule next poll now that this client's polling completed successfully
+                    ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error polling qBittorrent client {ClientName}", client.Name);
+                    ScheduleNextClientPollOnFailure(client.Id);
                 }
             }, cancellationToken);
         }
@@ -2339,10 +2561,18 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Broadcasting DownloadUpdate with {Count} items; sample ids: {Ids}", sanitized.Count, sanitized.Select(s => s.id).Take(5).ToArray());
 
-                await _hubContext.Clients.All.SendAsync(
-                    "DownloadUpdate",
-                    sanitized,
-                    cancellationToken);
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync(
+                        "DownloadUpdate",
+                        sanitized,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    // Log a friendly warning so operator can see broadcast failures
+                    _logger.LogWarning(ex, "Failed to send DownloadUpdate to SignalR clients (Count={Count}, SampleIds={Ids})", sanitized.Count, sanitized.Select(s => s.id).Take(5).ToArray());
+                }
             }
 
             // Also send full list periodically (every 10 polls)
@@ -2371,10 +2601,17 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Broadcasting DownloadsList with {Count} items; sample ids: {Ids}", sanitizedList.Count, sanitizedList.Select(s => s.id).Take(5).ToArray());
 
-                await _hubContext.Clients.All.SendAsync(
-                    "DownloadsList",
-                    sanitizedList,
-                    cancellationToken);
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync(
+                        "DownloadsList",
+                        sanitizedList,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send DownloadsList to SignalR clients (Count={Count}, SampleIds={Ids})", sanitizedList.Count, sanitizedList.Select(s => s.id).Take(5).ToArray());
+                }
             }
         }
 

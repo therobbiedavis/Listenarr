@@ -128,7 +128,8 @@ namespace Listenarr.Api.Services
 
             if (string.IsNullOrEmpty(resolvedNpx))
             {
-                _logger.LogWarning("No npx executable found (checked Playwright:NodePath and PATH). Cannot run npx installer.");
+                _logger.LogInformation("No npx executable found (checked Playwright:NodePath and PATH). Skipping npx installer.");
+                _status.LastError = "npx not found";
                 return (false, string.Empty, "npx not found", -1);
             }
 

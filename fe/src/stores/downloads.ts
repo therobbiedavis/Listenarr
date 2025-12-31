@@ -118,11 +118,14 @@ export const useDownloadsStore = defineStore('downloads', () => {
   })
   
   const completedDownloads = computed(() => 
-    downloads.value.filter(d => ['Completed', 'Ready'].includes(d.status))
+    downloads.value.filter(d => {
+      const status = (d.status || '').toString().toLowerCase()
+      return status === 'completed' || status === 'ready'
+    })
   )
   
   const failedDownloads = computed(() => 
-    downloads.value.filter(d => d.status === 'Failed')
+    downloads.value.filter(d => (d.status || '').toString().toLowerCase() === 'failed')
   )
   
   const loadDownloads = async () => {

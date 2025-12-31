@@ -883,51 +883,74 @@ try
                 logger.LogDebug(ex, "Platform-specific Playwright install script attempt failed");
             }
 
-            // Fallback: try npx playwright install (requires Node.js available on PATH)
+            // Fallback: try the configured Playwright installer (which will itself handle npx presence checks)
             try
             {
-                // Install only Chromium to reduce download size and time. Give a much larger
-                // timeout (10 minutes) because browser artifacts are large and may take time
-                // on slow networks. Use the IProcessRunner when available so output is
-                // captured and timeouts are enforced consistently.
-                logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
-                var psi = new System.Diagnostics.ProcessStartInfo
+                logger.LogInformation("Attempting Playwright npx fallback via IPlaywrightInstaller (if available)");
+                var installer = scope.ServiceProvider.GetService<Listenarr.Api.Services.IPlaywrightInstaller>();
+                if (installer != null)
                 {
-                    FileName = "npx",
-                    Arguments = "playwright install chromium",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
-                if (processRunner != null)
-                {
-                    var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                    logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(result.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    if (result.TimedOut)
+                    var result = await installer.InstallOnceAsync(cts.Token).ConfigureAwait(false);
+                    logger.LogDebug("Playwright installer output: {Out}\n{Err}", LogRedaction.RedactText(result.Out, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Err, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    if (result.Success)
                     {
-                        logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
-                    }
-                    else if (result.ExitCode == 0)
-                    {
-                        logger.LogInformation("'npx playwright install chromium' completed successfully");
+                        logger.LogInformation("Playwright installer completed successfully");
                         return true;
                     }
                     else
                     {
-                        logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", result.ExitCode);
+                        logger.LogInformation("Playwright installer did not provision browsers: {Err}", result.Err);
                     }
                 }
                 else
                 {
-                    logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
+                    // Fallback: prior behavior was to attempt 'npx' directly; avoid doing that unless we can resolve the executable.
+                    var resolved = Listenarr.Api.Services.ProcessHelpers.FindExecutableOnPath("npx");
+                    if (string.IsNullOrEmpty(resolved))
+                    {
+                        logger.LogInformation("npx not found on PATH; skipping 'npx playwright install chromium' fallback.");
+                    }
+                    else
+                    {
+                        var psi = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = resolved,
+                            Arguments = "playwright install chromium",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+
+                        var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                        if (processRunner != null)
+                        {
+                            var pr = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                            logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(pr.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(pr.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                            if (pr.TimedOut)
+                            {
+                                logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
+                            }
+                            else if (pr.ExitCode == 0)
+                            {
+                                logger.LogInformation("'npx playwright install chromium' completed successfully");
+                                return true;
+                            }
+                            else
+                            {
+                                logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", pr.ExitCode);
+                            }
+                        }
+                        else
+                        {
+                            logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "'npx playwright install chromium' attempt failed or npx not available");
+                logger.LogDebug(ex, "Playwright npx fallback attempt failed");
             }
 
             // As a last resort, ask the PlaywrightPageFetcher to ensure browsers are initialized.

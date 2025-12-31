@@ -206,7 +206,8 @@ namespace Listenarr.Api.Services
             try
             {
                 // Try to get from database first
-                var settings = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
+                // Ensure a deterministic selection of the singleton application settings row
+                var settings = await _dbContext.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
 
                 if (settings == null)
                 {
@@ -237,7 +238,7 @@ namespace Listenarr.Api.Services
                 // Ensure Id is always 1 (singleton pattern)
                 settings.Id = 1;
 
-                var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
+                var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
 
                 if (existing != null)
                 {

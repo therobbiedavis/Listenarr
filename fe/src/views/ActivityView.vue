@@ -10,6 +10,10 @@
           <component :is="loading ? PhSpinner : PhArrowClockwise" />
           Refresh
         </button>
+        <!-- Dev-only debug button to inspect downloads/store -->
+        <button v-if="DEV" class="btn btn-ghost" @click="debugDownloads" title="Log downloads to console">
+          Debug
+        </button>
       </div>
     </div>
 
@@ -180,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, unref } from 'vue'
 import { PhActivity, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhDesktop, PhArrowDown, PhClock, PhX, PhQueue, PhWarningCircle, PhInfo, PhChartBar, PhTrash, PhPause, PhList, PhCheckCircle } from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
@@ -193,6 +197,34 @@ import CustomSelect from '@/components/CustomSelect.vue'
 const downloadsStore = useDownloadsStore()
 const configStore = useConfigurationStore()
 const selectedTab = ref('all')
+// Development flag for debug-only UI
+const DEV = import.meta.env.DEV
+
+// Debug helper to inspect downloads and computed lists
+const debugDownloads = () => {
+  try {
+    // Print a concise summary so we can quickly inspect status and client IDs
+    console.log('[DEBUG Downloads] queue snapshot (summary):',
+      (queue || []).map((q: any) => ({ id: q.id, status: q.status, downloadClientId: q.downloadClientId, title: q.title })))
+
+    console.log('[DEBUG Downloads] downloadsStore.downloads (summary):',
+      (downloadsStore.downloads || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))
+
+    console.log('[DEBUG Downloads] activeDownloads (summary):',
+      (unref(downloadsStore.activeDownloads) || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))
+
+    console.log('[DEBUG Config] showCompletedExternalDownloads:', Boolean(configStore.applicationSettings?.showCompletedExternalDownloads))
+
+    console.log('[DEBUG Downloads] completedDownloads (summary):',
+      (unref(downloadsStore.completedDownloads) || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))
+
+    console.log('[DEBUG Activity] allActivityItems (All):', allActivityItems.value.map((i: any) => ({ id: i.id, status: i.status, downloadClientId: i.downloadClientId })))
+    console.log('[DEBUG Activity] completedActivityItems (Completed):', completedActivityItems.value.map((i: any) => ({ id: i.id, status: i.status, downloadClientId: i.downloadClientId })))
+    console.log('[DEBUG Activity] failedActivityItems (Failed):', failedActivityItems.value.map((i: any) => ({ id: i.id, status: i.status, downloadClientId: i.downloadClientId })))
+  } catch (e) {
+    console.warn('[DEBUG] Failed to gather downloads debug info', e)
+  }
+}
 const queue = ref<QueueItem[]>([])
 const loading = ref(false)
 const showRemoveModal = ref(false)
@@ -210,6 +242,7 @@ const mobileTabOptions = computed(() => [
   { value: 'downloading', label: `Downloading (${allActivityItems.value.filter(q => q.status === 'downloading').length})`, icon: PhDownloadSimple },
   { value: 'paused', label: `Paused (${allActivityItems.value.filter(q => q.status === 'paused').length})`, icon: PhPause },
   { value: 'queued', label: `Queued (${allActivityItems.value.filter(q => q.status === 'queued').length})`, icon: PhClock },
+  { value: 'failed', label: `Failed (${failedActivityItems.value.length})`, icon: PhX },
   // Completed: include completed external downloads from the downloads store
   { value: 'completed', label: `Completed (${completedActivityItems.value.filter(q => q.status === 'completed').length})`, icon: PhCheckCircle }
 ])
@@ -299,29 +332,64 @@ const allActivityItems = computed(() => {
   const queueItems = [...queue.value]
   
   // Get DDL downloads from database (since they don't have corresponding queue items)
-  const ddlDownloadItems = downloadsStore.activeDownloads
-    .filter(d => d.downloadClientId === 'DDL')
+  const activeDownloadsList = unref(downloadsStore.activeDownloads || [])
+  const completedDownloadsList = unref(downloadsStore.completedDownloads || [])
+  const failedDownloadsList = unref(downloadsStore.failedDownloads || [])
+
+  const ddlDownloadItems = activeDownloadsList
+    .filter(d => (d.downloadClientId || '').toString() === 'DDL')
     .map(convertDownloadToQueueItem)
-  
-  // Combine queue items (external clients managed by Listenarr) and DDL downloads
-  // Filter out completed items from external download clients (torrents/NZBs)
-  // to avoid cluttering the activity view with finished transfers that are
-  // already processed. Keep completed DDL downloads (internal) visible.
-  const combined = [...queueItems, ...ddlDownloadItems]
+
+  // Include failed DDL downloads so internal failed items can be cleared by users
+  const failedDDLItems = failedDownloadsList.map(convertDownloadToQueueItem)
+
+  // Include external active downloads (not DDL) from the downloads store so
+  // queue-less active items are visible in Activity (e.g., when queue snapshot
+  // doesn't contain corresponding entries). Convert to QueueItem shape.
+  const externalActiveDownloads = activeDownloadsList
+    .filter(d => d.downloadClientId && d.downloadClientId !== 'DDL')
+    .map(convertDownloadToQueueItem)
+
+  // Combine queue items (external clients managed by Listenarr), DDL downloads,
+  // failed DDL items, and external active downloads
+  let combined = [...queueItems, ...ddlDownloadItems, ...failedDDLItems, ...externalActiveDownloads]
+
   // Read user preference from configuration store: show completed external downloads
   const userPref = showCompletedExternalDownloads.value
-  if (userPref) return combined
 
-  // By default we hide completed external client items from the main
-  // combined list (to avoid clutter). Completed external downloads will
-  // still be surfaced in the Completed tab (see `completedActivityItems`).
-  const filtered = combined.filter(it => {
-    // if item is from external client and completed, omit it
-    if ((it.downloadClientType || '').toString().toLowerCase() !== 'ddl' && it.status === 'completed') return false
-    return true
-  })
+  if (userPref) {
+    // Include completed external downloads from the downloads store
+    const completedExternal = (downloadsStore.completedDownloads || [])
+      .filter(d => d.downloadClientId && d.downloadClientId !== 'DDL')
+      .map(convertDownloadToQueueItem)
 
-  return filtered
+    // Merge and deduplicate by id (prefer entries that already exist in `combined` which
+    // usually come from the queue snapshot and are more up-to-date for progress fields)
+    const map = new Map<string, QueueItem>()
+    for (const it of combined) map.set(it.id, it)
+    for (const it of completedExternal) {
+      if (!map.has(it.id)) map.set(it.id, it)
+    }
+
+    combined = Array.from(map.values())
+  } else {
+    // By default we hide completed external client items from the main
+    // combined list (to avoid clutter). Completed external downloads will
+    // still be surfaced in the Completed tab (see `completedActivityItems`).
+    combined = combined.filter(it => {
+      // if item is from external client and completed, omit it
+      if ((it.downloadClientType || '').toString().toLowerCase() !== 'ddl' && it.status === 'completed') return false
+      return true
+    })
+  }
+
+  // Deduplicate final combined list preferring queue items when available
+  const finalMap = new Map<string, QueueItem>()
+  for (const it of combined) {
+    if (!finalMap.has(it.id)) finalMap.set(it.id, it)
+  }
+
+  return Array.from(finalMap.values())
 })
 
 // Build a version of the activity list that includes completed external
@@ -354,11 +422,26 @@ const completedActivityItems = computed(() => {
   return Array.from(map.values())
 })
 
+// Failed activity items: merge queue snapshot failures and DB failures
+const failedActivityItems = computed(() => {
+  // Items from the queue which are failed (external client snapshot)
+  const queueFailed = queue.value.filter(q => q.status === 'failed')
+  // Failed downloads stored in DB (DDL or external failures)
+  const failedFromDownloads = (downloadsStore.failedDownloads || []).map(convertDownloadToQueueItem)
+  
+  const map = new Map<string, QueueItem>()
+  for (const it of queueFailed) map.set(it.id, it)
+  for (const it of failedFromDownloads) if (!map.has(it.id)) map.set(it.id, it)
+  
+  return Array.from(map.values())
+})
+
 const filterTabs = computed(() => [
   { label: 'All', value: 'all', count: allActivityItems.value.length },
   { label: 'Downloading', value: 'downloading', count: allActivityItems.value.filter(q => q.status === 'downloading').length },
   { label: 'Paused', value: 'paused', count: allActivityItems.value.filter(q => q.status === 'paused').length },
   { label: 'Queued', value: 'queued', count: allActivityItems.value.filter(q => q.status === 'queued').length },
+  { label: 'Failed', value: 'failed', count: failedActivityItems.value.length },
   // Completed tab should reflect combined view including completed external downloads
   { label: 'Completed', value: 'completed', count: completedActivityItems.value.filter(q => q.status === 'completed').length },
 ])
@@ -371,6 +454,11 @@ const filteredQueue = computed(() => {
   if (selectedTab.value === 'completed') {
     // Use the completed-augmented list for the Completed tab
     return completedActivityItems.value.filter(item => item.status === 'completed')
+  }
+
+  if (selectedTab.value === 'failed') {
+    // Use the failed-augmented list for the Failed tab so we show DB-failures too
+    return failedActivityItems.value
   }
 
   return allActivityItems.value.filter(item => item.status === selectedTab.value)

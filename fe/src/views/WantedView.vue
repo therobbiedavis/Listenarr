@@ -168,6 +168,9 @@ import type { Audiobook, SearchResult } from '@/types'
 import { safeText } from '@/utils/textUtils'
 import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle, PhBooks, PhQuestion, PhXCircle, PhSkipForward } from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
+import { useDownloadsStore } from '@/stores/downloads'
+
+const downloadsStore = useDownloadsStore()
 
 const libraryStore = useLibraryStore()
 
@@ -403,8 +406,13 @@ function closeManualSearch() {
 
 function handleDownloaded(result: SearchResult) {
   logger.debug('Downloaded:', result)
-  // Refresh library after successful download
+  // Refresh downloads and library after successful manual download so Activity/Downloads show the new item
   setTimeout(async () => {
+    try {
+      await downloadsStore.loadDownloads()
+    } catch (e) {
+      console.warn('Failed to refresh downloads after manual download:', e)
+    }
     await libraryStore.fetchLibrary()
     closeManualSearch()
   }, 2000)
@@ -422,8 +430,13 @@ const searchAudiobook = async (item: Audiobook) => {
     if (result.success) {
       searchResults.value[item.id] = `Found on ${result.indexerUsed}, downloading...`
       
-      // Refresh library to update status
+      // Refresh downloads and library to update status (ensure DDL downloads show up immediately)
       setTimeout(async () => {
+        try {
+          await downloadsStore.loadDownloads()
+        } catch (e) {
+          console.warn('Failed to refresh downloads after search:', e)
+        }
         await libraryStore.fetchLibrary()
         delete searching.value[item.id]
         delete searchResults.value[item.id]
