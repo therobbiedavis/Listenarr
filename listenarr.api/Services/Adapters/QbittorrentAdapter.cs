@@ -119,7 +119,8 @@ namespace Listenarr.Api.Services.Adapters
                     _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                 }
 
-                var beforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
+                // Request only the hash field before adding to minimize memory usage
+                var beforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash", ct);
                 var existingHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (beforeResp.IsSuccessStatusCode)
                 {
@@ -202,7 +203,8 @@ namespace Listenarr.Api.Services.Adapters
 
                 await Task.Delay(1000, ct);
 
-                var afterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
+                // Request only necessary fields (hash and name) to reduce response size
+                var afterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash,name", ct);
                 if (afterResp.IsSuccessStatusCode)
                 {
                     var afterJson = await afterResp.Content.ReadAsStringAsync(ct);
@@ -220,6 +222,7 @@ namespace Listenarr.Api.Services.Adapters
                                         var hash = hEl.GetString() ?? string.Empty;
                                         if (!existingHashes.Contains(hash))
                                         {
+                                            var name = t.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
                                             _logger.LogInformation("Detected new qBittorrent torrent: hash={Hash}", hash);
                                             return hash;
                                         }
@@ -349,7 +352,9 @@ namespace Listenarr.Api.Services.Adapters
                     return items;
                 }
 
-                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
+                // Limit fields returned to reduce memory usage
+                var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
+                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields={Uri.EscapeDataString(fields)}", ct);
                 if (!torrentsResp.IsSuccessStatusCode) return items;
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);

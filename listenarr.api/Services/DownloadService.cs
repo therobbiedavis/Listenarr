@@ -1087,8 +1087,8 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Adding torrent to qBittorrent: {Title}", result.Title);
                 _logger.LogDebug("Torrent URL: {Url}", torrentUrl);
 
-                // Get existing torrents list before adding (to find the new one)
-                var torrentsBeforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+                // Get existing torrents list before adding (only request hashes to minimize payload)
+                var torrentsBeforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash");
                 var existingHashes = new HashSet<string>();
                 if (torrentsBeforeResp.IsSuccessStatusCode)
                 {
@@ -1176,8 +1176,10 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Successfully sent torrent to qBittorrent");
 
                 // Wait a moment for qBittorrent to process the torrent
-                await Task.Delay(1000);                // Get updated torrents list to find the newly added torrent hash
-                var torrentsAfterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+                await Task.Delay(1000);
+
+                // Get updated torrents list to find the newly added torrent hash (request minimal fields)
+                var torrentsAfterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash,name");
                 if (torrentsAfterResp.IsSuccessStatusCode)
                 {
                     var afterJson = await torrentsAfterResp.Content.ReadAsStringAsync();
