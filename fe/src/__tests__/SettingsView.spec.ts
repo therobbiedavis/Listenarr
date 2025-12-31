@@ -144,4 +144,54 @@ describe('SettingsView', () => {
     expect(calledWith.usProxyHost).toBe('proxy.test.local')
     expect(Number(calledWith.usProxyPort)).toBe(3128)
   })
+
+  it('toggles download client enabled state', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }] })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    // Prepare configuration store with a single disabled client
+    const { useConfigurationStore } = await import('@/stores/configuration')
+    const cfgStore = useConfigurationStore()
+    cfgStore.downloadClientConfigurations = [
+      {
+        id: 'client-1',
+        name: 'Test Client',
+        type: 'qbittorrent',
+        host: 'localhost',
+        port: 8080,
+        isEnabled: false,
+        useSSL: false,
+        downloadPath: ''
+      }
+    ] as any
+
+    // Prevent load from overwriting our test data
+    cfgStore.loadDownloadClientConfigurations = vi.fn(async () => {})
+
+    cfgStore.saveDownloadClientConfiguration = vi.fn(async (c: any) => {
+      // Simulate backend saving and return an id (no-op)
+      cfgStore.downloadClientConfigurations[0] = c
+      return 'ok'
+    })
+
+    const wrapper = mount(SettingsView, { global: { plugins: [pinia, router], stubs: ['FolderBrowser'] } })
+
+    // Activate the clients tab
+    const clientsTab = wrapper.findAll('button.tab-button').find(b => b.text().includes('Download Clients'))
+    expect(clientsTab).toBeTruthy()
+    await clientsTab!.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // Call the toggle handler directly (avoid relying on rendered DOM in VTU)
+    await (wrapper.vm as any).toggleDownloadClientFunc(cfgStore.downloadClientConfigurations[0])
+    // Wait for async save
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(cfgStore.saveDownloadClientConfiguration).toHaveBeenCalled()
+    expect(cfgStore.downloadClientConfigurations[0].isEnabled).toBe(true)
+  })
 })

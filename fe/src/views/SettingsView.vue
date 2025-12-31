@@ -304,6 +304,18 @@
                 </span>
               </div>
               <div class="indexer-actions">
+                <button
+                  @click="toggleDownloadClientFunc(client)"
+                  class="icon-button"
+                  :title="client.isEnabled ? 'Disable' : 'Enable'"
+                >
+                  <template v-if="client.isEnabled">
+                    <PhToggleRight />
+                  </template>
+                  <template v-else>
+                    <PhToggleLeft />
+                  </template>
+                </button>
                 <button 
                   @click="editClientConfig(client)" 
                   class="icon-button"
@@ -2604,6 +2616,24 @@ const toggleIndexerFunc = async (id: number) => {
     toast.success('Indexer', `Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
   } catch (error) {
     console.error('Failed to toggle indexer:', error)
+    const errorMessage = formatApiError(error)
+    toast.error('Toggle failed', errorMessage)
+  }
+}
+
+// Toggle the enabled state of a download client (saves via configuration store)
+const toggleDownloadClientFunc = async (client: DownloadClientConfiguration) => {
+  try {
+    const updatedClient = { ...client, isEnabled: !client.isEnabled }
+    await configStore.saveDownloadClientConfiguration(updatedClient)
+    // Update local store to reflect the change
+    const idx = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
+    if (idx !== -1) {
+      configStore.downloadClientConfigurations[idx] = updatedClient
+    }
+    toast.success('Download client', `${client.name} ${updatedClient.isEnabled ? 'enabled' : 'disabled'} successfully`)
+  } catch (error) {
+    console.error('Failed to toggle download client:', error)
     const errorMessage = formatApiError(error)
     toast.error('Toggle failed', errorMessage)
   }
