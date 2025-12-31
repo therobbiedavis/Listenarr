@@ -1115,8 +1115,17 @@ function getScoreClass(score: number): string {
   transition: background-color 0.2s;
 }
 
-.results-table tbody tr:hover {
-  background-color: #2a2a2a;
+/* Remove row background change on hover — underline title text instead */
+.title-text {
+  color: white;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.title-text:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background-color: unset;
 }
 
 .results-table td {
