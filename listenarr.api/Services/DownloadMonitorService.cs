@@ -481,6 +481,7 @@ namespace Listenarr.Api.Services
                     metadata = metadata
                 };
 
+                _logger.LogInformation("Broadcasting candidate DownloadUpdate for {DownloadId}; isCandidate={IsCandidate}", dl.Id, isCandidate);
                 await _hubContext.Clients.All.SendAsync("DownloadUpdate", new[] { payload }, cancellationToken);
             }
             catch (Exception ex)
@@ -2336,6 +2337,8 @@ namespace Listenarr.Api.Services
                     metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
                 }).ToList();
 
+                _logger.LogInformation("Broadcasting DownloadUpdate with {Count} items; sample ids: {Ids}", sanitized.Count, sanitized.Select(s => s.id).Take(5).ToArray());
+
                 await _hubContext.Clients.All.SendAsync(
                     "DownloadUpdate",
                     sanitized,
@@ -2365,6 +2368,8 @@ namespace Listenarr.Api.Services
                     downloadClientId = d.DownloadClientId,
                     metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
                 }).ToList();
+
+                _logger.LogInformation("Broadcasting DownloadsList with {Count} items; sample ids: {Ids}", sanitizedList.Count, sanitizedList.Select(s => s.id).Take(5).ToArray());
 
                 await _hubContext.Clients.All.SendAsync(
                     "DownloadsList",

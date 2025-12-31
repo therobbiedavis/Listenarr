@@ -235,6 +235,7 @@ import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
+import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
 import { ref as vueRef2, reactive } from 'vue'
@@ -610,10 +611,7 @@ const applyFirstResult = () => {
 onMounted(async () => {
   logger.debug('Initializing real-time updates via SignalR...')
   
-  // Import session debugging utilities
-  const { logSessionState, clearAllAuthData } = await import('@/utils/sessionDebug')
-  
-  // Log initial session state for debugging
+  // Session debugging utilities
   logSessionState('App Mount - Initial State')
   
   // Verify session is valid before proceeding

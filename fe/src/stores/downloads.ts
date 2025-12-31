@@ -17,6 +17,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
     // Subscribe to individual download updates
   unsubscribeUpdate = signalRService.onDownloadUpdate(async (updatedDownloads) => {
       console.log('[Downloads Store] Received update for', updatedDownloads.length, 'downloads')
+      console.log('[Downloads Store] Update sample:', updatedDownloads.slice(0,5).map(u => ({ id: u.id, status: u.status })))
       
       updatedDownloads.forEach(updated => {
         const index = downloads.value.findIndex(d => d.id === updated.id)
@@ -68,6 +69,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
     // Subscribe to full downloads list
       unsubscribeList = signalRService.onDownloadsList((downloadsList) => {
       console.log('[Downloads Store] Received full list of', downloadsList.length, 'downloads')
+      console.log('[Downloads Store] Full list sample:', downloadsList.slice(0,5).map(d => ({ id: d.id, status: d.status })))
       downloads.value = downloadsList
       triggerRef(downloads)
     })

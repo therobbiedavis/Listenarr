@@ -96,7 +96,7 @@ describe('ManualSearchModal.vue', () => {
 
     ;(wrapper.vm as any).results = [fake]
 
-    const scoreObj = {
+    const scoreObj: any = {
       searchResult: fake,
       totalScore: -1,
       scoreBreakdown: {},
@@ -137,7 +137,7 @@ describe('ManualSearchModal.vue', () => {
     }]
 
     // Provide a quality score with a smartScore. Ensure both ref.value and unwrapped Map get the entry
-    const scoreObj = {
+    const scoreObj: any = {
       searchResult: (wrapper.vm as any).results[0],
       totalScore: 47,
       scoreBreakdown: { Quality: 65 },

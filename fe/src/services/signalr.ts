@@ -1,6 +1,7 @@
 import type { Download, QueueItem, Audiobook } from '@/types'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { setConnected, setLastError, setReconnectAttempts } from './signalrEvents'
+import { getStartupConfigCached } from '@/services/startupConfigCache'
 
 // SignalR client for real-time download updates
 // Using native WebSocket with fallback to long polling
@@ -82,7 +83,6 @@ class SignalRService {
             hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(sess)}`
           } else {
             // Fallback: if authentication is disabled, include the server API key
-            const { getStartupConfigCached } = await import('./startupConfigCache')
             const sc = await getStartupConfigCached(2000)
             const apiKey = sc?.apiKey
             const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired

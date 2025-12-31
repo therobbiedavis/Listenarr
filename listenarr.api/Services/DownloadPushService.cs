@@ -64,6 +64,7 @@ namespace Listenarr.Api.Services
                     metadata = sanitizedMetadata
                 };
 
+                _logger.LogInformation("Broadcasting pushed DownloadUpdate for {DownloadId} ({Status})", download.Id, download.Status);
                 await _hubContext.Clients.All.SendAsync("DownloadUpdate", new[] { downloadDto }, cancellationToken);
 
                 // Mark this download id as recently pushed

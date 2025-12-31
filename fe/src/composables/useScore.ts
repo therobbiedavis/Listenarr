@@ -52,7 +52,7 @@ export function getScoreBreakdownTooltip(score: QualityScore | undefined): strin
     const { components, total } = computeNormalizedSmart(sb)
 
     Object.keys(components).forEach(k => {
-      const v = components[k]
+      const v = components[k] ?? 0
       const sign = v > 0 ? '+' : ''
       parts.push(`${k}: ${sign}${v}`)
     })

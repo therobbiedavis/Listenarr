@@ -24,9 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
         console.log('[AuthStore] Authentication error - clearing session')
         // Clear any stale tokens when we get auth errors
         try {
-          import('@/utils/sessionToken').then(({ sessionTokenManager }) => {
-            sessionTokenManager.clearToken()
-          })
+          sessionTokenManager.clearToken()
         } catch {}
       }
       user.value = { authenticated: false }
@@ -49,24 +47,14 @@ export const useAuthStore = defineStore('auth', () => {
         // Attempt SPA navigation to login using the router if available.
         // Use dynamic import to avoid circular dependency at module load time.
         try {
-          import('@/router')
-            .then((mod) => {
-              try {
-                const current = window.location.pathname + window.location.search + window.location.hash
-                if (!current.startsWith('/login')) {
-                  // Preserve the current location as redirect parameter so user can return after login
-                  mod.default.push({ 
-                    name: 'login', 
-                    query: { redirect: current } 
-                  }).catch(() => { 
-                    window.location.href = `/login?redirect=${encodeURIComponent(current)}` 
-                  })
-                }
-              } catch {
-                window.location.href = '/login'
-              }
-            })
-            .catch(() => { window.location.href = '/login' })
+          const current = window.location.pathname + window.location.search + window.location.hash
+          if (!current.startsWith('/login')) {
+            try {
+              window.location.href = `/login?redirect=${encodeURIComponent(current)}`
+            } catch {
+              window.location.href = '/login'
+            }
+          }
         } catch {
           try { window.location.href = '/login' } catch {}
         }

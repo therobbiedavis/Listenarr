@@ -314,7 +314,10 @@ const displayResults = computed(() => {
     if (!hasA && !hasB) return 0
 
     if (scoreA === scoreB) return 0
-    return asc ? (scoreA - scoreB) : (scoreB - scoreA)
+    // scoreA and scoreB are guaranteed to be numbers here (checked above), coerce to number for TS
+    const sA = scoreA as number
+    const sB = scoreB as number
+    return asc ? (sA - sB) : (sB - sA)
   })
   return copy
 })

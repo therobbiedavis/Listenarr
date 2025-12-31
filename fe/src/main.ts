@@ -28,6 +28,7 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
+import { useToast } from './services/toastService'
 
 const app = createApp(App)
 
@@ -36,13 +37,13 @@ app.config.errorHandler = (err, instance, info) => {
   console.error('[Vue Error]', err, info)
   
   // Show user-friendly error message
-  import('./services/toastService').then(({ useToast }) => {
+  try {
     const toast = useToast()
     toast.error('Unexpected Error', 'Something went wrong. Please refresh the page.')
-  }).catch(() => {
+  } catch (e) {
     // Fallback if toast service fails
     alert('An unexpected error occurred. Please refresh the page.')
-  })
+  }
   
   // TODO: Send to error tracking service (e.g., Sentry)
   // if (import.meta.env.PROD) {
@@ -55,13 +56,13 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('[Unhandled Promise]', event.reason)
   event.preventDefault()
   
-  import('./services/toastService').then(({ useToast }) => {
+  try {
     const toast = useToast()
     toast.error('Error', 'An unexpected error occurred.')
-  }).catch(() => {
+  } catch (err) {
     // Fallback if toast service fails
-    console.error('Toast service unavailable for unhandled rejection')
-  })
+    console.error('Toast service unavailable for unhandled rejection', err)
+  }
 })
 
 app.use(createPinia())
