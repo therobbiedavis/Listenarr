@@ -57,7 +57,7 @@ namespace Listenarr.Api.Tests
             Assert.True(Directory.Exists(outputRoot));
 
             // At least one successful import result should be present
-            Assert.True(results.Any(r => r.Success));
+            Assert.Contains(results, r => r.Success);
 
             // All successful results should point to files under the output root
             foreach (var r in results.Where(r => r.Success))

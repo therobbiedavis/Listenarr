@@ -331,7 +331,10 @@ namespace Listenarr.Api.Tests
             // Assert: destination should exist and be unique (chapter (1).mp3)
             var files = Directory.GetFiles(dest);
             Assert.Contains(files, p => Path.GetFileName(p).StartsWith("chapter"));
-            Assert.True(files.Length >= 2 || files.Any(f => f.EndsWith("chapter (1).mp3")), "Expected a unique suffixed filename to be created");
+            if (files.Length < 2)
+            {
+                Assert.Contains(files, f => f.EndsWith("chapter (1).mp3"));
+            }
 
             // Cleanup
             try { Directory.Delete(basePath, true); } catch { }
