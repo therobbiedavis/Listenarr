@@ -835,14 +835,17 @@ namespace Listenarr.Api.Services
                     return;
                 }
 
-                // Security: Validate that the torrent URL belongs to the configured indexer's domain
+                // Parse and validate URLs
                 if (!Uri.TryCreate(searchResult.TorrentUrl, UriKind.Absolute, out var torrentUri) ||
-                    !Uri.TryCreate(indexer.Url, UriKind.Absolute, out var indexerUri) ||
-                    !string.Equals(torrentUri.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
+                    !Uri.TryCreate(indexer.Url, UriKind.Absolute, out var indexerUri))
                 {
-                    _logger.LogWarning("Rejecting MyAnonamouse torrent for '{Title}': URL {Url} does not match indexer domain {IndexerDomain}",
-                        searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl), indexer.Url);
+                    _logger.LogWarning("Unable to cache MyAnonamouse torrent for '{Title}': invalid URL(s). Torrent={Url}, Indexer={IndexerUrl}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl), indexer.Url);
                     return;
+                }
+
+                if (!string.Equals(torrentUri.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("MyAnonamouse torrent host {TorrentHost} differs from indexer host {IndexerHost}. Proceeding with explicit cookie header.", torrentUri.Host, indexerUri.Host);
                 }
 
                 var mamId = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
@@ -852,14 +855,52 @@ namespace Listenarr.Api.Services
                     return;
                 }
 
-                using var httpClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
-                _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl));
-                var response = await httpClient.GetAsync(searchResult.TorrentUrl);
+                HttpClient? disposableClient = null;
+                HttpClient httpClientToUse = _httpClient;
+                try
+                {
+                    // Prefer factory-created client when available (helps testability and centralizes handlers)
+                    if (_httpClientFactory != null)
+                    {
+                        httpClientToUse = _httpClientFactory.CreateClient();
+                    }
+                    else
+                    {
+                        httpClientToUse = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
+                        disposableClient = httpClientToUse;
+                    }
+
+                    _logger.LogDebug("Downloading MyAnonamouse torrent for '{Title}' from {Url}", searchResult.Title, LogRedaction.SanitizeUrl(searchResult.TorrentUrl));
+
+                    var req = new HttpRequestMessage(HttpMethod.Get, searchResult.TorrentUrl);
+                    // Ensure the authenticated session is sent even if the download host differs
+                    if (!string.IsNullOrEmpty(mamId))
+                        req.Headers.Add("Cookie", $"mam_id={mamId}");
+
+                    var response = await httpClientToUse.SendAsync(req);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("MyAnonamouse torrent download failed for '{Title}' with status {Status}", searchResult.Title, response.StatusCode);
                     return;
+                }
+
+                // Update mam_id in indexer AdditionalSettings if tracker sent a new mam_id cookie
+                try
+                {
+                    var newMam = MyAnonamouseHelper.TryExtractMamIdFromResponse(response);
+                    if (!string.IsNullOrEmpty(newMam) && !string.Equals(newMam, mamId, StringComparison.Ordinal))
+                    {
+                        _logger.LogInformation("MyAnonamouse: received updated mam_id from torrent download response for indexer {Name}", indexer.Name);
+                        indexer.AdditionalSettings = MyAnonamouseHelper.UpdateMamIdInAdditionalSettings(indexer.AdditionalSettings, newMam);
+                        dbContext.Indexers.Update(indexer);
+                        await dbContext.SaveChangesAsync();
+                        mamId = newMam;
+                    }
+                }
+                catch (Exception exMam)
+                {
+                    _logger.LogDebug(exMam, "Failed to persist updated mam_id from MyAnonamouse torrent response");
                 }
 
                 var torrentBytes = await response.Content.ReadAsByteArrayAsync();
@@ -872,6 +913,11 @@ namespace Listenarr.Api.Services
                 searchResult.TorrentFileContent = torrentBytes;
                 searchResult.TorrentFileName = MyAnonamouseHelper.ResolveTorrentFileName(response, searchResult.TorrentUrl);
                 _logger.LogInformation("Cached MyAnonamouse torrent for '{Title}' ({Bytes} bytes)", searchResult.Title, torrentBytes.Length);
+            }
+            finally
+            {
+                disposableClient?.Dispose();
+            }
             }
             catch (Exception ex)
             {

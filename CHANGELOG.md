@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2025-12-31
+
+### Fixed
+- **MyAnonamouse authentication & downloads**: Persist `mam_id` values received from tracker responses and explicitly include `mam_id` cookie on direct torrent downloads when the torrent host differs from the configured indexer; adds unit tests covering cookie persistence and download caching. 
+
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 

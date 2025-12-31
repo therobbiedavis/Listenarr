@@ -48,6 +48,52 @@ namespace Listenarr.Api.Services
             return client;
         }
 
+        public static string? TryExtractMamIdFromResponse(HttpResponseMessage response)
+        {
+            try
+            {
+                if (response.Headers.TryGetValues("Set-Cookie", out var setCookieValues))
+                {
+                    foreach (var sc in setCookieValues)
+                    {
+                        // Look for mam_id=VALUE in the header value
+                        var m = System.Text.RegularExpressions.Regex.Match(sc, @"\bmam_id=([^;\s]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (m.Success)
+                            return m.Groups[1].Value.Trim('"');
+                    }
+                }
+            }
+            catch
+            {
+                // Swallow parsing errors; this helper is best-effort
+            }
+
+            return null;
+        }
+
+        public static string UpdateMamIdInAdditionalSettings(string? additionalSettings, string mamId)
+        {
+            if (string.IsNullOrWhiteSpace(additionalSettings))
+            {
+                var obj = new System.Text.Json.Nodes.JsonObject();
+                obj["mam_id"] = mamId;
+                return obj.ToJsonString();
+            }
+
+            try
+            {
+                var node = System.Text.Json.Nodes.JsonNode.Parse(additionalSettings) as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
+                node["mam_id"] = mamId;
+                return node.ToJsonString();
+            }
+            catch
+            {
+                var obj = new System.Text.Json.Nodes.JsonObject();
+                obj["mam_id"] = mamId;
+                return obj.ToJsonString();
+            }
+        }
+
         public static CookieContainer BuildCookieContainer(string mamId, string? baseUrl)
         {
             var container = new CookieContainer();

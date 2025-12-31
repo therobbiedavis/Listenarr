@@ -2407,6 +2407,28 @@ namespace Listenarr.Api.Services
                         return new List<IndexerSearchResult>();
                     }
 
+                    // Capture and persist an updated mam_id cookie if the tracker provided one in Set-Cookie
+                    try
+                    {
+                        var newMam = MyAnonamouseHelper.TryExtractMamIdFromResponse(response);
+                        if (!string.IsNullOrEmpty(newMam) && !string.Equals(newMam, mamId, StringComparison.Ordinal))
+                        {
+                            _logger.LogInformation("MyAnonamouse: received updated mam_id from response for indexer {Name}", indexer.Name);
+                            var idx = await _dbContext.Indexers.FindAsync(indexer.Id);
+                            if (idx != null)
+                            {
+                                idx.AdditionalSettings = MyAnonamouseHelper.UpdateMamIdInAdditionalSettings(idx.AdditionalSettings, newMam);
+                                _dbContext.Indexers.Update(idx);
+                                await _dbContext.SaveChangesAsync();
+                                mamId = newMam;
+                            }
+                        }
+                    }
+                    catch (Exception exMam)
+                    {
+                        _logger.LogDebug(exMam, "Failed to persist updated mam_id from MyAnonamouse response");
+                    }
+
                     var jsonResponse = await response.Content.ReadAsStringAsync();
                     _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
                     results = ParseMyAnonamouseResponse(jsonResponse, indexer);
