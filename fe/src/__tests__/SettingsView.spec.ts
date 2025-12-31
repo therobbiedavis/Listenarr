@@ -173,9 +173,9 @@ describe('SettingsView', () => {
     cfgStore.loadDownloadClientConfigurations = vi.fn(async () => {})
 
     cfgStore.saveDownloadClientConfiguration = vi.fn(async (c: any) => {
-      // Simulate backend saving and return an id (no-op)
+      // Simulate backend saving (no-op)
       cfgStore.downloadClientConfigurations[0] = c
-      return 'ok'
+      return Promise.resolve()
     })
 
     const wrapper = mount(SettingsView, { global: { plugins: [pinia, router], stubs: ['FolderBrowser'] } })

@@ -278,6 +278,54 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
+        public void ParseMyAnonamouse_Appends_MamId_To_DownloadUrl()
+        {
+            var json = @"[
+  {
+    ""guid"": ""https://www.myanonamouse.net/t/123"",
+    ""dl"": ""abc123"",
+    ""title"": ""Test"",
+    ""size"": 12345
+  }
+]";
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var results = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexer });
+
+            Assert.Single(results);
+            var r = results[0];
+            Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=test_mam", r.TorrentUrl);
+        }
+
+        [Fact]
+        public void ParseMyAnonamouse_Normalizes_And_Encodes_MamId_Once()
+        {
+            var json = @"[
+  {
+    ""guid"": ""https://www.myanonamouse.net/t/123"",
+    ""dl"": ""abc123"",
+    ""title"": ""Test""
+  }
+]";
+
+            // Case A: raw mam_id with + and = characters
+            var indexerRaw = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc+def==\" }" };
+            var method = typeof(SearchService).GetMethod("ParseMyAnonamouseResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var service = new SearchService(null, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var resRaw = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexerRaw });
+            Assert.Single(resRaw);
+            Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resRaw[0].TorrentUrl);
+
+            // Case B: mam_id already percent-encoded (should not double-encode)
+            var indexerEnc = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse", AdditionalSettings = "{ \"mam_id\": \"abc%2Bdef%3D%3D\" }" };
+            var resEnc = (List<IndexerSearchResult>)method.Invoke(service, new object[] { json, indexerEnc });
+            Assert.Single(resEnc);
+            Assert.Equal("https://www.myanonamouse.net/tor/download.php/abc123?mam_id=abc%2Bdef%3D%3D", resEnc[0].TorrentUrl);
+        }
+
+        [Fact]
         public void ParseMyAnonamouse_Parses_Age_And_Grabs_From_String_Fields()
         {
             var json = @"[

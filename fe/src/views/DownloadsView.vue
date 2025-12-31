@@ -116,12 +116,21 @@
             >
               Open Folder
             </button>
+
+            <button
+              @click="openInspect(download)"
+              class="action-button inspect"
+            >
+              Inspect
+            </button>
           </div>
         </div>
           </div>  <!-- Close downloads-list -->
         </div>    <!-- Close downloads-list-spacer -->
       </div>      <!-- Close downloads-list-container -->
     </div>
+
+    <InspectTorrentModal v-if="inspectState.show" :downloadId="inspectState.downloadId" :initialAnnounces="inspectState.announces" @close="closeInspect" />
   </div>
 </template>
 
@@ -131,7 +140,9 @@ import { useDownloadsStore } from '@/stores/downloads'
 import CustomSelect from '@/components/CustomSelect.vue'
 import type { Download } from '@/types'
 import { useToast } from '@/services/toastService'
-import { PhDownloadSimple, PhCheckCircle, PhXCircle } from '@phosphor-icons/vue'
+import { PhDownloadSimple, PhCheckCircle, PhXCircle, PhEye } from '@phosphor-icons/vue'
+import InspectTorrentModal from '@/components/InspectTorrentModal.vue'
+import { apiService } from '@/services/api'
 
 const downloadsStore = useDownloadsStore()
 const toast = useToast()
@@ -208,6 +219,30 @@ const cancelDownload = async (downloadId: string) => {
   }
 }
 
+const inspectState = ref({ show: false, downloadId: '', announces: null as string[] | null, loading: false })
+
+const openInspect = async (download: Download) => {
+  inspectState.value.show = true
+  inspectState.value.downloadId = download.id
+  inspectState.value.loading = true
+  try {
+    const res = await apiService.getCachedAnnounces(download.id)
+    inspectState.value.announces = res?.announces ?? null
+  } catch (e) {
+    console.warn('Failed to fetch cached announces', e)
+    inspectState.value.announces = null
+  } finally {
+    inspectState.value.loading = false
+  }
+}
+
+const closeInspect = () => {
+  inspectState.value.show = false
+  inspectState.value.downloadId = ''
+  inspectState.value.announces = null
+  inspectState.value.loading = false
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const retryDownload = async (download: Download) => {
   // For now, just show a message. In a real implementation,
@@ -260,6 +295,7 @@ onMounted(() => {
   // No polling needed - SignalR pushes updates in real-time!
   // The downloads store automatically receives updates via WebSocket
 })
+
 </script>
 
 <style scoped>

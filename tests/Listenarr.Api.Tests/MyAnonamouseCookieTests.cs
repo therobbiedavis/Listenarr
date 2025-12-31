@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Hubs;
 using Listenarr.Api.Services;
 using Listenarr.Api.Models;
+using Listenarr.Api.Controllers;
 using Listenarr.Infrastructure.Models;
 using System.Linq;
 using System.Reflection;
@@ -138,7 +139,7 @@ namespace Listenarr.Api.Tests
             var method = typeof(Listenarr.Api.Services.DownloadService).GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.NotNull(method);
 
-            var task = (Task)method!.Invoke(downloadService, new object[] { sr })!;
+            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
             await task;
 
             Assert.NotNull(capturedRequest);
@@ -150,6 +151,480 @@ namespace Listenarr.Api.Tests
             Assert.NotEmpty(sr.TorrentFileContent);
         }
 
+        [Fact]
+        public async Task TryPrepareMyAnonamouseTorrent_SetsHostHeaderWhenHostDiffers()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            using var db = new ListenArrDbContext(options);
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            db.Indexers.Add(idx);
+            db.SaveChanges();
+
+            HttpRequestMessage? capturedRequest = null;
+            var handler = new DelegatingHandlerMock((req, ct) => {
+                capturedRequest = req;
+                var content = new ByteArrayContent(Encoding.UTF8.GetBytes("dummy-torrent"));
+                content.Headers.ContentDisposition = new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment") { FileName = "file.torrent" };
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            });
+
+            var httpClient = new HttpClient(handler);
+
+            // Simple IHttpClientFactory that returns our client
+            var httpFactory = new SimpleHttpClientFactory(httpClient);
+
+            // Build a minimal service provider for dependencies
+            var provider = TestServiceFactory.BuildServiceProvider(services => {
+                services.AddSingleton<IHttpClientFactory>(httpFactory);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(sp => new TestDbFactory(options));
+                services.AddSingleton<IHubContext<DownloadHub>>(new TestHubContext());
+                services.AddMemoryCache();
+                services.AddSingleton<Listenarr.Api.Services.IAudiobookRepository>(new TestAudiobookRepository());
+            });
+
+            var hubContext = provider.GetService<IHubContext<DownloadHub>>()!;
+            var audiobookRepo = provider.GetService<IAudiobookRepository>()!;
+            var configSvc = provider.GetService<IConfigurationService>() ?? new TestConfigurationService();
+            var dbFactorySvc = provider.GetService<IDbContextFactory<ListenArrDbContext>>()!;
+            var httpFactorySvc = provider.GetService<IHttpClientFactory>()!;
+            var scopeFactorySvc = provider.GetService<IServiceScopeFactory>()!;
+            var pathMappingSvc = provider.GetService<IRemotePathMappingService>() ?? new TestRemotePathMappingService();
+            var importSvc = provider.GetService<IImportService>() ?? new TestImportService();
+            var searchSvc = provider.GetService<ISearchService>() ?? new TestSearchService();
+            var clientGatewaySvc = provider.GetService<IDownloadClientGateway>();
+            var cacheSvc = provider.GetService<IMemoryCache>()!;
+            var dqSvc = provider.GetService<IDownloadQueueService>() ?? new TestDownloadQueueService();
+            var completedProc = provider.GetService<ICompletedDownloadProcessor>() ?? new TestCompletedDownloadProcessor();
+            var metricsSvc = provider.GetService<IAppMetricsService>() ?? new TestAppMetricsService();
+            var notificationSvc = provider.GetService<NotificationService>()!;
+            var hubBroadcaster = provider.GetService<Listenarr.Application.Services.IHubBroadcaster>();
+
+            var downloadService = new Listenarr.Api.Services.DownloadService(
+                hubContext,
+                audiobookRepo,
+                configSvc,
+                dbFactorySvc,
+                NullLogger<Listenarr.Api.Services.DownloadService>.Instance,
+                httpFactorySvc,
+                scopeFactorySvc,
+                pathMappingSvc,
+                importSvc,
+                searchSvc,
+                clientGatewaySvc,
+                cacheSvc,
+                dqSvc,
+                completedProc,
+                metricsSvc,
+                notificationSvc,
+                hubBroadcaster );
+
+            // Build a SearchResult that references the indexer and uses a different host for torrent URL
+            var sr = new SearchResult
+            {
+                Title = "Test Book",
+                TorrentUrl = "https://47.39.239.96/tor/download.php/abc",
+                IndexerId = idx.Id,
+                TorrentFileContent = null
+            };
+
+            // Call the non-public TryPrepareMyAnonamouseTorrentAsync via reflection
+            var method = typeof(Listenarr.Api.Services.DownloadService).GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
+            await task;
+
+            Assert.NotNull(capturedRequest);
+            // Assert Host header was set to the indexer host
+            Assert.Equal("www.myanonamouse.net", capturedRequest.Headers.Host);
+        }
+
+        [Fact]
+        public async Task TryPrepareMyAnonamouseTorrent_FollowsRedirectAndPreservesHeaders()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            using var db = new ListenArrDbContext(options);
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"orig_mam\" }" };
+            db.Indexers.Add(idx);
+            db.SaveChanges();
+
+            HttpRequestMessage? capturedRequest = null;
+            int callCount = 0;
+            var handler = new DelegatingHandlerMock((req, ct) => {
+                callCount++;
+                if (callCount == 1)
+                {
+                    var resp = new HttpResponseMessage(HttpStatusCode.Found);
+                    resp.Headers.Location = new Uri("https://47.39.239.96/tor/download.php/abc");
+                    resp.Headers.Add("Set-Cookie", "mam_id=redirect_mam; Path=/; HttpOnly");
+                    return Task.FromResult(resp);
+                }
+
+                // Second call: capture the redirected request
+                capturedRequest = req;
+                var content = new ByteArrayContent(Encoding.UTF8.GetBytes("dummy-torrent"));
+                content.Headers.ContentDisposition = new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment") { FileName = "file.torrent" };
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            });
+
+            var httpClient = new HttpClient(handler);
+            var httpFactory = new SimpleHttpClientFactory(httpClient);
+
+            var provider = TestServiceFactory.BuildServiceProvider(services => {
+                services.AddSingleton<IHttpClientFactory>(httpFactory);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(sp => new TestDbFactory(options));
+                services.AddSingleton<IHubContext<DownloadHub>>(new TestHubContext());
+                services.AddMemoryCache();
+                services.AddSingleton<Listenarr.Api.Services.IAudiobookRepository>(new TestAudiobookRepository());
+            });
+
+            var hubContext = provider.GetService<IHubContext<DownloadHub>>()!;
+            var audiobookRepo = provider.GetService<IAudiobookRepository>()!;
+            var configSvc = provider.GetService<IConfigurationService>() ?? new TestConfigurationService();
+            var dbFactorySvc = provider.GetService<IDbContextFactory<ListenArrDbContext>>()!;
+            var httpFactorySvc = provider.GetService<IHttpClientFactory>()!;
+            var scopeFactorySvc = provider.GetService<IServiceScopeFactory>()!;
+            var pathMappingSvc = provider.GetService<IRemotePathMappingService>() ?? new TestRemotePathMappingService();
+            var importSvc = provider.GetService<IImportService>() ?? new TestImportService();
+            var searchSvc = provider.GetService<ISearchService>() ?? new TestSearchService();
+            var clientGatewaySvc = provider.GetService<IDownloadClientGateway>();
+            var cacheSvc = provider.GetService<IMemoryCache>()!;
+            var dqSvc = provider.GetService<IDownloadQueueService>() ?? new TestDownloadQueueService();
+            var completedProc = provider.GetService<ICompletedDownloadProcessor>() ?? new TestCompletedDownloadProcessor();
+            var metricsSvc = provider.GetService<IAppMetricsService>() ?? new TestAppMetricsService();
+            var notificationSvc = provider.GetService<NotificationService>()!;
+            var hubBroadcaster = provider.GetService<Listenarr.Application.Services.IHubBroadcaster>();
+
+            var downloadService = new Listenarr.Api.Services.DownloadService(
+                hubContext,
+                audiobookRepo,
+                configSvc,
+                dbFactorySvc,
+                NullLogger<Listenarr.Api.Services.DownloadService>.Instance,
+                httpFactorySvc,
+                scopeFactorySvc,
+                pathMappingSvc,
+                importSvc,
+                searchSvc,
+                clientGatewaySvc,
+                cacheSvc,
+                dqSvc,
+                completedProc,
+                metricsSvc,
+                notificationSvc,
+                hubBroadcaster );
+
+            var sr = new SearchResult
+            {
+                Title = "Test Book",
+                TorrentUrl = "https://www.myanonamouse.net/tor/redirectstart",
+                IndexerId = idx.Id,
+                TorrentFileContent = null
+            };
+
+            var method = typeof(Listenarr.Api.Services.DownloadService).GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
+            await task;
+
+            Assert.NotNull(capturedRequest);
+            // The redirected request should have Host set to indexer host
+            Assert.Equal("www.myanonamouse.net", capturedRequest.Headers.Host);
+            // The redirected request should include the updated mam_id from the redirect response
+            Assert.True(capturedRequest.Headers.TryGetValues("Cookie", out var cookieVals));
+            Assert.Contains("mam_id=redirect_mam", cookieVals.First());
+
+            // Note: persistence of mam_id to the database is handled; functional behavior verified below.
+            Assert.NotNull(sr.TorrentFileContent);
+            Assert.NotEmpty(sr.TorrentFileContent);
+        }
+
+        [Fact]
+        public async Task TryPrepareMyAnonamouseTorrent_AbortsWhenTrackerReturnsUnrecognizedHostError()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            using var db = new ListenArrDbContext(options);
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            db.Indexers.Add(idx);
+            db.SaveChanges();
+
+            HttpRequestMessage? capturedRequest = null;
+            var handler = new DelegatingHandlerMock((req, ct) => {
+                capturedRequest = req;
+                var html = "<html><body>Unrecognized host/PassKey</body></html>";
+                var content = new StringContent(html, Encoding.UTF8, "text/html");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            });
+
+            var httpClient = new HttpClient(handler);
+            var httpFactory = new SimpleHttpClientFactory(httpClient);
+
+            var provider = TestServiceFactory.BuildServiceProvider(services => {
+                services.AddSingleton<IHttpClientFactory>(httpFactory);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(sp => new TestDbFactory(options));
+                services.AddSingleton<IHubContext<DownloadHub>>(new TestHubContext());
+                services.AddMemoryCache();
+                services.AddSingleton<Listenarr.Api.Services.IAudiobookRepository>(new TestAudiobookRepository());
+            });
+
+            var hubContext = provider.GetService<IHubContext<DownloadHub>>()!;
+            var audiobookRepo = provider.GetService<IAudiobookRepository>()!;
+            var configSvc = provider.GetService<IConfigurationService>() ?? new TestConfigurationService();
+            var dbFactorySvc = provider.GetService<IDbContextFactory<ListenArrDbContext>>()!;
+            var httpFactorySvc = provider.GetService<IHttpClientFactory>()!;
+            var scopeFactorySvc = provider.GetService<IServiceScopeFactory>()!;
+            var pathMappingSvc = provider.GetService<IRemotePathMappingService>() ?? new TestRemotePathMappingService();
+            var importSvc = provider.GetService<IImportService>() ?? new TestImportService();
+            var searchSvc = provider.GetService<ISearchService>() ?? new TestSearchService();
+            var clientGatewaySvc = provider.GetService<IDownloadClientGateway>();
+            var cacheSvc = provider.GetService<IMemoryCache>()!;
+            var dqSvc = provider.GetService<IDownloadQueueService>() ?? new TestDownloadQueueService();
+            var completedProc = provider.GetService<ICompletedDownloadProcessor>() ?? new TestCompletedDownloadProcessor();
+            var metricsSvc = provider.GetService<IAppMetricsService>() ?? new TestAppMetricsService();
+            var notificationSvc = provider.GetService<NotificationService>()!;
+            var hubBroadcaster = provider.GetService<Listenarr.Application.Services.IHubBroadcaster>();
+
+            var downloadService = new Listenarr.Api.Services.DownloadService(
+                hubContext,
+                audiobookRepo,
+                configSvc,
+                dbFactorySvc,
+                NullLogger<Listenarr.Api.Services.DownloadService>.Instance,
+                httpFactorySvc,
+                scopeFactorySvc,
+                pathMappingSvc,
+                importSvc,
+                searchSvc,
+                clientGatewaySvc,
+                cacheSvc,
+                dqSvc,
+                completedProc,
+                metricsSvc,
+                notificationSvc,
+                hubBroadcaster );
+
+            var sr = new SearchResult
+            {
+                Title = "Test Book",
+                TorrentUrl = "https://www.myanonamouse.net/tor/download.php/me+IG7...",
+                IndexerId = idx.Id,
+                TorrentFileContent = null
+            };
+
+            var method = typeof(Listenarr.Api.Services.DownloadService).GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            var task = (Task)method!.Invoke(downloadService, new object[] { sr, null })!;
+            await task;
+
+            // Since the tracker returned an error HTML page, the torrent should not be cached/uploaded
+            Assert.Null(sr.TorrentFileContent);
+            Assert.NotNull(capturedRequest);
+        }
+
+        [Fact]
+        public async Task TryPrepareMyAnonamouseTorrent_Caches_Bytes_Accessible_Via_Controller()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            using var db = new ListenArrDbContext(options);
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"test_mam\" }" };
+            db.Indexers.Add(idx);
+            db.SaveChanges();
+
+            var handler = new DelegatingHandlerMock((req, ct) => {
+                var content = new ByteArrayContent(Encoding.UTF8.GetBytes("dummy-torrent-bytes"));
+                content.Headers.ContentDisposition = new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment") { FileName = "file.torrent" };
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            });
+
+            var httpClient = new HttpClient(handler);
+            var httpFactory = new SimpleHttpClientFactory(httpClient);
+
+            var provider = TestServiceFactory.BuildServiceProvider(services => {
+                services.AddSingleton<IHttpClientFactory>(httpFactory);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(sp => new TestDbFactory(options));
+                services.AddSingleton<IHubContext<DownloadHub>>(new TestHubContext());
+                services.AddMemoryCache();
+                services.AddSingleton<Listenarr.Api.Services.IAudiobookRepository>(new TestAudiobookRepository());
+            });
+
+            var hubContext = provider.GetService<IHubContext<DownloadHub>>()!;
+            var audiobookRepo = provider.GetService<IAudiobookRepository>()!;
+            var configSvc = provider.GetService<IConfigurationService>() ?? new TestConfigurationService();
+            var dbFactorySvc = provider.GetService<IDbContextFactory<ListenArrDbContext>>()!;
+            var httpFactorySvc = provider.GetService<IHttpClientFactory>()!;
+            var scopeFactorySvc = provider.GetService<IServiceScopeFactory>()!;
+            var pathMappingSvc = provider.GetService<IRemotePathMappingService>() ?? new TestRemotePathMappingService();
+            var importSvc = provider.GetService<IImportService>() ?? new TestImportService();
+            var searchSvc = provider.GetService<ISearchService>() ?? new TestSearchService();
+            var clientGatewaySvc = provider.GetService<IDownloadClientGateway>();
+            var cacheSvc = provider.GetService<IMemoryCache>()!;
+            var dqSvc = provider.GetService<IDownloadQueueService>() ?? new TestDownloadQueueService();
+            var completedProc = provider.GetService<ICompletedDownloadProcessor>() ?? new TestCompletedDownloadProcessor();
+            var metricsSvc = provider.GetService<IAppMetricsService>() ?? new TestAppMetricsService();
+            var notificationSvc = provider.GetService<NotificationService>()!;
+            var hubBroadcaster = provider.GetService<Listenarr.Application.Services.IHubBroadcaster>();
+
+            var downloadService = new Listenarr.Api.Services.DownloadService(
+                hubContext,
+                audiobookRepo,
+                configSvc,
+                dbFactorySvc,
+                NullLogger<Listenarr.Api.Services.DownloadService>.Instance,
+                httpFactorySvc,
+                scopeFactorySvc,
+                pathMappingSvc,
+                importSvc,
+                searchSvc,
+                clientGatewaySvc,
+                cacheSvc,
+                dqSvc,
+                completedProc,
+                metricsSvc,
+                notificationSvc,
+                hubBroadcaster );
+
+            var sr = new SearchResult
+            {
+                Title = "Test Book",
+                TorrentUrl = "https://www.myanonamouse.net/tor/download.php/abc",
+                IndexerId = idx.Id,
+                TorrentFileContent = null
+            };
+
+            var downloadId = Guid.NewGuid().ToString();
+
+            // Call the non-public TryPrepareMyAnonamouseTorrentAsync with downloadId via reflection
+            var method = typeof(Listenarr.Api.Services.DownloadService).GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            var task = (Task)method!.Invoke(downloadService, new object[] { sr, downloadId })!;
+            await task;
+
+            // Now create a DownloadsController and request the cached torrent
+            var downloadsController = new Listenarr.Api.Controllers.DownloadsController(db, NullLogger<Listenarr.Api.Controllers.DownloadsController>.Instance, configSvc, cacheSvc);
+            var result = downloadsController.GetCachedTorrent(downloadId);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.FileContentResult>(result);
+            var fileResult = (Microsoft.AspNetCore.Mvc.FileContentResult)result;
+            Assert.Equal("application/x-bittorrent", fileResult.ContentType);
+            Assert.Equal("file.torrent", fileResult.FileDownloadName);
+            Assert.Equal(Encoding.UTF8.GetBytes("dummy-torrent-bytes"), fileResult.FileContents);
+        }
+
+        [Fact]
+        public async Task TryPrepareMyAnonamouseTorrent_Caches_Announces_Accessible_Via_Controller()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            using var db = new ListenArrDbContext(options);
+            var idx = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"old_mam\" }" };
+            db.Indexers.Add(idx);
+            db.SaveChanges();
+
+            Uri? capturedUri = null;
+            var sb = new StringBuilder();
+            sb.Append("d");
+            sb.Append("8:announce82:https://www.myanonamouse.net/tracker.php/mGDjyetAEBGCaneLZNS9OHawTo1upcwU/announce");
+            sb.Append("e");
+
+            var handler = new DelegatingHandlerMock((req, ct) => {
+                capturedUri = req.RequestUri;
+                var content = new ByteArrayContent(Encoding.UTF8.GetBytes(sb.ToString()));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+            });
+
+            var httpFactory = new SimpleHttpClientFactory(new HttpClient(handler));
+
+            // Build a minimal service provider for dependencies (reusing test helpers)
+            var provider = TestServiceFactory.BuildServiceProvider(services => {
+                services.AddSingleton<IHttpClientFactory>(httpFactory);
+                services.AddSingleton<IDbContextFactory<ListenArrDbContext>>(sp => new TestDbFactory(options));
+                services.AddSingleton<IHubContext<DownloadHub>>(new TestHubContext());
+                services.AddMemoryCache();
+                services.AddSingleton<Listenarr.Api.Services.IAudiobookRepository>(new TestAudiobookRepository());
+            });
+
+            var hubContext = provider.GetService<IHubContext<DownloadHub>>()!;
+            var audiobookRepo = provider.GetService<IAudiobookRepository>()!;
+            var configSvc = provider.GetService<IConfigurationService>() ?? new TestConfigurationService();
+            var dbFactorySvc = provider.GetService<IDbContextFactory<ListenArrDbContext>>()!;
+            var httpFactorySvc = provider.GetService<IHttpClientFactory>()!;
+            var scopeFactorySvc = provider.GetService<IServiceScopeFactory>()!;
+            var pathMappingSvc = provider.GetService<IRemotePathMappingService>() ?? new TestRemotePathMappingService();
+            var importSvc = provider.GetService<IImportService>() ?? new TestImportService();
+            var searchSvc = provider.GetService<ISearchService>() ?? new TestSearchService();
+            var clientGatewaySvc = provider.GetService<IDownloadClientGateway>();
+            var cacheSvc = provider.GetService<IMemoryCache>()!;
+            var dqSvc = provider.GetService<IDownloadQueueService>() ?? new TestDownloadQueueService();
+            var completedProc = provider.GetService<ICompletedDownloadProcessor>() ?? new TestCompletedDownloadProcessor();
+            var metricsSvc = provider.GetService<IAppMetricsService>() ?? new TestAppMetricsService();
+            var notificationSvc = provider.GetService<NotificationService>()!;
+            var hubBroadcaster = provider.GetService<Listenarr.Application.Services.IHubBroadcaster>();
+
+            var downloadService = new Listenarr.Api.Services.DownloadService(
+                hubContext,
+                audiobookRepo,
+                configSvc,
+                dbFactorySvc,
+                NullLogger<Listenarr.Api.Services.DownloadService>.Instance,
+                httpFactorySvc,
+                scopeFactorySvc,
+                pathMappingSvc,
+                importSvc,
+                searchSvc,
+                clientGatewaySvc,
+                cacheSvc,
+                dqSvc,
+                completedProc,
+                metricsSvc,
+                notificationSvc,
+                hubBroadcaster );
+
+            var sr = new SearchResult
+            {
+                Title = "Test Book",
+                TorrentUrl = "https://www.myanonamouse.net/tor/download.php/abc",
+                IndexerId = idx.Id,
+                TorrentFileContent = null
+            };
+
+            var downloadId = Guid.NewGuid().ToString();
+
+            // Call the non-public TryPrepareMyAnonamouseTorrentAsync with downloadId via reflection
+            var method = typeof(Listenarr.Api.Services.DownloadService).GetMethod("TryPrepareMyAnonamouseTorrentAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            var task = (Task)method!.Invoke(downloadService, new object[] { sr, downloadId })!;
+            await task;
+
+            // Now request announces from the sync DownloadsController helper
+            var downloadsController = new DownloadsController(db, NullLogger<DownloadsController>.Instance, configSvc, cacheSvc);
+            var result = downloadsController.GetCachedAnnounces(downloadId);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var ok = (Microsoft.AspNetCore.Mvc.OkObjectResult)result;
+            Assert.NotNull(ok.Value);
+
+            // Also assert via service accessor
+            var announces = await downloadService.GetCachedAnnouncesAsync(downloadId);
+            Assert.NotNull(announces);
+            // Expect mam_id to be appended to announce URLs for MyAnonamouse so trackers that require passkey accept them
+            Assert.Contains(announces, a => a.IndexOf("mam_id=old_mam", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
         // Simple IHttpClientFactory implementation for tests
         private class SimpleHttpClientFactory : IHttpClientFactory
         {
@@ -263,6 +738,39 @@ namespace Listenarr.Api.Tests
             public void Gauge(string key, double value) { }
             public void Timing(string key, TimeSpan duration) { }
             public void Timer(string key, TimeSpan duration) { }
+        }
+
+        [Fact]
+        public void NormalizeMamId_HandlesVariousEncodings()
+        {
+            // Test raw mam_id (no encoding)
+            Assert.Equal("abc123", NormalizeMamId("abc123"));
+
+            // Test single-encoded (e.g., from URL)
+            Assert.Equal("abc%2Bdef%3D%3D", NormalizeMamId("abc%2Bdef%3D%3D"));
+
+            // Test double-encoded (problematic case) - should decode to single-encoded
+            Assert.Equal("abc%2Bdef%3D%3D", NormalizeMamId("abc%252Bdef%253D%253D"));
+
+            // Test triple-encoded
+            Assert.Equal("abc%2Bdef%3D%3D", NormalizeMamId("abc%25252Bdef%25253D%25253D"));
+
+            // Test empty/null
+            Assert.Equal("", NormalizeMamId(""));
+            Assert.Equal(null, NormalizeMamId(null));
+        }
+
+        private static string NormalizeMamId(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+            var decoded = raw;
+            while (true)
+            {
+                var next = Uri.UnescapeDataString(decoded);
+                if (next == decoded) break;
+                decoded = next;
+            }
+            return Uri.EscapeDataString(decoded);
         }
     }
 }

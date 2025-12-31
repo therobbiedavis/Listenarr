@@ -205,7 +205,7 @@ const debugDownloads = () => {
   try {
     // Print a concise summary so we can quickly inspect status and client IDs
     console.log('[DEBUG Downloads] queue snapshot (summary):',
-      (queue || []).map((q: any) => ({ id: q.id, status: q.status, downloadClientId: q.downloadClientId, title: q.title })))
+      (queue.value || []).map((q: any) => ({ id: q.id, status: q.status, downloadClientId: q.downloadClientId, title: q.title })))
 
     console.log('[DEBUG Downloads] downloadsStore.downloads (summary):',
       (downloadsStore.downloads || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))

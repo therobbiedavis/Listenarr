@@ -4,6 +4,7 @@ using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using System.Linq;
 using Listenarr.Infrastructure.Models;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Listenarr.Api.Controllers;
 
@@ -14,17 +15,50 @@ public class DownloadsController : ControllerBase
     private readonly ListenArrDbContext _dbContext;
     private readonly ILogger<DownloadsController> _logger;
     private readonly IConfigurationService _configurationService;
+    private readonly IMemoryCache? _cache;
 
-    public DownloadsController(ListenArrDbContext dbContext, ILogger<DownloadsController> logger, IConfigurationService configurationService)
+    public DownloadsController(ListenArrDbContext dbContext, ILogger<DownloadsController> logger, IConfigurationService configurationService, IMemoryCache? cache = null)
     {
         _dbContext = dbContext;
         _logger = logger;
         _configurationService = configurationService;
+        _cache = cache;
+    }
+    /// <summary>
+    /// Retrieve cached torrent bytes (if cached) for a given download id (synchronous for tests)
+    /// </summary>
+    public IActionResult GetCachedTorrent(string downloadId)
+    {
+        if (_cache == null)
+        {
+            return NotFound(new { error = "Cached torrent not found", downloadId });
+        }
+
+        if (_cache.TryGetValue($"mam:cachedtorrent:{downloadId}:bytes", out byte[]? bytes) && bytes != null && bytes.Length > 0)
+        {
+            var fileName = _cache.Get<string>($"mam:cachedtorrent:{downloadId}:name") ?? "download.torrent";
+            return new FileContentResult(bytes, "application/x-bittorrent") { FileDownloadName = fileName };
+        }
+
+        return NotFound(new { error = "Cached torrent not found", downloadId });
     }
 
     /// <summary>
-    /// Get all downloads, optionally filtered by status
+    /// Retrieve cached announce URLs (sync for tests)
     /// </summary>
+    public IActionResult GetCachedAnnounces(string downloadId)
+    {
+        if (_cache == null)
+            return NotFound(new { error = "Cached announces not found", downloadId });
+
+        if (_cache.TryGetValue($"mam:cachedtorrent:{downloadId}:announces", out System.Collections.Generic.List<string>? announces) && announces != null && announces.Count > 0)
+        {
+            return Ok(new { downloadId, announces });
+        }
+
+        return NotFound(new { error = "Cached announces not found", downloadId });
+    }
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Download>>> GetDownloads([FromQuery] string? status = null)
     {
@@ -99,7 +133,7 @@ public class DownloadsController : ControllerBase
             _logger.LogError(ex, "Error retrieving download {DownloadId}", id);
             return StatusCode(500, new { error = "Failed to retrieve download", message = ex.Message });
         }
-    }
+      }
 
     /// <summary>
     /// Get active downloads (Queued or Downloading status)
@@ -128,8 +162,8 @@ public class DownloadsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Delete a download record (does not cancel active download)
+
+    /// <summary>    /// Delete a download record (does not cancel active download)
     /// </summary>
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteDownload(string id)

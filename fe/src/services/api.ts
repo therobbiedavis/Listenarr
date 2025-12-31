@@ -555,6 +555,22 @@ class ApiService {
     return this.request<boolean>(`/downloads/${id}`, { method: 'DELETE' })
   }
 
+  async getCachedAnnounces(downloadId: string): Promise<{ downloadId: string; announces: string[] } | null> {
+    return this.request<{ downloadId: string; announces: string[] } | null>(`/download/cached/${downloadId}/announces`)
+  }
+
+  async getCachedTorrent(downloadId: string): Promise<{ blob: Blob; filename?: string } | null> {
+    const url = `${API_BASE_URL}/download/cached/${downloadId}/torrent`
+    const resp = await fetch(url, { method: 'GET', credentials: 'include' })
+    if (!resp.ok) return null
+    const contentDisposition = resp.headers.get('content-disposition') || ''
+    let filename: string | undefined
+    const match = /filename="?([^";]+)"?/.exec(contentDisposition)
+    if (match) filename = match[1]
+    const blob = await resp.blob()
+    return { blob, filename }
+  }
+
   async searchAndDownload(audiobookId: number): Promise<{
     success: boolean
     message?: string

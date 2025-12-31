@@ -201,6 +201,18 @@ namespace Listenarr.Api.Services
         /// <param name="client">The download client configuration to test</param>
         /// <returns>Tuple containing success flag, message, and optionally the client configuration</returns>
         Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client);
+
+        /// <summary>
+        /// Retrieve cached torrent bytes and filename for a given download id if available
+        /// </summary>
+        /// <param name="downloadId">The download ID to look up</param>
+        Task<(byte[]? Bytes, string? FileName)> GetCachedTorrentAsync(string downloadId);
+
+        /// <summary>
+        /// Retrieve cached announce URLs for a given download id if available
+        /// </summary>
+        /// <param name="downloadId">The download ID to look up</param>
+        Task<System.Collections.Generic.List<string>?> GetCachedAnnouncesAsync(string downloadId);
     }
 
     /// <summary>
