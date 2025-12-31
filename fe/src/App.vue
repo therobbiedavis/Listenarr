@@ -862,9 +862,8 @@ const hideLayout = computed(() => {
 <style>
 @font-face {
   font-family: 'Figtree';
-  src: url('/fonts/Figtree-VariableFont_wght.woff2') format('woff2'),
-       url('/fonts/Figtree-VariableFont_wght.woff') format('woff'),
-       url('/fonts/Figtree-VariableFont_wght.ttf') format('truetype');
+  /* Only include font formats that are present in repo to avoid unresolved asset warnings during build */
+  src: url('/fonts/Figtree-VariableFont_wght.ttf') format('truetype');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;

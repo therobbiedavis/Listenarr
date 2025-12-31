@@ -1,0 +1,22 @@
+diff --git a/node_modules/@microsoft/signalr/dist/esm/Utils.js b/node_modules/@microsoft/signalr/dist/esm/Utils.js
+index 6b06f16..31b534c 100644
+--- a/node_modules/@microsoft/signalr/dist/esm/Utils.js
++++ b/node_modules/@microsoft/signalr/dist/esm/Utils.js
+@@ -187,7 +187,7 @@ export function constructUserAgent(version, os, runtime, runtimeVersion) {
+     return userAgent;
+ }
+ // eslint-disable-next-line spaced-comment
+-/*#__PURE__*/ function getOsName() {
++function getOsName() {
+     if (Platform.isNode) {
+         switch (process.platform) {
+             case "win32":
+@@ -205,7 +205,7 @@ export function constructUserAgent(version, os, runtime, runtimeVersion) {
+     }
+ }
+ // eslint-disable-next-line spaced-comment
+-/*#__PURE__*/ function getRuntimeVersion() {
++function getRuntimeVersion() {
+     if (Platform.isNode) {
+         return process.versions.node;
+     }
