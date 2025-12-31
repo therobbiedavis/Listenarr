@@ -619,12 +619,15 @@ namespace Listenarr.Api.Services
 
             var downloadId = Guid.NewGuid().ToString();
 
+            // Ensure downloadClientId is non-null before assignment into model
+            var downloadClientIdForModel = downloadClientId ?? string.Empty;
+
             // Create Download record in database before sending to client
             var download = new Download
             {
                 Id = downloadId,
                 AudiobookId = audiobookId,
-                Title = searchResult.Title,
+                Title = searchResult.Title ?? string.Empty,
                 Artist = searchResult.Artist ?? string.Empty,
                 Album = searchResult.Album ?? string.Empty,
                 OriginalUrl = !string.IsNullOrEmpty(searchResult.MagnetLink) ? searchResult.MagnetLink : (searchResult.TorrentUrl ?? searchResult.NzbUrl ?? string.Empty),
@@ -635,7 +638,7 @@ namespace Listenarr.Api.Services
                 DownloadPath = downloadClient.DownloadPath ?? string.Empty,
                 FinalPath = string.Empty,
                 StartedAt = DateTime.UtcNow,
-                DownloadClientId = downloadClientId,
+                DownloadClientId = downloadClientIdForModel,
                 Metadata = new Dictionary<string, object>
                 {
                     ["Source"] = searchResult.Source ?? string.Empty,
@@ -685,7 +688,7 @@ namespace Listenarr.Api.Services
                 {
                     var configService = scope.ServiceProvider.GetService<IConfigurationService>() ?? _configurationService;
                     var fileNamingService = scope.ServiceProvider.GetService<IFileNamingService>();
-                    var settings = await configService.GetApplicationSettingsAsync();
+                    var settings = configService != null ? await configService.GetApplicationSettingsAsync() : new ApplicationSettings();
 
                     // Fetch audiobook data if available for better notification content
                     object notificationData;

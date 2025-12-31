@@ -79,12 +79,10 @@ namespace Listenarr.Api.Services
                 DownloadId = downloadId,
                 JobType = ProcessingJobType.MoveOrCopyFile,
                 SourcePath = sourcePath,
-                DownloadClientId = downloadClientId,
+                DownloadClientId = downloadClientId ?? string.Empty,
                 Priority = 5, // Normal priority
                 Status = ProcessingJobStatus.Pending
             };
-
-            job.AddLogEntry($"Queued for post-processing: {sourcePath}");
 
             _context.DownloadProcessingJobs.Add(job);
             await _context.SaveChangesAsync();

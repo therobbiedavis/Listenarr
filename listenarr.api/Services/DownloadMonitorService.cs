@@ -360,8 +360,17 @@ namespace Listenarr.Api.Services
             {
                 using var initScope = _serviceScopeFactory.CreateScope();
                 var cfg = initScope.ServiceProvider.GetService<IConfigurationService>();
-                var appSettings = await cfg?.GetApplicationSettingsAsync() ?? new ApplicationSettings();
-                if (appSettings != null && appSettings.PollingIntervalSeconds > 0)
+                ApplicationSettings appSettings;
+                if (cfg != null)
+                {
+                    appSettings = await cfg.GetApplicationSettingsAsync() ?? new ApplicationSettings();
+                }
+                else
+                {
+                    appSettings = new ApplicationSettings();
+                }
+
+                if (appSettings.PollingIntervalSeconds > 0)
                 {
                     _pollingInterval = TimeSpan.FromSeconds(appSettings.PollingIntervalSeconds);
                 }

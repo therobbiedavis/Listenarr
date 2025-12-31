@@ -62,6 +62,7 @@ namespace Listenarr.Api.Services
         /// <param name="sortBy">Sort results by seeders, peers, size, or age</param>
         /// <param name="sortDirection">Sort direction (ascending or descending)</param>
         /// <param name="isAutomaticSearch">Whether this is an automatic search</param>
+        /// <param name="request">Optional request object to pass indexer-specific parameters</param>
         /// <returns>List of search results from indexers only</returns>
         Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null);
 

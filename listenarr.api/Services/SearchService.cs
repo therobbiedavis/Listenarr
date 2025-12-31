@@ -2359,9 +2359,10 @@ namespace Listenarr.Api.Services
                 }
 
                 // Apply freeleech wedge preference
-                if (request?.MyAnonamouse?.FreeleechWedge != null)
+                var freeleechWedge = request?.MyAnonamouse?.FreeleechWedge;
+                if (freeleechWedge != null)
                 {
-                    queryParams.Add(new KeyValuePair<string, string>("tor[freeleechWedge]", request.MyAnonamouse.FreeleechWedge.ToString().ToLowerInvariant()));
+                    queryParams.Add(new KeyValuePair<string, string>("tor[freeleechWedge]", freeleechWedge.Value.ToString().ToLowerInvariant()));
                 }
 
                 var qs = string.Join("&", queryParams.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value ?? string.Empty)}"));
@@ -2707,15 +2708,19 @@ namespace Listenarr.Api.Services
 
                         // Prefer explicit 'added' timestamp when present (MyAnonamouse uses "yyyy-MM-dd HH:mm:ss")
                         DateTime? publishDate = null;
-                        if (item.TryGetProperty("added", out var addedElem) && addedElem.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(addedElem.GetString()))
+                        if (item.TryGetProperty("added", out var addedElem) && addedElem.ValueKind == JsonValueKind.String)
                         {
-                            try
+                            var addedStr = addedElem.GetString();
+                            if (!string.IsNullOrWhiteSpace(addedStr))
                             {
-                                publishDate = DateTime.ParseExact(addedElem.GetString(), "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).ToLocalTime();
-                            }
-                            catch (Exception)
-                            {
-                                // ignore and fallback to other fields below
+                                try
+                                {
+                                    publishDate = DateTime.ParseExact(addedStr, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).ToLocalTime();
+                                }
+                                catch (Exception)
+                                {
+                                    // ignore and fallback to other fields below
+                                }
                             }
                         }
 
@@ -3033,9 +3038,9 @@ namespace Listenarr.Api.Services
                                 nzbUrlDetected = nzbElem.GetString() ?? string.Empty;
 
                             // Apply discovered links to the result
-                            if (!string.IsNullOrEmpty(magnetLink)) result.MagnetLink = magnetLink;
-                            if (!string.IsNullOrEmpty(torrentUrlDetected)) result.TorrentUrl = torrentUrlDetected;
-                            if (!string.IsNullOrEmpty(nzbUrlDetected)) result.NzbUrl = nzbUrlDetected;
+                            if (!string.IsNullOrEmpty(magnetLink)) result.MagnetLink = magnetLink ?? string.Empty;
+                            if (!string.IsNullOrEmpty(torrentUrlDetected)) result.TorrentUrl = torrentUrlDetected ?? string.Empty;
+                            if (!string.IsNullOrEmpty(nzbUrlDetected)) result.NzbUrl = nzbUrlDetected ?? string.Empty;
 
                             // If a direct downloadUrl was provided by the API, prefer that as the torrent/nzb URL
                             if (!string.IsNullOrEmpty(downloadUrlField))
@@ -3043,16 +3048,16 @@ namespace Listenarr.Api.Services
                                 // Choose disposition based on common hints and protocol
                                 if ((downloadUrlField ?? string.Empty).EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) || (item.TryGetProperty("protocol", out var protoElem) && protoElem.ValueKind == JsonValueKind.String && protoElem.GetString()?.Equals("torrent", StringComparison.OrdinalIgnoreCase) == true))
                                 {
-                                    result.TorrentUrl = downloadUrlField;
+                                    result.TorrentUrl = downloadUrlField ?? string.Empty;
                                 }
                                 else if ((downloadUrlField ?? string.Empty).EndsWith(".nzb", StringComparison.OrdinalIgnoreCase) || (item.TryGetProperty("protocol", out var proto2Elem) && proto2Elem.ValueKind == JsonValueKind.String && proto2Elem.GetString()?.Equals("usenet", StringComparison.OrdinalIgnoreCase) == true))
                                 {
-                                    result.NzbUrl = downloadUrlField;
+                                    result.NzbUrl = downloadUrlField ?? string.Empty;
                                 }
                                 else
                                 {
                                     // Unknown, prefer TorrentUrl by default
-                                    result.TorrentUrl = downloadUrlField;
+                                    result.TorrentUrl = downloadUrlField ?? string.Empty;
                                 }
                             }
 
@@ -3174,7 +3179,8 @@ namespace Listenarr.Api.Services
                         {
                             if (vipElem.ValueKind == JsonValueKind.True || (vipElem.ValueKind == JsonValueKind.String && string.Equals(vipElem.GetString(), "true", StringComparison.OrdinalIgnoreCase)))
                             {
-                                if (!title.EndsWith(" [VIP]")) title = (title ?? string.Empty) + " [VIP]";
+                                title ??= string.Empty;
+                                if (!title.EndsWith(" [VIP]")) title = title + " [VIP]";
                             }
                         }
 
