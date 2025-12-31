@@ -39,7 +39,7 @@ namespace Listenarr.Api.Services
         private readonly ILogger<DownloadMonitorService> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IAppMetricsService _metrics;
-        private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
+        private TimeSpan _pollingInterval = TimeSpan.FromSeconds(30); // default; overridden by ApplicationSettings.PollingIntervalSeconds
         private readonly Dictionary<string, Download> _lastDownloadStates = new();
         // Tracks downloads that appear complete and the time they were first observed complete
         private readonly Dictionary<string, DateTime> _completionCandidates = new();
@@ -355,6 +355,23 @@ namespace Listenarr.Api.Services
             // Wait a bit before starting to ensure the app is fully initialized
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
+            // Attempt to read configured polling interval from ApplicationSettings (fallback to current default)
+            try
+            {
+                using var initScope = _serviceScopeFactory.CreateScope();
+                var cfg = initScope.ServiceProvider.GetService<IConfigurationService>();
+                var appSettings = await cfg?.GetApplicationSettingsAsync() ?? new ApplicationSettings();
+                if (appSettings != null && appSettings.PollingIntervalSeconds > 0)
+                {
+                    _pollingInterval = TimeSpan.FromSeconds(appSettings.PollingIntervalSeconds);
+                }
+                _logger.LogInformation("DownloadMonitorService polling interval set to {Interval}s", _pollingInterval.TotalSeconds);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to read polling interval from settings, using default {Default}s", _pollingInterval.TotalSeconds);
+            }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -535,7 +552,33 @@ namespace Listenarr.Api.Services
                         return;
                     }
 
-                    var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info", cancellationToken);
+                    // Ask qBittorrent for a limited set of fields to reduce memory usage
+                    var fields = "hash,name,save_path,content_path,progress,amount_left,state,size,category";
+
+                    // Prefer querying only the hashes we are tracking (if available) to avoid fetching all torrents
+                    var trackedHashes = downloads
+                        .Select(d => d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var h) ? h?.ToString() : null)
+                        .Where(h => !string.IsNullOrEmpty(h))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    string query = $"?fields={Uri.EscapeDataString(fields)}";
+
+                    if (trackedHashes.Any())
+                    {
+                        // Cap the number of hashes to keep the query reasonable
+                        var hashesParam = Uri.EscapeDataString(string.Join("|", trackedHashes.Take(200)));
+                        query = $"?hashes={hashesParam}&fields={Uri.EscapeDataString(fields)}";
+                        _logger.LogDebug("Querying qBittorrent for specific hashes (count={Count})", trackedHashes.Count);
+                    }
+                    else if (client.Settings != null && client.Settings.TryGetValue("category", out var catObj) && !string.IsNullOrEmpty(catObj?.ToString()))
+                    {
+                        var cat = Uri.EscapeDataString(catObj!.ToString()!);
+                        query = $"?category={cat}&fields={Uri.EscapeDataString(fields)}";
+                        _logger.LogDebug("Querying qBittorrent by category: {Category}", cat);
+                    }
+
+                    var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
                     if (!torrentsResp.IsSuccessStatusCode)
                     {
                         _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);

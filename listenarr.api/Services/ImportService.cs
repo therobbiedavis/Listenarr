@@ -357,159 +357,176 @@ namespace Listenarr.Api.Services
                         }
                         if (string.IsNullOrWhiteSpace(destDirForFile)) destDirForFile = settings.OutputPath ?? "./completed";
 
-                        // Only perform file operations if destination directory exists (do not create)
-                        if (!string.IsNullOrEmpty(destDirForFile) && Directory.Exists(destDirForFile))
+                        // Ensure destination directory exists (create if missing)
+                        // For directory imports we create the destination directory when possible so multi-file releases
+                        // can be imported into a new library folder. If creation fails, skip this file and record a warning.
+                        if (string.IsNullOrWhiteSpace(destDirForFile))
                         {
-                            // Build naming metadata: prefer audiobook metadata when available, otherwise use extracted candidate metadata
-                            var namingMetadata = new AudioMetadata();
-                            if (abForNaming != null)
+                            res.Success = false;
+                            res.Message = "Destination directory not configured";
+                            res.SkippedReason = destDirForFile;
+                            _logger.LogWarning("ImportFilesFromDirectory: Destination directory not configured for multi-file import: {Source}", file);
+                            results.Add(res);
+                            continue;
+                        }
+
+                        try
+                        {
+                            // Ensure the directory exists (create if necessary)
+                            Directory.CreateDirectory(destDirForFile);
+                        }
+                        catch (Exception ex)
+                        {
+                            res.Success = false;
+                            res.Message = "Destination directory does not exist and could not be created";
+                            res.SkippedReason = destDirForFile;
+                            _logger.LogWarning(ex, "ImportFilesFromDirectory: Failed to create destination directory for multi-file import: {DestDir}. Keeping source file: {Source}", destDirForFile, file);
+                            results.Add(res);
+                            continue;
+                        }
+
+                        // Build naming metadata: prefer audiobook metadata when available, otherwise use extracted candidate metadata
+                        var namingMetadata = new AudioMetadata();
+                        if (abForNaming != null)
+                        {
+                            namingMetadata.Title = abForNaming.Title ?? Path.GetFileNameWithoutExtension(file);
+                            namingMetadata.Artist = (abForNaming.Authors != null && abForNaming.Authors.Any()) ? string.Join(", ", abForNaming.Authors) : string.Empty;
+                            namingMetadata.AlbumArtist = namingMetadata.Artist;
+                            namingMetadata.Series = abForNaming.Series;
+                        }
+                        else if (candidateMetadata != null)
+                        {
+                            namingMetadata = candidateMetadata;
+                        }
+                        else
+                        {
+                            namingMetadata.Title = Path.GetFileNameWithoutExtension(file);
+                        }
+
+                        var filenamePattern = abForNaming != null ? "{Title}" : settings.FileNamingPattern;
+                        if (string.IsNullOrWhiteSpace(filenamePattern))
+                            filenamePattern = "{Author}/{Series}/{Title}";
+
+                        var ext = Path.GetExtension(file);
+
+                        var variablesForFile = new Dictionary<string, object>
+                        {
+                            { "Author", namingMetadata.Artist ?? "Unknown Author" },
+                            { "Series", string.IsNullOrWhiteSpace(namingMetadata.Series) ? string.Empty : namingMetadata.Series },
+                            { "Title", namingMetadata.Title ?? Path.GetFileNameWithoutExtension(file) },
+                            { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? namingMetadata.TrackNumber?.ToString() ?? string.Empty },
+                            { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
+                            { "Quality", (namingMetadata.Bitrate.HasValue ? namingMetadata.Bitrate.ToString() + "kbps" : null) ?? namingMetadata.Format ?? string.Empty },
+                            { "DiskNumber", namingMetadata.DiscNumber?.ToString() ?? string.Empty },
+                            { "ChapterNumber", namingMetadata.TrackNumber?.ToString() ?? string.Empty }
+                        };
+
+                        var patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                            || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
+                            || filenamePattern.IndexOf('/') >= 0
+                            || filenamePattern.IndexOf('\\') >= 0;
+                        var treatAsFilename = abForNaming != null ? true : !patternAllowsSubfolders;
+
+                        var filename = _fileNamingService.ApplyNamingPattern(filenamePattern, variablesForFile, treatAsFilename);
+                        if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext;
+
+                        if (!patternAllowsSubfolders)
+                        {
+                            try
                             {
-                                namingMetadata.Title = abForNaming.Title ?? Path.GetFileNameWithoutExtension(file);
-                                namingMetadata.Artist = (abForNaming.Authors != null && abForNaming.Authors.Any()) ? string.Join(", ", abForNaming.Authors) : string.Empty;
-                                namingMetadata.AlbumArtist = namingMetadata.Artist;
-                                namingMetadata.Series = abForNaming.Series;
+                                var forced = Path.GetFileName(filename);
+                                var invalid = Path.GetInvalidFileNameChars();
+                                var sb = new System.Text.StringBuilder();
+                                foreach (var c in forced)
+                                {
+                                    sb.Append(invalid.Contains(c) ? '_' : c);
+                                }
+                                filename = sb.ToString();
                             }
-                            else if (candidateMetadata != null)
+                            catch
                             {
-                                namingMetadata = candidateMetadata;
+                                filename = Path.GetFileName(filename);
                             }
-                            else
+                        }
+
+                        var destPathForFile = Path.Combine(destDirForFile, filename);
+
+                        // After generating the target filename, we'll still place the file into
+                        // the destination directory first (original filename) then apply
+                        // the naming pattern on that destination file so that the file
+                        // exists in the destination before any renaming occurs.
+                        var initialDest = Path.Combine(destDirForFile, Path.GetFileName(file));
+                        var uniqueInitial = FileUtils.GetUniqueDestinationPath(initialDest);
+
+                        var action = settings.CompletedFileAction ?? "Move";
+                        if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var ok = await _fileMover.CopyFileAsync(file, uniqueInitial);
+                            if (ok)
                             {
-                                namingMetadata.Title = Path.GetFileNameWithoutExtension(file);
-                            }
-
-                            var filenamePattern = abForNaming != null ? "{Title}" : settings.FileNamingPattern;
-                            if (string.IsNullOrWhiteSpace(filenamePattern))
-                                filenamePattern = "{Author}/{Series}/{Title}";
-
-                            var ext = Path.GetExtension(file);
-
-                            var variablesForFile = new Dictionary<string, object>
-                            {
-                                { "Author", namingMetadata.Artist ?? "Unknown Author" },
-                                { "Series", string.IsNullOrWhiteSpace(namingMetadata.Series) ? string.Empty : namingMetadata.Series },
-                                { "Title", namingMetadata.Title ?? Path.GetFileNameWithoutExtension(file) },
-                                { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? namingMetadata.TrackNumber?.ToString() ?? string.Empty },
-                                { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
-                                { "Quality", (namingMetadata.Bitrate.HasValue ? namingMetadata.Bitrate.ToString() + "kbps" : null) ?? namingMetadata.Format ?? string.Empty },
-                                { "DiskNumber", namingMetadata.DiscNumber?.ToString() ?? string.Empty },
-                                { "ChapterNumber", namingMetadata.TrackNumber?.ToString() ?? string.Empty }
-                            };
-
-                            var patternAllowsSubfolders = filenamePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                || filenamePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0
-                                || filenamePattern.IndexOf('/') >= 0
-                                || filenamePattern.IndexOf('\\') >= 0;
-                            var treatAsFilename = abForNaming != null ? true : !patternAllowsSubfolders;
-
-                            var filename = _fileNamingService.ApplyNamingPattern(filenamePattern, variablesForFile, treatAsFilename);
-                            if (!filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) filename += ext;
-
-                            if (!patternAllowsSubfolders)
-                            {
-                                try
-                                {
-                                    var forced = Path.GetFileName(filename);
-                                    var invalid = Path.GetInvalidFileNameChars();
-                                    var sb = new System.Text.StringBuilder();
-                                    foreach (var c in forced)
-                                    {
-                                        sb.Append(invalid.Contains(c) ? '_' : c);
-                                    }
-                                    filename = sb.ToString();
-                                }
-                                catch
-                                {
-                                    filename = Path.GetFileName(filename);
-                                }
-                            }
-
-                            var destPathForFile = Path.Combine(destDirForFile, filename);
-
-                            // After generating the target filename, we'll still place the file into
-                            // the destination directory first (original filename) then apply
-                            // the naming pattern on that destination file so that the file
-                            // exists in the destination before any renaming occurs.
-                            var initialDest = Path.Combine(destDirForFile, Path.GetFileName(file));
-                            var uniqueInitial = FileUtils.GetUniqueDestinationPath(initialDest);
-
-                            var action = settings.CompletedFileAction ?? "Move";
-                            if (string.Equals(action, "Copy", StringComparison.OrdinalIgnoreCase))
-                            {
-                                var ok = await _fileMover.CopyFileAsync(file, uniqueInitial);
-                                if (ok)
-                                {
-                                    _logger.LogInformation("ImportFilesFromDirectory: Copied file {Source} -> {Dest}", file, uniqueInitial);
-                                    res.WasCopied = true;
-                                }
-                            }
-                            else
-                            {
-                                var ok = await _fileMover.MoveFileAsync(file, uniqueInitial);
-                                if (ok)
-                                {
-                                    _logger.LogInformation("ImportFilesFromDirectory: Moved file {Source} -> {Dest}", file, uniqueInitial);
-                                    res.WasMoved = true;
-                                }
-                            }
-
-                            // Now apply the filename pattern on the destination copy/move
-                            var uniqueFinal = FileUtils.GetUniqueDestinationPath(destPathForFile);
-
-                            // If the final name differs from the initial unique path, move/rename it
-                            if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase))
-                            {
-                                try
-                                {
-                                    var ok = await _fileMover.MoveFileAsync(uniqueInitial, uniqueFinal);
-                                    if (ok)
-                                    {
-                                        _logger.LogInformation("ImportFilesFromDirectory: Renamed/Moved destination file {Source} -> {Final}", uniqueInitial, uniqueFinal);
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning("ImportFilesFromDirectory: Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
-                                        uniqueFinal = uniqueInitial;
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "ImportFilesFromDirectory: Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
-                                    uniqueFinal = uniqueInitial;
-                                }
-                            }
-
-                            res.FinalPath = uniqueFinal;
-                            res.Success = true;
-
-                            // Register audiobook file if linked
-                            if (audiobookId != null)
-                            {
-                                try
-                                {
-                                    using var afScope = _scopeFactory.CreateScope();
-                                    var audioFileService = afScope.ServiceProvider.GetService<IAudioFileService>()
-                                        ?? ActivatorUtilities.CreateInstance<AudioFileService>(afScope.ServiceProvider,
-                                            _scopeFactory,
-                                            afScope.ServiceProvider.GetService<ILogger<AudioFileService>>() ?? new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>(),
-                                            afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
-                                            afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
-
-                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobookId.Value, res.FinalPath, "download");
-                                    res.WasRegisteredToAudiobook = created;
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "ImportFilesFromDirectory: Failed to create AudiobookFile for imported file {File}", file);
-                                }
+                                _logger.LogInformation("ImportFilesFromDirectory: Copied file {Source} -> {Dest}", file, uniqueInitial);
+                                res.WasCopied = true;
                             }
                         }
                         else
                         {
-                            res.Success = false;
-                            res.Message = "Destination directory does not exist";
-                            res.SkippedReason = destDirForFile;
-                            _logger.LogWarning("ImportFilesFromDirectory: Destination directory does not exist for multi-file import: {DestDir}. Keeping source file: {Source}", destDirForFile, file);
+                            var ok = await _fileMover.MoveFileAsync(file, uniqueInitial);
+                            if (ok)
+                            {
+                                _logger.LogInformation("ImportFilesFromDirectory: Moved file {Source} -> {Dest}", file, uniqueInitial);
+                                res.WasMoved = true;
+                            }
+                        }
+
+                        // Now apply the filename pattern on the destination copy/move
+                        var uniqueFinal = FileUtils.GetUniqueDestinationPath(destPathForFile);
+
+                        // If the final name differs from the initial unique path, move/rename it
+                        if (!string.Equals(Path.GetFullPath(uniqueInitial), Path.GetFullPath(uniqueFinal), StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                var ok = await _fileMover.MoveFileAsync(uniqueInitial, uniqueFinal);
+                                if (ok)
+                                {
+                                    _logger.LogInformation("ImportFilesFromDirectory: Renamed/Moved destination file {Source} -> {Final}", uniqueInitial, uniqueFinal);
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("ImportFilesFromDirectory: Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
+                                    uniqueFinal = uniqueInitial;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "ImportFilesFromDirectory: Failed to apply naming/rename on multi-file import for {File}", uniqueInitial);
+                                uniqueFinal = uniqueInitial;
+                            }
+                        }
+
+                        res.FinalPath = uniqueFinal;
+                        res.Success = true;
+
+                        // Register audiobook file if linked
+                        if (audiobookId != null)
+                        {
+                            try
+                            {
+                                using var afScope = _scopeFactory.CreateScope();
+                                var audioFileService = afScope.ServiceProvider.GetService<IAudioFileService>()
+                                    ?? ActivatorUtilities.CreateInstance<AudioFileService>(afScope.ServiceProvider,
+                                        _scopeFactory,
+                                        afScope.ServiceProvider.GetService<ILogger<AudioFileService>>() ?? new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>(),
+                                        afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
+                                        afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
+
+                                var created = await audioFileService.EnsureAudiobookFileAsync(audiobookId.Value, res.FinalPath, "download");
+                                res.WasRegisteredToAudiobook = created;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "ImportFilesFromDirectory: Failed to create AudiobookFile for imported file {File}", file);
+                            }
                         }
                     }
                     catch (Exception ex)
