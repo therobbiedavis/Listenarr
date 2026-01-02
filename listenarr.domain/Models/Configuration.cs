@@ -121,6 +121,9 @@ namespace Listenarr.Domain.Models
         // Action to take when a download completes: "Move" or "Copy"
         public string CompletedFileAction { get; set; } = "Move";
 
+        // Whether to extract archive files (zip/rar/7z) when discovered in a completed download
+        public bool ExtractArchives { get; set; } = true;
+
         // Whether to show completed downloads from external clients in the Activity view
         public bool ShowCompletedExternalDownloads { get; set; } = false;
 

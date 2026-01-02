@@ -1471,6 +1471,24 @@ namespace Listenarr.Api.Controllers
                     final = Path.Combine(root, final.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 }
 
+                // If caller explicitly asked to change the DB without moving files, update the BasePath and return early.
+                if (request.MoveFiles.HasValue && request.MoveFiles.Value == false)
+                {
+                    try
+                    {
+                        audiobook.BasePath = final;
+                        _dbContext.Audiobooks.Update(audiobook);
+                        await _dbContext.SaveChangesAsync();
+                        _logger.LogInformation("Updated BasePath for audiobook {AudiobookId} without moving files: {BasePath}", id, final);
+                        return Ok(new { message = "Destination updated" });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to update BasePath for audiobook {AudiobookId}", id);
+                        return StatusCode(500, new { message = "Failed to update BasePath", error = ex.Message });
+                    }
+                }
+
                 // Determine source path snapshot to use for the move. Prefer an explicit source from the request
                 // (the frontend should send the original source if it updated the audiobook BasePath before requesting a move),
                 // otherwise fall back to the current audiobook.BasePath as a best-effort.
@@ -1481,6 +1499,43 @@ namespace Listenarr.Api.Controllers
                 if (string.IsNullOrWhiteSpace(sourcePath))
                 {
                     return BadRequest(new { message = "Source path not provided. Supply current source path in the Move request or ensure audiobook has a valid BasePath." });
+                }
+
+                // Validate source exists now to provide earlier feedback to clients (avoids enqueueing doomed jobs)
+                if (!Directory.Exists(sourcePath))
+                {
+                    return BadRequest(new { message = "Source path does not exist. Ensure the audiobook's current BasePath exists or provide a valid SourcePath in the request." });
+                }
+
+                // Validate target parent is valid and writable (try to create if necessary)
+                var targetParent = Path.GetDirectoryName(final);
+                if (string.IsNullOrEmpty(targetParent))
+                {
+                    return BadRequest(new { message = "Invalid target path" });
+                }
+                try
+                {
+                    if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to access or create target parent {TargetParent}", targetParent);
+                    return BadRequest(new { message = "Target parent path is not writable or unavailable" });
+                }
+
+                // If source and target are identical, nothing to do
+                try
+                {
+                    var srcFull = Path.GetFullPath(sourcePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    var tgtFull = Path.GetFullPath(final).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (string.Equals(srcFull, tgtFull, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(new { message = "Source and target paths are identical; nothing to move." });
+                    }
+                }
+                catch
+                {
+                    // Ignore errors normalizing paths; background worker will fail if invalid
                 }
 
                 var jobId = await _moveQueueService.EnqueueMoveAsync(id, final, sourcePath);
@@ -2252,6 +2307,10 @@ namespace Listenarr.Api.Controllers
         {
             public string? DestinationPath { get; set; }
             public string? SourcePath { get; set; }
+            // If provided and false, update DB only and do not enqueue a move job
+            public bool? MoveFiles { get; set; }
+            // When moving files, whether to delete the original folder if empty after the move
+            public bool? DeleteEmptySource { get; set; }
         }
 
     }

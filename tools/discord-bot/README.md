@@ -11,7 +11,7 @@ Features:
 
 Prerequisites
 - Node.js 18+ installed
-- The Listenarr API reachable (default: `http://localhost:5146`)
+- The Listenarr API reachable (default: `http://localhost:5000`)
 
 Quick start
 

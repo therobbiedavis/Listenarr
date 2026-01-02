@@ -61,6 +61,8 @@ namespace Listenarr.Api.Extensions
             services.AddScoped<IFileMover, FileMover>();
             // File finalizer: handles import delegation and final-path sync
             services.AddScoped<IFileFinalizer, FileFinalizer>();
+            // Archive extractor for extracting common archive types (zip/rar/7z)
+            services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
             // Completed download processor: handles imports and registration when a download completes
             services.AddScoped<ICompletedDownloadProcessor, CompletedDownloadProcessor>();
             // Bind FileMover options from configuration (optional)

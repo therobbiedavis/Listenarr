@@ -770,16 +770,16 @@ defineExpose({
 
 .count-badge {
   padding: 6px 12px;
-  background-color: #3a3a3a;
+  background-color: #007acc;
   border-radius: 6px;
-  color: #ccc;
+  color: #fff;
   font-size: 12px;
+  transition: background-color 0.12s ease;
 }
 
-.toolbar {
-  position: fixed;
-  top: 60px; /* Account for global header nav */
-  left: 200px; /* Account for sidebar width */
+.count-badge:hover,
+.count-badge:focus {
+  background-color: #005fa3;
   right: 0;
   z-index: 99; /* Below global nav (1000) but above content */
   display: flex;
@@ -1574,7 +1574,7 @@ defineExpose({
   transform: translate(-50%, -50%);
   width: 14px;
   height: 14px;
-  border-radius: 6px;
+  border-radius: 4px;
   border: 2px solid rgba(255,255,255,0.14);
   background: transparent;
   box-sizing: border-box;
@@ -1582,24 +1582,8 @@ defineExpose({
   z-index: 1;
 }
 
-.selection-checkbox::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%) rotate(45deg) scale(0);
-  width: 6px;
-  height: 10px;
-  border-right: 2px solid transparent;
-  border-bottom: 2px solid transparent;
-  z-index: 2;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-}
+/* Custom checkmark uses pseudo-element ::after - no need to hide it */
 
-/* Hide the old pseudo-element checkmark (we now use the native control) */
-.selection-checkbox::after {
-  display: none !important;
-}
 
 .selection-checkbox:hover {
   background-color: rgba(0, 0, 0, 0.6);
@@ -1627,10 +1611,10 @@ defineExpose({
 /* When the item is selected, style the custom box and show the check */
 .collection-card.selected .selection-checkbox::before,
 .audiobook-list-item.selected .selection-checkbox::before {
-  background-color: #2196F3;
-  border-color: #2196F3;
-  box-shadow: 0 0 0 4px rgba(33,150,243,0.12);
-}
+  background-color: #007acc;
+  border-color: #007acc;
+  box-shadow: 0 0 0 4px rgba(0,122,204,0.12);
+} 
 
 .audiobook-item.selected .selection-checkbox::after,
 .audiobook-list-item.selected .selection-checkbox::after {
@@ -1642,7 +1626,7 @@ defineExpose({
 
 /* Focus outlines for keyboard navigation */
 .selection-checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(0,122,204,0.9);
+  outline: 2px solid rgba(0,122,204,0.3);
   outline-offset: 2px;
 }
 

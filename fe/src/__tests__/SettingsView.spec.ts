@@ -194,4 +194,26 @@ describe('SettingsView', () => {
     expect(cfgStore.saveDownloadClientConfiguration).toHaveBeenCalled()
     expect(cfgStore.downloadClientConfigurations[0].isEnabled).toBe(true)
   })
+
+  it('renders Root Folders in its own tab', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }] })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const wrapper = mount(SettingsView, { global: { plugins: [pinia, router], stubs: ['FolderBrowser'] } })
+
+    const tab = wrapper.findAll('button.tab-button').find(b => b.text().includes('Root Folders'))
+    expect(tab).toBeTruthy()
+    await tab!.trigger('click')
+    // Wait for router navigation to complete and nextTick
+    await router.isReady().catch(() => {})
+    await new Promise((r) => setTimeout(r, 0))
+    await wrapper.vm.$nextTick()
+
+    // Ensure the Root Folders tab became active
+    expect(tab!.classes()).toContain('active')
+  })
 })

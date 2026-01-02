@@ -564,6 +564,7 @@ import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 import { apiService } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
 import { signalRService } from '@/services/signalr'
@@ -614,6 +615,7 @@ const route = useRoute()
 const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
+const rootFoldersStore = useRootFoldersStore()
 
 // Show developer-only test UI in development builds
 const isDevelopment = import.meta.env.DEV
@@ -670,7 +672,7 @@ const capitalizeFirst = (str: string | undefined): string => {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
 }
 
-// Show a base path even when no files exist yet by falling back to configured outputPath
+// Show a base path even when no files exist yet by falling back to configured default root folder
 const displayBasePath = computed(() => {
   // Prefer server-provided basePath
   const server = audiobook.value?.basePath
@@ -678,7 +680,10 @@ const displayBasePath = computed(() => {
 
   const settings = configStore.applicationSettings
   if (!settings) return ''
-  const root = (settings.outputPath || '').trim()
+
+  // Use default root folder path, fallback to legacy outputPath
+  const defaultRoot = rootFoldersStore.defaultFolder
+  const root = (defaultRoot?.path || settings.outputPath || '').trim()
   const pattern = (settings.fileNamingPattern || '').trim()
   if (!root || !pattern) return root || ''
 

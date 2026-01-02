@@ -20,6 +20,7 @@ namespace Listenarr.Infrastructure.Models
         public DbSet<QualityProfile> QualityProfiles { get; set; }
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
         public DbSet<ProcessExecutionLog> ProcessExecutionLogs { get; set; }
+        public DbSet<RootFolder> RootFolders { get; set; }
 
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
@@ -58,6 +59,9 @@ namespace Listenarr.Infrastructure.Models
             modelBuilder.Entity<History>().HasIndex(h => h.Timestamp);
 
             modelBuilder.Entity<MoveJob>().HasIndex(m => new { m.AudiobookId, m.Status });
+
+            // RootFolders table configuration
+            modelBuilder.ApplyConfiguration(new Configurations.RootFolderConfiguration());
         }
     }
 }

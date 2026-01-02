@@ -139,10 +139,12 @@
               <label class="form-label">Destination</label>
               <div class="destination-display">
                 <div class="destination-row">
-                  <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
+                  <div class="root-select">
+                    <RootFolderSelect v-model:rootId="selectedRootId" v-model:customPath="customRootPath" />
+                  </div>
                   <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
                 </div>
-                <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
+                <small class="form-help">Select a named root (or custom path) and edit the path relative to it on the right.</small>
               </div>
             </div>
 
@@ -190,6 +192,8 @@ import type { AudibleBookMetadata, QualityProfile, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
+import RootFolderSelect from '@/components/RootFolderSelect.vue'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 
 interface Props {
   visible: boolean
@@ -218,6 +222,10 @@ const options = ref({
   // editable relative path portion (relative to rootPath)
   relativePath: '' as string | null
 })
+
+const rootStore = useRootFoldersStore()
+const selectedRootId = ref<number | null>(null)
+const customRootPath = ref<string | null>(null)
 
 const rootPath = ref<string>('')
 const previewFull = ref<string>('')
@@ -310,7 +318,17 @@ const seedPreview = async () => {
 
   // Load application settings to get default root
   await configStore.loadApplicationSettings()
-  rootPath.value = configStore.applicationSettings?.outputPath || ''
+  // Load named root folders if available
+  await rootStore.load()
+  if (rootStore.folders.length > 0) {
+    const def = rootStore.folders.find(f => f.isDefault) || rootStore.folders[0]
+    selectedRootId.value = def?.id ?? null
+    // override rootPath for preview
+    rootPath.value = def?.path || configStore.applicationSettings?.outputPath || ''
+  } else {
+    // Fallback to legacy outputPath if no root folders
+    rootPath.value = configStore.applicationSettings?.outputPath || ''
+  }
 
   // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
   try {
@@ -335,8 +353,8 @@ const seedPreview = async () => {
     const resp2 = await apiService.previewLibraryPath(metadataForPreview, rootPath.value || undefined)
     previewFull.value = resp2?.fullPath || ''
     previewRelative.value = resp2?.relativePath || ''
-    // Seed editable relative path
-    options.value.relativePath = previewRelative.value
+    // Seed editable relative path — prefer server-relative, otherwise derive from full preview and configured root
+    options.value.relativePath = deriveRelative(previewRelative.value, previewFull.value, rootPath.value)
   } catch (e) {
     console.error('Failed to preview path:', e)
   }
@@ -368,6 +386,35 @@ function retryImage() {
   imageRetryCount.value++
   imageLoading.value = true
   // The computed imageSrc will include a cache-buster when retryCount>0
+}
+
+// Helper to derive a relative path from server preview/paths
+function deriveRelative(serverRelative: string | undefined | null, serverFull: string | undefined | null, root: string | undefined | null): string {
+  const rootVal = root || ''
+  // Prefer explicit server-provided relative
+  if (serverRelative && String(serverRelative).trim().length > 0) return serverRelative
+
+  // If no root configured, fall back to showing the full path
+  if (!rootVal) return serverFull || ''
+  if (!serverFull) return ''
+
+  // Normalize separators to forward slash for comparison
+  const normRoot = rootVal.replace(/\\/g, '/')
+  let normFull = serverFull.replace(/\\/g, '/')
+
+  // Ensure trailing slash on root for slicing
+  const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
+
+  if (normFull.toLowerCase() === normRoot.toLowerCase()) return ''
+  if (normFull.toLowerCase().startsWith(rootWithSlash.toLowerCase())) {
+    const rel = normFull.slice(rootWithSlash.length).replace(/^\/+/, '')
+    // Preserve user's original separator preference from configured root
+    const useBackslash = rootVal.includes('\\')
+    return useBackslash ? rel.replace(/\//g, '\\') : rel
+  }
+
+  // Not under root: show full path so user can edit it
+  return serverFull
 }
 
 // Re-seed preview if the passed book changes after mount (parent may update props)
@@ -457,12 +504,24 @@ const addToLibrary = async () => {
     let destination: string | undefined = undefined
     try {
       const rel = (options.value.relativePath || '').trim()
-      if (rootPath.value && rel) {
-        const sep = rootPath.value.includes('\\') ? '\\' : '/'
+      // Resolve selected root (custom, named, or default)
+      let root = null
+      if (selectedRootId.value === 0) root = customRootPath.value || ''
+      else if (selectedRootId.value && selectedRootId.value > 0) {
+        const found = rootStore.folders.find(f => f.id === selectedRootId.value)
+        root = found?.path || ''
+      } else {
+        // Use default root folder, fallback to legacy outputPath for compatibility
+        const defaultRoot = rootStore.folders.find(f => f.isDefault)
+        root = defaultRoot?.path || configStore.applicationSettings?.outputPath || ''
+      }
+
+      if (root && rel) {
+        const sep = root.includes('\\') ? '\\' : '/'
         const cleanedRel = rel.replace(/\\|\//g, sep)
-        destination = rootPath.value.endsWith(sep) ? rootPath.value + cleanedRel : rootPath.value + sep + cleanedRel
-      } else if (rootPath.value && !rel) {
-        destination = rootPath.value
+        destination = root.endsWith(sep) ? root + cleanedRel : root + sep + cleanedRel
+      } else if (root && !rel) {
+        destination = root
       }
 
       const metadataToSend = (enriched.value || props.book) as AudibleBookMetadata

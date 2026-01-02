@@ -471,6 +471,7 @@ import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare,
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
 import BulkEditModal from '@/components/BulkEditModal.vue'
@@ -518,6 +519,7 @@ const router = useRouter()
 const route = useRoute()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
+const rootFoldersStore = useRootFoldersStore()
 const downloadsStore = useDownloadsStore()
 
 // Computed list after applying search, filters and sorting
@@ -942,8 +944,9 @@ const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
 const hasRootFolderConfigured = computed(() => {
-  return configStore.applicationSettings?.outputPath && 
-         configStore.applicationSettings.outputPath.trim().length > 0
+  return rootFoldersStore.folders.length > 0 ||
+         (configStore.applicationSettings?.outputPath && 
+          configStore.applicationSettings.outputPath.trim().length > 0)
 })
 
 // Virtual scrolling supporting grid and list layouts
@@ -1643,10 +1646,16 @@ defineExpose({
 
 .count-badge {
   padding: 6px 12px;
-  background-color: #3a3a3a;
+  background-color: #007acc;
   border-radius: 6px;
-  color: #ccc;
+  color: #fff;
   font-size: 12px;
+  transition: background-color 0.12s ease;
+}
+
+.count-badge:hover,
+.count-badge:focus {
+  background-color: #005fa3;
 }
 
 .group-dropdown {
@@ -1759,7 +1768,7 @@ defineExpose({
   position: absolute;
   top: 0.375em;
   right: 0.375em;
-  background-color: rgba(205, 157, 73, 0.867);
+  background-color: #007acc;
   color: white;
   padding: 0.1em 0.25em;
   border-radius: 0.5rem; /* rounded-lg like sample */
@@ -1768,6 +1777,19 @@ defineExpose({
   z-index: 20;
   min-width: 1.5rem;
   text-align: center;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+  z-index: 100;
+}
+
+.series-count-badge:hover,
+.series-count-badge:focus {
+  background-color: #005fa3;
+  box-shadow: 0 4px 12px rgba(0, 122, 204, 0.15);
+}
+
+.series-count-badge:focus {
+  outline: 2px solid rgba(0,122,204,0.2);
+  outline-offset: 2px;
 }
 
 .series-covers {
@@ -1803,7 +1825,7 @@ defineExpose({
   padding: 1rem;
   opacity: 0;
   transition: opacity 0.2s ease;
-  z-index: 10;
+  z-index: 100;
 }
 
 /* Blurred background used when a series has a single cover */
@@ -1835,6 +1857,7 @@ defineExpose({
   color: var(--text-color);
   margin: 0;
   font-weight: 600;
+  z-index: 100;
 }
 
 .collection-card:hover .series-hover-overlay {
@@ -2027,31 +2050,12 @@ defineExpose({
   transform: translate(-50%, -50%);
   width: 14px;
   height: 14px;
-  border-radius: 6px;
+  border-radius: 4px;
   border: 2px solid rgba(255,255,255,0.14);
   background: transparent;
   box-sizing: border-box;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
   z-index: 1;
-}
-
-.selection-checkbox::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%) rotate(45deg) scale(0);
-  width: 6px;
-  height: 10px;
-  border-right: 2px solid transparent;
-  border-bottom: 2px solid transparent;
-  z-index: 2;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-}
-
-/* Hide the old pseudo-element checkmark (we now use the native control) */
-.selection-checkbox::after {
-  display: none !important;
 }
 
 .selection-checkbox:hover {
@@ -2080,10 +2084,10 @@ defineExpose({
 /* When the item is selected, style the custom box and show the check */
 .audiobook-item.selected .selection-checkbox::before,
 .audiobook-list-item.selected .selection-checkbox::before {
-  background-color: #2196F3;
-  border-color: #2196F3;
-  box-shadow: 0 0 0 4px rgba(33,150,243,0.12);
-}
+  background-color: #007acc;
+  border-color: #007acc;
+  box-shadow: 0 0 0 4px rgba(0,122,204,0.12);
+} 
 
 .audiobook-item.selected .selection-checkbox::after,
 .audiobook-list-item.selected .selection-checkbox::after {
@@ -2101,7 +2105,7 @@ defineExpose({
 
 /* Focus outlines for keyboard navigation */
 .selection-checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(0,122,204,0.9);
+  outline: 2px solid rgba(0,122,204,0.3);
   outline-offset: 2px;
 }
 

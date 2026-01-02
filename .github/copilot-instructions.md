@@ -120,7 +120,7 @@ The scripts will:
 5. ✅ Display colored console output (blue=API, green=WEB)
 
 **URLs:**
-- **Backend API**: http://localhost:5146
+- **Backend API**: http://localhost:5000
 - **Frontend Web**: http://localhost:5173
 
 ### Manual Setup (Alternative)
@@ -131,7 +131,7 @@ If you prefer to start services separately:
 ```bash
 cd listenarr.api
 dotnet restore       # First time only
-dotnet run --urls http://localhost:5146
+dotnet run --urls http://localhost:5000
 ```
 
 **Terminal 2 - Frontend:**
@@ -195,7 +195,7 @@ docker-compose up --build
 
 ## Current Status
 - ✅ **FULLY OPERATIONAL** - Both frontend and backend running successfully
-- ✅ **Backend API**: Running on `http://localhost:5146` with all endpoints functional
+- ✅ **Backend API**: Running on `http://localhost:5000` with all endpoints functional
 - ✅ **Frontend Web**: Running on `http://localhost:5173` with complete UI
 - ✅ **Database**: SQLite with Entity Framework Core integrated
 - ✅ **Integration**: API communication configured and working

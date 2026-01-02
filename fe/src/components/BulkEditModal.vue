@@ -87,28 +87,28 @@
           </div>
 
           <!-- Root Folder -->
-          <div v-if="rootFolders.length > 1" class="form-group">
-            <label class="form-label" for="root-folder">
+          <div class="form-group">
+            <label class="form-label">
               <i class="ph ph-folder"></i>
               Root Folder
             </label>
-            <select 
-              id="root-folder"
-              v-model="formData.rootFolder" 
-              class="form-select"
-            >
-              <option :value="null">No Change</option>
-              <option 
-                v-for="folder in rootFolders" 
-                :key="folder" 
-                :value="folder"
-              >
-                {{ folder }}
-              </option>
-            </select>
-            <p class="help-text">
-              The folder where audiobook files will be stored
-            </p>
+
+            <label class="radio-label" style="padding:0.5rem 1rem;">
+              <input type="checkbox" v-model="formData.rootChangeEnabled" />
+              <span style="margin-left:0.5rem">Change root folder</span>
+            </label>
+
+            <div v-if="formData.rootChangeEnabled" style="margin-top:0.75rem">
+              <RootFolderSelect
+                v-model:rootId="formData.rootId"
+                v-model:customPath="formData.rootCustomPath"
+                data-cy="bulk-root-select"
+              />
+
+              <p class="help-text">
+                Select a named root or provide a custom path. If you choose "Use default" and no named default exists, the application default output path will be used.
+              </p>
+            </div>
           </div>
 
           <!-- Action Buttons -->
@@ -154,6 +154,7 @@ import { ref, computed, watch } from 'vue'
 import { apiService } from '@/services/api'
 import { useToast } from '@/services/toastService'
 import type { QualityProfile } from '@/types'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 
 interface Props {
   isOpen: boolean
@@ -164,7 +165,10 @@ interface Props {
 interface FormData {
   monitored: boolean | null
   qualityProfileId: number | null
-  rootFolder: string | null
+  // root change controls
+  rootChangeEnabled: boolean
+  rootId: number | null | 0
+  rootCustomPath: string | null
 }
 
 const props = defineProps<Props>()
@@ -175,20 +179,26 @@ const emit = defineEmits<{
 
 const qualityProfiles = ref<QualityProfile[]>([])
 const rootFolders = ref<string[]>([])
+const rootStore = useRootFoldersStore()
 const saving = ref(false)
+
+// Root change helper values
+const defaultOutputPath = ref<string | null>(null)
 const results = ref<Array<{ id: number; success: boolean; errors: string[] }>>([])
 const showResults = ref(false)
 
 const formData = ref<FormData>({
   monitored: null,
   qualityProfileId: null,
-  rootFolder: null
+  rootChangeEnabled: false,
+  rootId: null,
+  rootCustomPath: null
 })
 
 const hasChanges = computed(() => {
   return formData.value.monitored !== null ||
          formData.value.qualityProfileId !== null ||
-         formData.value.rootFolder !== null
+         (formData.value.rootChangeEnabled === true && (formData.value.rootId !== null || (formData.value.rootCustomPath && formData.value.rootCustomPath.length > 0)))
 })
 
 const toast = useToast()
@@ -205,11 +215,19 @@ async function loadData() {
     // Load quality profiles
     qualityProfiles.value = await apiService.getQualityProfiles()
     
-    // Load root folders from configuration
-    const appSettings = await apiService.getApplicationSettings()
-    if (appSettings.outputPath) {
-      rootFolders.value = [appSettings.outputPath]
-      // TODO: If you implement multiple root folders, load them here
+      // Load root folders from configuration
+    await rootStore.load()
+    if (rootStore.folders.length > 0) {
+      rootFolders.value = rootStore.folders.map(f => f.path)
+      // Capture default output path for fallback when user picks "Use default"
+      const def = rootStore.folders.find(f => f.isDefault)
+      defaultOutputPath.value = def?.path ?? null
+    } else {
+      const appSettings = await apiService.getApplicationSettings()
+      if (appSettings.outputPath) {
+        rootFolders.value = [appSettings.outputPath]
+        defaultOutputPath.value = appSettings.outputPath
+      }
     }
   } catch (error) {
     console.error('Failed to load bulk edit data:', error)
@@ -220,7 +238,9 @@ function resetForm() {
   formData.value = {
     monitored: null,
     qualityProfileId: null,
-    rootFolder: null
+    rootChangeEnabled: false,
+    rootId: null,
+    rootCustomPath: null
   }
 }
 
@@ -240,8 +260,20 @@ async function handleSave() {
       updates.qualityProfileId = formData.value.qualityProfileId
     }
     
-    if (formData.value.rootFolder !== null) {
-      updates.rootFolder = formData.value.rootFolder
+    if (formData.value.rootChangeEnabled === true) {
+      // Resolve chosen root path: named root, custom path or default
+      let chosen: string | null = null
+      if (formData.value.rootId === 0) {
+        chosen = formData.value.rootCustomPath || null
+      } else if (formData.value.rootId && formData.value.rootId > 0) {
+        const found = rootStore.folders.find(f => f.id === formData.value.rootId)
+        chosen = found?.path ?? null
+      } else if (formData.value.rootId === null) {
+        // Use default path (if available)
+        chosen = defaultOutputPath.value
+      }
+
+      if (chosen !== null) updates.rootFolder = chosen
     }
 
     // Convert Set to Array for API call

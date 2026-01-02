@@ -446,5 +446,10 @@ class SignalRService {
 // Singleton instance
 export const signalRService = new SignalRService()
 
+// Expose the service on window for E2E tests in development only
+if (import.meta.env.DEV) {
+  try { (window as any).signalRService = signalRService } catch {}
+}
+
 // Auto-connect when module is imported
 signalRService.connect()

@@ -21,8 +21,9 @@ import type {
   SearchSortDirection,
   AudimetaSearchResponse,
   AudimetaBookResponse,
-  AudibleBookMetadata
-  , ManualImportPreviewResponse, ManualImportRequest, ManualImportResult
+  AudibleBookMetadata,
+  ManualImportPreviewResponse, ManualImportRequest, ManualImportResult,
+  RootFolder
 } from '@/types'
 import { getStartupConfigCached, getCachedStartupConfig } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -691,6 +692,25 @@ class ApiService {
     })
   }
 
+  // Root Folders
+  async getRootFolders(): Promise<RootFolder[]> {
+    return this.request<RootFolder[]>('/rootfolders')
+  }
+
+  async createRootFolder(root: { name: string; path: string; isDefault?: boolean }): Promise<RootFolder> {
+    return this.request<RootFolder>('/rootfolders', { method: 'POST', body: JSON.stringify(root) })
+  }
+
+  async updateRootFolder(id: number, root: { id: number; name: string; path: string; isDefault?: boolean }, opts?: { moveFiles?: boolean; deleteEmptySource?: boolean }): Promise<RootFolder> {
+    const qs = opts ? `?moveFiles=${opts.moveFiles === true}&deleteEmptySource=${opts.deleteEmptySource !== false}` : ''
+    return this.request<RootFolder>(`/rootfolders/${id}${qs}`, { method: 'PUT', body: JSON.stringify(root) })
+  }
+
+  async deleteRootFolder(id: number, reassignTo?: number): Promise<{ message?: string }> {
+    const qs = reassignTo ? `?reassignTo=${reassignTo}` : ''
+    return this.request<{ message?: string }>(`/rootfolders/${id}${qs}`, { method: 'DELETE' })
+  }
+
   // Discord integration helpers
   async getDiscordStatus(): Promise<{ success: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string }> {
     return this.request<{ success: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string }>('/discord/status')
@@ -844,10 +864,12 @@ class ApiService {
     })
   }
 
-  async moveAudiobook(id: number, destinationPath: string, sourcePath?: string): Promise<{ message: string; jobId: string }> {
+  async moveAudiobook(id: number, destinationPath: string, options?: { sourcePath?: string; moveFiles?: boolean; deleteEmptySource?: boolean }): Promise<{ message: string; jobId?: string }> {
     const body: any = { destinationPath }
-    if (sourcePath) body.sourcePath = sourcePath
-    return this.request<{ message: string; jobId: string }>(`/library/${id}/move`, {
+    if (options?.sourcePath) body.sourcePath = options.sourcePath
+    if (options?.moveFiles !== undefined) body.moveFiles = options.moveFiles
+    if (options?.deleteEmptySource !== undefined) body.deleteEmptySource = options.deleteEmptySource
+    return this.request<{ message: string; jobId?: string }>(`/library/${id}/move`, {
       method: 'POST',
       body: JSON.stringify(body)
     })

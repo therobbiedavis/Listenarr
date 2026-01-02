@@ -121,15 +121,15 @@
 
   <div :class="['app-layout', { 'no-top': hideLayout }]">
       <!-- Sidebar Navigation -->
-      <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }">
+      <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }" ref="sidebarRef">
         <nav class="sidebar-nav">
           <div class="nav-section">
-            <RouterLink to="/" class="nav-item" @mouseenter="preload('home')" @focus="preload('home')" @touchstart.passive="preload('home')" @click="closeMobileMenu">
+            <RouterLink to="/" class="nav-item" @mouseenter="preload('home'); onNavMouseEnter('audiobooks')" @mouseleave="onNavMouseLeave('audiobooks')" @focus="preload('home'); onNavFocus('audiobooks')" @blur="onNavBlur('audiobooks')" @touchstart.passive="preload('home')" @click="() => { onNavClick('audiobooks'); closeMobileMenu() }">
               <PhBooks />
               <span>Audiobooks</span>
             </RouterLink>
             <!-- Sub-navigation for Audiobooks grouping (stacked under Audiobooks) -->
-            <div class="nav-sub" v-if="route.path.startsWith('/audiobooks') || route.name === 'home' || route.name === 'audiobooks'">
+            <div class="nav-sub" @mouseenter="onNavMouseEnter('audiobooks')" @mouseleave="onNavMouseLeave('audiobooks')" @focusin="onNavFocus('audiobooks')" @focusout="onNavBlur('audiobooks')" :class="{ open: (hoverNav === 'audiobooks' || persistentNav === 'audiobooks') || route.path.startsWith('/audiobooks') || route.name === 'home' || route.name === 'audiobooks' }">
               <RouterLink :to="{ path: '/audiobooks', query: { group: 'books' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: ((route.query.group || 'books') === 'books') }">
                 <span>Books</span>
               </RouterLink>
@@ -169,10 +169,34 @@
           </div>
 
           <div class="nav-section">
-            <RouterLink to="/settings" class="nav-item" @mouseenter="preload('settings')" @focus="preload('settings')" @touchstart.passive="preload('settings')" @click="closeMobileMenu">
+            <RouterLink to="/settings" class="nav-item" @mouseenter="preload('settings'); onNavMouseEnter('settings')" @mouseleave="onNavMouseLeave('settings')" @focus="preload('settings'); onNavFocus('settings')" @blur="onNavBlur('settings')" @touchstart.passive="preload('settings')" @click="() => { onNavClick('settings'); closeMobileMenu() }">
               <PhGear />
               <span>Settings</span>
             </RouterLink>
+            <!-- Sub-navigation for Settings tabs -->
+            <div class="nav-sub" @mouseenter="onNavMouseEnter('settings')" @mouseleave="onNavMouseLeave('settings')" @focusin="onNavFocus('settings')" @focusout="onNavBlur('settings')" :class="{ open: (hoverNav === 'settings' || persistentNav === 'settings') || route.path === '/settings' }">
+              <RouterLink :to="{ path: '/settings', hash: '#rootfolders' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: (route.hash || '#rootfolders') === '#rootfolders' }">
+                <span>Root Folders</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/settings', hash: '#indexers' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#indexers' }">
+                <span>Indexers</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/settings', hash: '#clients' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#clients' }">
+                <span>Clients</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/settings', hash: '#quality-profiles' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#quality-profiles' }">
+                <span>Quality Profiles</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/settings', hash: '#notifications' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#notifications' }">
+                <span>Notifications</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/settings', hash: '#bot' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#bot' }">
+                <span>Discord Bot</span>
+              </RouterLink>
+              <RouterLink :to="{ path: '/settings', hash: '#general' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#general' }">
+                <span>General</span>
+              </RouterLink>
+            </div>
             <RouterLink to="/system" class="nav-item" @mouseenter="preload('system')" @focus="preload('system')" @touchstart.passive="preload('system')" @click="closeMobileMenu">
               <PhMonitor />
               <span>System</span>
@@ -247,6 +271,70 @@ const { notification, close: closeNotification } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
+// Hover and persistence state for sidebar subnavs
+const hoverNav = ref<string | null>(null)
+const persistentNav = ref<string | null>(null)
+const hoverTimeout = ref<number | null>(null)
+const HOVER_CLOSE_DELAY = 200
+const sidebarRef = ref<HTMLElement | null>(null)
+const hoverSupported = ref(false)
+const isTouchDevice = ref(false)
+
+onMounted(() => {
+  try {
+    hoverSupported.value = !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches)
+  } catch { hoverSupported.value = false }
+  try {
+    isTouchDevice.value = ('ontouchstart' in window) || (navigator && (navigator as any).maxTouchPoints > 0)
+  } catch { isTouchDevice.value = false }
+})
+
+function onNavMouseEnter(name: string) {
+  // Only use hover behavior on pointer-capable devices (prevents touch-only devices from triggering)
+  if (!hoverSupported.value) return
+  if (hoverTimeout.value) { clearTimeout(hoverTimeout.value); hoverTimeout.value = null }
+  hoverNav.value = name
+}
+
+function onNavMouseLeave(name: string) {
+  if (!hoverSupported.value) return
+  if (hoverTimeout.value) clearTimeout(hoverTimeout.value)
+  hoverTimeout.value = window.setTimeout(() => {
+    // if this nav is persistently open, keep it open
+    if (persistentNav.value === name) {
+      hoverNav.value = name
+    } else {
+      hoverNav.value = null
+    }
+    hoverTimeout.value = null
+  }, HOVER_CLOSE_DELAY)
+}
+
+function onNavFocus(name: string) {
+  // Focus should open immediately for keyboard users
+  hoverNav.value = name
+}
+
+function onNavBlur(name: string) {
+  // Blur should behave like mouseleave
+  onNavMouseLeave(name)
+}
+
+function onNavClick(name: string) {
+  // Toggle persistent open state
+  persistentNav.value = persistentNav.value === name ? null : name
+  hoverNav.value = persistentNav.value || null
+}
+
+// Close persistent nav when clicking outside sidebar
+useEventListener(document, 'click', (e: MouseEvent) => {
+  const target = e.target as Node
+  if (!sidebarRef.value) return
+  if (!sidebarRef.value.contains(target)) {
+    persistentNav.value = null
+    hoverNav.value = null
+  }
+})
 
 // Version from API
 const version = ref('')
@@ -1136,6 +1224,18 @@ const hideLayout = computed(() => {
   background-color: #e74c3c;
 }
 
+/* Sidebar-specific badge: branded blue */
+.sidebar .badge {
+  background-color: #007acc;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.sidebar .badge:hover,
+.sidebar .badge:focus {
+  background-color: #005fa3;
+  box-shadow: 0 6px 18px rgba(0,122,204,0.12);
+}
+
 /* Main Content */
 .main-content {
   flex: 1;
@@ -1356,6 +1456,32 @@ const hideLayout = computed(() => {
   flex-direction: column;
   padding-left: 36px;
   margin-bottom: 0.5rem;
+  /* collapse layout space when closed */
+  max-height: 0;
+  overflow: hidden;
+  /* Use transform-scale for smooth animation */
+  transform-origin: top;
+  transform: scaleY(0);
+  opacity: 0;
+  pointer-events: none;
+  transition: max-height 220ms ease, transform 160ms cubic-bezier(0.2,0.9,0.3,1), opacity 120ms ease;
+}
+
+.sidebar .nav-sub.open {
+  max-height: 400px; /* large enough to contain items */
+  transform: scaleY(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar .nav-sub,
+  .sidebar .nav-sub.open {
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+    max-height: none !important;
+  }
 }
 
 .sidebar .nav-subitem {

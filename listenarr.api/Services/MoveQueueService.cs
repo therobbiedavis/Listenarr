@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
+using Microsoft.AspNetCore.SignalR;
 
 
 namespace Listenarr.Api.Services
@@ -111,6 +112,26 @@ namespace Listenarr.Api.Services
                     dbJob.UpdatedAt = DateTime.UtcNow;
                     db.MoveJobs.Update(dbJob);
                     db.SaveChanges();
+                }
+
+                // Broadcast status update to SignalR clients so UI can react to Processing/Failed/Completed
+                try
+                {
+                    var hub = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
+                    var payload = new {
+                        jobId = id.ToString(),
+                        audiobookId = dbJob?.AudiobookId ?? (job != null ? job.AudiobookId : (int?)null),
+                        status = status,
+                        error = error,
+                        target = dbJob?.RequestedPath ?? (job != null ? job.RequestedPath : null),
+                        updatedAt = DateTime.UtcNow
+                    };
+                    // Fire and forget but block briefly to surface errors during development
+                    hub.Clients.All.SendAsync("MoveJobUpdate", payload).GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for job {JobId}", id);
                 }
             }
             catch (Exception ex)

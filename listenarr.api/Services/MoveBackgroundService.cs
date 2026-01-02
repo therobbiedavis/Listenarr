@@ -126,26 +126,63 @@ namespace Listenarr.Api.Services
                             var ddir = Path.GetDirectoryName(destPath);
                             if (!string.IsNullOrEmpty(ddir) && !Directory.Exists(ddir)) Directory.CreateDirectory(ddir);
 
-                            // Copy file with retry
+                            // Copy file with retry/backoff and preserve timestamps/attributes on success
                             var succeeded = false;
-                            for (int attempt = 0; attempt < 3; attempt++)
+                            const int maxAttempts = 5;
+                            for (int attempt = 1; attempt <= maxAttempts; attempt++)
                             {
                                 try
                                 {
                                     File.Copy(entry, destPath, false);
+
+                                    // Preserve file attributes and timestamps
+                                    try
+                                    {
+                                        var attrs = File.GetAttributes(entry);
+                                        File.SetAttributes(destPath, attrs);
+
+                                        var lastWrite = File.GetLastWriteTimeUtc(entry);
+                                        var creation = File.GetCreationTimeUtc(entry);
+                                        File.SetLastWriteTimeUtc(destPath, lastWrite);
+                                        File.SetCreationTimeUtc(destPath, creation);
+                                    }
+                                    catch (Exception attrEx)
+                                    {
+                                        _logger.LogDebug(attrEx, "Non-fatal: failed to preserve attributes for {File}", entry);
+                                    }
+
                                     succeeded = true;
                                     break;
                                 }
                                 catch (IOException ioex)
                                 {
-                                    _logger.LogWarning(ioex, "IO error copying file {File} attempt {Attempt}", entry, attempt + 1);
-                                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                                    _logger.LogWarning(ioex, "IO error copying file {File} attempt {Attempt}", entry, attempt);
+
+                                    // exponential backoff
+                                    var delay = TimeSpan.FromSeconds(Math.Min(8, Math.Pow(2, attempt - 1)));
+                                    await Task.Delay(delay, stoppingToken);
                                 }
                             }
 
                             if (!succeeded)
                             {
-                                throw new Exception($"Failed to copy file: {entry}");
+                                // Increment attempt count for the DB job to surface retries
+                                try
+                                {
+                                    var dbJob = db.MoveJobs.FirstOrDefault(j => j.Id == job.Id);
+                                    if (dbJob != null)
+                                    {
+                                        dbJob.AttemptCount += 1;
+                                        db.MoveJobs.Update(dbJob);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to increment AttemptCount for job {JobId}", job.Id);
+                                }
+
+                                throw new Exception($"Failed to copy file after {maxAttempts} attempts: {entry}");
                             }
                         }
 
@@ -162,24 +199,28 @@ namespace Listenarr.Api.Services
 
                         _moveQueue.UpdateJobStatus(job.Id, "Completed");
                         _logger.LogInformation("Move job {JobId} completed: {Source} -> {Target}", job.Id, source, target);
-
-                        // Broadcast via SignalR
-                        try
-                        {
-                            using var hubScope = _scopeFactory.CreateScope();
-                            var hub = hubScope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
-                            var payload = new { jobId = job.Id.ToString(), audiobookId = job.AudiobookId, status = "Completed", target = target };
-                            await hub.Clients.All.SendAsync("MoveJobUpdate", payload, stoppingToken);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for job {JobId}", job.Id);
-                        }
                     }
                     catch (Exception ex)
                     {
                         // Cleanup any temp dir
                         try { if (Directory.Exists(tempName)) Directory.Delete(tempName, true); } catch { }
+
+                        // Increment attempt count for the job on failure
+                        try
+                        {
+                            var dbJob = db.MoveJobs.FirstOrDefault(j => j.Id == job.Id);
+                            if (dbJob != null)
+                            {
+                                dbJob.AttemptCount += 1;
+                                db.MoveJobs.Update(dbJob);
+                                await db.SaveChangesAsync(stoppingToken);
+                            }
+                        }
+                        catch (Exception attEx)
+                        {
+                            _logger.LogWarning(attEx, "Failed to increment AttemptCount for job {JobId} after failure", job.Id);
+                        }
+
                         _moveQueue.UpdateJobStatus(job.Id, "Failed", ex.Message);
                         _logger.LogError(ex, "Move job {JobId} failed", job.Id);
                     }

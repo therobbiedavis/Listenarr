@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - 2025-12-31
 
+### Added
+- **Download finalization**: Added `ExtractArchives` application setting and an EF Core migration to persist it (migration: `20251231003000_AddExtractArchivesToApplicationSettings`). This enables automatic archive extraction on completed downloads when enabled.
+- **Legacy root folder migration**: On startup, a legacy single `ApplicationSettings.outputPath` will be migrated into the new `RootFolder` table as a named root called `Default` with `IsDefault = true` (only when no root folders already exist).
+
 ### Fixed
 - **MyAnonamouse authentication & downloads**: Persist `mam_id` values received from tracker responses and explicitly include `mam_id` cookie on direct torrent downloads when the torrent host differs from the configured indexer; adds unit tests covering cookie persistence and download caching. 
 

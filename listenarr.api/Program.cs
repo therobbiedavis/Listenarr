@@ -107,6 +107,12 @@ builder.Services.AddSignalR()
         options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
 
+// RootFolder repository + service
+builder.Services.AddScoped<Listenarr.Api.Repositories.IRootFolderRepository, Listenarr.Api.Repositories.EfRootFolderRepository>();
+builder.Services.AddScoped<Listenarr.Api.Services.IRootFolderService, Listenarr.Api.Services.RootFolderService>();
+// Migrator for legacy single-outputPath -> RootFolder migration
+builder.Services.AddScoped<Listenarr.Api.Services.ILegacyOutputPathMigrator, Listenarr.Api.Services.LegacyOutputPathMigrator>();
+
 // Add in-memory cache for metadata prefetch / reuse
 builder.Services.AddMemoryCache();
 
@@ -649,7 +655,17 @@ using (var scope = app.Services.CreateScope())
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
 
-        // NOTE: Automatic schema ALTERs were intentionally removed from startup.
+            // Migrate legacy single-root configuration (ApplicationSettings.outputPath) into the new RootFolder table
+            try
+            {
+                using var migrScope = app.Services.CreateScope();
+                var migrator = migrScope.ServiceProvider.GetRequiredService<Listenarr.Api.Services.ILegacyOutputPathMigrator>();
+                migrator.MigrateAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Legacy output path migration failed");
+            }
         // Schema changes should be applied by EF migrations. See Migration:
         // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
     }

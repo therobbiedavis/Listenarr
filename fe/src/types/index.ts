@@ -194,6 +194,15 @@ export interface RemotePathMapping {
   updatedAt: string
 }
 
+export interface RootFolder {
+  id: number
+  name: string
+  path: string
+  isDefault: boolean
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface TranslatePathRequest {
   downloadClientId: string
   remotePath: string
@@ -651,4 +660,11 @@ export interface SearchResponse {
   indexerResults: IndexerSearchResult[];
   metadataResults: MetadataSearchResult[];
   totalCount: number;
+}
+
+export interface RootFolder {
+  id: number;
+  name: string;
+  path: string;
+  isDefault: boolean;
 }

@@ -1,13 +1,5 @@
 <template>
   <div class="settings-page">
-    <div class="settings-header">
-      <h1>
-        <PhGear />
-        Settings
-      </h1>
-      <p>Configure your APIs, download clients, and application settings</p>
-    </div>
-
     <div class="settings-tabs">
       <!-- Mobile dropdown -->
       <div class="settings-tabs-mobile">
@@ -32,20 +24,20 @@
 
         <div ref="desktopTabsRef" class="settings-tabs-desktop">
           <button 
-            @click="router.push({ hash: '#indexers' })" 
-            :class="{ active: activeTab === 'indexers' }"
+            @click="router.push({ hash: '#rootfolders' })" 
+            :class="{ active: activeTab === 'rootfolders' }"
             class="tab-button"
           >
-    <PhListMagnifyingGlass />
-          Indexers
+    <PhFolder />
+          Root Folders
         </button>
         <button 
-          @click="router.push({ hash: '#apis' })" 
-          :class="{ active: activeTab === 'apis' }"
+          @click="router.push({ hash: '#indexers' })" 
+          :class="{ active: activeTab === 'indexers' }"
           class="tab-button"
         >
-    <PhCloud />
-          Metadata Sources
+    <PhListMagnifyingGlass />
+          Indexers
         </button>
         <button 
           @click="router.push({ hash: '#clients' })" 
@@ -64,14 +56,6 @@
           Quality Profiles
         </button>
         <button 
-          @click="router.push({ hash: '#general' })" 
-          :class="{ active: activeTab === 'general' }"
-          class="tab-button"
-        >
-    <PhSliders />
-          General Settings
-        </button>
-        <button 
           @click="router.push({ hash: '#notifications' })" 
           :class="{ active: activeTab === 'notifications' }"
           class="tab-button"
@@ -79,14 +63,21 @@
     <PhBell />
           Notifications
         </button>
-        <!-- Integrations tab removed -->
         <button 
-          @click="router.push({ hash: '#requests' })" 
-          :class="{ active: activeTab === 'requests' }"
+          @click="router.push({ hash: '#bot' })" 
+          :class="{ active: activeTab === 'bot' }"
           class="tab-button"
         >
     <PhGlobe />
-          Requests
+          Discord Bot
+        </button>
+        <button 
+          @click="router.push({ hash: '#general' })" 
+          :class="{ active: activeTab === 'general' }"
+          class="tab-button"
+        >
+    <PhSliders />
+          General Settings
         </button>
         </div>
 
@@ -102,17 +93,51 @@
       </div>
     </div>
 
-      <!-- Integrations tab removed -->
+    <!-- Settings Toolbar -->
+    <div class="settings-toolbar">
+      <div class="toolbar-content">
+        <div class="toolbar-actions">
+          <!-- Add buttons for each section -->
+          <button v-if="activeTab === 'rootfolders'" @click="openAddRootFolder()" class="add-button">
+            <PhPlus />
+            Add Root Folder
+          </button>
+          <button v-if="activeTab === 'indexers'" @click="showIndexerForm = true" class="add-button">
+            <PhPlus />
+            Add Indexer
+          </button>
+          <button v-if="activeTab === 'clients'" @click="showClientForm = true; editingClient = null" class="add-button">
+            <PhPlus />
+            Add Download Client
+          </button>
+          <button v-if="activeTab === 'quality-profiles'" @click="openQualityProfileForm()" class="add-button">
+            <PhPlus />
+            Add Quality Profile
+          </button>
+          <button v-if="activeTab === 'notifications'" @click="showWebhookForm = true" class="add-button">
+            <PhPlus />
+            Add Webhook
+          </button>
+          
+          <!-- Save button for sections that need it -->
+          <button v-if="activeTab === 'general' || activeTab === 'bot'" @click="saveSettings" :disabled="configStore.isLoading" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
+            <template v-if="configStore.isLoading">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else>
+              <PhFloppyDisk />
+            </template>
+            {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div class="settings-content">
       <!-- Indexers Tab -->
       <div v-if="activeTab === 'indexers'" class="tab-content">
         <div class="section-header">
           <h3>Indexers</h3>
-          <button @click="showIndexerForm = true" class="add-button">
-            <PhPlus />
-            Add Indexer
-          </button>
         </div>
 
         <div v-if="indexers.length === 0" class="empty-state">
@@ -214,74 +239,11 @@
         </div>
       </div>
 
-      <!-- Metadata Sources Tab -->
-      <div v-if="activeTab === 'apis'" class="tab-content">
-        <div class="section-header">
-          <h3>Metadata Sources</h3>
-          <button @click="showApiForm = true" class="add-button">
-            <PhPlus />
-            Add Metadata Source
-          </button>
-        </div>
-
-        <div v-if="configStore.apiConfigurations.length === 0" class="empty-state">
-          <PhCloudSlash />
-          <p>No metadata sources configured. Add one to enrich audiobook information.</p>
-        </div>
-
-        <div v-else class="config-list">
-          <div 
-            v-for="api in configStore.apiConfigurations" 
-            :key="api.id"
-            class="config-card"
-            :class="{ disabled: !api.isEnabled }"
-          >
-            <div class="config-info">
-              <h4>{{ api.name }}</h4>
-              <p class="config-url">{{ api.baseUrl }}</p>
-              <div class="config-meta">
-                <span v-if="api.type !== 'metadata'" class="config-type">{{ api.type.toUpperCase() }}</span>
-                <span class="config-status" :class="{ enabled: api.isEnabled }">
-                  <component :is="api.isEnabled ? PhCheckCircle : PhXCircle" :class="api.isEnabled ? 'success' : 'error'" />
-                  {{ api.isEnabled ? 'Enabled' : 'Disabled' }}
-                </span>
-                <span class="config-priority">
-                  <PhArrowUp />
-                  Priority: {{ api.priority }}
-                </span>
-              </div>
-            </div>
-              <div class="config-actions">
-              <button    
-                @click="toggleApiConfig(api)"
-                class="icon-button"
-                >
-                <template v-if="api.isEnabled">
-                  <PhToggleRight />
-                </template>
-                <template v-else>
-                  <PhToggleLeft />
-                </template>
-              </button>  
-              <button @click="editApiConfig(api)" class="icon-button" title="Edit">
-                <PhPencil />
-              </button>
-              <button @click="confirmDeleteApi(api)" class="icon-button danger" title="Delete">
-                <PhTrash />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- Download Clients Tab -->
       <div v-if="activeTab === 'clients'" class="tab-content">
         <div class="section-header">
           <h3>Download Clients</h3>
-          <button @click="showClientForm = true; editingClient = null" class="add-button">
-            <PhPlus />
-            Add Download Client
-          </button>
         </div>
 
         <div v-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
@@ -498,10 +460,6 @@
       <div v-if="activeTab === 'quality-profiles'" class="tab-content">
         <div class="section-header">
           <h3>Quality Profiles</h3>
-          <button @click="openQualityProfileForm()" class="add-button">
-            <PhPlus />
-            Add Quality Profile
-          </button>
         </div>
 
         <!-- Empty State -->
@@ -654,15 +612,6 @@
       <div v-if="activeTab === 'general'" class="tab-content">
         <div class="section-header">
           <h3>General Settings</h3>
-          <button @click="saveSettings" :disabled="configStore.isLoading" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
-            <template v-if="configStore.isLoading">
-              <PhSpinner class="ph-spin" />
-            </template>
-            <template v-else>
-              <PhFloppyDisk />
-            </template>
-            {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
-          </button>
         </div>
         <div v-if="validationErrors.length > 0" class="error-summary" role="alert">
           <strong>Please fix the following:</strong>
@@ -675,16 +624,6 @@
           <div class="form-section">
             <h4><PhFolder /> File Management</h4>
             
-            <div class="form-group">
-              <label>Root Folder / Output Path</label>
-              <FolderBrowser 
-                v-model="settings.outputPath" 
-                placeholder="Select a folder for audiobooks..."
-                inputDataCy="output-path"
-              />
-              <span class="form-help">Root folder where downloaded audiobooks will be saved. This must be set before adding audiobooks.</span>
-            </div>
-
             <div class="form-group">
               <label>File Naming Pattern</label>
               <input v-model="settings.fileNamingPattern" type="text" placeholder="{Author}/{Series}/{Title}">
@@ -981,21 +920,20 @@
         </div>
       </div>
 
+      <!-- Root Folders Tab -->
+      <div v-if="activeTab === 'rootfolders'" class="tab-content">
+        <div class="form-section">
+          <RootFoldersSettings ref="rootFoldersRef" :hide-header="false" />
+
+        </div>
+      </div>
+
       <!-- Notifications Tab -->
       
   <!-- Requests (Discord Bot) Tab -->
-  <div v-if="activeTab === 'requests' && settings" class="tab-content">
+  <div v-if="activeTab === 'bot' && settings" class="tab-content">
         <div class="section-header">
-          <h3>Requests (Discord Bot)</h3>
-          <button @click="saveSettings" :disabled="configStore.isLoading" class="save-button">
-            <template v-if="configStore.isLoading">
-              <PhSpinner class="ph-spin" />
-            </template>
-            <template v-else>
-              <PhFloppyDisk />
-            </template>
-            Save Settings
-          </button>
+          <h3>Discord Bot</h3>
         </div>
 
         <div class="form-section">
@@ -1170,12 +1108,7 @@
         <div class="section-header">
           <div class="section-title-wrapper">
             <h3>Notification Webhooks</h3>
-            <p class="section-subtitle">Configure webhooks to receive real-time notifications about audiobook events</p>
           </div>
-          <button @click="showWebhookForm = true" class="add-button">
-            <PhPlus />
-            Add Webhook
-          </button>
         </div>
 
         <div v-if="webhooks.length === 0" class="empty-state">
@@ -1718,6 +1651,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
+import RootFoldersSettings from '@/components/settings/RootFoldersSettings.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
 import {
   // Settings & Navigation
@@ -1760,16 +1694,16 @@ const configStore = useConfigurationStore()
 const toast = useToast()
 // Debug environment markers (Vitest exposes import.meta.vitest / import.meta.env.VITEST)
 console.debug('[test-debug] import.meta.vitest:', (import.meta as unknown as { vitest?: unknown }).vitest, 'env.VITEST:', (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST, '__vitest_global__:', (globalThis as unknown as { __vitest?: unknown }).__vitest)
-  const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'>('indexers')
+  const activeTab = ref<'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'>('rootfolders')
 
 const mobileTabOptions = computed(() => [
+  { value: 'rootfolders', label: 'Root Folders', icon: PhFolder },
   { value: 'indexers', label: 'Indexers', icon: PhListMagnifyingGlass },
-  { value: 'apis', label: 'Metadata Sources', icon: PhCloud },
   { value: 'clients', label: 'Download Clients', icon: PhDownload },
   { value: 'quality-profiles', label: 'Quality Profiles', icon: PhStar },
-  { value: 'general', label: 'General Settings', icon: PhSliders },
   { value: 'notifications', label: 'Notifications', icon: PhBell },
-  { value: 'requests', label: 'Requests', icon: PhGlobe },
+  { value: 'bot', label: 'Discord Bot', icon: PhGlobe },
+  { value: 'general', label: 'General Settings', icon: PhSliders },
   // Integrations removed
 ])
 // Desktop tabs carousel refs/state
@@ -1777,6 +1711,7 @@ const desktopTabsRef = ref<HTMLElement | null>(null)
 const hasTabOverflow = ref(false)
 const showLeftTabChevron = ref(false)
 const showRightTabChevron = ref(false)
+const rootFoldersRef = ref<any>(null)
 
 function updateTabOverflow() {
   const el = desktopTabsRef.value
@@ -1837,6 +1772,12 @@ function ensureActiveTabVisible() {
   if (active) {
     // center the active tab in view when overflowing
     active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  }
+}
+
+function openAddRootFolder() {
+  if (rootFoldersRef.value && typeof rootFoldersRef.value.openAdd === 'function') {
+    rootFoldersRef.value.openAdd()
   }
 }
 
@@ -1999,17 +1940,13 @@ const adminUsers = ref<Array<{ id: number; username: string; email?: string; isA
   const vitestEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST
     if (vitestEnv) return true
 
-    // Required output path
-    if (!settings.value) return false
-    const outputPathValid = !!(settings.value.outputPath && String(settings.value.outputPath).trim().length > 0)
-
-    return outputPathValid && isProxyConfigValid.value
+    // No longer require output path since we use root folders now
+    return isProxyConfigValid.value
   })
 
   const validationErrors = computed(() => {
     const errs: string[] = []
     if (!settings.value) return errs
-    if (!settings.value.outputPath || String(settings.value.outputPath).trim().length === 0) errs.push('Output path is required')
     if (settings.value.useUsProxy) {
       const host = (settings.value.usProxyHost || '').toString().trim()
       const port = Number(settings.value.usProxyPort || 0)
@@ -3230,20 +3167,20 @@ const resetWebhookFormErrors = () => {
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
-  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications' | 'integrations'
-  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'requests', 'notifications', 'integrations'].includes(hash)) {
+  const hash = route.hash.replace('#', '') as 'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
+  if (hash && ['rootfolders', 'indexers', 'clients', 'quality-profiles', 'notifications', 'bot', 'general'].includes(hash)) {
     activeTab.value = hash as any
   } else {
-    // Default to indexers and update URL
-    activeTab.value = 'indexers'
-    router.replace({ hash: '#indexers' })
+    // Default to rootfolders and update URL
+    activeTab.value = 'rootfolders'
+    router.replace({ hash: '#rootfolders' })
   }
 }
 
 // Handle dropdown tab change
 // const onTabChange = (event: Event) => {
 //   const target = event.target as HTMLSelectElement
-//   const newTab = target.value as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'
+//   const newTab = target.value as 'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'requests' | 'general'
 //   activeTab.value = newTab
 //   router.push({ hash: `#${newTab}` })
 // }
@@ -3256,13 +3193,13 @@ watch(() => route.hash, () => {
 // Track which tab data has been loaded to avoid duplicate requests
 const loaded = reactive({
   indexers: false,
-  apis: false,
   clients: false,
   profiles: false,
   admins: false,
   mappings: false,
   general: false,
-  requests: false,
+  rootfolders: false,
+  bot: false,
   integrations: false
 })
 
@@ -3275,10 +3212,10 @@ async function loadTabContents(tab: string) {
           loaded.indexers = true
         }
         break
-      case 'apis':
-        if (!loaded.apis) {
-          await configStore.loadApiConfigurations()
-          loaded.apis = true
+      case 'rootfolders':
+        if (!loaded.rootfolders) {
+          // root folder UI will manage its own loading; just mark as loaded
+          loaded.rootfolders = true
         }
         break
       case 'clients':
@@ -3391,8 +3328,8 @@ async function loadTabContents(tab: string) {
           loaded.general = true
         }
         break
-      case 'requests':
-          if (!loaded.requests) {
+      case 'bot':
+          if (!loaded.bot) {
           // Requests tab needs application settings and quality profiles
           await configStore.loadApplicationSettings()
           // Reuse the same normalization logic for requests tab load
@@ -3430,7 +3367,7 @@ async function loadTabContents(tab: string) {
           } catch (e) {
             console.debug('Failed to load quality profiles for requests tab', e)
           }
-          loaded.requests = true
+          loaded.bot = true
         }
         break
       case 'notifications':
@@ -3490,6 +3427,8 @@ onMounted(async () => {
 
 <style scoped>
 .settings-page {
+  position: relative;
+  top: 60px;
   padding: 2rem;
   min-height: 100vh;
   background-color: #1a1a1a;
@@ -3569,6 +3508,7 @@ onMounted(async () => {
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 500px;
+  margin-top: 60px; /* Add margin to account for fixed toolbar */
 }
 
 /* Desktop tabs carousel styles */
@@ -3641,6 +3581,35 @@ onMounted(async () => {
 .tabs-scroll-btn:hover {
   background: rgba(0, 0, 0, 1);
   transform: translateY(-50%) scale(1.02);
+}
+
+/* Settings Toolbar */
+.settings-toolbar {
+  position: fixed;
+  top: 60px; /* Account for global header nav */
+  left: 200px; /* Account for sidebar width */
+  right: 0;
+  z-index: 99; /* Below global nav (1000) but above content */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #333;
+  margin-bottom: 20px;
+}
+
+.toolbar-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
 }
 
 /* When tabs don't overflow hide the scrollbar and buttons via v-show in template */
@@ -5294,6 +5263,20 @@ onMounted(async () => {
   .add-button,
   .save-button {
     width: 100%;
+    justify-content: center;
+  }
+
+  .settings-toolbar {
+    left: 0; /* Full width on mobile */
+  }
+
+  .toolbar-content {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .toolbar-actions {
     justify-content: center;
   }
 

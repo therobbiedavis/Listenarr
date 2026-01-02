@@ -90,10 +90,12 @@
             </label>
             <div class="destination-display">
               <div class="destination-row">
-                <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
+                <div class="root-select">
+                  <RootFolderSelect v-model:rootId="selectedRootId" v-model:customPath="customRootPath" />
+                </div>
                 <input type="text" v-model="formData.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
               </div>
-              <p class="help-text">Root (left) is read-only — edit the output path relative to it on the right.</p>
+              <p class="help-text">Select a named root (or custom path) and edit the path relative to it on the right.</p>
             </div>
           </div>
 
@@ -201,6 +203,32 @@
               {{ saving ? 'Saving...' : 'Save Changes' }}
             </button>
           </div>
+
+          <!-- Move confirmation modal (in-component) -->
+          <div v-if="showMoveConfirm" class="confirm-overlay" @click="cancelMoveConfirm">
+            <div class="confirm-dialog" @click.stop>
+              <div class="confirm-header">
+                <h3>Move audiobook files?</h3>
+              </div>
+              <div class="confirm-body">
+                <p>You're changing the destination for this audiobook and moving all files from:</p>
+                <pre style="white-space:pre-wrap">{{ pendingMove?.original || '<none>' }}</pre>
+                <p>to:</p>
+                <pre style="white-space:pre-wrap">{{ pendingMove?.combined || '<none>' }}</pre>
+                <div style="margin-top:8px;">
+                  <label><input type="checkbox" v-model="modalMoveFiles" /> <strong>Move files</strong> (recommended)</label>
+                </div>
+                <div style="margin-top:8px;" v-if="modalMoveFiles">
+                  <label><input type="checkbox" v-model="modalDeleteEmpty" /> Delete original folder if empty</label>
+                </div>
+              </div>
+              <div class="confirm-actions">
+                <button class="btn cancel" @click="cancelMoveConfirm">Cancel</button>
+                <button class="btn" @click="confirmChangeWithoutMoving">Change without moving</button>
+                <button class="btn confirm" :class="{ danger: true }" @click="confirmMove">Move</button>
+              </div>
+            </div>
+          </div>
         </form>
       </div>
     </div>
@@ -211,11 +239,12 @@
 import { ref, computed, watch } from 'vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
-import { showConfirm } from '@/composables/useConfirm'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, QualityProfile } from '@/types'
 import { PhX } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
+import RootFolderSelect from '@/components/RootFolderSelect.vue'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 
 interface Props {
   isOpen: boolean
@@ -241,6 +270,9 @@ const emit = defineEmits<{
 const qualityProfiles = ref<QualityProfile[]>([])
 const rootFolders = ref<string[]>([])
 const configStore = useConfigurationStore()
+const rootStore = useRootFoldersStore()
+const selectedRootId = ref<number | null>(null) // null/use default, 0 = custom
+const customRootPath = ref<string | null>(null)
 const rootPath = ref<string | null>(null)
 const saving = ref(false)
 const newTag = ref('')
@@ -258,6 +290,44 @@ const formData = ref<FormData>({
 // Move job tracking (shows queued/processing/completed/failed state)
 const moveJob = ref<{ jobId: string; status: string; target?: string; error?: string } | null>(null)
 const moveUnsub = ref<(() => void) | null>(null)
+
+// In-component move confirmation modal state
+const showMoveConfirm = ref(false)
+const pendingMove = ref<{ original?: string; combined?: string } | null>(null)
+const modalMoveFiles = ref(true)
+const modalDeleteEmpty = ref(true)
+let moveConfirmResolver: ((r: { proceed: boolean; moveFiles: boolean; deleteEmptySource: boolean }) => void) | null = null
+
+function askMoveConfirmation(original: string, combined: string) {
+  modalMoveFiles.value = true
+  modalDeleteEmpty.value = true
+  pendingMove.value = { original, combined }
+  showMoveConfirm.value = true
+  return new Promise<{ proceed: boolean; moveFiles: boolean; deleteEmptySource: boolean }>((resolve) => {
+    moveConfirmResolver = resolve
+  })
+}
+
+function cancelMoveConfirm() {
+  if (moveConfirmResolver) moveConfirmResolver({ proceed: false, moveFiles: false, deleteEmptySource: false })
+  moveConfirmResolver = null
+  showMoveConfirm.value = false
+  pendingMove.value = null
+}
+
+function confirmChangeWithoutMoving() {
+  if (moveConfirmResolver) moveConfirmResolver({ proceed: true, moveFiles: false, deleteEmptySource: false })
+  moveConfirmResolver = null
+  showMoveConfirm.value = false
+  pendingMove.value = null
+}
+
+function confirmMove() {
+  if (moveConfirmResolver) moveConfirmResolver({ proceed: true, moveFiles: Boolean(modalMoveFiles.value), deleteEmptySource: Boolean(modalDeleteEmpty.value) })
+  moveConfirmResolver = null
+  showMoveConfirm.value = false
+  pendingMove.value = null
+}
 
 const hasChanges = computed(() => {
   if (!props.audiobook) return false
@@ -279,19 +349,32 @@ watch(() => props.isOpen, async (isOpen) => {
     await loadData()
     await initializeForm()
   }
-})
+}, { immediate: true })
 
 async function loadData() {
   try {
     // Load quality profiles
     qualityProfiles.value = await apiService.getQualityProfiles()
 
-    // Load root folders from configuration via the configuration store
+    // Load root folders from settings store
     await configStore.loadApplicationSettings()
+    await rootStore.load()
+
     const appSettings = configStore.applicationSettings
     if (appSettings && appSettings.outputPath) {
-      rootFolders.value = [appSettings.outputPath]
+      // Fallback default
       rootPath.value = appSettings.outputPath
+    }
+
+    // If there are named root folders, prefer them
+    if (rootStore.folders.length > 0) {
+      // Use default root if any
+      const def = rootStore.folders.find(f => f.isDefault) || rootStore.folders[0]
+      rootPath.value = def?.path || rootPath.value
+      // pre-select default
+      selectedRootId.value = def?.id ?? null
+    } else {
+      selectedRootId.value = null
     }
   } catch (error) {
     console.error('Failed to load edit data:', error)
@@ -311,15 +394,42 @@ async function initializeForm() {
     ,relativePath: null
   }
 
+  // Helper: derive relative path from full base and configured root
+  function deriveRelativeFromBase(base: string | null | undefined, root: string | null | undefined): string {
+    if (!base) return ''
+    if (!root) return base
+
+    const normBase = base.replace(/\\/g, '/')
+    const normRoot = root.replace(/\\/g, '/')
+    const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
+
+    if (normBase.toLowerCase() === normRoot.toLowerCase()) return ''
+    if (normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())) {
+      const rel = normBase.slice(rootWithSlash.length).replace(/^\/+/, '')
+      const useBackslash = root.includes('\\')
+      return useBackslash ? rel.replace(/\//g, '\\') : rel
+    }
+
+    // Not under root: return full base so users can edit the absolute path
+    return base
+  }
+
     // If there's an existing basePath that uses the configured root, derive the relative path
     try {
-      if (formData.value.basePath && rootPath.value) {
-        const base = formData.value.basePath
-        const root = rootPath.value
-        if (base.startsWith(root)) {
-          const rel = base.slice(root.length).replace(/^[/\\]+/, '')
-          formData.value.relativePath = rel
-        }
+      // If there's a named root selected, derive relative path from that
+      let chosenRoot = rootPath.value
+      if (selectedRootId.value && selectedRootId.value > 0) {
+        const found = rootStore.folders.find(f => f.id === selectedRootId.value)
+        if (found) chosenRoot = found.path
+      } else if (selectedRootId.value === 0 && customRootPath.value) {
+        chosenRoot = customRootPath.value
+      }
+
+      if (formData.value.basePath && chosenRoot) {
+        formData.value.relativePath = deriveRelativeFromBase(formData.value.basePath, chosenRoot)
+      } else if (formData.value.basePath && !chosenRoot) {
+        // No configured root — show the full base path so user can edit it
+        formData.value.relativePath = formData.value.basePath || null
       }
 
       // IMPORTANT: Do not use metadata to fill the destination input for edits.
@@ -333,8 +443,19 @@ async function initializeForm() {
     }
 }
 
+function resolveSelectedRootPath(): string | null {
+  if (selectedRootId.value === 0) {
+    return customRootPath.value || null
+  }
+  if (selectedRootId.value && selectedRootId.value > 0) {
+    const r = rootStore.folders.find(f => f.id === selectedRootId.value)
+    return r?.path ?? (rootPath.value || null)
+  }
+  return rootPath.value || null
+}
+
 function combinedBasePath(): string | null {
-  const r = rootPath.value || ''
+  const r = resolveSelectedRootPath() || ''
   const rel = (formData.value.relativePath || '').trim()
   if (!r && !rel) return null
   if (!r) return rel
@@ -345,14 +466,16 @@ function combinedBasePath(): string | null {
 
 async function handleSave() {
   if (!props.audiobook || !hasChanges.value) return
-  // If the base path (destination) changed, confirm with the user before proceeding
+  // If the base path (destination) changed, prompt the user with rich options
   const combined = combinedBasePath()
   const originalBase = props.audiobook.basePath || ''
+  let userWantsMove = true
+  let userWantsDeleteEmpty = true
   if ((combined || '') !== originalBase) {
-    const message = `You're changing the destination from:\n\n${originalBase || '<none>'}\n\nto:\n\n${combined || '<none>'}\n\nEverything in the current destination will be moved to the new destination and the current destination will be deleted. Do you want to continue?`
-    // Use centralized app confirm so UI is consistent and non-blocking
-    const ok = await showConfirm(message, 'Move Audiobook', { confirmText: 'Move', cancelText: 'Cancel', danger: true })
-    if (!ok) return
+    const choice = await askMoveConfirmation(originalBase || '', combined || '')
+    if (!choice || !choice.proceed) return
+    userWantsMove = Boolean(choice.moveFiles)
+    userWantsDeleteEmpty = Boolean(choice.deleteEmptySource)
   }
 
   saving.value = true
@@ -382,36 +505,45 @@ async function handleSave() {
     // Call single update API
     await apiService.updateAudiobook(props.audiobook.id, updates)
 
-    // If base path changed, enqueue server-side move and show progress via SignalR
+    // If base path changed, either update DB without moving or enqueue server-side move and show progress via SignalR
     if ((combined || '') !== (props.audiobook.basePath || '')) {
-      try {
-        const res = await apiService.moveAudiobook(props.audiobook.id, combined ?? '', originalBase || undefined)
-        toast.info('Move queued', `Move job queued (${res.jobId}). Moving files in background.`)
+      if (!userWantsMove) {
+        // User requested a DB-only change
+        toast.info('Destination updated', 'Destination changed without moving files.')
+      } else {
+        try {
+          const res = await apiService.moveAudiobook(props.audiobook.id, combined ?? '', { sourcePath: originalBase || undefined, moveFiles: true, deleteEmptySource: userWantsDeleteEmpty })
+          toast.info('Move queued', `Move job queued (${res.jobId}). Moving files in background.`)
 
-        // Record initial move job state and subscribe to updates
-        moveJob.value = { jobId: res.jobId, status: 'Queued', target: combined ?? undefined }
-        moveUnsub.value = signalRService.onMoveJobUpdate((job) => {
-          if (!job || !job.jobId) return
-          if (String(job.jobId).toLowerCase() !== String(res.jobId).toLowerCase()) return
+          // Record initial move job state and subscribe to updates
+          moveJob.value = {
+            jobId: res.jobId,
+            status: 'Queued',
+            target: combined || ''
+          } as any
+          moveUnsub.value = signalRService.onMoveJobUpdate((job) => {
+            if (!job || !job.jobId) return
+            if (String(job.jobId).toLowerCase() !== String(res.jobId).toLowerCase()) return
 
-          // Update local job state
-          moveJob.value = { jobId: job.jobId, status: job.status, target: job.target, error: job.error }
+            // Update local job state
+            moveJob.value = { jobId: job.jobId, status: job.status, target: job.target, error: job.error }
 
-            if (job.status === 'Completed') {
-              toast.success('Move completed', `Files moved to ${job.target || combined}`)
-              try { if (moveUnsub.value) moveUnsub.value() } catch {}
-              moveUnsub.value = null
-            } else if (job.status === 'Failed') {
-              toast.error('Move failed', job.error || 'Move job failed. Check logs for details.')
-              try { if (moveUnsub.value) moveUnsub.value() } catch {}
-              moveUnsub.value = null
-          } else if (job.status === 'Processing') {
-            toast.info('Move in progress', `Moving files to ${job.target || combined}`)
-          }
-        })
-      } catch (moveErr) {
-        console.error('Failed to enqueue move job:', moveErr)
-        toast.error('Move failed', 'Failed to enqueue move job. Please try again.')
+              if (job.status === 'Completed') {
+                toast.success('Move completed', `Files moved to ${job.target || combined}`)
+                try { if (moveUnsub.value) moveUnsub.value() } catch {}
+                moveUnsub.value = null
+              } else if (job.status === 'Failed') {
+                toast.error('Move failed', job.error || 'Move job failed. Check logs for details.')
+                try { if (moveUnsub.value) moveUnsub.value() } catch {}
+                moveUnsub.value = null
+            } else if (job.status === 'Processing') {
+              toast.info('Move in progress', `Moving files to ${job.target || combined}`)
+            }
+          })
+        } catch (moveErr) {
+          console.error('Failed to enqueue move job:', moveErr)
+          toast.error('Move failed', 'Failed to enqueue move job. Please try again.')
+        }
       }
     }
 

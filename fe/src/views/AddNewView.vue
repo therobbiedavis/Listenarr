@@ -640,6 +640,7 @@ declare global {
 import { isbnService, type ISBNBook } from '@/services/isbn'
 import { signalRService } from '@/services/signalr'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useLibraryStore } from '@/stores/library'
 import AudiobookDetailsModal from '@/components/AudiobookDetailsModal.vue'
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
@@ -663,6 +664,7 @@ type LooseResult = Partial<SearchResult> & Record<string, unknown>
 const route = useRoute()
 const router = useRouter()
 const configStore = useConfigurationStore()
+const rootFoldersStore = useRootFoldersStore()
 const libraryStore = useLibraryStore()
 const toast = useToast()
 
@@ -2312,7 +2314,7 @@ const viewTitleResultDetails = async (book: TitleSearchResult) => {
 // Common methods for both search types
 const addToLibrary = async (book: AudibleBookMetadata) => {
   // Check if root folder is configured
-  if (!configStore.applicationSettings?.outputPath) {
+  if (rootFoldersStore.folders.length === 0 && !configStore.applicationSettings?.outputPath) {
     toast.warning('Root folder not configured', 'Please configure the root folder in Settings before adding audiobooks.')
     router.push('/settings')
     return
@@ -3745,6 +3747,7 @@ select.form-input:focus {
   border-radius: 6px;
   white-space: nowrap;
   transition: background-color 0.2s ease, color 0.2s ease;
+  z-index: 100;
 }
 
 .series-badge:hover {
