@@ -230,6 +230,7 @@ namespace Listenarr.Api.Services
                                 CanRemove = true,
                                 RemotePath = uc.RemotePath,
                                 LocalPath = uc.LocalPath,
+                                ContentPath = uc.ContentPath,
                                 Seeders = uc.Seeders,
                                 Leechers = uc.Leechers,
                                 Ratio = uc.Ratio
@@ -318,7 +319,8 @@ namespace Listenarr.Api.Services
                             CanPause = false,
                             CanRemove = true,
                             RemotePath = d.DownloadPath,
-                            LocalPath = d.FinalPath
+                            LocalPath = d.FinalPath,
+                            ContentPath = d.FinalPath ?? d.DownloadPath
                         });
 
                         existingIds.Add(d.Id);

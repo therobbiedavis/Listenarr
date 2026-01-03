@@ -340,6 +340,14 @@ namespace Listenarr.Api.Services.Adapters
                             ? await _pathMappingService.TranslatePathAsync(client.Id, remotePath)
                             : remotePath;
 
+                        // For SABnzbd, construct ContentPath from download path + filename
+                        var contentPath = !string.IsNullOrEmpty(remotePath) && !string.IsNullOrEmpty(filename)
+                            ? Path.Combine(remotePath, filename)
+                            : remotePath;
+                        var localContentPath = !string.IsNullOrEmpty(contentPath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
+                            : contentPath;
+
                         items.Add(new QueueItem
                         {
                             Id = nzoId,
@@ -358,7 +366,8 @@ namespace Listenarr.Api.Services.Adapters
                             CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
                             CanRemove = true,
                             RemotePath = remotePath,
-                            LocalPath = localPath
+                            LocalPath = localPath,
+                            ContentPath = localContentPath
                         });
                     }
                     catch (Exception ex)

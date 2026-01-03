@@ -99,5 +99,12 @@ namespace Listenarr.Domain.Models
         /// The path translated for Listenarr's filesystem (after applying remote path mapping)
         /// </summary>
         public string? LocalPath { get; set; }
+
+        /// <summary>
+        /// The full path to the downloaded content (file or folder).
+        /// For qBittorrent: content_path field (save_path + name)
+        /// This is often the most accurate path for locating the actual downloaded file/folder.
+        /// </summary>
+        public string? ContentPath { get; set; }
     }
 }

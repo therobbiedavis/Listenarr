@@ -1228,7 +1228,7 @@ namespace Listenarr.Api.Services
                 {
                     var announces = MyAnonamouseHelper.ExtractAnnounceUrls(torrentBytes);
                     var count = announces?.Count ?? 0;
-                    var unique = count > 0 ? string.Join(", ", announces.Take(10)) : "(none)";
+                    var unique = count > 0 ? string.Join(", ", announces?.Take(10) ?? Enumerable.Empty<string>()) : "(none)";
                     _logger.LogInformation("Cached MyAnonamouse torrent announces for '{Title}' - count={Count}: {Announces}", searchResult.Title, count, LogRedaction.RedactText(unique, LogRedaction.GetSensitiveValuesFromEnvironment()));
 
                     // Also cache the extracted announce URLs for quick retrieval by diagnostics endpoints
@@ -1539,7 +1539,7 @@ namespace Listenarr.Api.Services
                     {
                         var announces = MyAnonamouseHelper.ExtractAnnounceUrls(result.TorrentFileContent!);
                         var count = announces?.Count ?? 0;
-                        var unique = count > 0 ? string.Join(", ", announces.Take(10)) : "(none)";
+                        var unique = count > 0 ? string.Join(", ", announces?.Take(10) ?? Enumerable.Empty<string>()) : "(none)";
                         _logger.LogInformation("Torrent announce/URLs for '{Title}' - count={Count}: {Announces}", result.Title, count, LogRedaction.RedactText(unique, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         if (count == 0)
                         {
@@ -2419,6 +2419,7 @@ namespace Listenarr.Api.Services
                                 CanRemove = true,
                                 RemotePath = uc.RemotePath,
                                 LocalPath = uc.LocalPath,
+                                ContentPath = uc.ContentPath,
                                 Seeders = uc.Seeders,
                                 Leechers = uc.Leechers,
                                 Ratio = uc.Ratio
@@ -2616,7 +2617,8 @@ namespace Listenarr.Api.Services
                             CanPause = false,
                             CanRemove = true,
                             RemotePath = d.DownloadPath,
-                            LocalPath = d.FinalPath
+                            LocalPath = d.FinalPath,
+                            ContentPath = d.FinalPath ?? d.DownloadPath
                         });
 
                         existingIds.Add(d.Id);
@@ -2811,11 +2813,17 @@ namespace Listenarr.Api.Services
                         var numLeechs = torrent.TryGetValue("num_leechs", out var numLeechsEl) ? (int?)numLeechsEl.GetInt32() : null;
                         var ratio = torrent.TryGetValue("ratio", out var ratioEl) ? (double?)ratioEl.GetDouble() : null;
                         var savePath = torrent.TryGetValue("save_path", out var savePathEl) ? savePathEl.GetString() ?? "" : "";
+                        var contentPath = torrent.TryGetValue("content_path", out var contentPathEl) ? contentPathEl.GetString() ?? "" : "";
 
                         // Apply remote path mapping for Docker scenarios
                         var localPath = !string.IsNullOrEmpty(savePath)
                             ? await _pathMappingService.TranslatePathAsync(client.Id, savePath)
                             : savePath;
+
+                        // Also map the content path (the actual file/folder path)
+                        var localContentPath = !string.IsNullOrEmpty(contentPath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
+                            : contentPath;
 
                         // Map qBittorrent states to unified status
                         // Note: qBittorrent doesn't have explicit "completed" states
@@ -2855,9 +2863,9 @@ namespace Listenarr.Api.Services
                             _ => "unknown"
                         };
 
-                        // Determine completion: progress >= 100% AND in seeding state
-                        // This is the correct way since qBittorrent doesn't have explicit completed states
-                        if (progress >= 100.0 && (status == "seeding" || state == "uploading" || state == "stalledUP" || state == "checkingUP" || state == "forcedUP" || state == "stoppedUP"))
+                        // Determine completion: any torrent at 100% progress is complete
+                        // regardless of whether it's seeding, paused, or in any other state
+                        if (progress >= 100.0)
                         {
                             status = "completed";
                         }
@@ -2883,7 +2891,8 @@ namespace Listenarr.Api.Services
                             CanPause = status == "downloading" || status == "queued",
                             CanRemove = true,
                             RemotePath = savePath,
-                            LocalPath = localPath
+                            LocalPath = localPath,
+                            ContentPath = localContentPath
                         });
                     }
                 }

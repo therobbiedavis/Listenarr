@@ -1207,6 +1207,66 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   return 'quality-mismatch'
 }
 
+/**
+ * Force reload all lazy images after data updates (e.g., bulk edit, individual edit)
+ * 
+ * Problem: When imageUrl changes, Vue updates :data-src but <img> elements are reused (same :key).
+ * The lazy observer already loaded old images and may have removed data-src attributes.
+ * Even when Vue restores data-src, img.src still shows the old image.
+ * 
+ * Solution: Reset all lazy images back to placeholder, then re-observe them.
+ */
+async function reloadAllLazyImages() {
+  await nextTick()
+  
+  try {
+    // Find all lazy images in the current view
+    const lazyImages = Array.from(document.querySelectorAll('img.lazy-img')) as HTMLImageElement[]
+    
+    // Reset each image back to placeholder
+    for (const img of lazyImages) {
+      try {
+        const dataSrc = img.getAttribute('data-src')
+        const currentSrc = img.getAttribute('src')
+        
+        // If image has data-src (Vue updated it), reset src to placeholder
+        if (dataSrc) {
+          img.src = getPlaceholderUrl()
+        } 
+        // If image was already loaded (no data-src), force reload
+        else if (currentSrc && !currentSrc.startsWith('data:image')) {
+          img.src = getPlaceholderUrl()
+        }
+      } catch (e) {
+        // Ignore individual image errors
+      }
+    }
+    
+    await nextTick()
+    
+    // Reset the global observer to clear stale observations
+    resetLazyObserver()
+    
+    // Re-observe all lazy images with updated data-src values
+    observeLazyImages()
+    
+    // Force immediate load of visible images
+    await nextTick()
+    ensureVisibleImagesLoad()
+    
+    // Defensive retry after slight delay
+    setTimeout(() => {
+      try {
+        ensureVisibleImagesLoad()
+      } catch (e) {
+        console.debug('ensureVisibleImagesLoad retry failed:', e)
+      }
+    }, 100)
+  } catch (e) {
+    console.error('Failed to reload lazy images:', e)
+  }
+}
+
 function handleClickOutside(event: Event) {
   const target = event.target as HTMLElement
   if (!target.closest('.group-dropdown')) {
@@ -1489,8 +1549,12 @@ function closeBulkEdit() {
 async function handleBulkEditSaved() {
   // Refresh library to show updated data
   await libraryStore.fetchLibrary()
+  
   // Clear selection after successful bulk edit
   libraryStore.clearSelection()
+  
+  // Force reload all lazy images (e.g., after root folder changes)
+  await reloadAllLazyImages()
 }
 
 function openEditModal(audiobook: Audiobook) {
@@ -1517,6 +1581,9 @@ async function handleEditSaved() {
       editAudiobook.value = updated
     }
   }
+  
+  // Force reload all lazy images (e.g., if root folder or image URL changed)
+  await reloadAllLazyImages()
 }
 
 function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: MouseEvent) {

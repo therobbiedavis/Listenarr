@@ -35,9 +35,11 @@ namespace Listenarr.Api.Tests
             Directory.CreateDirectory(nested);
             File.WriteAllText(Path.Combine(src, "file1.txt"), "one");
             File.WriteAllText(Path.Combine(nested, "file2.txt"), "two");
+            // Additionally create a cover image inside the audiobook folder and set ImageUrl to it
+            File.WriteAllText(Path.Combine(src, "cover.jpg"), "coverdata");
 
-            // Audiobook record uses src
-            var ab = new Audiobook { Title = "MoveTest", BasePath = src };
+            // Audiobook record uses src and points to the local cover
+            var ab = new Audiobook { Title = "MoveTest", BasePath = src, ImageUrl = Path.GetFullPath(Path.Combine(src, "cover.jpg")) };
             db.Audiobooks.Add(ab);
             await db.SaveChangesAsync();
 
@@ -94,6 +96,10 @@ namespace Listenarr.Api.Tests
                 var db2 = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 var ab2 = await db2.Audiobooks.FindAsync(ab.Id);
                 Assert.Equal(Path.GetFullPath(dst), ab2.BasePath);
+
+                // Verify ImageUrl was updated to new location when the cover file exists
+                var expectedCover = Path.GetFullPath(Path.Combine(dst, "cover.jpg"));
+                Assert.Equal(expectedCover, ab2.ImageUrl);
             }
 
             // Cleanup

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
+using Listenarr.Infrastructure.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
@@ -418,6 +419,103 @@ namespace Listenarr.Api.Services
                             _logger.LogError(ex, "ProcessCompletedDownloadAsync: failed to import single file {FinalPath} for download {DownloadId}", finalPath, downloadId);
                         }
                     }
+                }
+
+                // Cleanup from download client if configured
+                try
+                {
+                    if (download != null && !string.IsNullOrWhiteSpace(download.DownloadClientId))
+                    {
+                        var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
+                        using var cleanupScope = scopeFactoryToUse.CreateScope();
+                        var configService = cleanupScope.ServiceProvider.GetService<IConfigurationService>();
+                        var downloadClientGateway = cleanupScope.ServiceProvider.GetService<IDownloadClientGateway>();
+                        
+                        if (configService != null && downloadClientGateway != null)
+                        {
+                            var clientConfig = await configService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
+                            if (clientConfig != null && !string.IsNullOrEmpty(clientConfig.RemoveCompletedDownloads) && 
+                                clientConfig.RemoveCompletedDownloads != "none")
+                            {
+                                bool deleteFiles = clientConfig.RemoveCompletedDownloads == "remove_and_delete";
+                                var removed = await downloadClientGateway.RemoveAsync(clientConfig, download.Id, deleteFiles);
+                                
+                                if (removed)
+                                {
+                                    _logger.LogInformation("Removed download {DownloadId} from client {ClientName} (deleteFiles={DeleteFiles})", 
+                                        download.Id, clientConfig.Name, deleteFiles);
+                                    
+                                    // Log to history
+                                    var historyRepo = cleanupScope.ServiceProvider.GetService<IHistoryRepository>();
+                                    if (historyRepo != null)
+                                    {
+                                        var historyEntry = new Listenarr.Domain.Models.History
+                                        {
+                                            AudiobookId = download.AudiobookId,
+                                            AudiobookTitle = download.Title,
+                                            EventType = "Imported",
+                                            Message = $"Automatically imported and removed from {clientConfig.Name}. Files deleted: {deleteFiles}",
+                                            Source = "AutoImport",
+                                            Timestamp = DateTime.UtcNow,
+                                            NotificationSent = false,
+                                            Data = System.Text.Json.JsonSerializer.Serialize(new { 
+                                                DownloadId = download.Id,
+                                                ClientName = clientConfig.Name,
+                                                ClientType = clientConfig.Type,
+                                                FilesDeleted = deleteFiles,
+                                                FinalPath = download.FinalPath
+                                            })
+                                        };
+                                        await historyRepo.AddAsync(historyEntry);
+                                        _logger.LogInformation("Added history entry for automatic import of {DownloadId}", downloadId);
+                                        
+                                        // Send notification
+                                        try
+                                        {
+                                            var notificationService = cleanupScope.ServiceProvider.GetService<INotificationService>();
+                                            if (notificationService != null)
+                                            {
+                                                var webhooks = await configService.GetWebhookConfigurationsAsync();
+                                                foreach (var webhook in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Imported")))
+                                                {
+                                                    await notificationService.SendNotificationAsync(
+                                                        "Imported",
+                                                        new {
+                                                            AudiobookTitle = download.Title,
+                                                            DownloadClient = clientConfig.Name,
+                                                            FilePath = download.FinalPath,
+                                                            RemovedFromClient = true,
+                                                            FilesDeleted = deleteFiles,
+                                                            Timestamp = DateTime.UtcNow
+                                                        },
+                                                        webhook.Url,
+                                                        webhook.Triggers
+                                                    );
+                                                }
+                                                
+                                                // Mark notification as sent
+                                                historyEntry.NotificationSent = true;
+                                                await historyRepo.UpdateAsync(historyEntry);
+                                            }
+                                        }
+                                        catch (Exception notifyEx)
+                                        {
+                                            _logger.LogWarning(notifyEx, "Failed to send import notification for {DownloadId}", downloadId);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("Failed to remove download {DownloadId} from client {ClientName}", 
+                                        download.Id, clientConfig.Name);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogError(cleanupEx, "Error during post-import cleanup for {DownloadId}", downloadId);
                 }
 
                 try

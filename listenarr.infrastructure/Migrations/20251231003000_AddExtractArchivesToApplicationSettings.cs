@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Listenarr.Infrastructure.Models;
 
 namespace Listenarr.Infrastructure.Migrations

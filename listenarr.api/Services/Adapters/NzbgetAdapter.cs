@@ -421,6 +421,14 @@ namespace Listenarr.Api.Services.Adapters
                 }
             }
 
+            // For NZBGet, construct ContentPath from destDir + title
+            var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
+                ? Path.Combine(destDir, title)
+                : destDir;
+            var localContentPath = !string.IsNullOrEmpty(contentPath)
+                ? _pathMappingService.TranslatePathAsync(client.Id, contentPath).GetAwaiter().GetResult()
+                : contentPath;
+
             var addedAt = DateTime.UtcNow;
 
             return new QueueItem
@@ -441,7 +449,8 @@ namespace Listenarr.Api.Services.Adapters
                 CanPause = status is "downloading" or "queued",
                 CanRemove = true,
                 RemotePath = destDir,
-                LocalPath = localPath
+                LocalPath = localPath,
+                ContentPath = localContentPath
             };
         }
 

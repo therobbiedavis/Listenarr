@@ -2968,7 +2968,7 @@ namespace Listenarr.Api.Services
                         {
                             var baseUrl = (indexer?.Url ?? "https://www.myanonamouse.net").TrimEnd('/');
                             downloadUrl = $"{baseUrl}/tor/download.php/{dlHash}";
-                            var mamIdLocal = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
+                            var mamIdLocal = MyAnonamouseHelper.TryGetMamId(indexer?.AdditionalSettings);
                             if (!string.IsNullOrEmpty(mamIdLocal))
                             {
                                 // Normalize mam_id: if the stored value is already percent-encoded, unescape it first

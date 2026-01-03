@@ -51,6 +51,11 @@ namespace Listenarr.Domain.Models
         public string DownloadPath { get; set; } = string.Empty;
         public bool UseSSL { get; set; } = false;
         public bool IsEnabled { get; set; } = true;
+        
+        /// <summary>
+        /// Cleanup behavior after successful import: "none", "remove", "remove_and_delete"
+        /// </summary>
+        public string RemoveCompletedDownloads { get; set; } = "none";
 
         // Store as JSON string in database
         public string SettingsJson { get; set; } = "{}";

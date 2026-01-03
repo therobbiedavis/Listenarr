@@ -37,4 +37,25 @@ watch(localCustomPath, (v) => emit('update:customPath', v))
 <style scoped>
 .root-folder-select { display:flex; flex-direction:column; gap:0.5rem }
 .custom-path { margin-top:0.5rem }
+
+.form-select {
+  padding: 0.75rem 1rem;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.form-select:hover {
+  border-color: #555;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+}
 </style>

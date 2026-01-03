@@ -560,7 +560,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed, type Component } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick, type Component } from 'vue'
 import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
@@ -569,6 +569,8 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { apiService } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
+import { getPlaceholderUrl } from '@/utils/placeholder'
+import { observeLazyImages, ensureVisibleImagesLoad } from '@/utils/lazyLoad'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
@@ -744,6 +746,12 @@ watch(activeTab, async (newTab) => {
 
 onMounted(async () => {
   await loadAudiobook()
+  
+  // Setup lazy loading for images
+  await nextTick()
+  observeLazyImages()
+  ensureVisibleImagesLoad()
+  
   // subscribe to scan job updates
   signalRService.onScanJobUpdate((job) => {
     if (!audiobook.value) return
@@ -841,6 +849,11 @@ async function loadAudiobook() {
 async function afterLoad() {
   await loadQualityProfilesForDetail()
   await loadWebhooks()
+  
+  // Trigger lazy loading after data loads
+  await nextTick()
+  observeLazyImages()
+  ensureVisibleImagesLoad()
 }
 
 async function loadWebhooks() {
@@ -1200,6 +1213,11 @@ function toggleFileAccordion(fileId: number): void {
 
 function getFullPath(relativePath?: string): string {
   if (!relativePath) return 'Unknown'
+  
+  // Check if path is already absolute (starts with drive letter or root slash)
+  const isAbsolute = /^([a-zA-Z]:[\\/]|[\\/])/.test(relativePath)
+  if (isAbsolute) return relativePath
+  
   if (!audiobook.value?.basePath) return relativePath
   // Combine base path with relative path
   return audiobook.value.basePath + (audiobook.value.basePath.endsWith('/') || audiobook.value.basePath.endsWith('\\') ? '' : '/') + relativePath

@@ -113,6 +113,9 @@ builder.Services.AddScoped<Listenarr.Api.Services.IRootFolderService, Listenarr.
 // Migrator for legacy single-outputPath -> RootFolder migration
 builder.Services.AddScoped<Listenarr.Api.Services.ILegacyOutputPathMigrator, Listenarr.Api.Services.LegacyOutputPathMigrator>();
 
+// History repository for tracking events
+builder.Services.AddScoped<Listenarr.Infrastructure.Repositories.IHistoryRepository, Listenarr.Infrastructure.Repositories.HistoryRepository>();
+
 // Add in-memory cache for metadata prefetch / reuse
 builder.Services.AddMemoryCache();
 

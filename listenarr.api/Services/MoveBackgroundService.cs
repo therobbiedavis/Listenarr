@@ -197,6 +197,47 @@ namespace Listenarr.Api.Services
                         db.Audiobooks.Update(audiobook);
                         await db.SaveChangesAsync(stoppingToken);
 
+                        // Preserve local image path if it pointed inside the source directory
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(audiobook.ImageUrl))
+                            {
+                                var imageUrl = audiobook.ImageUrl;
+
+                                // Only attempt to rewrite file-system paths (skip /api/images/ or URLs)
+                                bool looksLikeFsPath = Path.IsPathRooted(imageUrl) || imageUrl.StartsWith(source, StringComparison.OrdinalIgnoreCase) || imageUrl.StartsWith(source.Replace(Path.DirectorySeparatorChar, '/'), StringComparison.OrdinalIgnoreCase);
+                                if (looksLikeFsPath)
+                                {
+                                    try
+                                    {
+                                        var fullImagePath = Path.IsPathRooted(imageUrl) ? Path.GetFullPath(imageUrl) : Path.GetFullPath(Path.Combine(source, imageUrl));
+                                        if (fullImagePath.StartsWith(source, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            var rel = Path.GetRelativePath(source, fullImagePath);
+                                            var newImagePath = Path.GetFullPath(Path.Combine(target, rel));
+
+                                            // Only update if the new file actually exists after move
+                                            if (System.IO.File.Exists(newImagePath))
+                                            {
+                                                audiobook.ImageUrl = newImagePath;
+                                                db.Audiobooks.Update(audiobook);
+                                                await db.SaveChangesAsync(stoppingToken);
+                                                _logger.LogInformation("Updated ImageUrl for audiobook {AudiobookId} to new path after move", audiobook.Id);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception innerEx)
+                                    {
+                                        _logger.LogDebug(innerEx, "Non-fatal: failed to update ImageUrl after move for audiobook {AudiobookId}", audiobook.Id);
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Non-fatal: error while attempting to preserve ImageUrl for audiobook {AudiobookId}", audiobook.Id);
+                        }
+
                         _moveQueue.UpdateJobStatus(job.Id, "Completed");
                         _logger.LogInformation("Move job {JobId} completed: {Source} -> {Target}", job.Id, source, target);
                     }

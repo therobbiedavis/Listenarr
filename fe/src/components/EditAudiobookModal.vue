@@ -89,13 +89,54 @@
               Destination Folder
             </label>
             <div class="destination-display">
-              <div class="destination-row">
-                <div class="root-select">
-                  <RootFolderSelect v-model:rootId="selectedRootId" v-model:customPath="customRootPath" />
-                </div>
-                <input type="text" v-model="formData.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+              <!-- Read-only display mode -->
+              <div v-if="!editingDestination" class="destination-readonly">
+                <input
+                  type="text"
+                  :value="combinedBasePath() || 'No destination set'"
+                  class="form-input readonly-input"
+                  readonly
+                  disabled
+                />
+                <button
+                  type="button"
+                  class="btn-edit-destination"
+                  @click="editingDestination = true"
+                  title="Edit destination"
+                >
+                  <PhPencil :size="16" />
+                  <span class="btn-text">Edit</span>
+                </button>
               </div>
-              <p class="help-text">Select a named root (or custom path) and edit the path relative to it on the right.</p>
+              <!-- Edit mode -->
+              <div v-else class="destination-edit">
+                <div class="destination-row">
+                  <div class="root-select">
+                    <RootFolderSelect v-model:rootId="selectedRootId" v-model:customPath="customRootPath" />
+                  </div>
+                  <input type="text" v-model="formData.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+                </div>
+                <div class="destination-actions">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    @click="editingDestination = false"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    @click="editingDestination = false"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+              <p class="help-text">
+                <span v-if="!editingDestination">Click the edit button to change the destination folder.</span>
+                <span v-else>Select a named root (or custom path) and edit the path relative to it on the right.</span>
+              </p>
             </div>
           </div>
 
@@ -241,7 +282,7 @@ import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, QualityProfile } from '@/types'
-import { PhX } from '@phosphor-icons/vue'
+import { PhX, PhPencil } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import RootFolderSelect from '@/components/RootFolderSelect.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
@@ -276,6 +317,7 @@ const customRootPath = ref<string | null>(null)
 const rootPath = ref<string | null>(null)
 const saving = ref(false)
 const newTag = ref('')
+const editingDestination = ref(false)
 const toast = useToast()
 
 const formData = ref<FormData>({
@@ -392,6 +434,35 @@ async function initializeForm() {
     explicit: Boolean(props.audiobook.explicit),
     basePath: props.audiobook.basePath ?? null
     ,relativePath: null
+  }
+
+  // Determine which root folder matches the existing basePath
+  if (props.audiobook.basePath && rootStore.folders.length > 0) {
+    // Check if basePath starts with any configured root folder
+    const matchingRoot = rootStore.folders.find(folder => {
+      const normBase = props.audiobook.basePath!.replace(/\\/g, '/')
+      const normRoot = folder.path.replace(/\\/g, '/')
+      const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
+      return normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())
+    })
+
+    if (matchingRoot) {
+      // Found a matching configured root folder
+      selectedRootId.value = matchingRoot.id
+      customRootPath.value = null
+    } else {
+      // No matching configured root folder - use custom path
+      selectedRootId.value = 0
+      customRootPath.value = props.audiobook.basePath
+    }
+  } else if (props.audiobook.basePath) {
+    // No configured root folders, but there's a basePath - use custom
+    selectedRootId.value = 0
+    customRootPath.value = props.audiobook.basePath
+  } else {
+    // No basePath - use default selection
+    selectedRootId.value = null
+    customRootPath.value = null
   }
 
   // Helper: derive relative path from full base and configured root
@@ -1091,6 +1162,75 @@ function close() {
   padding: 0.5rem 0;
 }
 
+/* Read-only destination display */
+.destination-readonly {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.readonly-input {
+  flex: 1;
+  background-color: #1a1a1a !important;
+  color: #888 !important;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.btn-edit-destination {
+  padding: 0.6rem 1rem;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background-color: #333;
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 70px;
+  height: 40px; /* Match input height */
+  font-size: 0.9rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.btn-edit-destination:hover {
+  border-color: #007acc;
+  background-color: #007acc;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,122,204,0.3);
+}
+
+.btn-edit-destination:active {
+  background-color: #0056b3;
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.btn-edit-destination .btn-text {
+  font-weight: 500;
+}
+
+/* Edit mode destination */
+.destination-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.destination-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.btn-sm {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  min-width: auto;
+}
+
 /* root-label is used instead of readonly-path */
 
 .form-input {
@@ -1119,7 +1259,7 @@ function close() {
 .root-label {
   width: fit-content;
   max-width: 40%;
-  padding: 0.45rem 0 0,45rem 0.6rem;
+  padding: 0.45rem 0.6rem;
   color: #ccc;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
   font-size: 0.9rem;

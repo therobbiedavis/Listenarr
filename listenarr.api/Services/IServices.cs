@@ -474,6 +474,12 @@ namespace Listenarr.Api.Services
         /// </summary>
         /// <param name="config">The startup configuration to save</param>
         Task SaveStartupConfigAsync(StartupConfig config);
+
+        /// <summary>
+        /// Gets all webhook configurations
+        /// </summary>
+        /// <returns>List of webhook configurations</returns>
+        Task<List<WebhookConfiguration>> GetWebhookConfigurationsAsync();
     }
 
     /// <summary>
@@ -500,6 +506,15 @@ namespace Listenarr.Api.Services
         /// <param name="title">Notification title</param>
         /// <param name="message">Notification message</param>
         Task SendSystemNotificationAsync(string title, string message);
+
+        /// <summary>
+        /// Sends a notification to a specific webhook
+        /// </summary>
+        /// <param name="trigger">The event trigger name</param>
+        /// <param name="data">The notification data payload</param>
+        /// <param name="webhookUrl">The webhook URL to send to</param>
+        /// <param name="enabledTriggers">List of enabled triggers for this webhook</param>
+        Task SendNotificationAsync(string trigger, object data, string webhookUrl, List<string> enabledTriggers);
     }
 
     /// <summary>

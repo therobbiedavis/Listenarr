@@ -1024,6 +1024,203 @@ namespace Listenarr.Api.Controllers
             return Ok(result);
         }
 
+        [HttpPost("bulk-update")]
+        public async Task<IActionResult> BulkUpdateAudiobooks([FromBody] BulkUpdateRequest request)
+        {
+            if (request?.Ids == null || !request.Ids.Any())
+            {
+                return BadRequest(new { message = "No audiobook IDs provided for bulk update" });
+            }
+
+            var results = new List<object>();
+
+            // Fetch application settings once for naming pattern when processing rootFolder changes
+            ApplicationSettings? settings = null;
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                settings = await configService.GetApplicationSettingsAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load application settings while performing bulk update");
+            }
+
+            foreach (var id in request.Ids.Distinct())
+            {
+                var entryErrors = new List<string>();
+                var success = false;
+
+                try
+                {
+                    var audiobook = await _repo.GetByIdAsync(id);
+                    if (audiobook == null)
+                    {
+                        entryErrors.Add($"Audiobook with ID {id} not found");
+                        results.Add(new { id, success, errors = entryErrors });
+                        continue;
+                    }
+
+                    // Track whether any change was applied
+                    var changed = false;
+
+                    // Monitored
+                    if (request.Updates != null && request.Updates.TryGetValue("monitored", out var monitoredObj))
+                    {
+                        try
+                        {
+                            bool monVal;
+                            if (monitoredObj is JsonElement je)
+                            {
+                                monVal = je.ValueKind == JsonValueKind.True;
+                            }
+                            else
+                            {
+                                monVal = Convert.ToBoolean(monitoredObj);
+                            }
+
+                            audiobook.Monitored = monVal;
+                            changed = true;
+                            _logger.LogInformation("Set Monitored={Monitored} for audiobook id={Id}", monVal, id);
+
+                            // History entry
+                            _dbContext.History.Add(new History
+                            {
+                                AudiobookId = audiobook.Id,
+                                AudiobookTitle = audiobook.Title ?? "Unknown",
+                                EventType = "Updated",
+                                Message = $"Monitored set to {monVal}",
+                                Source = "BulkUpdate",
+                                Timestamp = DateTime.UtcNow
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Invalid monitored value: {ex.Message}");
+                        }
+                    }
+
+                    // QualityProfileId
+                    if (request.Updates != null && request.Updates.TryGetValue("qualityProfileId", out var qpObj))
+                    {
+                        try
+                        {
+                            int qpVal;
+                            if (qpObj is JsonElement jq)
+                            {
+                                qpVal = jq.GetInt32();
+                            }
+                            else
+                            {
+                                qpVal = Convert.ToInt32(qpObj);
+                            }
+
+                            audiobook.QualityProfileId = qpVal;
+                            changed = true;
+                            _logger.LogInformation("Set QualityProfileId={Profile} for audiobook id={Id}", qpVal, id);
+
+                            _dbContext.History.Add(new History
+                            {
+                                AudiobookId = audiobook.Id,
+                                AudiobookTitle = audiobook.Title ?? "Unknown",
+                                EventType = "Updated",
+                                Message = $"Quality profile set to {qpVal}",
+                                Source = "BulkUpdate",
+                                Timestamp = DateTime.UtcNow
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Invalid qualityProfileId value: {ex.Message}");
+                        }
+                    }
+
+                    // Root folder change (rootFolder => path string)
+                    if (request.Updates != null && request.Updates.TryGetValue("rootFolder", out var rootObj))
+                    {
+                        try
+                        {
+                            string? rootPath = null;
+                            if (rootObj is JsonElement jr)
+                            {
+                                if (jr.ValueKind == JsonValueKind.String)
+                                    rootPath = jr.GetString();
+                            }
+                            else if (rootObj != null)
+                            {
+                                rootPath = rootObj.ToString();
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(rootPath))
+                            {
+                                // Use configured naming pattern to compute full base directory for this audiobook
+                                var fileNamingPattern = settings?.FileNamingPattern ?? string.Empty;
+                                var newBase = ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern);
+
+                                try
+                                {
+                                    if (!Directory.Exists(newBase))
+                                    {
+                                        Directory.CreateDirectory(newBase);
+                                        _logger.LogInformation("Created directory for audiobook id={Id} at {Path}", id, newBase);
+                                    }
+
+                                    audiobook.BasePath = newBase;
+                                    changed = true;
+
+                                    _dbContext.History.Add(new History
+                                    {
+                                        AudiobookId = audiobook.Id,
+                                        AudiobookTitle = audiobook.Title ?? "Unknown",
+                                        EventType = "Updated",
+                                        Message = $"BasePath set to {newBase} via bulk update",
+                                        Source = "BulkUpdate",
+                                        Timestamp = DateTime.UtcNow
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                    entryErrors.Add($"Failed to apply root folder for audiobook {id}: {ex.Message}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Invalid rootFolder value: {ex.Message}");
+                        }
+                    }
+
+                    // Persist updates for this audiobook
+                    if (changed)
+                    {
+                        try
+                        {
+                            _dbContext.Audiobooks.Update(audiobook);
+                            await _dbContext.SaveChangesAsync();
+                            success = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Failed to save changes for audiobook {id}: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        entryErrors.Add("No valid updates provided for this audiobook");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    entryErrors.Add($"Unhandled error: {ex.Message}");
+                }
+
+                results.Add(new { id, success, errors = entryErrors });
+            }
+
+            return Ok(new { message = "Bulk update completed", results });
+        }
+
         /// <summary>
         /// Scan the filesystem for files belonging to this audiobook, extract metadata (ffprobe) and persist AudiobookFile records.
         /// Optional body: { path: "C:\\some\\folder" } to scan a specific folder instead of the configured output path.

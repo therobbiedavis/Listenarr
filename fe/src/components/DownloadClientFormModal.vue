@@ -186,24 +186,34 @@
           </div>
 
           <!-- Client Specific Settings -->
-          <div class="form-section" v-if="isUsenet">
+          <div class="form-section">
             <h3>Completed Download Handling</h3>
             
-            <div class="checkbox-group">
+            <div class="form-group">
+              <label for="removeCompletedDownloads">Completed Download Action</label>
+              <select id="removeCompletedDownloads" v-model="formData.removeCompletedDownloads">
+                <option value="none">None - Keep in client</option>
+                <option value="remove">Remove - Remove from client</option>
+                <option value="remove_and_delete">Remove and Delete - Remove from client and delete files</option>
+              </select>
+              <small>Action to take after a download is successfully imported. "Remove and Delete" will delete the downloaded files from the download client after import.</small>
+            </div>
+
+            <div class="checkbox-group" v-if="isUsenet">
               <label>
                 <input type="checkbox" v-model="formData.removeCompleted" />
                 <span>
-                  <strong>Remove Completed</strong>
+                  <strong>Remove Completed (Legacy)</strong>
                   <small>Remove imported downloads from download client history</small>
                 </span>
               </label>
             </div>
 
-            <div class="checkbox-group">
+            <div class="checkbox-group" v-if="isUsenet">
               <label>
                 <input type="checkbox" v-model="formData.removeFailed" />
                 <span>
-                  <strong>Remove Failed</strong>
+                  <strong>Remove Failed (Legacy)</strong>
                   <small>Remove failed downloads from download client history</small>
                 </span>
               </label>
@@ -337,6 +347,7 @@ const defaultFormData = {
   olderPriority: 'default',
   removeCompleted: false,
   removeFailed: false,
+  removeCompletedDownloads: 'none',
   initialState: 'default',
   sequentialOrder: false,
   firstAndLastFirst: false,
@@ -436,6 +447,7 @@ watch(() => props.editingClient, (newClient) => {
       olderPriority: (settings?.olderPriority as string) || 'default',
       removeCompleted: (settings?.removeCompleted as boolean) || false,
       removeFailed: (settings?.removeFailed as boolean) || false,
+      removeCompletedDownloads: (settings?.removeCompletedDownloads as string) || 'none',
       initialState: (settings?.initialState as string) || 'default',
       sequentialOrder: (settings?.sequentialOrder as boolean) || false,
       firstAndLastFirst: (settings?.firstAndLastFirst as boolean) || false,
@@ -496,6 +508,7 @@ const handleSubmit = async () => {
         olderPriority: formData.value.olderPriority,
         removeCompleted: formData.value.removeCompleted,
         removeFailed: formData.value.removeFailed,
+        removeCompletedDownloads: formData.value.removeCompletedDownloads,
         initialState: formData.value.initialState,
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,

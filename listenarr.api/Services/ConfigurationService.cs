@@ -325,5 +325,20 @@ namespace Listenarr.Api.Services
                 throw;
             }
         }
+
+        // Webhook Configuration methods
+        public async Task<List<WebhookConfiguration>> GetWebhookConfigurationsAsync()
+        {
+            try
+            {
+                var settings = await GetApplicationSettingsAsync();
+                return settings?.Webhooks ?? new List<WebhookConfiguration>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving webhook configurations");
+                return new List<WebhookConfiguration>();
+            }
+        }
     }
 }

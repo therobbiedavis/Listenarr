@@ -493,10 +493,15 @@ namespace Listenarr.Api.Services
             var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
 
             // Get all active downloads from database
+            // Include:
+            // - Queued, Downloading, Paused, Processing (actively being monitored)
+            // - Completed without FinalPath (completed in client but not yet imported)
             var activeDownloads = await dbContext.Downloads
                 .Where(d => d.Status == DownloadStatus.Queued ||
                            d.Status == DownloadStatus.Downloading ||
-                           d.Status == DownloadStatus.Processing)
+                           d.Status == DownloadStatus.Paused ||
+                           d.Status == DownloadStatus.Processing ||
+                           (d.Status == DownloadStatus.Completed && string.IsNullOrEmpty(d.FinalPath)))
                 .ToListAsync(cancellationToken);
 
             _logger.LogDebug("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
@@ -765,8 +770,18 @@ namespace Listenarr.Api.Services
 
 
                     _logger.LogDebug("Found {TorrentCount} torrents in qBittorrent for client {ClientName}", torrentLookup.Count, client.Name);
+                    
+                    // Log all torrents for diagnostics
+                    foreach (var t in torrentLookup.Take(10))
+                    {
+                        _logger.LogDebug("qBittorrent torrent: Name={Name}, Hash={Hash}, Progress={Progress:P2}, State={State}, Size={Size}", 
+                            t.Name, t.Hash, t.Progress, t.State, t.Size);
+                    }
 
                     // For each DB download associated with this client, try to find matching torrent
+                    _logger.LogInformation("Checking {DownloadCount} downloads against qBittorrent torrents for client {ClientName}", 
+                        downloads.Count, client.Name);
+                    
                     foreach (var dl in downloads)
                     {
                         try
@@ -936,15 +951,11 @@ namespace Listenarr.Api.Services
                             // Update database with real-time progress information
                             await UpdateDownloadProgressAsync(dl.Id, matched.Progress * 100, matched.AmountLeft, matched.State, dbContext, cancellationToken);
 
-                            // Correct completion detection for qBittorrent
-                            // A torrent is complete when:
-                            // 1. Progress >= 100% (1.0) AND
-                            // 2. In an uploading/seeding state OR amount left is 0
-                            var isComplete = (matched.Progress >= 1.0 &&
-                                            (matched.State == "uploading" || matched.State == "stalledUP" ||
-                                             matched.State == "checkingUP" || matched.State == "forcedUP" ||
-                                             matched.State == "stoppedUP" || matched.State == "queuedUP")) ||
-                                            matched.AmountLeft == 0;
+                            // Lenient completion detection for qBittorrent (similar to Sonarr)
+                            // A torrent is complete when progress >= 100% OR amount left is 0
+                            // The stability window below ensures we don't immediately import a torrent
+                            // that just hit 100% - we wait for the configured delay period
+                            var isComplete = matched.Progress >= 1.0 || matched.AmountLeft == 0;
 
                             _logger.LogDebug("Completion check for {DownloadId}: IsComplete={IsComplete}, Progress={Progress:P2}, AmountLeft={AmountLeft}, State={State}",
                                 dl.Id, isComplete, matched.Progress, matched.AmountLeft, matched.State);

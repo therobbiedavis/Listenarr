@@ -93,7 +93,7 @@
               Root Folder
             </label>
 
-            <label class="radio-label" style="padding:0.5rem 1rem;">
+            <label class="radio-label">
               <input type="checkbox" v-model="formData.rootChangeEnabled" />
               <span style="margin-left:0.5rem">Change root folder</span>
             </label>

@@ -144,6 +144,23 @@ namespace Listenarr.Api.Services
                 return 0;
             }
 
+            // Check if there's already an active download for this audiobook
+            var activeDownload = await dbContext.Downloads
+                .Where(d => d.AudiobookId == audiobook.Id &&
+                           (d.Status == DownloadStatus.Queued ||
+                            d.Status == DownloadStatus.Downloading ||
+                            d.Status == DownloadStatus.Paused ||
+                            d.Status == DownloadStatus.Processing ||
+                            d.Status == DownloadStatus.Ready))
+                .FirstOrDefaultAsync(stoppingToken);
+
+            if (activeDownload != null)
+            {
+                _logger.LogInformation("Audiobook '{Title}' already has an active download (ID: {DownloadId}, Status: {Status}), skipping automatic search",
+                    audiobook.Title, activeDownload.Id, activeDownload.Status);
+                return 0;
+            }
+
             // Check existing quality and decide whether to search
             var (cutoffMet, bestExistingQuality) = await GetExistingQualityAsync(audiobook, qualityProfileService, dbContext);
             _logger.LogInformation("Audiobook '{Title}': cutoff met={CutoffMet}, best existing quality={BestQuality}",

@@ -297,6 +297,14 @@ namespace Listenarr.Api.Services.Adapters
 
             var addedAt = addedDate > 0 ? DateTimeOffset.FromUnixTimeSeconds(addedDate).UtcDateTime : DateTime.UtcNow;
 
+            // For Transmission, construct ContentPath from downloadDir + name
+            var contentPath = !string.IsNullOrEmpty(downloadDir) && !string.IsNullOrEmpty(name)
+                ? Path.Combine(downloadDir, name)
+                : downloadDir;
+            var localContentPath = !string.IsNullOrEmpty(contentPath)
+                ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
+                : contentPath;
+
             var queueItem = new QueueItem
             {
                 Id = id,
@@ -316,7 +324,8 @@ namespace Listenarr.Api.Services.Adapters
                 CanPause = status is "downloading" or "queued",
                 CanRemove = true,
                 RemotePath = downloadDir,
-                LocalPath = localPath
+                LocalPath = localPath,
+                ContentPath = localContentPath
             };
 
             return queueItem;

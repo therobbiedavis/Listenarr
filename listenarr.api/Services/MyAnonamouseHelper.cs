@@ -204,13 +204,6 @@ namespace Listenarr.Api.Services
             using var inStream = new System.IO.MemoryStream(torrentBytes);
             using var outStream = new System.IO.MemoryStream();
 
-            void Copy(int count)
-            {
-                var buffer = new byte[count];
-                var read = inStream.Read(buffer, 0, count);
-                outStream.Write(buffer, 0, read);
-            }
-
             string ReadNumber()
             {
                 var sb = new System.Text.StringBuilder();
@@ -325,13 +318,6 @@ namespace Listenarr.Api.Services
                     sb.Append((char)b);
                 }
                 return sb.ToString();
-            }
-
-            string ReadStringLocal(int len)
-            {
-                var buf = new byte[len];
-                var r = inStream.Read(buf, 0, len);
-                return System.Text.Encoding.UTF8.GetString(buf, 0, r);
             }
 
             void CopyElement()

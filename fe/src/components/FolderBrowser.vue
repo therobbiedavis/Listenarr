@@ -241,9 +241,9 @@ const validatePath = async () => {
   flex: 1;
   padding: 0.75rem;
   background-color: #2a2a2a;
-  border: 1px solid #555;
+  border: 1px solid #3a3a3a;
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   color: #fff;
   transition: all 0.2s;
 }
