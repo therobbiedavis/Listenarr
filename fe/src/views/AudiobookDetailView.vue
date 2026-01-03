@@ -122,14 +122,13 @@
 
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()})` }"></div>
+      <div class="backdrop" :style="{ backgroundImage: `url(${coverImageUrl})` }"></div>
       <div class="hero-content">
         <div class="poster-container">
           <img 
-            :src="getPlaceholderUrl()"
-            :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
+            :src="coverImageUrl"
             :alt="audiobook.title"
-            class="poster lazy-img"
+            class="poster"
             loading="lazy"
             decoding="async"
             @error="handleImageError"
@@ -570,7 +569,6 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { apiService } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
-import { observeLazyImages, ensureVisibleImagesLoad } from '@/utils/lazyLoad'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
@@ -675,6 +673,11 @@ const capitalizeFirst = (str: string | undefined): string => {
   if (!str) return ''
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
 }
+
+// Computed property for cover image URL
+const coverImageUrl = computed(() => {
+  return apiService.getImageUrl(audiobook.value?.imageUrl) || getPlaceholderUrl()
+})
 
 // Show a base path even when no files exist yet by falling back to configured default root folder
 const displayBasePath = computed(() => {
@@ -849,11 +852,6 @@ async function loadAudiobook() {
 async function afterLoad() {
   await loadQualityProfilesForDetail()
   await loadWebhooks()
-  
-  // Trigger lazy loading after data loads
-  await nextTick()
-  observeLazyImages()
-  ensureVisibleImagesLoad()
 }
 
 async function loadWebhooks() {

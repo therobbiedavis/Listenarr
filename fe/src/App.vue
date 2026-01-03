@@ -42,7 +42,7 @@
             <ul v-if="suggestions.length > 0" class="search-list">
               <li v-for="s in suggestions" :key="s.id" class="search-result" @click="selectSuggestion(s)">
                 <div style="display:flex;align-items:center;gap:10px;">
-                  <img v-if="s.imageUrl" :src="getPlaceholderUrl()" :data-src="apiService.getImageUrl(s.imageUrl) || ''" @error="handleImageError" alt="cover" class="result-thumb lazy-img" loading="lazy" decoding="async" />
+                  <img v-if="s.imageUrl" :src="apiService.getImageUrl(s.imageUrl) || getPlaceholderUrl()" @error="handleImageError" alt="cover" class="result-thumb" loading="lazy" decoding="async" />
                   <img v-else :src="getPlaceholderUrl()" alt="cover" class="result-thumb" />
                   <div>
                     <div class="result-title">{{ s.title }}</div>
@@ -259,7 +259,6 @@ import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
-import { observeLazyImages } from '@/utils/lazyLoad'
 import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
@@ -694,14 +693,8 @@ const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
 
-onMounted(async () => {
-  await nextTick()
-  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-})
-
-watch(() => suggestions.length, async () => {
-  await nextTick()
-  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+watch(() => suggestions.length, () => {
+  // Native lazy loading covers search suggestions automatically
 })
 
 // (notificationRef and click-outside handler are declared earlier)

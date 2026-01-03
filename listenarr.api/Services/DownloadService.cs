@@ -401,10 +401,31 @@ namespace Listenarr.Api.Services
                                                 afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
                                                 afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
 
-                                        var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, importedFinalPath, "download");
+                                        // Get the audiobook to calculate relative path (consistent with scan service)
+                                        var scopedDb = afScope.ServiceProvider.GetService<ListenArrDbContext>();
+                                        var audiobook = scopedDb != null ? await scopedDb.Audiobooks.FindAsync(download.AudiobookId.Value) : null;
+                                        
+                                        string pathToStore = importedFinalPath;
+                                        if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
+                                        {
+                                            try
+                                            {
+                                                // Store relative path if the file is within the audiobook's base path
+                                                pathToStore = Path.GetRelativePath(audiobook.BasePath, importedFinalPath);
+                                                _logger.LogDebug("Converted absolute path to relative for audiobook {AudiobookId}: {Absolute} -> {Relative}", 
+                                                    download.AudiobookId, importedFinalPath, pathToStore);
+                                            }
+                                            catch (Exception rpEx)
+                                            {
+                                                _logger.LogDebug(rpEx, "Could not calculate relative path, using absolute");
+                                                pathToStore = importedFinalPath;
+                                            }
+                                        }
+
+                                        var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, pathToStore, "download");
                                         if (created)
                                         {
-                                            _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {FinalPath}", download.AudiobookId, importedFinalPath);
+                                            _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {Path}", download.AudiobookId, pathToStore);
                                         }
                                     }
                                 }

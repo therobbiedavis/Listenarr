@@ -147,9 +147,8 @@
           </div>
 
           <img
-            class="list-thumb lazy-img"
-            :src="getPlaceholderUrl()"
-            :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
+            class="list-thumb"
+            :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
             :alt="audiobook.title"
             loading="lazy"
             decoding="async"
@@ -218,13 +217,12 @@
           <div class="collection-cover">
             <img
               v-if="audiobook.imageUrl"
-              :src="getPlaceholderUrl()"
-              :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
+              :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
               :alt="audiobook.title"
               loading="lazy"
               decoding="async"
               @error="handleImageError"
-              class="collection-image lazy-img"
+              class="collection-image"
             />
             <div v-else class="no-cover">
               <PhBookOpen />
@@ -313,7 +311,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { observeLazyImages, ensureVisibleImagesLoad, resetLazyObserver } from '@/utils/lazyLoad'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhUser, PhBooks, PhGridFour, PhList, PhCheckSquare, PhX, PhArrowClockwise, PhInfo, PhBookOpen, PhSpinner, PhWarningCircle, PhPencil, PhTrash, PhCaretLeft, PhCaretRight, PhStar, PhEye, PhEyeSlash } from '@phosphor-icons/vue'
 import { useLibraryStore } from '@/stores/library'
@@ -694,23 +691,9 @@ onMounted(async () => {
   if (libraryStore.audiobooks.length === 0) {
     await libraryStore.fetchLibrary()
   }
-  // Ensure DOM is settled before observing lazy images
-  await nextTick()
-  try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
-  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad immediate failed', e) }
-  setTimeout(() => { try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad retry failed', e) } }, 150)
-  setTimeout(() => { try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad final retry failed', e) } }, 400)
 })
 
-// Re-observe images when page changes
-watch(() => paginatedAudiobooks.value.length, async () => {
-  await nextTick()
-  try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
-  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad failed after paginatedAudiobooks change', e) }
-})
-
+// No need to watch for page changes - native loading="lazy" handles everything
 watch(searchQuery, () => {
   currentPage.value = 1
 })

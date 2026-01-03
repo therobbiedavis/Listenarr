@@ -208,6 +208,9 @@ internal class TestConfigurationService : Listenarr.Api.Services.IConfigurationS
     public Task SaveStartupConfigAsync(Listenarr.Domain.Models.StartupConfig config)
         => Task.CompletedTask;
 
+    public Task<List<Listenarr.Domain.Models.WebhookConfiguration>> GetWebhookConfigurationsAsync()
+        => Task.FromResult(new List<Listenarr.Domain.Models.WebhookConfiguration>());
+
     // Other IConfigurationService members (if added later) should be implemented here with sensible defaults.
 }
 

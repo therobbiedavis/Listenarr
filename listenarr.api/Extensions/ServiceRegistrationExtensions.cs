@@ -265,6 +265,9 @@ namespace Listenarr.Api.Extensions
             // Register the concrete factory as scoped so it can safely resolve scoped adapters via DI.
             services.AddScoped<IDownloadClientAdapterFactory, Listenarr.Api.Services.Adapters.DownloadClientAdapterFactory>();
 
+            // Register import item resolution service (Sonarr's ProvideImportItemService pattern)
+            services.AddScoped<IImportItemResolutionService, ImportItemResolutionService>();
+
             // Register notification payload builder adapter for DI so callers can inject/mokc payload construction.
             services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
 

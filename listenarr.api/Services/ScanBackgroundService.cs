@@ -445,6 +445,9 @@ namespace Listenarr.Api.Services
                                 await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);
                                 await _hubContext.Clients.All.SendAsync("ScanJobUpdate", new { jobId = job.Id.ToString(), audiobookId = job.AudiobookId, status = "Completed", found = foundFiles.Count, created = createdFiles, completedAt = DateTime.UtcNow });
                                 _logger.LogInformation("Broadcasted AudiobookUpdate for AudiobookId {AudiobookId} after scan job {JobId}", audiobook.Id, job.Id);
+                                
+                                // Mark job as completed in queue to prevent deduplication issues
+                                try { _queue.UpdateJobStatus(job.Id, "Completed"); } catch { }
                             }
                         }
                         catch (Exception ex)

@@ -1206,390 +1206,42 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Application settings: OutputPath='{OutputPath}', EnableMetadataProcessing={EnableMetadata}, CompletedFileAction={Action}",
                     settings.OutputPath, settings.EnableMetadataProcessing, settings.CompletedFileAction);
 
-                // Determine localPath (apply remote path mapping if needed)
-                string localPath = clientPath;
-                _logger.LogDebug("Original client path: {ClientPath}", clientPath);
-
-                if (!string.IsNullOrEmpty(clientPath))
+                // V2 Pattern: Use ImportItemResolutionService to get accurate path from download client
+                var importResolver = scope.ServiceProvider.GetService<IImportItemResolutionService>();
+                if (importResolver == null)
                 {
-                    try
-                    {
-                        var pathMapper = scope.ServiceProvider.GetService<IRemotePathMappingService>();
-                        if (pathMapper != null)
-                        {
-                            var mappedPath = await pathMapper.TranslatePathAsync(client.Id, clientPath);
-                            if (!string.Equals(mappedPath, clientPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                localPath = mappedPath;
-                                _logger.LogInformation("Applied path mapping for client {ClientId}: {RemotePath} -> {LocalPath}",
-                                    client.Id, clientPath, localPath);
-                            }
-                            else
-                            {
-                                _logger.LogDebug("No path mapping applied for client {ClientId} and path {ClientPath}", client.Id, clientPath);
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogDebug("No path mapping service available");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error during path mapping for client {ClientId} and path {ClientPath}", client.Id, clientPath);
-                    }
+                    _logger.LogError("ImportItemResolutionService not available for download {DownloadId}", download.Id);
+                    return;
                 }
 
-                _logger.LogInformation("Searching for files in local path: {LocalPath}", localPath);
-
-                string sourceFile = string.Empty;
-                List<string> foundFiles = new();
-
-                // Enhanced file discovery logic
-                if (!string.IsNullOrEmpty(localPath))
+                // Build a preliminary QueueItem from what we know
+                var preliminaryItem = new QueueItem
                 {
-                    // Check if the path itself is a file
-                    if (File.Exists(localPath) && settings.AllowedFileExtensions.Any(ext => localPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        sourceFile = localPath;
-                        foundFiles.Add(localPath);
-                        _logger.LogInformation("Client path is directly a valid file: {FilePath}", localPath);
-                    }
-                    // Check if it's a directory
-                    else if (Directory.Exists(localPath))
-                    {
-                        _logger.LogDebug("Scanning directory for audio files: {Directory}", localPath);
+                    Id = download.Id,
+                    Title = download.Title ?? "Unknown",
+                    Status = "completed",
+                    ContentPath = clientPath,
+                    DownloadClientId = client.Id
+                };
 
-                        try
-                        {
-                            // Find all audio files in the directory and subdirectories
-                            foundFiles = Directory.GetFiles(localPath, "*.*", SearchOption.AllDirectories)
-                                .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                .ToList();
-
-                            _logger.LogInformation("Found {FileCount} audio files in directory {Directory}", foundFiles.Count, localPath);
-                            try { _metrics.Increment("finalize.files.found_in_dir", foundFiles.Count); } catch { }
-                            foreach (var file in foundFiles.Take(5)) // Log first 5 files for debugging
-                            {
-                                var fileInfo = new FileInfo(file);
-                                _logger.LogDebug("Found file: {FileName} ({Size:N0} bytes)", Path.GetFileName(file), fileInfo.Length);
-                            }
-
-                            if (foundFiles.Any())
-                            {
-                                // Smart file selection logic
-                                var titleWords = download.Title?.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries) ?? new string[0];
-
-                                // Try to find file with most title words in the filename
-                                var bestMatch = foundFiles
-                                    .Select(f => new
-                                    {
-                                        Path = f,
-                                        FileName = Path.GetFileNameWithoutExtension(f),
-                                        Size = new FileInfo(f).Length,
-                                        MatchScore = titleWords.Count(word =>
-                                            Path.GetFileNameWithoutExtension(f).Contains(word, StringComparison.OrdinalIgnoreCase))
-                                    })
-                                    .OrderByDescending(x => x.MatchScore)
-                                    .ThenByDescending(x => x.Size) // Prefer larger files as tie-breaker
-                                    .FirstOrDefault();
-
-                                if (bestMatch != null)
-                                {
-                                    // If there is more than one audio file in the directory we treat this
-                                    // as a multi-file release (audiobook with multiple tracks). In that
-                                    // case enqueue the directory itself so downstream processing will
-                                    // delegate to ImportService.ImportFilesFromDirectoryAsync which
-                                    // imports all files in the folder. If just a single audio file
-                                    // exists, keep the current behavior and select the file.
-                                    if (foundFiles.Count > 1)
-                                    {
-                                        sourceFile = localPath; // queue the directory for multi-file import
-                                        _logger.LogInformation("Detected multi-file download (contains {Count} audio files) - enqueuing directory for import: {Directory}", foundFiles.Count, localPath);
-                                    }
-                                    else
-                                    {
-                                        sourceFile = bestMatch.Path;
-                                        _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)",
-                                            Path.GetFileName(sourceFile), bestMatch.MatchScore, bestMatch.Size);
-                                        try { _metrics.Increment("finalize.file.selected_from_dir"); } catch { }
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error scanning directory for files: {Directory}", localPath);
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Local path does not exist or is not accessible: {LocalPath}", localPath);
-
-                        // Heuristic attempts to handle common SABnzbd/staging variations
-                        // Some clients (and SABnzbd history entries) append numeric suffixes
-                        // like '.1' to folder names or file names. Try stripping trailing
-                        // numeric suffix and/or searching the parent directory for a
-                        // similarly named folder that contains valid audio files.
-                        try
-                        {
-                            // Normalize: remove any trailing slash for manipulation
-                            var trimmed = localPath.TrimEnd('/', '\\');
-
-                            // 1) Strip trailing numeric suffixes like '.1', '.2' etc
-                            var noNumericSuffix = System.Text.RegularExpressions.Regex.Replace(trimmed, @"\.\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                            if (!string.Equals(noNumericSuffix, trimmed, StringComparison.OrdinalIgnoreCase))
-                            {
-                                // If this candidate exists, treat it as the local path
-                                if (File.Exists(noNumericSuffix) && settings.AllowedFileExtensions.Any(ext => noNumericSuffix.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    sourceFile = noNumericSuffix;
-                                    foundFiles.Add(sourceFile);
-                                    _logger.LogInformation("Found file by stripping numeric suffix: {File}", sourceFile);
-                                    try { _metrics.Increment("finalize.heuristic.strip_suffix"); } catch { }
-                                }
-                                else if (Directory.Exists(noNumericSuffix))
-                                {
-                                    var tmpFiles = Directory.GetFiles(noNumericSuffix, "*.*", SearchOption.AllDirectories)
-                                        .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                        .ToList();
-
-                                    if (tmpFiles.Any())
-                                    {
-                                        foundFiles = tmpFiles;
-                                        sourceFile = tmpFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                        _logger.LogInformation("Found files by stripping numeric suffix in directory: {Directory}. Selected: {File}", noNumericSuffix, sourceFile);
-                                        try { _metrics.Increment("finalize.heuristic.strip_suffix"); } catch { }
-                                    }
-                                }
-                            }
-
-                            // 2) If still not found, search parent directory for near matches
-                            if (string.IsNullOrEmpty(sourceFile))
-                            {
-                                var parent = Path.GetDirectoryName(trimmed);
-                                if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
-                                {
-                                    var baseName = Path.GetFileName(trimmed);
-                                    // Remove a trailing numeric suffix for matching purposes
-                                    var baseNoSuffix = System.Text.RegularExpressions.Regex.Replace(baseName, @"\.\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-                                    var candidateDirs = Directory.GetDirectories(parent)
-                                        .Where(d => Path.GetFileName(d).IndexOf(baseNoSuffix, StringComparison.OrdinalIgnoreCase) >= 0)
-                                        .ToList();
-
-                                    foreach (var cand in candidateDirs)
-                                    {
-                                        try
-                                        {
-                                            var candFiles = Directory.GetFiles(cand, "*.*", SearchOption.AllDirectories)
-                                                .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                                .ToList();
-
-                                            if (candFiles.Any())
-                                            {
-                                                sourceFile = candFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                                foundFiles = candFiles;
-                                                _logger.LogInformation("Found file by searching parent directory: {Candidate} -> {File}", cand, sourceFile);
-                                                try { _metrics.Increment("finalize.heuristic.parent_search_found"); } catch { }
-                                                break;
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _logger.LogWarning(ex, "Error scanning candidate directory {Directory}", cand);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Heuristic search for alternate local path variants failed: {LocalPath}", localPath);
-                        }
-                    }
+                // Resolve the accurate import path via the download client adapter
+                QueueItem resolvedItem;
+                try
+                {
+                    resolvedItem = await importResolver.ResolveImportItemAsync(
+                        download,
+                        preliminaryItem,
+                        previousAttempt: null,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to resolve import item for download {DownloadId}, using fallback path", download.Id);
+                    resolvedItem = preliminaryItem;
                 }
 
-                // Fallback 1: Try download record paths
-                if (string.IsNullOrEmpty(sourceFile))
-                {
-                    _logger.LogDebug("No file found in client path, trying fallback paths from download record");
-
-                    var fallbackPaths = new[] { download.FinalPath, download.DownloadPath }.Where(p => !string.IsNullOrEmpty(p));
-
-                    foreach (var fallbackPath in fallbackPaths)
-                    {
-                        _logger.LogDebug("Checking fallback path: {Path}", fallbackPath);
-
-                        if (File.Exists(fallbackPath!))
-                        {
-                            sourceFile = fallbackPath!;
-                            _logger.LogInformation("Found file using fallback path: {FilePath}", sourceFile);
-                            break;
-                        }
-                        else if (Directory.Exists(fallbackPath!))
-                        {
-                            _logger.LogDebug("Fallback path is a directory, scanning: {Directory}", fallbackPath);
-
-                            try
-                            {
-                                var dirFiles = Directory.GetFiles(fallbackPath!, "*.*", SearchOption.AllDirectories)
-                                    .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .ToList();
-
-                                if (dirFiles.Any())
-                                {
-                                    sourceFile = dirFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                    _logger.LogInformation("Found file in fallback directory: {FilePath}", sourceFile);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error scanning fallback directory: {Directory}", fallbackPath);
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Fallback path does not exist: {Path}", fallbackPath);
-                        }
-                    }
-                }
-
-                // Fallback 2: Try common Docker volume paths if still not found
-                if (string.IsNullOrEmpty(sourceFile) && !string.IsNullOrEmpty(clientPath))
-                {
-                    _logger.LogDebug("Trying Docker volume path variations for: {ClientPath}", clientPath);
-
-                    var dockerPaths = new List<string>();
-
-                    // Common Docker path variations
-                    var variations = new List<string> { clientPath };
-
-                    // Common Docker path variations
-                    try
-                    {
-                        // Replace container /data path with /host/data if present
-                        variations.Add(clientPath.Replace("/data", "/host/data"));
-
-                        // Only attempt to replace client.DownloadPath if it is non-empty.
-                        // String.Replace throws when oldValue is empty, and some clients
-                        // may not set DownloadPath, so guard against that case.
-                        if (!string.IsNullOrEmpty(client.DownloadPath))
-                        {
-                            variations.Add(clientPath.Replace(client.DownloadPath, "/host" + client.DownloadPath));
-                        }
-
-                        variations.Add(Path.Combine("/host", clientPath.TrimStart('/')));
-                        variations.Add(Path.Combine("/data", clientPath.TrimStart('/')));
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Error building docker path variations for {ClientPath}", clientPath);
-                    }
-
-                    var pathVariations = variations.Distinct().ToArray();
-
-                    foreach (var variation in pathVariations.Distinct())
-                    {
-                        _logger.LogDebug("Trying Docker path variation: {Path}", variation);
-
-                        if (Directory.Exists(variation))
-                        {
-                            try
-                            {
-                                var dockerFiles = Directory.GetFiles(variation, "*.*", SearchOption.AllDirectories)
-                                    .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .ToList();
-
-                                if (dockerFiles.Any())
-                                {
-                                    var titleWords = download.Title?.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries) ?? new string[0];
-
-                                    var bestDockerMatch = dockerFiles
-                                        .Select(f => new
-                                        {
-                                            Path = f,
-                                            Size = new FileInfo(f).Length,
-                                            MatchScore = titleWords.Count(word =>
-                                                Path.GetFileNameWithoutExtension(f).Contains(word, StringComparison.OrdinalIgnoreCase))
-                                        })
-                                        .OrderByDescending(x => x.MatchScore)
-                                        .ThenByDescending(x => x.Size)
-                                        .First();
-
-                                    sourceFile = bestDockerMatch.Path;
-                                    _logger.LogInformation("Found file using Docker path variation: {FilePath} (match score: {Score})",
-                                        sourceFile, bestDockerMatch.MatchScore);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error scanning Docker path variation: {Path}", variation);
-                            }
-                        }
-                    }
-                }
-
-                // Fallback 3: Try to find files in client's base download directory
-                if (string.IsNullOrEmpty(sourceFile) && !string.IsNullOrEmpty(client.DownloadPath))
-                {
-                    _logger.LogDebug("Trying client base download directory: {DownloadPath}", client.DownloadPath);
-
-                    var searchPaths = new[] { client.DownloadPath };
-
-                    // Apply path mapping to client download path
-                    try
-                    {
-                        var pathMapper = scope.ServiceProvider.GetService<IRemotePathMappingService>();
-                        if (pathMapper != null)
-                        {
-                            var mappedClientPath = await pathMapper.TranslatePathAsync(client.Id, client.DownloadPath);
-                            if (!string.Equals(mappedClientPath, client.DownloadPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                searchPaths = new[] { client.DownloadPath, mappedClientPath };
-                                _logger.LogDebug("Added mapped client path to search: {MappedPath}", mappedClientPath);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error applying path mapping to client download path");
-                    }
-
-                    foreach (var searchPath in searchPaths)
-                    {
-                        if (Directory.Exists(searchPath))
-                        {
-                            _logger.LogDebug("Searching in client directory: {SearchPath}", searchPath);
-
-                            try
-                            {
-                                var clientFiles = Directory.GetFiles(searchPath, "*.*", SearchOption.AllDirectories)
-                                    .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .Where(f => !string.IsNullOrEmpty(download.Title) &&
-                                               Path.GetFileName(f).Contains(download.Title.Split(' ')[0], StringComparison.OrdinalIgnoreCase))
-                                    .ToList();
-
-                                if (clientFiles.Any())
-                                {
-                                    sourceFile = clientFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                    _logger.LogInformation("Found file in client directory search: {FilePath}", sourceFile);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error searching client directory: {SearchPath}", searchPath);
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Client search path does not exist: {SearchPath}", searchPath);
-                        }
-                    }
-                }
+                var sourceFile = resolvedItem.ContentPath ?? string.Empty;
+                _logger.LogInformation("Resolved import path for download {DownloadId}: {SourcePath}", download.Id, sourceFile);
 
                 // If the source is empty OR neither a file nor a directory exists at the path,
                 // treat it as a missing source. We need to consider directories valid here because
@@ -1645,8 +1297,8 @@ namespace Listenarr.Api.Services
 
                     if (attempts >= maxRetries)
                     {
-                        _logger.LogError("Unable to locate source file for download {DownloadId} after {Attempts} attempts. Searched paths: ClientPath={ClientPath}, LocalPath={LocalPath}, FinalPath={FinalPath}, DownloadPath={DownloadPath}",
-                            download.Id, attempts, clientPath, localPath, download.FinalPath, download.DownloadPath);
+                        _logger.LogError("Unable to locate source file for download {DownloadId} after {Attempts} attempts. Resolved path: {SourcePath}, FinalPath={FinalPath}, DownloadPath={DownloadPath}",
+                            download.Id, attempts, sourceFile, download.FinalPath, download.DownloadPath);
                         try { _metrics.Increment("finalize.failed.file_not_found"); } catch { }
                         try { _metrics.Increment("finalize.retry.exhausted"); } catch { }
                         // Reset retry tracking if we have exhausted attempts
@@ -1670,7 +1322,7 @@ namespace Listenarr.Api.Services
                     // Compute exponential backoff delay
                     var currentAttempt = _missingSourceRetryAttempts[download.Id];
                     var delaySeconds = initialDelay * (int)Math.Pow(2, Math.Max(0, currentAttempt - 1));
-                    _logger.LogInformation("Source not found for download {DownloadId}. Scheduling retry #{Attempt} in {Delay}s (paths: {LocalPath})", download.Id, currentAttempt, delaySeconds, localPath);
+                    _logger.LogInformation("Source not found for download {DownloadId}. Scheduling retry #{Attempt} in {Delay}s (resolved path: {SourcePath})", download.Id, currentAttempt, delaySeconds, sourceFile);
 
                     try { _metrics.Increment("finalize.retry.scheduled"); } catch { }
 
@@ -1847,10 +1499,10 @@ namespace Listenarr.Api.Services
                     var dbDownload = await db.Downloads.FindAsync(download.Id, cancellationToken);
                     if (dbDownload != null)
                     {
-                        // Ensure DownloadPath contains the client save path (already mapped to localPath earlier)
-                        if (!string.IsNullOrEmpty(localPath) && dbDownload.DownloadPath != localPath)
+                        // Ensure DownloadPath contains the resolved source path
+                        if (!string.IsNullOrEmpty(sourceFile) && dbDownload.DownloadPath != sourceFile)
                         {
-                            dbDownload.DownloadPath = localPath;
+                            dbDownload.DownloadPath = sourceFile;
                         }
 
                         // Mark the download as Processing (observed complete by client,

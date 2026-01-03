@@ -102,10 +102,10 @@ describe('AddNewView pagination', () => {
     await vm.performAdvancedSearch()
     await wrapper.vm.$nextTick()
 
-    // Find lazy image element
-    const img = wrapper.find('img.lazy-search-img')
+    // Find result image element
+    const img = wrapper.find('.result-poster img')
     expect(img.exists()).toBe(true)
-    expect(img.attributes('data-src')).toBe('http://img2')
+    expect(img.attributes('src')).toBe('http://img2')
   })
 
   it('maps runtime from runtimeLengthMin (minutes) to seconds', async () => {

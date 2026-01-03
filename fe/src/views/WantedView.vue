@@ -61,9 +61,7 @@
           >
         <div class="wanted-poster">
           <img 
-            class="lazy-img"
-            :src="getPlaceholderUrl()"
-            :data-src="apiService.getImageUrl(item.imageUrl) || ''"
+            :src="apiService.getImageUrl(item.imageUrl) || getPlaceholderUrl()"
             :alt="item.title"
             loading="lazy"
             decoding="async"
@@ -160,7 +158,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { observeLazyImages, ensureVisibleImagesLoad, resetLazyObserver } from '@/utils/lazyLoad'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
@@ -240,21 +237,11 @@ onMounted(async () => {
   // Initialize virtual scrolling
   await nextTick()
   updateVisibleRange()
-
-  // Ensure DOM layout is ready before observing lazy images
-  await nextTick()
-  try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
-  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad immediate failed', e) }
-  setTimeout(() => { try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad retry failed', e) } }, 150)
-  setTimeout(() => { try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad final retry failed', e) } }, 400)
 })
 
 // Watch the visible range (virtual scroll) to lazy-load images when the viewport changes
-watch(() => visibleRange.value, async () => {
-  await nextTick()
-  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad failed after visibleRange change', e) }
+watch(() => visibleRange.value, () => {
+  // No-op: native lazy loading handles image work, but we keep the watcher to retain potential hooks
 })
 
 // Filter audiobooks that are monitored and missing files

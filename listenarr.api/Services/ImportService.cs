@@ -520,7 +520,28 @@ namespace Listenarr.Api.Services
                                         afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
                                         afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
 
-                                var created = await audioFileService.EnsureAudiobookFileAsync(audiobookId.Value, res.FinalPath, "download");
+                                // Get the audiobook to calculate relative path (consistent with scan service)
+                                var scopedDb = afScope.ServiceProvider.GetService<ListenArrDbContext>();
+                                var audiobook = scopedDb != null ? await scopedDb.Audiobooks.FindAsync(audiobookId.Value) : null;
+                                
+                                string pathToStore = res.FinalPath;
+                                if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
+                                {
+                                    try
+                                    {
+                                        // Store relative path if the file is within the audiobook's base path
+                                        pathToStore = Path.GetRelativePath(audiobook.BasePath, res.FinalPath);
+                                        _logger.LogDebug("Converted absolute path to relative for audiobook {AudiobookId}: {Absolute} -> {Relative}", 
+                                            audiobookId, res.FinalPath, pathToStore);
+                                    }
+                                    catch (Exception rpEx)
+                                    {
+                                        _logger.LogDebug(rpEx, "Could not calculate relative path, using absolute");
+                                        pathToStore = res.FinalPath;
+                                    }
+                                }
+
+                                var created = await audioFileService.EnsureAudiobookFileAsync(audiobookId.Value, pathToStore, "download");
                                 res.WasRegisteredToAudiobook = created;
                             }
                             catch (Exception ex)

@@ -106,5 +106,15 @@ namespace Listenarr.Domain.Models
         /// This is often the most accurate path for locating the actual downloaded file/folder.
         /// </summary>
         public string? ContentPath { get; set; }
+
+        /// <summary>
+        /// Creates a shallow copy of this QueueItem.
+        /// Used by GetImportItem to avoid modifying the original item.
+        /// Matches Sonarr's DownloadClientItem.Clone() pattern.
+        /// </summary>
+        public QueueItem Clone()
+        {
+            return (QueueItem)MemberwiseClone();
+        }
     }
 }

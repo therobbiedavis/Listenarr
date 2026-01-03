@@ -3000,13 +3000,13 @@ namespace Listenarr.Api.Services
                             Size = size,
                             Seeders = seeders,
                             Leechers = leechers,
-                            Source = indexer.Name,
-                            PublishedDate = publishDate.HasValue ? publishDate.Value.ToString("o") : string.Empty,
+                            Source = indexer.Name ?? "MyAnonamouse",
+                            PublishedDate = publishDate?.ToString("o") ?? string.Empty,
                             Quality = finalQuality,
                             Format = finalFormat,
                             TorrentUrl = downloadUrl,
                             // Use MyAnonamouse public item page pattern: https://myanonamouse.net/t/{id}
-                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : indexer.Url,
+                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id!)}" : (indexer.Url ?? ""),
                             MagnetLink = "",
                             NzbUrl = ""
                         };

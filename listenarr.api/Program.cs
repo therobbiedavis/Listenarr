@@ -313,6 +313,9 @@ builder.Services.AddHttpClient("nzbget")
 
 // Adapter factory resolution is provided by `IDownloadClientAdapterFactory`.
 
+// Register import item resolution service for V2 path resolution
+builder.Services.AddScoped<Listenarr.Api.Services.IImportItemResolutionService, Listenarr.Api.Services.ImportItemResolutionService>();
+
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")
     .ConfigureHttpClient(client =>

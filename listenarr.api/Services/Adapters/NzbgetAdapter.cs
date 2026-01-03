@@ -659,5 +659,91 @@ namespace Listenarr.Api.Services.Adapters
 
             return null;
         }
+
+        /// <summary>
+        /// Resolves the actual import item for a completed download.
+        /// Queries NZBGet history for FinalDir or DestDir.
+        /// EXACTLY matches Sonarr's NzbGet.GetImportItem pattern.
+        /// </summary>
+        public async Task<QueueItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            Download download,
+            QueueItem queueItem,
+            QueueItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // Clone to avoid mutating the original
+            var result = queueItem.Clone();
+
+            // If ContentPath is already set and exists, use it
+            if (!string.IsNullOrEmpty(result.ContentPath))
+            {
+                var localPath = await _pathMappingService.TranslatePathAsync(client.Id, result.ContentPath);
+                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                {
+                    result.ContentPath = localPath;
+                    return result;
+                }
+            }
+
+            try
+            {
+                // Query NZBGet history for the download
+                var historyResult = await CallXmlRpcAsync(client, "history", false);
+                var arrayData = historyResult.Element("array")?.Element("data");
+
+                if (arrayData == null)
+                {
+                    _logger.LogWarning("Failed to query NZBGet history for download {NzbId}", queueItem.Id);
+                    return result;
+                }
+
+                // Find the history entry matching our download ID
+                foreach (var valueElement in arrayData.Elements("value"))
+                {
+                    var structElement = valueElement.Element("struct");
+                    if (structElement == null) continue;
+
+                    var members = structElement.Elements("member").ToDictionary(
+                        m => m.Element("name")?.Value ?? string.Empty,
+                        m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
+                    );
+
+                    var entryId = members.GetValueOrDefault("NZBID", string.Empty);
+                    if (entryId != queueItem.Id) continue;
+
+                    // Found matching entry - extract path
+                    // FinalDir is preferred (post-processing destination), fallback to DestDir
+                    var finalDir = members.GetValueOrDefault("FinalDir", string.Empty);
+                    var destDir = members.GetValueOrDefault("DestDir", string.Empty);
+                    var contentPath = !string.IsNullOrEmpty(finalDir) ? finalDir : destDir;
+
+                    if (string.IsNullOrEmpty(contentPath))
+                    {
+                        _logger.LogWarning("No FinalDir or DestDir found for NZB {NzbId}", queueItem.Id);
+                        return result;
+                    }
+
+                    // Apply path mapping
+                    var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, contentPath);
+                    result.ContentPath = localContentPath;
+
+                    _logger.LogDebug(
+                        "Resolved NZBGet content path for {NzbId}: {ContentPath}",
+                        queueItem.Id,
+                        localContentPath);
+
+                    return result;
+                }
+
+                _logger.LogWarning("Download {NzbId} not found in NZBGet history", queueItem.Id);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error resolving import item for NZBGet download {NzbId}", queueItem.Id);
+                return result;
+            }
+        }
     }
 }

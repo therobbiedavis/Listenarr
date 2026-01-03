@@ -64,6 +64,13 @@ namespace Listenarr.Api.Tests
             // Queue service uses DbContext and logger - register real instance
             services.AddScoped<IDownloadProcessingQueueService, DownloadProcessingQueueService>();
 
+            // Mock IImportItemResolutionService - just returns the preliminary item unchanged
+            var importResolutionMock = new Mock<IImportItemResolutionService>();
+            importResolutionMock
+                .Setup(x => x.ResolveImportItemAsync(It.IsAny<Download>(), It.IsAny<QueueItem>(), It.IsAny<QueueItem>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Download d, QueueItem q, QueueItem? p, CancellationToken ct) => q);
+            services.AddScoped<IImportItemResolutionService>(_ => importResolutionMock.Object);
+
             var metricsMock = new Mock<IAppMetricsService>();
             services.AddSingleton<IAppMetricsService>(metricsMock.Object);
 
@@ -81,7 +88,7 @@ namespace Listenarr.Api.Tests
             // Delete the source to simulate disappearance before processing
             try { File.Delete(sourceFile); } catch { }
 
-            // Create the background service instance and invoke the private ProcessMoveOrCopyJobAsync
+            // Create the background service instance (no longer needs importItemResolution in constructor)
             var svc = new DownloadProcessingBackgroundService(scopeFactory, loggerMock.Object, metricsMock.Object);
 
             // Set job to processing (the outer loop normally does this)

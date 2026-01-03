@@ -253,10 +253,7 @@
             <div class="result-poster">
               <img
                 v-if="audibleResult.imageUrl"
-                class="lazy-search-img"
-                :data-src="apiService.getImageUrl(audibleResult.imageUrl)"
-                :data-original-src="audibleResult.imageUrl"
-                :src="getPlaceholderUrl()"
+                :src="apiService.getImageUrl(audibleResult.imageUrl) || getPlaceholderUrl()"
                 :alt="audibleResult.title"
                 loading="lazy"
                 decoding="async"
@@ -269,14 +266,11 @@
             <div class="result-info">
               <h3>
                 {{ safeText(audibleResult.title) }}
-              </h3>
-              <p v-if="audibleResult.subtitle" class="result-subtitle">
-                {{ safeText(audibleResult.subtitle) }}
-              </p>
+                :src="getCoverUrl(searchResult) || getPlaceholderUrl()"
               <p class="result-author">
                 by {{ (audibleResult.authors || []).map(author => safeText(author)).join(', ') || 'Unknown Author' }}
               </p>
-              
+                @error="handleLazyImageError"
               <p v-if="audibleResult.narrators?.length" class="result-narrator">
                 Narrated by {{ audibleResult.narrators.map(narrator => safeText(narrator)).join(', ') }}
               </p>
@@ -429,10 +423,7 @@
               <div class="result-poster">
               <img
                 v-if="getCoverUrl(book)"
-                class="lazy-search-img"
-                :data-src="getCoverUrl(book)"
-                :data-original-src="book.imageUrl || book.searchResult?.imageUrl || ''"
-                :src="getPlaceholderUrl()"
+                :src="getCoverUrl(book) || getPlaceholderUrl()"
                 :alt="book.title"
                 loading="lazy"
                 decoding="async"
@@ -1988,67 +1979,7 @@ const extractIsbnCandidates = (book: TitleSearchResult): string[] => {
   }
 }
 
-// Lazy load helper for Add New search result images
-let lazyObserver: IntersectionObserver | null = null
-
-const observeLazyImages = () => {
-  // Find all lazy-search-img elements (use dataset 'src' for the true image)
-  try {
-    const images = Array.from(document.querySelectorAll('img.lazy-search-img')) as HTMLImageElement[]
-    if (!images || images.length === 0) return
-
-    if ('IntersectionObserver' in window) {
-      if (!lazyObserver) {
-        lazyObserver = new IntersectionObserver((entries) => {
-          entries.forEach(entry => {
-            if (entry.isIntersecting) {
-              const img = entry.target as HTMLImageElement
-              const ds = img.dataset.src
-              if (ds) {
-                img.src = ds
-                img.removeAttribute('data-src')
-              }
-              lazyObserver?.unobserve(img)
-            }
-          })
-        }, { rootMargin: '200px', threshold: 0.01 })
-      }
-
-      for (const img of images) {
-        if (img.dataset.src) {
-          lazyObserver.observe(img)
-        }
-      }
-    } else {
-      // Fallback: load immediately
-      for (const img of images) {
-        if (img.dataset.src) {
-          img.src = img.dataset.src
-          img.removeAttribute('data-src')
-        }
-      }
-    }
-  } catch (e) {
-    logger.debug('observeLazyImages error', e)
-  }
-}
-
-// Observe when results change to attach lazy loader
-// Re-observe lazy images when results or client-side paging change
-watch([
-  () => titleResults.value.length,
-  () => audimetaPage.value,
-  () => currentAdvancedPage.value,
-  () => resultsPerPage.value
-], async () => {
-  await nextTick()
-  observeLazyImages()
-})
-
-onMounted(() => observeLazyImages())
-onUnmounted(() => {
-  try { lazyObserver?.disconnect(); lazyObserver = null } catch {}
-})
+// No custom lazy loading logic needed; browser handles loading="lazy"
 
 // Resolve a single book's ASIN by trying its ISBN candidates via backend lookup
 const resolveAsinForBook = async (book: TitleSearchResult): Promise<string | null> => {

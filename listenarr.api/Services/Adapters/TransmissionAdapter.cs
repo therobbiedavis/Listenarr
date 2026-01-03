@@ -234,6 +234,92 @@ namespace Listenarr.Api.Services.Adapters
             return Task.FromResult(new List<(string Id, string Name)>());
         }
 
+        /// <summary>
+        /// Resolves the actual import item for a completed download.
+        /// Queries Transmission API for downloadDir and builds the content path.
+        /// EXACTLY matches Sonarr's Transmission.GetImportItem pattern.
+        /// </summary>
+        public async Task<QueueItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            Download download,
+            QueueItem queueItem,
+            QueueItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // Clone to avoid mutating the original
+            var result = queueItem.Clone();
+
+            // If ContentPath is already set and exists, use it
+            if (!string.IsNullOrEmpty(result.ContentPath))
+            {
+                var localPath = await _pathMappingService.TranslatePathAsync(client.Id, result.ContentPath);
+                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                {
+                    result.ContentPath = localPath;
+                    return result;
+                }
+            }
+
+            // Query Transmission for the torrent details
+            var payload = new
+            {
+                method = "torrent-get",
+                arguments = new
+                {
+                    ids = ParseTransmissionIds(queueItem.Id),
+                    fields = new[] { "id", "name", "downloadDir" }
+                },
+                tag = 5
+            };
+
+            try
+            {
+                var response = await InvokeRpcAsync(client, payload, ct);
+                if (!response.TryGetProperty("arguments", out var args) || 
+                    !args.TryGetProperty("torrents", out var torrents) || 
+                    torrents.ValueKind != JsonValueKind.Array)
+                {
+                    _logger.LogWarning("Failed to query Transmission for torrent {TorrentId}", queueItem.Id);
+                    return result;
+                }
+
+                var torrent = torrents.EnumerateArray().FirstOrDefault();
+                if (torrent.ValueKind == JsonValueKind.Undefined)
+                {
+                    _logger.LogWarning("Torrent {TorrentId} not found in Transmission", queueItem.Id);
+                    return result;
+                }
+
+                var downloadDir = torrent.TryGetProperty("downloadDir", out var dirProp) ? dirProp.GetString() : null;
+                var name = torrent.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+
+                if (string.IsNullOrEmpty(downloadDir) || string.IsNullOrEmpty(name))
+                {
+                    _logger.LogWarning("Missing downloadDir or name for torrent {TorrentId}", queueItem.Id);
+                    return result;
+                }
+
+                // Transmission stores files as: downloadDir/name
+                var contentPath = Path.Combine(downloadDir, name);
+                
+                // Apply path mapping
+                var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, contentPath);
+                result.ContentPath = localContentPath;
+
+                _logger.LogDebug(
+                    "Resolved Transmission content path for {TorrentId}: {ContentPath}",
+                    queueItem.Id,
+                    localContentPath);
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error resolving import item for Transmission torrent {TorrentId}", queueItem.Id);
+                return result;
+            }
+        }
+
         private async Task<QueueItem> MapTorrentAsync(DownloadClientConfiguration client, JsonElement torrent, CancellationToken ct)
         {
             // Try snake_case (JSON-RPC 2.0 / Transmission 4.1+) first, fall back to camelCase for backwards compatibility

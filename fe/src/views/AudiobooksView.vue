@@ -175,10 +175,9 @@
                 <div class="series-count-badge">{{ collection.count }}</div>
                 <img
                   v-if="collection.coverUrl"
-                  :src="getPlaceholderUrl()"
-                  :data-src="apiService.getImageUrl(collection.coverUrl) || ''"
+                  :src="apiService.getImageUrl(collection.coverUrl) || getPlaceholderUrl()"
                   :alt="collection.name"
-                  class="audiobook-poster lazy-img"
+                  class="audiobook-poster"
                   loading="lazy"
                   decoding="async"
                   @error="handleImageError"
@@ -213,10 +212,9 @@
                       :style="getCoverStyle(0, collection.coverUrls.length)"
                     >
                       <img
-                        :src="getPlaceholderUrl()"
-                        :data-src="apiService.getImageUrl(collection.coverUrls[0]) || ''"
+                        :src="apiService.getImageUrl(collection.coverUrls[0]) || getPlaceholderUrl()"
                         :alt="`${collection.name} Cover`"
-                        class="series-cover-image centered lazy-img"
+                        class="series-cover-image centered"
                         loading="lazy"
                         decoding="async"
                         @error="handleImageError"
@@ -232,10 +230,9 @@
                       :style="getCoverStyle(index, collection.coverUrls.length)"
                     >
                       <img
-                        :src="getPlaceholderUrl()"
-                        :data-src="apiService.getImageUrl(coverUrl) || ''"
+                        :src="apiService.getImageUrl(coverUrl) || getPlaceholderUrl()"
                         :alt="`${collection.name} Cover`"
-                        class="series-cover-image lazy-img"
+                        class="series-cover-image"
                         loading="lazy"
                         decoding="async"
                         @error="handleImageError"
@@ -307,10 +304,9 @@
     </div>
       <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
       <img 
-        :src="getPlaceholderUrl()"
-        :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
+        :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
         :alt="audiobook.title"
-        class="audiobook-poster lazy-img"
+        class="audiobook-poster"
         loading="lazy"
         decoding="async"
         @error="handleImageError"
@@ -390,9 +386,8 @@
                 />
               </div>
               <img
-                class="list-thumb lazy-img"
-                :src="getPlaceholderUrl()"
-                :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
+                class="list-thumb"
+                :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
                 :alt="audiobook.title"
                 loading="lazy"
                 decoding="async"
@@ -480,7 +475,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
-import { observeLazyImages, ensureVisibleImagesLoad, resetLazyObserver } from '@/utils/lazyLoad'
 import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -917,23 +911,6 @@ watch(() => groupedCollections.value.map(g => g.name), async () => {
       }
     } catch {}
   }
-
-  // Wait a tick for any reactive updates, then schedule a short delayed
-  // re-observation to catch images whose data-src values were set after
-  // author lookup completed.
-  try {
-    await nextTick()
-    setTimeout(() => {
-      try { observeLazyImages() } catch (e: unknown) { console.error('observeLazyImages retry failed', e) }
-    }, 120)
-  } catch (e) {
-    console.error('Failed to schedule lazy image re-observation', e)
-  }
-
-
-  // After kickoffs, ensure any visible new images load immediately (defensive)
-  await nextTick()
-  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad failed after groupedCollections change', e) }
 }, { immediate: true })
 
 
@@ -1207,65 +1184,7 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   return 'quality-mismatch'
 }
 
-/**
- * Force reload all lazy images after data updates (e.g., bulk edit, individual edit)
- * 
- * Problem: When imageUrl changes, Vue updates :data-src but <img> elements are reused (same :key).
- * The lazy observer already loaded old images and may have removed data-src attributes.
- * Even when Vue restores data-src, img.src still shows the old image.
- * 
- * Solution: Reset all lazy images back to placeholder, then re-observe them.
- */
-async function reloadAllLazyImages() {
-  await nextTick()
-  
-  try {
-    // Find all lazy images in the current view
-    const lazyImages = Array.from(document.querySelectorAll('img.lazy-img')) as HTMLImageElement[]
-    
-    // Reset each image back to placeholder
-    for (const img of lazyImages) {
-      try {
-        const dataSrc = img.getAttribute('data-src')
-        const currentSrc = img.getAttribute('src')
-        
-        // If image has data-src (Vue updated it), reset src to placeholder
-        if (dataSrc) {
-          img.src = getPlaceholderUrl()
-        } 
-        // If image was already loaded (no data-src), force reload
-        else if (currentSrc && !currentSrc.startsWith('data:image')) {
-          img.src = getPlaceholderUrl()
-        }
-      } catch (e) {
-        // Ignore individual image errors
-      }
-    }
-    
-    await nextTick()
-    
-    // Reset the global observer to clear stale observations
-    resetLazyObserver()
-    
-    // Re-observe all lazy images with updated data-src values
-    observeLazyImages()
-    
-    // Force immediate load of visible images
-    await nextTick()
-    ensureVisibleImagesLoad()
-    
-    // Defensive retry after slight delay
-    setTimeout(() => {
-      try {
-        ensureVisibleImagesLoad()
-      } catch (e) {
-        console.debug('ensureVisibleImagesLoad retry failed:', e)
-      }
-    }, 100)
-  } catch (e) {
-    console.error('Failed to reload lazy images:', e)
-  }
-}
+// Native loading="lazy" handles all image loading automatically - no custom code needed
 
 function handleClickOutside(event: Event) {
   const target = event.target as HTMLElement
@@ -1414,30 +1333,10 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
     logger.debug('Failed to update route query for group:', err)
   }
 
-  // Ensure DOM settles, recalc visible range for the virtual scroller,
-  // then observe lazy images so newly rendered cards load reliably.
+  // Ensure DOM settles and recalc visible range for the virtual scroller
   try {
     await nextTick()
     try { updateVisibleRange() } catch (e: unknown) { console.error('updateVisibleRange failed after group change', e) }
-    await nextTick()
-
-    // Reset the observer to ensure we observe a fresh set of images (clears stale observations)
-    try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
-
-    try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-
-    // Force-load images that are already visible (defensive against IntersectionObserver timing races)
-    try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad immediate failed', e) }
-
-    // A couple of delayed retries to catch any later-updating images (author lookups, rendering timing, etc.)
-    setTimeout(() => {
-      try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad retry failed', e) }
-      try { observeLazyImages() } catch (e: unknown) { console.error('observeLazyImages retry failed', e) }
-    }, 150)
-
-    setTimeout(() => {
-      try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad final retry failed', e) }
-    }, 400)
   } catch (e) {
     console.error('Failed to schedule lazy image observation after group change', e)
   }
