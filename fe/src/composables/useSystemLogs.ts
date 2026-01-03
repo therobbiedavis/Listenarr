@@ -3,6 +3,7 @@ import * as signalR from '@microsoft/signalr'
 import type { LogEntry } from '@/types'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
+import { logger } from '@/utils/logger'
 
 /**
  * Composable for real-time system logs via SignalR
@@ -41,7 +42,7 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
             accessToken = apiKey
           }
         } catch (e) {
-          console.debug('[LogHub] Failed to get API key', e)
+          logger.debug('[LogHub] Failed to get API key', e)
         }
       }
 

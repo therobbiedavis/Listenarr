@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/api'
+import { logger } from '@/utils/logger'
 import type { RootFolder } from '@/types'
 
 export const useRootFoldersStore = defineStore('rootFolders', () => {
@@ -19,7 +20,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
         folders.value = []
       }
     } catch (err) {
-      console.debug('Failed to load root folders:', err)
+      logger.debug('Failed to load root folders:', err)
       folders.value = []
     } finally {
       loading.value = false

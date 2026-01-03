@@ -2,6 +2,7 @@ import type { Download, QueueItem, Audiobook } from '@/types'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { setConnected, setLastError, setReconnectAttempts } from './signalrEvents'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
+import { logger } from '@/utils/logger'
 
 // SignalR client for real-time download updates
 // Using native WebSocket with fallback to long polling
@@ -24,7 +25,7 @@ class SignalRService {
     // hub connection is always authenticated as the current SPA principal.
     try {
       sessionTokenManager.onTokenChange((token) => {
-        try { console.debug('[SignalR] session token changed, reconnecting', { hasToken: !!token }) } catch {}
+        try { logger.debug('[SignalR] session token changed, reconnecting', { hasToken: !!token }) } catch {}
         // If a connection exists, close it and reconnect after a short delay
         // to avoid racing with other connection lifecycle events.
         try {
@@ -96,7 +97,7 @@ class SignalRService {
             }
           }
         } catch (e) {
-          console.debug('[SignalR] startupConfig or session read failed', e)
+          logger.debug('[SignalR] startupConfig or session read failed', e)
         }
       } catch {
         // swallow outer errors

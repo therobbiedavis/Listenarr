@@ -192,6 +192,7 @@ import type { AudibleBookMetadata, QualityProfile, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
+import { logger } from '@/utils/logger'
 import RootFolderSelect from '@/components/RootFolderSelect.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 
@@ -342,7 +343,7 @@ const seedPreview = async () => {
         }
       } catch (metaErr) {
         // ignore metadata fetch errors - we'll fall back to provided book
-        console.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+        logger.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
       } finally {
         metadataLoading.value = false
       }

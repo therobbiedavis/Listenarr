@@ -1636,6 +1636,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
+import { logger } from '@/utils/logger'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
 import FolderBrowser from '@/components/FolderBrowser.vue'
@@ -1681,7 +1682,7 @@ const router = useRouter()
 const configStore = useConfigurationStore()
 const toast = useToast()
 // Debug environment markers (Vitest exposes import.meta.vitest / import.meta.env.VITEST)
-console.debug('[test-debug] import.meta.vitest:', (import.meta as unknown as { vitest?: unknown }).vitest, 'env.VITEST:', (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST, '__vitest_global__:', (globalThis as unknown as { __vitest?: unknown }).__vitest)
+logger.debug('[test-debug] import.meta.vitest:', (import.meta as unknown as { vitest?: unknown }).vitest, 'env.VITEST:', (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST, '__vitest_global__:', (globalThis as unknown as { __vitest?: unknown }).__vitest)
   const activeTab = ref<'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'>('rootfolders')
 
 const mobileTabOptions = computed(() => [
@@ -1842,7 +1843,7 @@ const regenerateApiKey = async () => {
         return
       } catch (initialErr) {
         // If initial generation fails (e.g., users exist), try authenticated regeneration
-        console.debug('Initial API key generation failed, trying authenticated regeneration', initialErr)
+        logger.debug('Initial API key generation failed, trying authenticated regeneration', initialErr)
       }
     }
     
@@ -2470,7 +2471,7 @@ const saveSettings = async () => {
   const runtimeConfigStore = useConfigurationStore()
   // Debug: log when saveSettings is invoked in tests to help diagnose test failures
   // (will be removed once tests are stable)
-  console.debug('[test-debug] saveSettings invoked', settingsToSave)
+  logger.debug('[test-debug] saveSettings invoked', settingsToSave)
   // Call the runtime store save method. Some test setups replace the store
   // instance or spy on the store returned from `useConfigurationStore()` at
   // different times; call both if they differ to ensure the spy is observed.
@@ -3217,7 +3218,7 @@ async function loadTabContents(tab: string) {
             remotePathMappings.value = await getRemotePathMappings()
             loaded.mappings = true
           } catch (e) {
-            console.debug('Failed to load remote path mappings', e)
+            logger.debug('Failed to load remote path mappings', e)
           }
         }
         break
@@ -3299,7 +3300,7 @@ async function loadTabContents(tab: string) {
             remotePathMappings.value = await getRemotePathMappings()
             loaded.mappings = true
           } catch (e) {
-            console.debug('Failed to load remote path mappings', e)
+            logger.debug('Failed to load remote path mappings', e)
           }
 
           try {
@@ -3310,7 +3311,7 @@ async function loadTabContents(tab: string) {
               if (firstAdmin) settings.value.adminUsername = firstAdmin.username
             }
           } catch (e) {
-            console.debug('Failed to load admin users', e)
+            logger.debug('Failed to load admin users', e)
           }
 
           loaded.general = true
@@ -3353,7 +3354,7 @@ async function loadTabContents(tab: string) {
           try {
             await loadQualityProfiles()
           } catch (e) {
-            console.debug('Failed to load quality profiles for requests tab', e)
+            logger.debug('Failed to load quality profiles for requests tab', e)
           }
           loaded.bot = true
         }

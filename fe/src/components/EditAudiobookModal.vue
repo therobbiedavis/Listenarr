@@ -439,7 +439,7 @@ async function initializeForm() {
       return
     } catch (err) {
       // Non-fatal: any error deriving relative path from stored basePath
-      console.debug('Preview path unavailable:', err)
+      logger.debug('Preview path unavailable:', err)
     }
 }
 

@@ -240,6 +240,43 @@ describe('AudiobooksView Grouping', () => {
     expect(groupedCollections).toHaveLength(0)
   })
 
+  it('route query group parameter overrides stored preference on initial load', async () => {
+    if (!(global as any).ResizeObserver) {
+      (global as any).ResizeObserver = class { observe() {}; disconnect() {}; }
+    }
+    if (!(global as any).WebSocket) {
+      (global as any).WebSocket = function () { /* noop */ }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }, { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView }] })
+    // Simulate previous preference saved as 'series'
+    localStorage.setItem('listenarr.groupBy', 'series')
+    // Navigate to audiobooks with explicit group=books in URL
+    await router.push({ path: '/audiobooks', query: { group: 'books' } })
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Book 1',
+        authors: ['Author A'],
+        series: 'Series 1',
+        imageUrl: 'cover1.jpg',
+        files: []
+      }
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, { global: { plugins: [pinia, router], stubs: ['BulkEditModal', 'EditAudiobookModal', 'CustomFilterModal', 'FiltersDropdown', 'CustomSelect'] } })
+    await new Promise(r => setTimeout(r, 0))
+
+    // Expect the component to use the route query 'books' despite stored 'series'
+    expect(wrapper.vm.groupBy).toBe('books')
+  })
+
   it('clears selection when changing grouping mode', async () => {
     if (!(global as any).ResizeObserver) {
       (global as any).ResizeObserver = class { observe() {}; disconnect() {}; }

@@ -27,6 +27,7 @@ import type {
 } from '@/types'
 import { getStartupConfigCached, getCachedStartupConfig } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
+import { logger } from '@/utils/logger'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
 // In production, prefer a configured VITE_API_BASE_URL but fall back to a relative '/api'
@@ -110,14 +111,12 @@ class ApiService {
       }
     } catch (e) {
       // Swallow errors fetching token; the server will return a clear error if required
-      try { console.debug('[ApiService] failed to fetch CSRF token', e) } catch {}
+      logger.debug('[ApiService] failed to fetch CSRF token', e)
     }
 
     try {
       // Debug: log outbound request details in development
-      if (import.meta.env.DEV) {
-        try { console.debug('[ApiService] request', { url, config }) } catch {}
-      }
+      logger.debug('[ApiService] request', { url, config })
 
       const response = await fetch(url, config)
 
@@ -154,9 +153,7 @@ class ApiService {
             const current = window.location.pathname + window.location.search + window.location.hash
             const safe = normalizeRedirect(current)
             if (!current.startsWith('/login')) {
-              if (import.meta.env.DEV) {
-                try { console.debug('[ApiService] 401 received, redirecting to login', { current, safe }) } catch {}
-              }
+              logger.debug('[ApiService] 401 received, redirecting to login', { current, safe })
 
               // Persist the safe redirect in sessionStorage as a fallback in case the
               // query parameter gets lost or sanitized during navigation. This helps
@@ -186,17 +183,13 @@ class ApiService {
         if (response.status === 400 && /csrf|anti.?forgery|invalid or missing/i.test(respText)) {
           try {
             const freshToken = await this.fetchAntiforgeryToken()
-            if (import.meta.env.DEV) {
-              try { console.debug('[ApiService] CSRF retry - fetched token?', { freshTokenExists: !!freshToken, freshTokenLength: freshToken ? freshToken.length : 0 }) } catch {}
-            }
+            logger.debug('[ApiService] CSRF retry - fetched token?', { freshTokenExists: !!freshToken, freshTokenLength: freshToken ? freshToken.length : 0 })
             if (freshToken) {
               const retryConfig: RequestInit = {
                 ...config,
                 headers: { ...(config.headers as Record<string, string> || {}), 'X-XSRF-TOKEN': freshToken }
               }
-              if (import.meta.env.DEV) {
-                try { console.debug('[ApiService] CSRF retry - retryConfig.headers', { headersPreview: { ...retryConfig.headers, 'X-XSRF-TOKEN': '[redacted]' } }) } catch {}
-              }
+              logger.debug('[ApiService] CSRF retry - retryConfig.headers', { headersPreview: { ...retryConfig.headers, 'X-XSRF-TOKEN': '[redacted]' } })
               const retryResp = await fetch(url, retryConfig)
               if (retryResp.ok) {
                 const retryText = await retryResp.text()
@@ -211,7 +204,7 @@ class ApiService {
               throw retryErr
             }
           } catch (retryErr) {
-            try { console.debug('[ApiService] CSRF retry failed', retryErr) } catch {}
+            logger.debug('[ApiService] CSRF retry failed', retryErr)
             // fall through to throw original error if retry fails
           }
         }
@@ -233,7 +226,7 @@ class ApiService {
     } catch (error) {
       // Enhanced logging for browser console to capture connection failures
       try {
-        console.error('[ApiService] request failed', { url, options: config, error })
+        logger.error('[ApiService] request failed', { url, options: config, error })
       } catch {}
       throw error
     }
@@ -939,7 +932,7 @@ class ApiService {
           } catch {}
         }
       } catch (e) {
-        try { console.debug('[ApiService] amazon-image-detect error', e) } catch {}
+        logger.debug('[ApiService] amazon-image-detect error', e)
       }
 
       return imageUrl
@@ -970,7 +963,7 @@ class ApiService {
       }
     } catch (e) {
       // fall back to default behavior below on any error
-      try { console.debug('[ApiService] getImageUrl library-detect error', e) } catch {}
+      logger.debug('[ApiService] getImageUrl library-detect error', e)
     }
 
     // If the stored path is the authors cache path, convert to our images API endpoint
@@ -995,7 +988,7 @@ class ApiService {
             return url
       }
     } catch (e) {
-      try { console.debug('[ApiService] getImageUrl authors-detect error', e) } catch {}
+      logger.debug('[ApiService] getImageUrl authors-detect error', e)
     }
 
     // Convert other relative URLs to absolute and append access_token
@@ -1263,22 +1256,16 @@ class ApiService {
         if (sess) headers['Authorization'] = `Bearer ${sess}`
       } catch {}
 
-      if (import.meta.env.DEV) {
-        try { console.debug('[ApiService] fetching antiforgery token', { url: `${API_BASE_URL}/antiforgery/token`, headers }) } catch {}
-      }
+      logger.debug('[ApiService] fetching antiforgery token', { url: `${API_BASE_URL}/antiforgery/token`, headers })
 
       const resp = await fetch(`${API_BASE_URL}/antiforgery/token`, { method: 'GET', credentials: 'include', headers })
       if (!resp.ok) {
-        if (import.meta.env.DEV) {
-          try { console.debug('[ApiService] antiforgery token request failed', { status: resp.status }) } catch {}
-        }
+        logger.debug('[ApiService] antiforgery token request failed', { status: resp.status })
         return null
       }
       const json = await resp.json()
       const token = json?.token ?? null
-      if (import.meta.env.DEV) {
-        try { console.debug('[ApiService] antiforgery token fetched', { tokenExists: !!token, tokenLength: token ? token.length : 0 }) } catch {}
-      }
+      logger.debug('[ApiService] antiforgery token fetched', { tokenExists: !!token, tokenLength: token ? token.length : 0 })
       return token
     } catch {
       return null
@@ -1330,9 +1317,9 @@ class ApiService {
       // error: "meant for a different claims-based user").
       try {
         await this.fetchAntiforgeryToken()
-        if (import.meta.env.DEV) console.debug('[ApiService] Fetched antiforgery token after login')
+        logger.debug('[ApiService] Fetched antiforgery token after login')
       } catch (e) {
-        if (import.meta.env.DEV) console.debug('[ApiService] Failed to fetch antiforgery token after login', e)
+        logger.debug('[ApiService] Failed to fetch antiforgery token after login', e)
       }
     } else if (responseData.authType === 'none') {
       // Authentication not required - clear any existing token

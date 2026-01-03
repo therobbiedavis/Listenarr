@@ -313,7 +313,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { observeLazyImages } from '@/utils/lazyLoad'
+import { observeLazyImages, ensureVisibleImagesLoad, resetLazyObserver } from '@/utils/lazyLoad'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhUser, PhBooks, PhGridFour, PhList, PhCheckSquare, PhX, PhArrowClockwise, PhInfo, PhBookOpen, PhSpinner, PhWarningCircle, PhPencil, PhTrash, PhCaretLeft, PhCaretRight, PhStar, PhEye, PhEyeSlash } from '@phosphor-icons/vue'
 import { useLibraryStore } from '@/stores/library'
@@ -694,13 +694,21 @@ onMounted(async () => {
   if (libraryStore.audiobooks.length === 0) {
     await libraryStore.fetchLibrary()
   }
+  // Ensure DOM is settled before observing lazy images
+  await nextTick()
+  try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
   try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad immediate failed', e) }
+  setTimeout(() => { try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad retry failed', e) } }, 150)
+  setTimeout(() => { try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad final retry failed', e) } }, 400)
 })
 
 // Re-observe images when page changes
 watch(() => paginatedAudiobooks.value.length, async () => {
   await nextTick()
+  try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
   try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad failed after paginatedAudiobooks change', e) }
 })
 
 watch(searchQuery, () => {

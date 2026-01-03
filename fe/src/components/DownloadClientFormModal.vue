@@ -298,6 +298,7 @@ import type { DownloadClientConfiguration, DownloadClientSettings } from '@/type
 import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
 import { getRemotePathMappings } from '@/services/api'
+import { logger } from '@/utils/logger'
 import type { RemotePathMapping } from '@/types'
 
 interface Props {
@@ -352,7 +353,7 @@ const loadRemotePathMappings = async () => {
   try {
     remotePathMappings.value = await getRemotePathMappings()
   } catch (e) {
-    try { console.debug('Failed to load remote path mappings', e) } catch {}
+    logger.debug('Failed to load remote path mappings', e)
     remotePathMappings.value = []
   }
 }

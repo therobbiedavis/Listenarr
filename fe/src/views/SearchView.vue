@@ -170,6 +170,7 @@ import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus, PhGlobe } from '@phospho
 import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
+import { logger } from '@/utils/logger'
 import type { SearchResult, AudibleBookMetadata, QualityScore, QualityProfile } from '@/types'
 import { useToast } from '@/services/toastService'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
@@ -204,7 +205,7 @@ onMounted(async () => {
     const w = window as unknown as Record<string, unknown>
     w.searchStore = searchStore
     w.searchResults = searchStore.searchResults
-    console.debug('[SearchView] Exposed searchStore and searchResults on window for debugging')
+    logger.debug('[SearchView] Exposed searchStore and searchResults on window for debugging')
   } catch {}
 })
 
@@ -213,7 +214,7 @@ const fetchRawDebug = async (q: string) => {
       const results = await apiService.intelligentSearch(q || 'Harry')
       rawDebugResults.value = results as unknown[]
       try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
-      console.debug('[SearchView] Raw debug results fetched (apiService)', results)
+      logger.debug('[SearchView] Raw debug results fetched (apiService)', results)
     } catch (e) {
       console.error('[SearchView] Raw debug fetch failed (apiService)', e)
       rawDebugResults.value = null
@@ -233,7 +234,7 @@ const fetchRawDebugWindow = async (q: string) => {
       const results = await resp.json()
       rawDebugResults.value = results as unknown[]
       try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
-      console.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
+      logger.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
     } catch (e) {
       console.error('[SearchView] Raw debug fetch failed (window.fetch)', e)
       rawDebugResults.value = null
@@ -265,7 +266,7 @@ const performSearch = async () => {
     const w = window as unknown as Record<string, unknown>
     w.searchStore = searchStore
     w.searchResults = searchStore.searchResults
-    console.debug('[SearchView] Bound searchStore/searchResults to window after search')
+    logger.debug('[SearchView] Bound searchStore/searchResults to window after search')
   } catch {}
   console.log('Search results count:', searchStore.searchResults.length)
   

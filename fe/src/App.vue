@@ -694,11 +694,13 @@ const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await nextTick()
   try { observeLazyImages() } catch (e: unknown) { console.error(e) }
 })
 
-watch(() => suggestions.length, () => {
+watch(() => suggestions.length, async () => {
+  await nextTick()
   try { observeLazyImages() } catch (e: unknown) { console.error(e) }
 })
 

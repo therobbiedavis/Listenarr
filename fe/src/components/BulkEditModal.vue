@@ -155,6 +155,7 @@ import { apiService } from '@/services/api'
 import { useToast } from '@/services/toastService'
 import type { QualityProfile } from '@/types'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import RootFolderSelect from '@/components/RootFolderSelect.vue'
 
 interface Props {
   isOpen: boolean
@@ -244,6 +245,8 @@ function resetForm() {
   }
 }
 
+import { logger } from '@/utils/logger'
+
 async function handleSave() {
   if (!hasChanges.value) return
 
@@ -282,7 +285,7 @@ async function handleSave() {
     // Debug logging: payload and environment
     // This will help diagnose NS_ERROR_CONNECTION_REFUSED in browser
     try {
-      console.debug('[BulkEditModal] Preparing bulk update', {
+      logger.debug('[BulkEditModal] Preparing bulk update', {
         endpoint: '/api/library/bulk-update',
         origin: window?.location?.origin,
         ids,

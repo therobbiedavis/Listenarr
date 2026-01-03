@@ -480,7 +480,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
-import { observeLazyImages } from '@/utils/lazyLoad'
+import { observeLazyImages, ensureVisibleImagesLoad, resetLazyObserver } from '@/utils/lazyLoad'
 import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -488,6 +488,7 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
+import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
@@ -804,6 +805,7 @@ async function ensureAuthorCover(authorName: string) {
   if (!authorName) return
   if (authorCoverOverrides[authorName]) return
   try {
+    if (typeof apiService.getAuthorLookup !== 'function') return
     const info = await apiService.getAuthorLookup(authorName)
     if (!info) return
     if (info.cachedPath) {
@@ -824,9 +826,20 @@ const groupBy = ref<'books' | 'authors' | 'series'>('books')
 const showGroupMenu = ref(false)
 
 try {
+  // Start with any stored preference
   const stored = localStorage.getItem(GROUP_BY_KEY)
   if (stored && ['books', 'authors', 'series'].includes(stored)) {
     groupBy.value = stored as 'books' | 'authors' | 'series'
+  }
+} catch {}
+
+// If the route contains an explicit group query parameter, prefer it on initial load
+try {
+  const initialQ = (route.query.group as string | undefined)
+  if (initialQ && ['books', 'authors', 'series'].includes(initialQ) && initialQ !== groupBy.value) {
+    // Use setGroupBy to ensure the same side-effects (selection clear, lazy image handling, etc.)
+    // fire-and-forget to avoid blocking initialization
+    void setGroupBy(initialQ as 'books'|'authors'|'series')
   }
 } catch {}
 
@@ -891,6 +904,8 @@ const groupedCollections = computed(() => {
 })
 
 // When grouped collections change (or grouping set to authors), fetch missing author images
+// Also re-run the lazy image observer after a short delay so any newly-populated
+// author cover overrides are applied to image `data-src` attributes and observed.
 watch(() => groupedCollections.value.map(g => g.name), async () => {
   if (groupBy.value !== 'authors') return
   for (const g of groupedCollections.value) {
@@ -902,6 +917,23 @@ watch(() => groupedCollections.value.map(g => g.name), async () => {
       }
     } catch {}
   }
+
+  // Wait a tick for any reactive updates, then schedule a short delayed
+  // re-observation to catch images whose data-src values were set after
+  // author lookup completed.
+  try {
+    await nextTick()
+    setTimeout(() => {
+      try { observeLazyImages() } catch (e: unknown) { console.error('observeLazyImages retry failed', e) }
+    }, 120)
+  } catch (e) {
+    console.error('Failed to schedule lazy image re-observation', e)
+  }
+
+
+  // After kickoffs, ensure any visible new images load immediately (defensive)
+  await nextTick()
+  try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad failed after groupedCollections change', e) }
 }, { immediate: true })
 
 
@@ -1001,8 +1033,12 @@ watch(showItemDetails, (v) => {
 watch(() => route.query.group, (g) => {
   try {
     const q = g as string | undefined
-    if (q && ['books', 'authors', 'series'].includes(q)) groupBy.value = q as 'books' | 'authors' | 'series'
-    else if (q === undefined) groupBy.value = 'books'
+    const mode = (q && ['books', 'authors', 'series'].includes(q)) ? q as 'books' | 'authors' | 'series' : 'books'
+    // If the route changed the group, use setGroupBy so we run the same DOM/update/observer logic
+    if (mode !== groupBy.value) {
+      // fire-and-forget async to avoid blocking the router navigation
+      void setGroupBy(mode)
+    }
   } catch {}
 })
 
@@ -1215,7 +1251,8 @@ onMounted(async () => {
     // Initialize visible range
     updateVisibleRange()
 
-    // Attach lazy observer so posters start with placeholder and load when visible
+    // Wait for DOM update then attach lazy observer so posters start with placeholder and load when visible
+    await nextTick()
     try { observeLazyImages() } catch (e: unknown) { console.error(e) }
 
     // Re-run observer when visible range changes (virtual scrolling)
@@ -1301,7 +1338,7 @@ function toggleViewMode() {
   viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
 }
 
-function setGroupBy(mode: 'books' | 'authors' | 'series') {
+async function setGroupBy(mode: 'books' | 'authors' | 'series') {
   groupBy.value = mode
   showGroupMenu.value = false
   // Clear any active selection when switching grouping mode
@@ -1314,7 +1351,51 @@ function setGroupBy(mode: 'books' | 'authors' | 'series') {
     // update route query so sidebar subnav and URL stay in sync
     router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
   } catch (err) {
-    console.debug('Failed to update route query for group:', err)
+    logger.debug('Failed to update route query for group:', err)
+  }
+
+  // Ensure DOM settles, recalc visible range for the virtual scroller,
+  // then observe lazy images so newly rendered cards load reliably.
+  try {
+    await nextTick()
+    try { updateVisibleRange() } catch (e: unknown) { console.error('updateVisibleRange failed after group change', e) }
+    await nextTick()
+
+    // Reset the observer to ensure we observe a fresh set of images (clears stale observations)
+    try { resetLazyObserver() } catch (e: unknown) { console.error('resetLazyObserver failed', e) }
+
+    try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+
+    // Force-load images that are already visible (defensive against IntersectionObserver timing races)
+    try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad immediate failed', e) }
+
+    // A couple of delayed retries to catch any later-updating images (author lookups, rendering timing, etc.)
+    setTimeout(() => {
+      try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad retry failed', e) }
+      try { observeLazyImages() } catch (e: unknown) { console.error('observeLazyImages retry failed', e) }
+    }, 150)
+
+    setTimeout(() => {
+      try { ensureVisibleImagesLoad() } catch (e: unknown) { console.error('ensureVisibleImagesLoad final retry failed', e) }
+    }, 400)
+  } catch (e) {
+    console.error('Failed to schedule lazy image observation after group change', e)
+  }
+
+  // If switching to authors, kick off author lookups for missing covers
+  if (mode === 'authors') {
+    try {
+      for (const g of groupedCollections.value) {
+        try {
+          const hasAuthorImage = !!g.coverUrl && g.coverUrl.includes('/config/cache/images/authors/')
+          if (!authorCoverOverrides[g.name] && !hasAuthorImage) {
+            void ensureAuthorCover(g.name)
+          }
+        } catch {}
+      }
+    } catch (e) {
+      console.error('Failed to kick off author cover lookups on group change', e)
+    }
   }
 } 
 

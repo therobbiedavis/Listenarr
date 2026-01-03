@@ -813,7 +813,7 @@ watch(() => lastResults?.value, async (newVal) => {
       await handleSimpleSearchResults(newVal)
     }
   } catch (e) {
-    console.debug('Error handling lastResults change', e)
+    logger.debug('Error handling lastResults change', e)
   }
 })
 
@@ -2394,7 +2394,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       }
     } catch (e) {
       // swallow normalization errors
-      console.debug('Normalization failed for simple result', e)
+      logger.debug('Normalization failed for simple result', e)
     }
     
     // Extract year from publishedDate if it's a Date object, otherwise parse string

@@ -68,9 +68,7 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
-  if (import.meta.env.DEV) {
-    try { console.debug('[router] beforeEach', { to: to.fullPath, authenticated: auth.user.authenticated, loaded: auth.loaded }) } catch {}
-  }
+  logger.debug('[router] beforeEach', { to: to.fullPath, authenticated: auth.user.authenticated, loaded: auth.loaded })
 
   // Obtain startup config using a shared module-level promise/cache so multiple navigations
   // during app boot don't trigger many GETs to /api/startupconfig.
@@ -78,12 +76,8 @@ router.beforeEach(async (to, from, next) => {
   const startupConfig = await getStartupConfigCached()
   // Fail-safe: if we couldn't load startup config, assume authentication is required
   const startupConfigMissing = !startupConfig
-  if (import.meta.env.DEV) {
-    try { console.debug('[router] startupConfigMissing', startupConfigMissing) } catch {}
-  }
-  if (import.meta.env.DEV) {
-    try { console.debug('[router] startupConfig', startupConfig) } catch {}
-  }
+  logger.debug('[router] startupConfigMissing', startupConfigMissing)
+  logger.debug('[router] startupConfig', startupConfig)
   const authRequiredConfig = (() => {
     if (startupConfigMissing) return true
     // Accept both camelCase and PascalCase variants from backend
@@ -114,26 +108,18 @@ router.beforeEach(async (to, from, next) => {
             hash: url.hash // Preserve the hash/anchor (e.g., #indexers)
           }
           auth.redirectTo = null
-          if (import.meta.env.DEV) { 
-            try { 
-              console.debug('[router] auth disabled, but redirect found in store/query, going to:', dest) 
-            } catch {} 
-          }
+          logger.debug('[router] auth disabled, but redirect found in store/query, going to:', dest)
           return next(dest)
         } catch {
           // Fallback to string path
           auth.redirectTo = null
-          if (import.meta.env.DEV) { 
-            try { 
-              console.debug('[router] auth disabled, but redirect found in store/query (fallback), going to:', redirectPath) 
-            } catch {} 
-          }
+          logger.debug('[router] auth disabled, but redirect found in store/query (fallback), going to:', redirectPath)
           return next(redirectPath)
         }
       }
       
       // No redirect - go to home
-      if (import.meta.env.DEV) { try { console.debug('[router] auth disabled, no redirect found, going to home') } catch {} }
+      logger.debug('[router] auth disabled, no redirect found, going to home')
       return next({ name: 'home' })
     }
     
@@ -142,11 +128,7 @@ router.beforeEach(async (to, from, next) => {
     if (!auth.loaded && to.meta.requiresAuth) {
       // First time loading a protected route - save it before auth finishes loading
       auth.redirectTo = to.fullPath
-      if (import.meta.env.DEV) { 
-        try { 
-          console.debug('[router] auth disabled, saving redirect for initial load:', to.fullPath) 
-        } catch {} 
-      }
+      logger.debug('[router] auth disabled, saving redirect for initial load:', to.fullPath)
     }
   } else {
     // Authentication enabled: enforce protection on routes marked as requiresAuth
@@ -154,7 +136,7 @@ router.beforeEach(async (to, from, next) => {
       // Preserve the intended route and redirect to login
       // Use a query param so the redirect survives page reloads; also keep store as fallback
       auth.redirectTo = to.fullPath
-      if (import.meta.env.DEV) { try { console.debug('[router] requiresAuth and not authenticated, redirecting to login', { redirect: to.fullPath }) } catch {} }
+      logger.debug('[router] requiresAuth and not authenticated, redirecting to login', { redirect: to.fullPath })
       return next({ name: 'login', query: { redirect: to.fullPath } })
     }
   }
@@ -175,21 +157,13 @@ router.beforeEach(async (to, from, next) => {
           hash: url.hash // Preserve the hash/anchor (e.g., #indexers)
         }
         auth.redirectTo = null
-        if (import.meta.env.DEV) { 
-          try { 
-            console.debug('[router] authenticated user on login page, redirecting to:', dest) 
-          } catch {} 
-        }
+        logger.debug('[router] authenticated user on login page, redirecting to:', dest)
         return next(dest)
       } catch {
         // Fallback: if URL parsing fails, use the path string directly
         // Vue Router should still handle it correctly
         auth.redirectTo = null
-        if (import.meta.env.DEV) { 
-          try { 
-            console.debug('[router] authenticated user on login page, redirecting to (fallback):', redirectPath) 
-          } catch {} 
-        }
+        logger.debug('[router] authenticated user on login page, redirecting to (fallback):', redirectPath)
         return next(redirectPath)
       }
     }
