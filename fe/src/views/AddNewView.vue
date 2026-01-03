@@ -260,17 +260,14 @@
                 @error="handleLazyImageError"
               />
               <template v-else>
-                <img :src="getPlaceholderUrl()" alt="Cover unavailable" loading="lazy" class="placeholder-cover-image" decoding="async" />
+                <img :src="getPlaceholderUrl()" alt="Cover unavailable" loading="lazy" class="placeholder-cover-image" decoding="async" @error="handleLazyImageError" />
               </template>
             </div>
             <div class="result-info">
-              <h3>
-                {{ safeText(audibleResult.title) }}
-                :src="getCoverUrl(searchResult) || getPlaceholderUrl()"
+              <h3>{{ safeText(audibleResult.title) }}</h3>
               <p class="result-author">
                 by {{ (audibleResult.authors || []).map(author => safeText(author)).join(', ') || 'Unknown Author' }}
               </p>
-                @error="handleLazyImageError"
               <p v-if="audibleResult.narrators?.length" class="result-narrator">
                 Narrated by {{ audibleResult.narrators.map(narrator => safeText(narrator)).join(', ') }}
               </p>

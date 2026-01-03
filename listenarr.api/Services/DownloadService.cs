@@ -441,6 +441,19 @@ namespace Listenarr.Api.Services
                         }
                     }
                 }
+
+                // After import completes, process the completed download to handle removal from client
+                try
+                {
+                    _logger.LogInformation("Calling CompletedDownloadProcessor for download {DownloadId}", downloadId);
+                    await _completedDownloadProcessor.ProcessCompletedDownloadAsync(downloadId, finalPath);
+                    _logger.LogInformation("CompletedDownloadProcessor finished for download {DownloadId}", downloadId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to process completed download removal for {DownloadId}", downloadId);
+                }
+
                 try
                 {
                     var currentQueue = await GetQueueAsync();

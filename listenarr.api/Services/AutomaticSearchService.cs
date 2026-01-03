@@ -166,6 +166,13 @@ namespace Listenarr.Api.Services
             _logger.LogInformation("Audiobook '{Title}': cutoff met={CutoffMet}, best existing quality={BestQuality}",
                 audiobook.Title, cutoffMet, bestExistingQuality ?? "none");
 
+            // Skip automatic search if quality cutoff is already met (matches Sonarr behavior)
+            if (cutoffMet)
+            {
+                _logger.LogInformation("Quality cutoff already met for audiobook '{Title}', skipping automatic search", audiobook.Title);
+                return 0;
+            }
+
             // Build search query
             var searchQuery = BuildSearchQuery(audiobook);
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);

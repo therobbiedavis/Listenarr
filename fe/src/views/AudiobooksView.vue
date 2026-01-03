@@ -494,6 +494,7 @@ import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { safeText } from '@/utils/textUtils'
 import { getPlaceholderUrl } from '@/utils/placeholder'
+import { observeLazyImages } from '@/utils/lazyLoad'
 
 function getAuthorSortKey(author: string): string {
   const parts = author.trim().split(/\s+/)
