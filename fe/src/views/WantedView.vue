@@ -61,9 +61,12 @@
           >
         <div class="wanted-poster">
           <img 
-            :src="apiService.getImageUrl(item.imageUrl) || apiService.getPlaceholderUrl()" 
+            class="lazy-img"
+            :src="getPlaceholderUrl()"
+            :data-src="apiService.getImageUrl(item.imageUrl) || ''"
             :alt="item.title"
             loading="lazy"
+            decoding="async"
             @error="handleImageError"
           />
         </div>
@@ -156,7 +159,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { observeLazyImages } from '@/utils/lazyLoad'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
@@ -183,6 +187,23 @@ const BUFFER_ROWS = 3
 
 const visibleRange = ref({ start: 0, end: 20 })
 
+// Update visible range for virtual scrolling (defined early to avoid TDZ when called from onMounted)
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+
+  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+
+  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
+  // filteredWanted may not be initialized yet; guard with optional chaining
+  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, (filteredWanted?.value?.length) || 0)
+
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
 const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
   if (!audiobook || !audiobook.qualityProfileId) {
     return null
@@ -194,6 +215,7 @@ const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
 }
 
 const selectedTab = ref('all')
+import { getPlaceholderUrl } from '@/utils/placeholder'
 const loading = ref(false)
 const searching = ref<Record<number, boolean>>({})
 const searchResults = ref<Record<number, string>>({})
@@ -219,6 +241,14 @@ onMounted(async () => {
   nextTick(() => {
     updateVisibleRange()
   })
+
+  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+})
+
+// Watch the visible range (virtual scroll) to lazy-load images when the viewport changes
+watch(() => visibleRange.value, async () => {
+  await nextTick()
+  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
 })
 
 // Filter audiobooks that are monitored and missing files
@@ -282,20 +312,7 @@ const visibleWanted = computed(() => {
   return filteredWanted.value.slice(visibleRange.value.start, visibleRange.value.end)
 })
 
-const updateVisibleRange = () => {
-  if (!scrollContainer.value) return
-  
-  const scrollTop = scrollContainer.value.scrollTop
-  const viewportHeight = scrollContainer.value.clientHeight
-  
-  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
-  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
-  
-  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
-  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, filteredWanted.value.length)
-  
-  visibleRange.value = { start: startIndex, end: endIndex }
-}
+
 
 const totalHeight = computed(() => {
   return filteredWanted.value.length * ROW_HEIGHT

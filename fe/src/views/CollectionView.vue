@@ -147,10 +147,12 @@
           </div>
 
           <img
-            class="list-thumb"
-            :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()"
+            class="list-thumb lazy-img"
+            :src="getPlaceholderUrl()"
+            :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
             :alt="audiobook.title"
             loading="lazy"
+            decoding="async"
             @error="handleImageError"
           />
 
@@ -216,10 +218,13 @@
           <div class="collection-cover">
             <img
               v-if="audiobook.imageUrl"
-              :src="apiService.getImageUrl(audiobook.imageUrl)"
+              :src="getPlaceholderUrl()"
+              :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
               :alt="audiobook.title"
+              loading="lazy"
+              decoding="async"
               @error="handleImageError"
-              class="collection-image"
+              class="collection-image lazy-img"
             />
             <div v-else class="no-cover">
               <PhBookOpen />
@@ -308,6 +313,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { observeLazyImages } from '@/utils/lazyLoad'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhUser, PhBooks, PhGridFour, PhList, PhCheckSquare, PhX, PhArrowClockwise, PhInfo, PhBookOpen, PhSpinner, PhWarningCircle, PhPencil, PhTrash, PhCaretLeft, PhCaretRight, PhStar, PhEye, PhEyeSlash } from '@phosphor-icons/vue'
 import { useLibraryStore } from '@/stores/library'
@@ -317,8 +323,9 @@ import { apiService } from '@/services/api'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import BulkEditModal from '@/components/BulkEditModal.vue'
 import { showConfirm } from '@/composables/useConfirm'
+import { getPlaceholderUrl } from '@/utils/placeholder'
 import CustomSelect from '@/components/CustomSelect.vue'
-import type { Audiobook, QualityProfile } from '@/types'
+import type { Audiobook } from '@/types'
 import { safeText } from '@/utils/textUtils'
 
 const route = useRoute()
@@ -411,7 +418,6 @@ const selectedCount = computed(() => libraryStore.selectedIds.size)
 const isSelected = (id: number) => libraryStore.isSelected(id)
 const toggleSelection = (id: number) => libraryStore.toggleSelection(id)
 
-const clearSelection = () => libraryStore.clearSelection()
 
 const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
@@ -539,42 +545,24 @@ const handleImageError = (event: Event) => {
     const img = event.target as HTMLImageElement
     if (!img) return
     // prevent repeated handling on same element
-    try { if ((img as any).__imageFallbackDone) return; (img as any).__imageFallbackDone = true } catch {}
+    try { if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return; (img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true } catch (e: unknown) {
+      console.error(e)
+    }
 
     // try to extract identifier from src or data-original-src
     const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
-    try {
-      const m = (original || '').match(/\/api\/images\/([^?\\/]+)(?:\?|$)/i)
-      if (m && m[1]) {
-        try { apiService.markImageFailed(decodeURIComponent(m[1])) } catch {}
-      }
-    } catch {}
+
 
     // set placeholder and clear lazy attributes
     try { img.src = apiService.getPlaceholderUrl() } catch {}
     try { img.removeAttribute('data-src') } catch {}
     try { img.removeAttribute('data-original-src') } catch {}
-    try { (img as any).onerror = null } catch {}
+    try { (img as unknown as { onerror?: null }).onerror = null } catch (e: unknown) {
+      console.error(e)
+    }
   } catch {}
 }
 
-const formatDuration = (duration?: number) => {
-  if (!duration) return ''
-  const hours = Math.floor(duration / 3600)
-  const minutes = Math.floor((duration % 3600) / 60)
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
-}
-
-const formatFileSize = (size?: number) => {
-  if (!size) return ''
-  const units = ['B', 'KB', 'MB', 'GB']
-  let unitIndex = 0
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex++
-  }
-  return `${size.toFixed(1)} ${units[unitIndex]}`
-}
 
 function getQualityProfileName(profileId?: number): string | null {
   if (!profileId) return null
@@ -706,6 +694,13 @@ onMounted(async () => {
   if (libraryStore.audiobooks.length === 0) {
     await libraryStore.fetchLibrary()
   }
+  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+})
+
+// Re-observe images when page changes
+watch(() => paginatedAudiobooks.value.length, async () => {
+  await nextTick()
+  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
 })
 
 watch(searchQuery, () => {
@@ -1802,14 +1797,6 @@ defineExpose({
 .monitored-badge.unmonitored {
   background: rgba(244, 67, 54, 0.9);
   color: #fff;
-}
-
-.edit-btn-small {
-  /* Specific styles if needed */
-}
-
-.delete-btn-small {
-  /* Specific styles if needed */
 }
 
 .grid-bottom-details {

@@ -240,6 +240,40 @@ describe('AudiobooksView Grouping', () => {
     expect(groupedCollections).toHaveLength(0)
   })
 
+  it('clears selection when changing grouping mode', async () => {
+    if (!(global as any).ResizeObserver) {
+      (global as any).ResizeObserver = class { observe() {}; disconnect() {}; }
+    }
+    if (!(global as any).WebSocket) {
+      (global as any).WebSocket = function () { /* noop */ }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }, { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView }] })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Book 1', authors: ['Author A'], series: 'Series 1', imageUrl: 'cover1.jpg', files: [] },
+      { id: 2, title: 'Book 2', authors: ['Author B'], series: 'Series 2', imageUrl: 'cover2.jpg', files: [] }
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, { global: { plugins: [pinia, router], stubs: ['BulkEditModal', 'EditAudiobookModal', 'CustomFilterModal', 'FiltersDropdown', 'CustomSelect'] } })
+    await new Promise(r => setTimeout(r, 0))
+
+    // Select one item
+    store.toggleSelection(1)
+    expect(store.selectedIds.size).toBeGreaterThan(0)
+
+    // Switch group and expect selection cleared
+    await wrapper.vm.setGroupBy('authors')
+    await wrapper.vm.$nextTick()
+    expect(store.selectedIds.size).toBe(0)
+  })
+
   it('series bottom placard is only visible when showItemDetails is enabled', async () => {
     if (!(global as any).ResizeObserver) {
       (global as any).ResizeObserver = class { observe() {}; disconnect() {}; }

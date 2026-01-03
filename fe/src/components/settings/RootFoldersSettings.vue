@@ -25,23 +25,27 @@
         <div v-for="folder in store.folders" :key="folder.id" class="folder-card" :class="{ 'is-default': folder.isDefault }">
           <div class="folder-info">
             <div class="folder-header">
-              <h4>{{ folder.name }}</h4>
-              <div class="folder-badges">
-                <span v-if="folder.isDefault" class="badge default">Default</span>
+              <div class="folder-title-section">
+                <div class="folder-name-row">
+                  <h4>{{ folder.name }}</h4>
+                  <div class="folder-badges">
+                    <span v-if="folder.isDefault" class="badge default">Default</span>
+                  </div>
+                </div>
+              </div>
+              <div class="folder-actions">
+                <button class="icon-button" @click="edit(folder)" title="Edit" data-cy="edit-root-folder">
+                  <PhPencil />
+                </button>
+                <button class="icon-button danger" @click="confirmDelete(folder)" title="Delete" data-cy="delete-root-folder">
+                  <PhTrash />
+                </button>
               </div>
             </div>
             <div class="folder-path">
               <PhFolder />
               <code>{{ folder.path }}</code>
             </div>
-          </div>
-          <div class="folder-actions">
-            <button class="icon-button" @click="edit(folder)" title="Edit" data-cy="edit-root-folder">
-              <PhPencil />
-            </button>
-            <button class="icon-button danger" @click="confirmDelete(folder)" title="Delete" data-cy="delete-root-folder">
-              <PhTrash />
-            </button>
           </div>
         </div>
       </div>
@@ -105,9 +109,6 @@ defineExpose({
 </script>
 
 <style scoped>
-.root-folders-settings {
-  max-width: 800px;
-}
 
 .section-header {
   display: flex;
@@ -181,26 +182,31 @@ defineExpose({
 }
 
 .folders-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
 }
 
 .folder-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   transition: all 0.2s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .folder-card:hover {
   border-color: rgba(77, 171, 247, 0.3);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(77, 171, 247, 0.15);
+}
+
+.folder-card.disabled {
+  opacity: 0.5;
+  filter: grayscale(50%);
 }
 
 .folder-card.is-default {
@@ -215,16 +221,23 @@ defineExpose({
 
 .folder-header {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1.5rem;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 0.5rem;
 }
 
-.folder-header h4 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #fff;
+.folder-title-section {
+  flex: 1;
+}
+
+.folder-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
 }
 
 .folder-badges {
@@ -233,25 +246,37 @@ defineExpose({
 }
 
 .badge {
-  padding: 0.25rem 0.5rem;
-  background: rgba(255, 255, 255, 0.1);
-  color: #ccc;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .badge.default {
-  background: #4dabf7;
-  color: white;
+  background-color: rgba(76, 175, 80, 0.15);
+  color: #51cf66;
+  border: 1px solid rgba(76, 175, 80, 0.3);
 }
 
-.folder-path {
+.folder-info h4, .folder-header h4 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+  .folder-path {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   color: #ccc;
   font-size: 0.9rem;
+  padding: 1.5rem;
 }
 
 .folder-path code {
@@ -270,27 +295,44 @@ defineExpose({
 }
 
 .icon-button {
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  color: #adb5bd;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border: none;
-  background: transparent;
-  color: #ccc;
-  border-radius: 4px;
-  cursor: pointer;
   transition: all 0.2s ease;
+  font-size: 1.1rem;
+  width: 36px;
+  height: 36px;
 }
 
-.icon-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+.icon-button:hover:not(:disabled) {
+  background: rgba(77, 171, 247, 0.15);
+  border-color: #4dabf7;
+  color: #4dabf7;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(77, 171, 247, 0.3);
 }
 
-.icon-button.danger:hover {
-  background: rgba(211, 47, 47, 0.1);
-  color: #f44336;
+.icon-button.danger {
+  color: #ff6b6b;
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.15);
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn {

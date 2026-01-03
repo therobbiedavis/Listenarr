@@ -42,62 +42,6 @@ const BACKEND_BASE_URL = import.meta.env.DEV
 type ErrorWithStatus = Error & { status?: number; body?: string; retryAfter?: number }
 
 class ApiService {
-  // In-memory cache of image identifiers that previously failed to load
-  private failedImageIds = new Set<string>()
-  private readonly FAILED_IMAGES_KEY = 'listenarr.failedImages'
-
-  constructor() {
-    try {
-      const raw = localStorage.getItem(this.FAILED_IMAGES_KEY)
-      if (raw) {
-        const ids = JSON.parse(raw)
-        if (Array.isArray(ids)) ids.forEach(id => { if (id) this.failedImageIds.add(String(id)) })
-      }
-    } catch {}
-  }
-
-  markImageFailed(identifier: string) {
-    try {
-      if (!identifier) return
-      this.failedImageIds.add(identifier)
-      try { localStorage.setItem(this.FAILED_IMAGES_KEY, JSON.stringify(Array.from(this.failedImageIds))) } catch {}
-    } catch {}
-  }
-
-  isImageFailed(identifier: string) {
-    try { return this.failedImageIds.has(identifier) } catch { return false }
-  }
-
-  // Remove specific ASINs/identifiers from the failed-images cache so the
-  // UI will attempt to refetch them again. This avoids clearing unrelated
-  // failures while allowing results from a search to retry fetching.
-  clearFailedImagesForAsins(asins: string[] | Set<string>) {
-    try {
-      const ids = Array.isArray(asins) ? asins : Array.from(asins)
-      const toRemove = new Set(ids.filter(Boolean).map(i => String(i)))
-      if (toRemove.size === 0) return
-      let changed = false
-      toRemove.forEach(id => {
-        if (this.failedImageIds.has(id)) {
-          this.failedImageIds.delete(id)
-          changed = true
-        }
-      })
-      if (changed) {
-        try { localStorage.setItem(this.FAILED_IMAGES_KEY, JSON.stringify(Array.from(this.failedImageIds))) } catch {}
-      }
-    } catch {}
-  }
-
-  // Convenience: clear failed images for all ASINs present in a search result list
-  clearFailedImagesForSearchResults(results: SearchResult[] | null | undefined) {
-    try {
-      if (!results || !Array.isArray(results)) return
-      const asins = results.map(r => (r?.asin ?? r?.imageUrl ?? '')).filter(Boolean) as string[]
-      if (asins.length === 0) return
-      this.clearFailedImagesForAsins(asins)
-    } catch {}
-  }
 
   getPlaceholderUrl(): string {
     try {
@@ -303,7 +247,6 @@ class ApiService {
     if (category) body.category = category
     const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body), signal })
     const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
-    try { this.clearFailedImagesForSearchResults(results) } catch {}
     return results
   }
 
@@ -432,14 +375,9 @@ class ApiService {
           results = (results as SearchResult[]).filter((r: SearchResult) => (((r.asin || '') as string).toLowerCase() === q))
         }
 
-        // Clear failed-image cache for these ASINs so we allow retries
-        try { this.clearFailedImagesForSearchResults(results) } catch {}
-
         // Wait for images to be cached (timeout after 10s) before returning.
         try { await this.waitForImagesCached(results, 10000) } catch {}
       } catch {}
-    } else {
-      try { this.clearFailedImagesForSearchResults(results) } catch {}
     }
 
     return results
@@ -959,7 +897,6 @@ class ApiService {
           }
           if (asinMatch && asinMatch[1]) {
             const identifier = asinMatch[1]
-            try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
             let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
             const params = new URLSearchParams()
             const sessionToken = sessionTokenManager.getToken()
@@ -984,7 +921,6 @@ class ApiService {
             const base = fname.replace(/\.[^.]+$/, '')
             if (base && base.length >= 10 && base.length <= 12) {
               const identifier = base
-              try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
               let url = `${BACKEND_BASE_URL}/api/images/${encodeURIComponent(identifier)}`
               const params = new URLSearchParams()
               const sessionToken = sessionTokenManager.getToken()
@@ -1030,11 +966,7 @@ class ApiService {
             url += `?access_token=${encodeURIComponent(apiKey)}`
           }
         }
-            // If we've previously marked this identifier as failed, return placeholder
-            try {
-              if (this.isImageFailed(identifier)) return this.getPlaceholderUrl()
-            } catch {}
-            return url
+                return url
       }
     } catch (e) {
       // fall back to default behavior below on any error
@@ -1060,8 +992,6 @@ class ApiService {
             url += `?access_token=${encodeURIComponent(apiKey)}`
           }
         }
-            // If we've previously marked this identifier as failed, return placeholder
-            try { if (this.isImageFailed(identifier)) return this.getPlaceholderUrl() } catch {}
             return url
       }
     } catch (e) {

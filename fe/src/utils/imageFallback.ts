@@ -1,4 +1,5 @@
 import { apiService } from '@/services/api'
+import { getPlaceholderUrl } from '@/utils/placeholder'
 
 export function handleImageError(ev: Event) {
   try {
@@ -10,15 +11,10 @@ export function handleImageError(ev: Event) {
 
     // Try to extract identifier from data-original-src or src that points to /api/images/{id}
     const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
-    try {
-      const m = (original || '').match(/\/api\/images\/([^?\\/]+)(?:\?|$)/i)
-      if (m && m[1]) {
-        try { apiService.markImageFailed(decodeURIComponent(m[1])) } catch {}
-      }
-    } catch {}
+
 
     // Set placeholder and clear lazy attributes
-    try { img.src = apiService.getPlaceholderUrl() } catch {}
+    try { img.src = getPlaceholderUrl() } catch {}
     try { img.removeAttribute('data-src') } catch {}
     try { img.removeAttribute('data-original-src') } catch {}
     try { (img as any).onerror = null } catch {}

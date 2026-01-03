@@ -175,9 +175,12 @@
                 <div class="series-count-badge">{{ collection.count }}</div>
                 <img
                   v-if="collection.coverUrl"
-                  :src="apiService.getImageUrl(collection.coverUrl) || apiService.getPlaceholderUrl()"
+                  :src="getPlaceholderUrl()"
+                  :data-src="apiService.getImageUrl(collection.coverUrl) || ''"
                   :alt="collection.name"
-                  class="audiobook-poster"
+                  class="audiobook-poster lazy-img"
+                  loading="lazy"
+                  decoding="async"
                   @error="handleImageError"
                 />
                 <div v-else class="no-cover">
@@ -203,16 +206,19 @@
                   <template v-if="collection.coverUrls.length === 1">
                     <div
                       class="series-single-bg"
-                      :style="{ backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0]) || apiService.getPlaceholderUrl()})` }"
+                      :style="{ backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0]) || getPlaceholderUrl()})` }"
                     />
                     <div
                       class="series-cover-item"
                       :style="getCoverStyle(0, collection.coverUrls.length)"
                     >
                       <img
-                        :src="apiService.getImageUrl(collection.coverUrls[0]) || apiService.getPlaceholderUrl()"
+                        :src="getPlaceholderUrl()"
+                        :data-src="apiService.getImageUrl(collection.coverUrls[0]) || ''"
                         :alt="`${collection.name} Cover`"
-                        class="series-cover-image centered"
+                        class="series-cover-image centered lazy-img"
+                        loading="lazy"
+                        decoding="async"
                         @error="handleImageError"
                       />
                     </div>
@@ -226,9 +232,12 @@
                       :style="getCoverStyle(index, collection.coverUrls.length)"
                     >
                       <img
-                        :src="apiService.getImageUrl(coverUrl) || apiService.getPlaceholderUrl()"
+                        :src="getPlaceholderUrl()"
+                        :data-src="apiService.getImageUrl(coverUrl) || ''"
                         :alt="`${collection.name} Cover`"
-                        class="series-cover-image"
+                        class="series-cover-image lazy-img"
+                        loading="lazy"
+                        decoding="async"
                         @error="handleImageError"
                       />
                     </div>
@@ -298,10 +307,12 @@
     </div>
       <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
       <img 
-        :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()" 
-        :alt="audiobook.title" 
-        class="audiobook-poster"
+        :src="getPlaceholderUrl()"
+        :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
+        :alt="audiobook.title"
+        class="audiobook-poster lazy-img"
         loading="lazy"
+        decoding="async"
         @error="handleImageError"
       />
         <div class="status-overlay">
@@ -379,10 +390,12 @@
                 />
               </div>
               <img
-                class="list-thumb"
-                :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()"
+                class="list-thumb lazy-img"
+                :src="getPlaceholderUrl()"
+                :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
                 :alt="audiobook.title"
                 loading="lazy"
+                decoding="async"
                 @error="handleImageError"
               />
               <div class="list-details">
@@ -467,6 +480,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { observeLazyImages } from '@/utils/lazyLoad'
 import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -484,6 +498,7 @@ import type { Audiobook, QualityProfile } from '@/types'
 import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { safeText } from '@/utils/textUtils'
+import { getPlaceholderUrl } from '@/utils/placeholder'
 
 function getAuthorSortKey(author: string): string {
   const parts = author.trim().split(/\s+/)
@@ -796,7 +811,8 @@ async function ensureAuthorCover(authorName: string) {
     } else if (info.asin) {
       authorCoverOverrides[authorName] = `/config/cache/images/authors/${info.asin}.jpg`
     }
-  } catch (e) {
+  } catch (e: unknown) {
+    console.error(e)
     // ignore network/lookup failures
   }
 }
@@ -849,7 +865,7 @@ const groupedCollections = computed(() => {
 
           if (!cover) {
             try {
-              const asin = (book as any).authorAsins?.[0]
+              const asin = (book as unknown as { authorAsins?: string[] })?.authorAsins?.[0]
               if (asin) cover = `/config/cache/images/authors/${asin}.jpg`
             } catch {}
           }
@@ -875,7 +891,7 @@ const groupedCollections = computed(() => {
 })
 
 // When grouped collections change (or grouping set to authors), fetch missing author images
-watch(() => groupedCollections.value.map(g => g.name), async (names) => {
+watch(() => groupedCollections.value.map(g => g.name), async () => {
   if (groupBy.value !== 'authors') return
   for (const g of groupedCollections.value) {
     try {
@@ -985,7 +1001,7 @@ watch(showItemDetails, (v) => {
 watch(() => route.query.group, (g) => {
   try {
     const q = g as string | undefined
-    if (q && ['books', 'authors', 'series'].includes(q)) groupBy.value = q as any
+    if (q && ['books', 'authors', 'series'].includes(q)) groupBy.value = q as 'books' | 'authors' | 'series'
     else if (q === undefined) groupBy.value = 'books'
   } catch {}
 })
@@ -1199,6 +1215,15 @@ onMounted(async () => {
     // Initialize visible range
     updateVisibleRange()
 
+    // Attach lazy observer so posters start with placeholder and load when visible
+    try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+
+    // Re-run observer when visible range changes (virtual scrolling)
+    watch(() => visibleRange.value, async () => {
+      await nextTick()
+      try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+    })
+
     // Add resize observer to recalculate on window resize
     const resizeObserver = new ResizeObserver(() => {
       // Guard against null - element may be unmounted during navigation
@@ -1279,13 +1304,19 @@ function toggleViewMode() {
 function setGroupBy(mode: 'books' | 'authors' | 'series') {
   groupBy.value = mode
   showGroupMenu.value = false
+  // Clear any active selection when switching grouping mode
+  try {
+    libraryStore.clearSelection()
+  } catch (e: unknown) {
+    console.error('Failed to clear selection on group change', e)
+  }
   try {
     // update route query so sidebar subnav and URL stay in sync
     router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
   } catch (err) {
     console.debug('Failed to update route query for group:', err)
   }
-}
+} 
 
 function navigateToCollection(collection: { name: string }) {
   const type = groupBy.value === 'authors' ? 'author' : 'series'
@@ -1296,18 +1327,17 @@ function handleImageError(event: Event) {
   try {
     const img = event.target as HTMLImageElement
     if (!img) return
-    try { if ((img as any).__imageFallbackDone) return; (img as any).__imageFallbackDone = true } catch {}
+    try { if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return; (img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true } catch (e: unknown) {
+      console.error(e)
+    }
     const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
-    try {
-      const m = (original || '').match(/\/api\/images\/([^?\\/]+)(?:\?|$)/i)
-      if (m && m[1]) {
-        try { apiService.markImageFailed(decodeURIComponent(m[1])) } catch {}
-      }
-    } catch {}
+
     try { img.src = apiService.getPlaceholderUrl() } catch {}
     try { img.removeAttribute('data-src') } catch {}
     try { img.removeAttribute('data-original-src') } catch {}
-    try { (img as any).onerror = null } catch {}
+    try { (img as unknown as { onerror?: null }).onerror = null } catch (e: unknown) {
+      console.error(e)
+    }
   } catch {}
 }
 
@@ -1872,13 +1902,15 @@ defineExpose({
 }
 
 .series-bottom-content {
-  width: 200px;
+  width: 100%;
+  max-width: 384px; /* match series-covers-container width */
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 0 0.5rem;
+  margin: 0 auto;
 }
 
 /* Use same typography as grid-bottom-details to keep consistency */

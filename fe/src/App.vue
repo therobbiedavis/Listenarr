@@ -42,7 +42,7 @@
             <ul v-if="suggestions.length > 0" class="search-list">
               <li v-for="s in suggestions" :key="s.id" class="search-result" @click="selectSuggestion(s)">
                 <div style="display:flex;align-items:center;gap:10px;">
-                  <img v-if="s.imageUrl" :src="apiService.getImageUrl(s.imageUrl)" @error="handleImageError" alt="cover" class="result-thumb" />
+                  <img v-if="s.imageUrl" :src="getPlaceholderUrl()" :data-src="apiService.getImageUrl(s.imageUrl) || ''" @error="handleImageError" alt="cover" class="result-thumb lazy-img" loading="lazy" decoding="async" />
                   <img v-else :src="getPlaceholderUrl()" alt="cover" class="result-thumb" />
                   <div>
                     <div class="result-title">{{ s.title }}</div>
@@ -124,13 +124,13 @@
       <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }" ref="sidebarRef">
         <nav class="sidebar-nav">
           <div class="nav-section">
-            <RouterLink to="/" class="nav-item" @mouseenter="preload('home'); onNavMouseEnter('audiobooks')" @mouseleave="onNavMouseLeave('audiobooks')" @focus="preload('home'); onNavFocus('audiobooks')" @blur="onNavBlur('audiobooks')" @touchstart.passive="preload('home')" @click="() => { onNavClick('audiobooks'); closeMobileMenu() }">
+            <RouterLink :to="{ path: '/audiobooks', query: { group: 'books' } }" class="nav-item" @mouseenter="preload('home'); onNavMouseEnter('audiobooks')" @mouseleave="onNavMouseLeave('audiobooks')" @focus="preload('home'); onNavFocus('audiobooks')" @blur="onNavBlur('audiobooks')" @touchstart.passive="preload('home')" @click="() => { onNavClick('audiobooks'); closeMobileMenu() }">
               <PhBooks />
               <span>Audiobooks</span>
             </RouterLink>
             <!-- Sub-navigation for Audiobooks grouping (stacked under Audiobooks) -->
             <div class="nav-sub" @mouseenter="onNavMouseEnter('audiobooks')" @mouseleave="onNavMouseLeave('audiobooks')" @focusin="onNavFocus('audiobooks')" @focusout="onNavBlur('audiobooks')" :class="{ open: (hoverNav === 'audiobooks' || persistentNav === 'audiobooks') || route.path.startsWith('/audiobooks') || route.name === 'home' || route.name === 'audiobooks' }">
-              <RouterLink :to="{ path: '/audiobooks', query: { group: 'books' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: ((route.query.group || 'books') === 'books') }">
+              <RouterLink :to="{ path: '/audiobooks', query: { group: 'books' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.query.group === 'books' }">
                 <span>Books</span>
               </RouterLink>
               <RouterLink :to="{ path: '/audiobooks', query: { group: 'authors' } }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: (route.query.group === 'authors') }">
@@ -175,7 +175,7 @@
             </RouterLink>
             <!-- Sub-navigation for Settings tabs -->
             <div class="nav-sub" @mouseenter="onNavMouseEnter('settings')" @mouseleave="onNavMouseLeave('settings')" @focusin="onNavFocus('settings')" @focusout="onNavBlur('settings')" :class="{ open: (hoverNav === 'settings' || persistentNav === 'settings') || route.path === '/settings' }">
-              <RouterLink :to="{ path: '/settings', hash: '#rootfolders' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: (route.hash || '#rootfolders') === '#rootfolders' }">
+              <RouterLink :to="{ path: '/settings', hash: '#rootfolders' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#rootfolders' }">
                 <span>Root Folders</span>
               </RouterLink>
               <RouterLink :to="{ path: '/settings', hash: '#indexers' }" class="nav-subitem" @click="closeMobileMenu" :class="{ active: route.hash === '#indexers' }">
@@ -245,7 +245,7 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
 import { PhMagnifyingGlass, PhBell, PhX, PhUsers, PhBooks, PhPlus, PhActivity, PhHeart, PhGear, PhMonitor, PhFileMinus, PhDownload, PhCheckCircle, PhList } from '@phosphor-icons/vue'
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { preloadRoute } from '@/router'
 // SignalR indicator moved to System view; session token handled where needed
@@ -259,6 +259,7 @@ import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
+import { observeLazyImages } from '@/utils/lazyLoad'
 import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
@@ -692,6 +693,14 @@ const selectSuggestion = (s: { id: number; title: string; author?: string }) => 
 const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
+
+onMounted(() => {
+  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+})
+
+watch(() => suggestions.length, () => {
+  try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+})
 
 // (notificationRef and click-outside handler are declared earlier)
 

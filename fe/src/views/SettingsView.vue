@@ -471,7 +471,7 @@
 
         <!-- Quality Profiles Grid -->
         <div v-else class="profiles-grid">
-          <div v-for="profile in qualityProfiles" :key="profile.id" class="profile-card">
+          <div v-for="profile in qualityProfiles" :key="profile.id" class="profile-card" :class="{ 'is-default': profile.isDefault }">
             <div class="profile-header">
               <div class="profile-title-section">
                 <div class="profile-name-row">
@@ -1129,11 +1129,8 @@
             class="webhook-card"
             :class="{ disabled: !webhook.isEnabled }"
           >
-            <div class="webhook-header" @click="toggleWebhookExpanded(webhook.id)">
+            <div class="webhook-header">
               <div class="webhook-title-row">
-                <div class="webhook-icon" :class="`service-${webhook.type.toLowerCase()}`">
-                  <component :is="getWebhookIcon(webhook.type)" />
-                </div>
                 <div class="webhook-info">
                   <h4>{{ webhook.name }}</h4>
                   <div class="webhook-meta">
@@ -1157,82 +1154,73 @@
                   <component :is="webhook.isEnabled ? PhCheckCircle : PhXCircle" />
                   {{ webhook.isEnabled ? 'Active' : 'Inactive' }}
                 </div>
-                <button 
-                  class="expand-toggle" 
-                  :class="{ expanded: isWebhookExpanded(webhook.id) }"
-                  :title="isWebhookExpanded(webhook.id) ? 'Collapse details' : 'Expand details'"
-                  @click.stop="toggleWebhookExpanded(webhook.id)"
+
+                <!-- Small action buttons aligned like other cards -->
+                <button
+                  class="icon-button"
+                  :class="{ active: webhook.isEnabled }"
+                  :title="webhook.isEnabled ? 'Disable webhook' : 'Enable webhook'"
+                  @click.stop="toggleWebhook(webhook)"
                 >
-                  <PhCaretDown />
+                  <component :is="webhook.isEnabled ? PhToggleRight : PhToggleLeft" />
                 </button>
+
+                <button
+                  class="icon-button"
+                  :title="!webhook.isEnabled ? 'Enable webhook to test' : 'Send test notification'"
+                  @click.stop="testWebhook(webhook)"
+                  :disabled="testingWebhook === webhook.id || !webhook.isEnabled"
+                >
+                  <PhSpinner v-if="testingWebhook === webhook.id" class="ph-spin" />
+                  <PhPaperPlaneTilt v-else />
+                </button>
+
+                <button
+                  class="icon-button"
+                  title="Edit webhook"
+                  @click.stop="editWebhook(webhook)"
+                >
+                  <PhPencil />
+                </button>
+
+                <button
+                  class="icon-button danger"
+                  title="Delete webhook"
+                  @click.stop="deleteWebhook(webhook.id)"
+                >
+                  <PhTrash />
+                </button>
+
+
               </div>
             </div>
 
-            <transition name="expand">
-              <div v-if="isWebhookExpanded(webhook.id)" class="webhook-body">
-                <div class="webhook-url-container">
-                  <PhLink class="url-icon" />
-                  <span class="webhook-url">{{ webhook.url }}</span>
-                </div>
+            <div class="webhook-body">
+              <div class="webhook-url-container">
+                <PhLink class="url-icon" />
+                <span class="webhook-url">{{ webhook.url }}</span>
+              </div>
 
-                <div class="webhook-triggers-section">
-                  <div class="triggers-header">
-                    <PhBell />
-                    <span class="triggers-label">Active Triggers ({{ webhook.triggers.length }})</span>
-                  </div>
-                  <div class="triggers-list">
-                    <span 
-                      v-for="trigger in webhook.triggers" 
-                      :key="trigger"
-                      class="trigger-badge"
-                      :class="getTriggerClass(trigger)"
-                    >
-                      <component :is="getTriggerIcon(trigger)" />
-                      {{ formatTriggerName(trigger) }}
-                    </span>
-                  </div>
+              <div class="webhook-triggers-section">
+                <div class="triggers-header">
+                  <PhBell />
+                  <span class="triggers-label">Active Triggers ({{ webhook.triggers.length }})</span>
+                </div>
+                <div class="triggers-list">
+                  <span 
+                    v-for="trigger in webhook.triggers" 
+                    :key="trigger"
+                    class="trigger-badge"
+                    :class="getTriggerClass(trigger)"
+                  >
+                    <component :is="getTriggerIcon(trigger)" />
+                    {{ formatTriggerName(trigger) }}
+                  </span>
                 </div>
               </div>
-            </transition>
-
-            <div class="webhook-actions">
-              <button 
-                @click="toggleWebhook(webhook)" 
-                class="action-btn toggle-btn"
-                :class="{ active: webhook.isEnabled }"
-                :title="webhook.isEnabled ? 'Disable webhook' : 'Enable webhook'"
-              >
-                <component :is="webhook.isEnabled ? PhToggleRight : PhToggleLeft" />
-                {{ webhook.isEnabled ? 'Enabled' : 'Disabled' }}
-              </button>
-              <button 
-                @click="testWebhook(webhook)" 
-                class="action-btn test-btn"
-                :disabled="testingWebhook === webhook.id || !webhook.isEnabled"
-                :title="!webhook.isEnabled ? 'Enable webhook to test' : 'Send test notification'"
-              >
-                <PhSpinner v-if="testingWebhook === webhook.id" class="ph-spin" />
-                <PhPaperPlaneTilt v-else />
-                <span v-if="testingWebhook !== webhook.id">Test</span>
-                <span v-else>Testing...</span>
-              </button>
-              <button 
-                @click="editWebhook(webhook)" 
-                class="action-btn edit-btn"
-                title="Edit webhook"
-              >
-                <PhPencil />
-                <span>Edit</span>
-              </button>
-              <button 
-                @click="deleteWebhook(webhook.id)" 
-                class="action-btn delete-btn"
-                title="Delete webhook"
-              >
-                <PhTrash />
-                <span>Delete</span>
-              </button>
             </div>
+
+
           </div>
         </div>
       </div>
@@ -3750,14 +3738,14 @@ onMounted(async () => {
 }
 
 .webhook-card:hover {
-  border-color: rgba(77, 171, 247, 0.4);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  border-color: rgba(77, 171, 247, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(77, 171, 247, 0.15);
 }
 
 .webhook-card.disabled {
-  opacity: 0.6;
-  filter: grayscale(30%);
+  opacity: 0.5;
+  filter: grayscale(50%);
 }
 
 .webhook-header {
@@ -3765,21 +3753,19 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.05) 0%, rgba(0, 0, 0, 0.1) 100%);
+  background-color: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
-  transition: background-color 0.2s ease;
 }
 
-.webhook-header:hover {
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.08) 0%, rgba(0, 0, 0, 0.15) 100%);
-}
+/* No hover state: matches other headers */
 
 .webhook-header-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
-}
+  gap: 0.5rem;
+  margin-left: 1rem;
+} 
 
 .webhook-title-row {
   display: flex;
@@ -3789,15 +3775,15 @@ onMounted(async () => {
 }
 
 .webhook-icon {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 1.5rem;
-}
+  font-size: 1.2rem;
+} 
 
 .webhook-icon.service-slack {
   background: linear-gradient(135deg, #4A154B 0%, #611f69 100%);
@@ -3908,24 +3894,28 @@ onMounted(async () => {
 }
 
 .webhook-status-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.webhook-status-badge {
   background-color: rgba(231, 76, 60, 0.15);
   color: #ff6b6b;
   border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 .webhook-status-badge.active {
   background-color: rgba(76, 175, 80, 0.15);
   color: #51cf66;
   border-color: rgba(76, 175, 80, 0.3);
-}
+} 
 
 .expand-toggle {
   display: flex;
@@ -4073,103 +4063,6 @@ onMounted(async () => {
   border-color: rgba(156, 39, 176, 0.3);
 }
 
-.webhook-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 0.5rem;
-  padding: 1rem 1.5rem;
-  background-color: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background-color: rgba(255, 255, 255, 0.05);
-  color: #adb5bd;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.action-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.action-btn span {
-  display: none;
-}
-
-@media (min-width: 640px) {
-  .action-btn span {
-    display: inline;
-  }
-}
-
-.action-btn.toggle-btn {
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border-color: rgba(231, 76, 60, 0.3);
-}
-
-.action-btn.toggle-btn.active {
-  background-color: rgba(76, 175, 80, 0.15);
-  color: #51cf66;
-  border-color: rgba(76, 175, 80, 0.3);
-}
-
-.action-btn.toggle-btn:hover:not(:disabled) {
-  background-color: rgba(231, 76, 60, 0.25);
-}
-
-.action-btn.toggle-btn.active:hover:not(:disabled) {
-  background-color: rgba(76, 175, 80, 0.25);
-}
-
-.action-btn.test-btn {
-  background-color: rgba(77, 171, 247, 0.15);
-  color: #4dabf7;
-  border-color: rgba(77, 171, 247, 0.3);
-}
-
-.action-btn.test-btn:hover:not(:disabled) {
-  background-color: rgba(77, 171, 247, 0.25);
-  border-color: rgba(77, 171, 247, 0.5);
-}
-
-.action-btn.edit-btn {
-  background-color: rgba(255, 193, 7, 0.15);
-  color: #ffc107;
-  border-color: rgba(255, 193, 7, 0.3);
-}
-
-.action-btn.edit-btn:hover:not(:disabled) {
-  background-color: rgba(255, 193, 7, 0.25);
-  border-color: rgba(255, 193, 7, 0.5);
-}
-
-.action-btn.delete-btn {
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border-color: rgba(231, 76, 60, 0.3);
-}
-
-.action-btn.delete-btn:hover:not(:disabled) {
-  background-color: rgba(231, 76, 60, 0.25);
-  border-color: rgba(231, 76, 60, 0.5);
-}
 
 .config-list {
   display: flex;
@@ -5040,7 +4933,6 @@ onMounted(async () => {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  padding: 1.5rem;
   transition: all 0.2s ease;
 }
 
@@ -5059,8 +4951,8 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 1rem;
-  padding-bottom: 1rem;
+  padding: 1.5rem;
+  background-color: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -5069,6 +4961,12 @@ onMounted(async () => {
   color: #fff;
   font-size: 1.1rem;
   font-weight: 600;
+}
+
+.indexer-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 1rem;
 }
 
 .indexer-type {
@@ -5149,6 +5047,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  padding: 1.5rem;
 }
 
 .detail-row {
@@ -5324,6 +5223,11 @@ onMounted(async () => {
   border-color: rgba(77, 171, 247, 0.3);
   box-shadow: 0 4px 12px rgba(77, 171, 247, 0.15);
   transform: translateY(-1px);
+}
+
+.profile-card.is-default {
+  border-color: rgba(77, 171, 247, 0.3);
+  background: rgba(77, 171, 247, 0.05);
 }
 
 .profile-header {

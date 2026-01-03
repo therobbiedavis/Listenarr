@@ -122,14 +122,16 @@
 
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()})` }"></div>
+      <div class="backdrop" :style="{ backgroundImage: `url(${apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()})` }"></div>
       <div class="hero-content">
         <div class="poster-container">
           <img 
-            :src="apiService.getImageUrl(audiobook.imageUrl) || apiService.getPlaceholderUrl()" 
+            :src="getPlaceholderUrl()"
+            :data-src="apiService.getImageUrl(audiobook.imageUrl) || ''"
             :alt="audiobook.title"
-            class="poster"
+            class="poster lazy-img"
             loading="lazy"
+            decoding="async"
             @error="handleImageError"
           />
         </div>
