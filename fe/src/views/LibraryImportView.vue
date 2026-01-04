@@ -16,7 +16,7 @@
 
 <script setup lang="ts">
 const importFromFolder = () => {
-  console.log('Import from folder')
+  // TODO: Implement folder import functionality
 }
 </script>
 

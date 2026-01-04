@@ -10,10 +10,6 @@
           <component :is="loading ? PhSpinner : PhArrowClockwise" />
           Refresh
         </button>
-        <!-- Dev-only debug button to inspect downloads/store -->
-        <button v-if="DEV" class="btn btn-ghost" @click="debugDownloads" title="Log downloads to console">
-          Debug
-        </button>
       </div>
     </div>
 
@@ -197,34 +193,7 @@ import CustomSelect from '@/components/CustomSelect.vue'
 const downloadsStore = useDownloadsStore()
 const configStore = useConfigurationStore()
 const selectedTab = ref('all')
-// Development flag for debug-only UI
-const DEV = import.meta.env.DEV
 
-// Debug helper to inspect downloads and computed lists
-const debugDownloads = () => {
-  try {
-    // Print a concise summary so we can quickly inspect status and client IDs
-    console.log('[DEBUG Downloads] queue snapshot (summary):',
-      (queue.value || []).map((q: any) => ({ id: q.id, status: q.status, downloadClientId: q.downloadClientId, title: q.title })))
-
-    console.log('[DEBUG Downloads] downloadsStore.downloads (summary):',
-      (downloadsStore.downloads || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))
-
-    console.log('[DEBUG Downloads] activeDownloads (summary):',
-      (unref(downloadsStore.activeDownloads) || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))
-
-    console.log('[DEBUG Config] showCompletedExternalDownloads:', Boolean(configStore.applicationSettings?.showCompletedExternalDownloads))
-
-    console.log('[DEBUG Downloads] completedDownloads (summary):',
-      (unref(downloadsStore.completedDownloads) || []).map((d: any) => ({ id: d.id, status: d.status, downloadClientId: d.downloadClientId })))
-
-    console.log('[DEBUG Activity] allActivityItems (All):', allActivityItems.value.map((i: any) => ({ id: i.id, status: i.status, downloadClientId: i.downloadClientId })))
-    console.log('[DEBUG Activity] completedActivityItems (Completed):', completedActivityItems.value.map((i: any) => ({ id: i.id, status: i.status, downloadClientId: i.downloadClientId })))
-    console.log('[DEBUG Activity] failedActivityItems (Failed):', failedActivityItems.value.map((i: any) => ({ id: i.id, status: i.status, downloadClientId: i.downloadClientId })))
-  } catch (e) {
-    console.warn('[DEBUG] Failed to gather downloads debug info', e)
-  }
-}
 const queue = ref<QueueItem[]>([])
 const loading = ref(false)
 const showRemoveModal = ref(false)

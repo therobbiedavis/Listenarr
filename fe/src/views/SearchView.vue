@@ -181,10 +181,6 @@ const searchStore = useSearchStore()
 const libraryStore = useLibraryStore()
 const toast = useToast()
 
-console.log('SearchView component loaded')
-console.log('searchStore:', searchStore)
-console.log('libraryStore:', libraryStore)
-
 const searchQuery = ref('')
 const selectedCategory = ref('')
 const isAddingToLibrary = ref(false)
@@ -216,7 +212,7 @@ const fetchRawDebug = async (q: string) => {
       try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
       logger.debug('[SearchView] Raw debug results fetched (apiService)', results)
     } catch (e) {
-      console.error('[SearchView] Raw debug fetch failed (apiService)', e)
+      logger.error('[SearchView] Raw debug fetch failed (apiService)', e as Error)
       rawDebugResults.value = null
     }
 }
@@ -236,49 +232,39 @@ const fetchRawDebugWindow = async (q: string) => {
       try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
       logger.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
     } catch (e) {
-      console.error('[SearchView] Raw debug fetch failed (window.fetch)', e)
+      logger.error('[SearchView] Raw debug fetch failed (window.fetch)', e as Error)
       rawDebugResults.value = null
     }
 }
 
 const performSearch = async () => {
-  console.log('=== performSearch START ===')
-  console.log('Search query:', searchQuery.value)
-  
   if (!searchQuery.value.trim()) {
-    console.log('Search query is empty, aborting')
     return
   }
   
   // Clear added results and scores for new search
-  console.log('Clearing added results and scores')
   addedResults.value.clear()
   qualityScores.value.clear()
   
-  console.log('Calling searchStore.search()')
   await searchStore.search(
     searchQuery.value.trim(),
     selectedCategory.value || undefined
   )
-  console.log('searchStore.search() completed')
-  // Ensure the store and results are available on window for debugging
+  
+  // Ensure the store and results are available on window for debugging (dev only)
   try {
     const w = window as unknown as Record<string, unknown>
     w.searchStore = searchStore
     w.searchResults = searchStore.searchResults
     logger.debug('[SearchView] Bound searchStore/searchResults to window after search')
   } catch {}
-  console.log('Search results count:', searchStore.searchResults.length)
   
   // Wait for next tick to ensure searchResults are updated
-  console.log('Waiting for nextTick()')
   await nextTick()
-  console.log('nextTick() completed')
   
   // Score search results if we have a default profile
   if (defaultProfile.value?.id && searchStore.searchResults.length > 0) {
     try {
-      console.log('Scoring search results with profile:', defaultProfile.value.name)
       const scores = await apiService.scoreSearchResults(
         defaultProfile.value.id,
         searchStore.searchResults
@@ -287,16 +273,14 @@ const performSearch = async () => {
       scores.forEach(score => {
         qualityScores.value.set(score.searchResult.id, score)
       })
-      console.log('Quality scores loaded:', scores.length)
+      logger.debug('Quality scores loaded:', scores.length)
     } catch (error) {
-      console.warn('Failed to score search results:', error)
+      logger.warn('Failed to score search results:', error)
     }
   }
   
   // Check which results are already in library
-  console.log('Calling checkExistingInLibrary()')
   checkExistingInLibrary()
-  console.log('=== performSearch END ===')
 }
 
 const cancelSearch = () => {
