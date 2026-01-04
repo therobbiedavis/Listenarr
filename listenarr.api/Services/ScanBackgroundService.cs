@@ -218,10 +218,8 @@ namespace Listenarr.Api.Services
                                     using var afScope = _scopeFactory.CreateScope();
                                     var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
 
-                                    // Calculate relative path from base path
-                                    var relativePath = !string.IsNullOrEmpty(basePath) ? Path.GetRelativePath(basePath, filePath) : filePath;
-
-                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, relativePath, "scan");
+                                    // Store absolute path - metadata extraction needs full path
+                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, filePath, "scan");
                                     if (created) createdFiles++;
                                 }
                                 catch (Exception ex)
@@ -239,12 +237,28 @@ namespace Listenarr.Api.Services
                                     .Where(f => f.AudiobookId == audiobook.Id)
                                     .ToListAsync();
 
-                                var foundSet = new HashSet<string>(
-                                    foundFiles.Select(f => !string.IsNullOrEmpty(basePath) ? Path.GetRelativePath(basePath, f) : f),
-                                    StringComparer.OrdinalIgnoreCase);
-                                var toRemove = existingFiles
-                                    .Where(f => f.Path != null && !foundSet.Contains(f.Path))
-                                    .ToList();
+                                // Create set of found files (absolute paths)
+                                var foundSet = new HashSet<string>(foundFiles, StringComparer.OrdinalIgnoreCase);
+                                
+                                // Check which existing files still exist
+                                var toRemove = new List<AudiobookFile>();
+                                foreach (var existingFile in existingFiles)
+                                {
+                                    if (string.IsNullOrEmpty(existingFile.Path)) continue;
+                                    
+                                    // Normalize path: if relative, make it absolute using basePath
+                                    var fullPath = existingFile.Path;
+                                    if (!Path.IsPathRooted(fullPath) && !string.IsNullOrEmpty(basePath))
+                                    {
+                                        fullPath = Path.GetFullPath(Path.Combine(basePath, fullPath));
+                                    }
+                                    
+                                    // Check if file still exists on disk
+                                    if (!foundSet.Contains(fullPath))
+                                    {
+                                        toRemove.Add(existingFile);
+                                    }
+                                }
 
                                 List<object> removedFilesDto = new();
                                 if (toRemove.Count > 0)

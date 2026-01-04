@@ -115,7 +115,7 @@ namespace Listenarr.Api.Services
                             var files = System.IO.Directory.GetFiles(finalPath, "*", System.IO.SearchOption.AllDirectories);
                             if (files != null && files.Length > 0)
                             {
-                                var importResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, null, files, settings);
+                                var importResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, files, settings);
                                 _logger.LogInformation("FileFinalizer.ImportFilesFromDirectoryAsync returned {Count} results for download {DownloadId}", importResults?.Count ?? 0, downloadId);
                             // if any successful imports returned final paths, set Download.FinalPath to the first one
                             try
@@ -173,7 +173,7 @@ namespace Listenarr.Api.Services
                                             var extractedFiles = System.IO.Directory.GetFiles(tempDirExtracted, "*", System.IO.SearchOption.AllDirectories);
                                             if (extractedFiles != null && extractedFiles.Length > 0)
                                             {
-                                                var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, null, extractedFiles, settings);
+                                                var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, extractedFiles, settings);
                                                 _logger.LogInformation("Imported {Count} files extracted from archive {Archive} for download {DownloadId}", extractedResults?.Count ?? 0, archivePath, downloadId);
 
                                                 var finalFromExtracted = extractedResults?.FirstOrDefault(r => r != null && r.Success && !string.IsNullOrWhiteSpace(r.FinalPath))?.FinalPath;
@@ -250,7 +250,7 @@ namespace Listenarr.Api.Services
                                         var extractedFiles = System.IO.Directory.GetFiles(tempExtractDir, "*", System.IO.SearchOption.AllDirectories);
                                         if (extractedFiles != null && extractedFiles.Length > 0)
                                         {
-                                            var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, null, extractedFiles, settings);
+                                            var extractedResults = await _fileFinalizer.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, extractedFiles, settings);
                                             _logger.LogInformation("Imported {Count} files extracted from archive {Archive} for download {DownloadId}", extractedResults?.Count ?? 0, finalPath, downloadId);
 
                                             var finalFromExtracted = extractedResults?.FirstOrDefault(r => r != null && r.Success && !string.IsNullOrWhiteSpace(r.FinalPath))?.FinalPath;
@@ -302,7 +302,7 @@ namespace Listenarr.Api.Services
                             }
                             else
                             {
-                                var importResult = await _fileFinalizer.ImportSingleFileAsync(downloadId, null, finalPath, settings);
+                                var importResult = await _fileFinalizer.ImportSingleFileAsync(downloadId, download?.AudiobookId, finalPath, settings);
                                 _logger.LogInformation("FileFinalizer.ImportSingleFileAsync result for download {DownloadId}: Success={Success}, FinalPath={FinalPath}", downloadId, importResult?.Success, importResult?.FinalPath);
 
                                 if (importResult != null && importResult.Success && !string.IsNullOrWhiteSpace(importResult.FinalPath))
@@ -399,31 +399,11 @@ namespace Listenarr.Api.Services
 
                                             if (download?.AudiobookId != null)
                                             {
-                                                // Get the audiobook to calculate relative path (consistent with scan service)
-                                                var scopedDb = afScope.ServiceProvider.GetService<ListenArrDbContext>();
-                                                var audiobook = scopedDb != null ? await scopedDb.Audiobooks.FindAsync(download.AudiobookId.Value) : null;
-                                                
-                                                string pathToStore = importResult.FinalPath;
-                                                if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
-                                                {
-                                                    try
-                                                    {
-                                                        // Store relative path if the file is within the audiobook's base path
-                                                        pathToStore = Path.GetRelativePath(audiobook.BasePath, importResult.FinalPath);
-                                                        _logger.LogDebug("Converted absolute path to relative for audiobook {AudiobookId}: {Absolute} -> {Relative}", 
-                                                            download.AudiobookId, importResult.FinalPath, pathToStore);
-                                                    }
-                                                    catch (Exception rpEx)
-                                                    {
-                                                        _logger.LogDebug(rpEx, "Could not calculate relative path, using absolute");
-                                                        pathToStore = importResult.FinalPath;
-                                                    }
-                                                }
-                                                
-                                                var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, pathToStore, "download");
+                                                // Always store absolute path for downloads - metadata extraction needs full path
+                                                var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, importResult.FinalPath, "download");
                                                 if (created)
                                                 {
-                                                    _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {Path}", download.AudiobookId, pathToStore);
+                                                    _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {Path}", download.AudiobookId, importResult.FinalPath);
                                                 }
                                             }
                                         }
@@ -445,26 +425,55 @@ namespace Listenarr.Api.Services
                 // Cleanup from download client if configured
                 try
                 {
-                    if (download != null && !string.IsNullOrWhiteSpace(download.DownloadClientId))
+                    // Reload download to ensure it wasn't deleted by concurrent operations
+                    var downloadForCleanup = await _downloadRepository.FindAsync(downloadId);
+                    
+                    _logger.LogDebug("Cleanup section: download is {IsNull}, DownloadClientId={ClientId}", 
+                        downloadForCleanup == null ? "NULL" : "NOT NULL", 
+                        downloadForCleanup?.DownloadClientId ?? "NULL");
+                        
+                    if (downloadForCleanup != null && !string.IsNullOrWhiteSpace(downloadForCleanup.DownloadClientId))
                     {
                         var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
                         using var cleanupScope = scopeFactoryToUse.CreateScope();
                         var configService = cleanupScope.ServiceProvider.GetService<IConfigurationService>();
                         var downloadClientGateway = cleanupScope.ServiceProvider.GetService<IDownloadClientGateway>();
                         
+                        _logger.LogDebug("Cleanup: configService={ConfigService}, gateway={Gateway}", 
+                            configService == null ? "NULL" : "OK", 
+                            downloadClientGateway == null ? "NULL" : "OK");
+                        
                         if (configService != null && downloadClientGateway != null)
                         {
-                            var clientConfig = await configService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
+                            var clientConfig = await configService.GetDownloadClientConfigurationAsync(downloadForCleanup.DownloadClientId);
+                            _logger.LogInformation("Cleanup: clientConfig={IsNull}, RemoveCompletedDownloads={Setting}", 
+                                clientConfig == null ? "NULL" : "Found", 
+                                clientConfig?.RemoveCompletedDownloads ?? "NULL");
+                                
                             if (clientConfig != null && !string.IsNullOrEmpty(clientConfig.RemoveCompletedDownloads) && 
                                 clientConfig.RemoveCompletedDownloads != "none")
                             {
                                 bool deleteFiles = clientConfig.RemoveCompletedDownloads == "remove_and_delete";
-                                var removed = await downloadClientGateway.RemoveAsync(clientConfig, download.Id, deleteFiles);
+                                
+                                // Get the actual client-specific ID (torrent hash for qBittorrent, etc.)
+                                string clientId = downloadForCleanup.Id;
+                                if (clientConfig.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) && 
+                                    downloadForCleanup.Metadata != null && downloadForCleanup.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                {
+                                    var torrentHash = hashObj?.ToString();
+                                    if (!string.IsNullOrEmpty(torrentHash))
+                                    {
+                                        clientId = torrentHash;
+                                        _logger.LogDebug("Using torrent hash {Hash} instead of download ID for qBittorrent removal", torrentHash);
+                                    }
+                                }
+                                
+                                var removed = await downloadClientGateway.RemoveAsync(clientConfig, clientId, deleteFiles);
                                 
                                 if (removed)
                                 {
                                     _logger.LogInformation("Removed download {DownloadId} from client {ClientName} (deleteFiles={DeleteFiles})", 
-                                        download.Id, clientConfig.Name, deleteFiles);
+                                        downloadForCleanup.Id, clientConfig.Name, deleteFiles);
                                     
                                     // Log to history
                                     var historyRepo = cleanupScope.ServiceProvider.GetService<IHistoryRepository>();
@@ -472,19 +481,19 @@ namespace Listenarr.Api.Services
                                     {
                                         var historyEntry = new Listenarr.Domain.Models.History
                                         {
-                                            AudiobookId = download.AudiobookId,
-                                            AudiobookTitle = download.Title,
+                                            AudiobookId = downloadForCleanup.AudiobookId,
+                                            AudiobookTitle = downloadForCleanup.Title,
                                             EventType = "Imported",
                                             Message = $"Automatically imported and removed from {clientConfig.Name}. Files deleted: {deleteFiles}",
                                             Source = "AutoImport",
                                             Timestamp = DateTime.UtcNow,
                                             NotificationSent = false,
                                             Data = System.Text.Json.JsonSerializer.Serialize(new { 
-                                                DownloadId = download.Id,
+                                                DownloadId = downloadForCleanup.Id,
                                                 ClientName = clientConfig.Name,
                                                 ClientType = clientConfig.Type,
                                                 FilesDeleted = deleteFiles,
-                                                FinalPath = download.FinalPath
+                                                FinalPath = downloadForCleanup.FinalPath
                                             })
                                         };
                                         await historyRepo.AddAsync(historyEntry);
@@ -502,9 +511,9 @@ namespace Listenarr.Api.Services
                                                     await notificationService.SendNotificationAsync(
                                                         "Imported",
                                                         new {
-                                                            AudiobookTitle = download.Title,
+                                                            AudiobookTitle = downloadForCleanup.Title,
                                                             DownloadClient = clientConfig.Name,
-                                                            FilePath = download.FinalPath,
+                                                            FilePath = downloadForCleanup.FinalPath,
                                                             RemovedFromClient = true,
                                                             FilesDeleted = deleteFiles,
                                                             Timestamp = DateTime.UtcNow
@@ -523,6 +532,26 @@ namespace Listenarr.Api.Services
                                         {
                                             _logger.LogWarning(notifyEx, "Failed to send import notification for {DownloadId}", downloadId);
                                         }
+                                    }
+                                    
+                                    // Delete the download record from database after successful cleanup
+                                    try
+                                    {
+                                        var dbContext = cleanupScope.ServiceProvider.GetService<ListenArrDbContext>();
+                                        if (dbContext != null)
+                                        {
+                                            var downloadToDelete = await dbContext.Downloads.FindAsync(downloadId);
+                                            if (downloadToDelete != null)
+                                            {
+                                                dbContext.Downloads.Remove(downloadToDelete);
+                                                await dbContext.SaveChangesAsync();
+                                                _logger.LogInformation("Deleted download {DownloadId} from database after successful cleanup", downloadId);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception deleteEx)
+                                    {
+                                        _logger.LogWarning(deleteEx, "Failed to delete download {DownloadId} from database", downloadId);
                                     }
                                 }
                                 else

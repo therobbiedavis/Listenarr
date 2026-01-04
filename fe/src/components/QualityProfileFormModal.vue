@@ -328,6 +328,21 @@
             </div>
 
             <div class="form-group">
+              <label for="minimumScore">Minimum Score Threshold</label>
+              <input 
+                id="minimumScore"
+                v-model.number="formData.minimumScore"
+                type="number"
+                min="0"
+                max="100"
+                placeholder="0 = allow any score"
+              />
+              <small class="info-text">
+                Reject releases with a score below this threshold (Sonarr-style MinFormatScore). 0 = no minimum.
+              </small>
+            </div>
+
+            <div class="form-group">
               <label class="checkbox-label">
                 <input 
                   type="checkbox" 

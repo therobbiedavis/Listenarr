@@ -86,6 +86,12 @@ namespace Listenarr.Domain.Models
         public int MinimumSeeders { get; set; } = 1;
 
         /// <summary>
+        /// Minimum score threshold for automatic downloads (Sonarr's MinFormatScore equivalent)
+        /// Releases with TotalScore below this will be rejected. 0 = no minimum (allow any score)
+        /// </summary>
+        public int MinimumScore { get; set; } = 0;
+
+        /// <summary>
         /// Whether this is the default profile for new audiobooks
         /// </summary>
         public bool IsDefault { get; set; } = false;

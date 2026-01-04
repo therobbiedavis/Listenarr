@@ -500,6 +500,7 @@ const handleSubmit = async () => {
   downloadPath: formData.value.downloadPath || '',
       useSSL: formData.value.useSSL,
       isEnabled: formData.value.isEnabled,
+      removeCompletedDownloads: formData.value.removeCompletedDownloads,
       settings: {
         ...(formData.value.type === 'sabnzbd' && formData.value.apiKey ? { apiKey: formData.value.apiKey } : {}),
         ...(formData.value.category && { category: formData.value.category }),
@@ -508,7 +509,6 @@ const handleSubmit = async () => {
         olderPriority: formData.value.olderPriority,
         removeCompleted: formData.value.removeCompleted,
         removeFailed: formData.value.removeFailed,
-        removeCompletedDownloads: formData.value.removeCompletedDownloads,
         initialState: formData.value.initialState,
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,

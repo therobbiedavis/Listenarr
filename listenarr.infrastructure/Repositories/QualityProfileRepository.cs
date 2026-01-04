@@ -57,6 +57,7 @@ namespace Listenarr.Infrastructure.Repositories
             existing.MinimumSize = profile.MinimumSize;
             existing.MaximumSize = profile.MaximumSize;
             existing.MinimumSeeders = profile.MinimumSeeders;
+            existing.MinimumScore = profile.MinimumScore;
             existing.IsDefault = profile.IsDefault;
             existing.PreferNewerReleases = profile.PreferNewerReleases;
             existing.MaximumAge = profile.MaximumAge;

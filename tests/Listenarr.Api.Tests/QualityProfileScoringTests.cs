@@ -505,6 +505,77 @@ namespace Listenarr.Api.Tests
             Assert.Contains(score.RejectionReasons, r => r.Contains("Too old"));
             Assert.True(score.TotalScore < 0, "Torrent should be rejected when profile maxAge exceeded");
         }
+
+        [Fact]
+        public async Task MinimumScore_ShouldReject_WhenBelowThreshold()
+        {
+            // Test Sonarr-style MinFormatScore: reject results below profile's minimum score
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumScore = 50, // Require score of at least 50
+                PreferredFormats = new System.Collections.Generic.List<string> { "mp3" },
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string> { "English" },
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            // Create a result that will score low (no quality, no preferred format match, etc.)
+            var result = new SearchResult
+            {
+                Title = "Low Quality Book",
+                Size = 50 * 1024 * 1024,
+                Format = "unknown",
+                Quality = null,
+                Language = "English",
+                DownloadType = "torrent",
+                Seeders = 1,
+                PublishedDate = DateTime.UtcNow.ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+            
+            Assert.True(score.IsRejected, "Result should be rejected when score is below MinimumScore");
+            Assert.Contains(score.RejectionReasons, r => r.Contains("below profile minimum"));
+        }
+
+        [Fact]
+        public async Task MinimumScore_Zero_ShouldAllow_AnyPositiveScore()
+        {
+            // Test default behavior: MinimumScore = 0 allows any non-negative score (Sonarr default)
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumScore = 0, // No minimum threshold (default)
+                PreferredFormats = new System.Collections.Generic.List<string> { "mp3" },
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string> { "English" },
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Some Book",
+                Size = 50 * 1024 * 1024,
+                Format = "mp3",
+                Quality = "128",
+                Language = "English",
+                DownloadType = "torrent",
+                Seeders = 1,
+                PublishedDate = DateTime.UtcNow.ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+            
+            Assert.False(score.IsRejected, "Result should not be rejected when MinimumScore = 0 and score > 0");
+            Assert.True(score.TotalScore > 0, "Score should be positive");
+        }
     }
 }
 

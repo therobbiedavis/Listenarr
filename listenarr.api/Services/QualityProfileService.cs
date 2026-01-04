@@ -121,6 +121,7 @@ namespace Listenarr.Api.Services
                 MustContain = new List<string>(),
                 PreferredLanguages = new List<string> { "English" },
                 MinimumSeeders = 1,
+                MinimumScore = 0, // Allow any score (Sonarr behavior)
                 IsDefault = true,
                 PreferNewerReleases = true,
                 MaximumAge = 365 * 2 // 2 years

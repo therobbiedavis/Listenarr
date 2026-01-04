@@ -163,8 +163,9 @@ namespace Listenarr.Api.Services
         /// </summary>
         /// <param name="downloadId">The download ID to remove</param>
         /// <param name="downloadClientId">Optional specific client ID</param>
+        /// <param name="force">If true, removes from database even if client removal fails</param>
         /// <returns>True if removed successfully, false otherwise</returns>
-        Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
+        Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false);
 
         /// <summary>
         /// Processes a completed download (moves files, updates database, triggers notifications)

@@ -166,16 +166,16 @@ namespace Listenarr.Api.Controllers
         /// Remove an item from the download queue
         /// </summary>
         [HttpDelete("queue/{downloadId}")]
-        public async Task<ActionResult> RemoveFromQueue(string downloadId, [FromQuery] string? downloadClientId = null)
+        public async Task<ActionResult> RemoveFromQueue(string downloadId, [FromQuery] string? downloadClientId = null, [FromQuery] bool force = false)
         {
             try
             {
-                var removed = await _downloadService.RemoveFromQueueAsync(downloadId, downloadClientId);
+                var removed = await _downloadService.RemoveFromQueueAsync(downloadId, downloadClientId, force);
                 if (removed)
                 {
                     return Ok(new { message = "Removed from queue successfully" });
                 }
-                return NotFound(new { message = "Download not found in queue" });
+                return NotFound(new { message = "Download not found in queue or removal failed. Try force=true to remove from database only." });
             }
             catch (Exception ex)
             {

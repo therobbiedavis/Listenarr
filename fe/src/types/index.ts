@@ -163,6 +163,7 @@ export interface DownloadClientConfiguration {
   downloadPath: string
   useSSL: boolean
   isEnabled: boolean
+  removeCompletedDownloads?: string // "none", "remove", "remove_and_delete"
   // Client-specific settings. Use `DownloadClientSettings` for typed access
   settings: DownloadClientSettings
 }
@@ -519,6 +520,7 @@ export interface QualityProfile {
   mustContain?: string[] // Must be present
   preferredLanguages?: string[] // e.g., ["English", "Spanish"]
   minimumSeeders?: number
+  minimumScore?: number // Minimum score threshold for automatic downloads (Sonarr's MinFormatScore)
   isDefault?: boolean
   preferNewerReleases?: boolean
   maximumAge?: number // days (0 = no limit)

@@ -541,7 +541,7 @@
               </div>
 
               <!-- Limits Section -->
-              <div v-if="profile.minimumSize || profile.maximumSize || (profile.minimumSeeders && profile.minimumSeeders > 0) || (profile.maximumAge && profile.maximumAge > 0)" class="profile-section">
+              <div v-if="profile.minimumSize || profile.maximumSize || (profile.minimumSeeders && profile.minimumSeeders > 0) || (profile.minimumScore && profile.minimumScore > 0) || (profile.maximumAge && profile.maximumAge > 0)" class="profile-section">
                 <h5><PhListChecks /> Limits & Requirements</h5>
                 <div class="limits-grid">
                   <div v-if="profile.minimumSize || profile.maximumSize" class="limit-item">
@@ -555,6 +555,11 @@
                     <PhUsers />
                     <span class="limit-label">Seeders</span>
                     <span class="limit-value">{{ profile.minimumSeeders }}+ required</span>
+                  </div>
+                  <div v-if="profile.minimumScore && profile.minimumScore > 0" class="limit-item">
+                    <PhStar />
+                    <span class="limit-label">Min Score</span>
+                    <span class="limit-value">{{ profile.minimumScore }}+ required</span>
                   </div>
                   <div v-if="profile.maximumAge && profile.maximumAge > 0" class="limit-item">
                     <PhClock />

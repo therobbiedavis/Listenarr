@@ -254,195 +254,8 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                ApplicationSettings settings = new ApplicationSettings();
-                try
-                {
-                    // Guard against implementations that might return null unexpectedly.
-                    settings = await _configurationService.GetApplicationSettingsAsync() ?? new ApplicationSettings();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "ProcessCompletedDownloadAsync: Failed to load application settings, using defaults");
-                    settings = new ApplicationSettings();
-                }
-
-                if (string.IsNullOrWhiteSpace(finalPath))
-                {
-                    _logger.LogWarning("ProcessCompletedDownloadAsync: finalPath is empty for download {DownloadId}", downloadId);
-                }
-                else
-                {
-                    if (System.IO.Directory.Exists(finalPath))
-                    {
-                        try
-                        {
-                            var files = System.IO.Directory.GetFiles(finalPath, "*", System.IO.SearchOption.TopDirectoryOnly);
-                            if (files != null && files.Length > 0)
-                            {
-                                var importResults = await _importService.ImportFilesFromDirectoryAsync(downloadId, download?.AudiobookId, files, settings);
-                                _logger.LogInformation("ImportFilesFromDirectoryAsync returned {Count} results for download {DownloadId}", importResults?.Count ?? 0, downloadId);
-                            }
-                            else
-                            {
-                                _logger.LogInformation("ProcessCompletedDownloadAsync: directory {FinalPath} contains no files to import (DownloadId: {DownloadId})", finalPath, downloadId);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "ProcessCompletedDownloadAsync: failed to import files from directory {FinalPath} for download {DownloadId}", finalPath, downloadId);
-                        }
-                    }
-                    else
-                    {
-                        try
-                        {
-                            var importResult = await _importService.ImportSingleFileAsync(downloadId, download?.AudiobookId, finalPath, settings);
-                            _logger.LogInformation("ImportSingleFileAsync result for download {DownloadId}: Success={Success}, FinalPath={FinalPath}", downloadId, importResult?.Success, importResult?.FinalPath);
-
-                            string? importedFinalPath = null;
-                            if (importResult != null && importResult.Success && !string.IsNullOrWhiteSpace(importResult.FinalPath))
-                            {
-                                importedFinalPath = importResult.FinalPath!;
-                                try
-                                {
-                                    var updateCtx = await _dbContextFactory.CreateDbContextAsync();
-                                    var tracked = await updateCtx.Downloads.FindAsync(downloadId);
-                                    if (tracked != null)
-                                    {
-                                        tracked.FinalPath = importedFinalPath;
-                                        updateCtx.Downloads.Update(tracked);
-                                        await updateCtx.SaveChangesAsync();
-                                        _logger.LogInformation("Updated download {DownloadId} FinalPath to import result: {FinalPath}", downloadId, importedFinalPath);
-                                    }
-
-                                    // Also sync FinalPath into any scoped ListenArrDbContext so in-memory tracked entities match persisted value.
-                                    try
-                                    {
-                                        var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
-                                        using var scopeSync2 = scopeFactoryToUse.CreateScope();
-                                        var scopedDb2 = scopeSync2.ServiceProvider.GetService<ListenArrDbContext>();
-                                        if (scopedDb2 != null)
-                                        {
-                                            var local2 = await scopedDb2.Downloads.FindAsync(downloadId);
-                                            if (local2 != null)
-                                            {
-                                                local2.FinalPath = importedFinalPath;
-                                                local2.Status = DownloadStatus.Completed;
-                                                _logger.LogDebug("Synchronized FinalPath into scoped ListenArrDbContext for {DownloadId}", downloadId);
-                                            }
-                                        }
-                                    }
-                                    catch (Exception sync2Ex)
-                                    {
-                                        _logger.LogDebug(sync2Ex, "Failed to synchronize FinalPath into scoped ListenArrDbContext (non-fatal)");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Failed to update Download.FinalPath after import for {DownloadId}", downloadId);
-                                }
-                            }
-
-                            if (download?.AudiobookId != null && importedFinalPath != null)
-                            {
-                                try
-                                {
-                                    var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
-                                    using var afScope = scopeFactoryToUse.CreateScope();
-
-                                    // Conservative quality gating for single-file imports:
-                                    // - Extract technical metadata for the candidate file (if available)
-                                    // - Query existing audiobook files for highest known bitrate
-                                    // - If an existing file has bitrate >= candidate bitrate, skip registration
-                                    int? candidateBitrate = null;
-                                    try
-                                    {
-                                        var metadataSvc = afScope.ServiceProvider.GetService<IMetadataService>();
-                                        if (metadataSvc != null)
-                                        {
-                                            var meta = await metadataSvc.ExtractFileMetadataAsync(importedFinalPath);
-                                            candidateBitrate = meta?.Bitrate;
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        // ignore metadata extraction failures and fall back to registering
-                                        candidateBitrate = null;
-                                    }
-
-                                    int? maxExistingBitrate = null;
-                                    try
-                                    {
-                                        var scopedDb = afScope.ServiceProvider.GetService<ListenArrDbContext>();
-                                        if (scopedDb != null)
-                                        {
-                                            var existing = await scopedDb.AudiobookFiles
-                                                .Where(f => f.AudiobookId == download.AudiobookId && f.Bitrate.HasValue)
-                                                .Select(f => f.Bitrate!.Value)
-                                                .ToListAsync();
-                                            if (existing.Any()) maxExistingBitrate = existing.Max();
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        maxExistingBitrate = null;
-                                    }
-
-                                    if (maxExistingBitrate.HasValue && candidateBitrate.HasValue && maxExistingBitrate.Value >= candidateBitrate.Value)
-                                    {
-                                        _logger.LogInformation("Skipping registration of imported file for audiobook {AudiobookId} because existing quality {Existing} >= candidate {Candidate}", download.AudiobookId, maxExistingBitrate.Value, candidateBitrate.Value);
-                                    }
-                                    else
-                                    {
-                                        var audioFileService = afScope.ServiceProvider.GetService<IAudioFileService>()
-                                            ?? ActivatorUtilities.CreateInstance<AudioFileService>(afScope.ServiceProvider,
-                                                scopeFactoryToUse,
-                                                afScope.ServiceProvider.GetService<ILogger<AudioFileService>>() ?? new Microsoft.Extensions.Logging.Abstractions.NullLogger<AudioFileService>(),
-                                                afScope.ServiceProvider.GetRequiredService<IMemoryCache>(),
-                                                afScope.ServiceProvider.GetRequiredService<MetadataExtractionLimiter>());
-
-                                        // Get the audiobook to calculate relative path (consistent with scan service)
-                                        var scopedDb = afScope.ServiceProvider.GetService<ListenArrDbContext>();
-                                        var audiobook = scopedDb != null ? await scopedDb.Audiobooks.FindAsync(download.AudiobookId.Value) : null;
-                                        
-                                        string pathToStore = importedFinalPath;
-                                        if (audiobook != null && !string.IsNullOrWhiteSpace(audiobook.BasePath))
-                                        {
-                                            try
-                                            {
-                                                // Store relative path if the file is within the audiobook's base path
-                                                pathToStore = Path.GetRelativePath(audiobook.BasePath, importedFinalPath);
-                                                _logger.LogDebug("Converted absolute path to relative for audiobook {AudiobookId}: {Absolute} -> {Relative}", 
-                                                    download.AudiobookId, importedFinalPath, pathToStore);
-                                            }
-                                            catch (Exception rpEx)
-                                            {
-                                                _logger.LogDebug(rpEx, "Could not calculate relative path, using absolute");
-                                                pathToStore = importedFinalPath;
-                                            }
-                                        }
-
-                                        var created = await audioFileService.EnsureAudiobookFileAsync(download.AudiobookId.Value, pathToStore, "download");
-                                        if (created)
-                                        {
-                                            _logger.LogInformation("Registered imported file to audiobook {AudiobookId}: {Path}", download.AudiobookId, pathToStore);
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "ProcessCompletedDownloadAsync: failed to register imported single file to audiobook for download {DownloadId}", downloadId);
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "ProcessCompletedDownloadAsync: failed to import single file {FinalPath} for download {DownloadId}", finalPath, downloadId);
-                        }
-                    }
-                }
-
-                // After import completes, process the completed download to handle removal from client
+                // CompletedDownloadProcessor handles the entire import workflow
+                // Don't do any import logic here - just delegate to the processor
                 try
                 {
                     _logger.LogInformation("Calling CompletedDownloadProcessor for download {DownloadId}", downloadId);
@@ -2470,9 +2283,29 @@ namespace Listenarr.Api.Services
                     try
                     {
                         var clientDownloads = listenarrDownloads.Where(d => d.DownloadClientId == client.Id).ToList();
-                        var mappedDownloadIds = mappedFiltered.Select(q => q.Id).ToHashSet();
+                        var mappedDownloadIds = mappedFiltered.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                        var orphanedDownloads = clientDownloads.Where(d => !mappedDownloadIds.Contains(d.Id)).ToList();
+                        var orphanedDownloads = clientDownloads.Where(d =>
+                        {
+                            // Check if download ID matches
+                            if (mappedDownloadIds.Contains(d.Id))
+                                return false;
+
+                            // For qBittorrent, also check if the TorrentHash matches
+                            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) &&
+                                d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                            {
+                                var torrentHash = hashObj?.ToString();
+                                if (!string.IsNullOrEmpty(torrentHash) && mappedDownloadIds.Contains(torrentHash))
+                                    return false;
+                            }
+
+                            // Don't purge Completed status downloads - they need cleanup first
+                            if (d.Status == DownloadStatus.Completed)
+                                return false;
+
+                            return true;
+                        }).ToList();
 
                         if (orphanedDownloads.Any())
                         {
@@ -2667,7 +2500,7 @@ namespace Listenarr.Api.Services
             return queueItems.OrderByDescending(q => q.AddedAt).ToList();
         }
 
-        public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null)
+        public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)
         {
             try
             {
@@ -2681,13 +2514,14 @@ namespace Listenarr.Api.Services
                 downloadRecord = await dbContext.Downloads.FindAsync(downloadId);
 
                 // If not found, try to find by client-specific ID (e.g., torrent hash)
+                // Note: Metadata is JSON, so we need to load and filter in memory
                 if (downloadRecord == null)
                 {
-                    downloadRecord = await dbContext.Downloads
-                        .Where(d => d.Metadata != null &&
-                               d.Metadata.ContainsKey("TorrentHash") &&
-                               d.Metadata["TorrentHash"].ToString() == downloadId)
-                        .FirstOrDefaultAsync();
+                    var allDownloads = await dbContext.Downloads.ToListAsync();
+                    downloadRecord = allDownloads.FirstOrDefault(d => 
+                        d.Metadata != null &&
+                        d.Metadata.ContainsKey("TorrentHash") &&
+                        d.Metadata["TorrentHash"]?.ToString() == downloadId);
                 }
 
                 // If still not found, try enhanced title/name matching for legacy downloads
@@ -2711,7 +2545,13 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                if (downloadClientId == null)
+                // If force=true, skip client removal and just remove from database
+                if (force)
+                {
+                    _logger.LogWarning("Force removal requested for {DownloadId}, skipping client removal", downloadId);
+                    removedFromClient = true;
+                }
+                else if (downloadClientId == null)
                 {
                     // Try all clients to find and remove the item
                     var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
@@ -2729,14 +2569,80 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
+                    // Check if the downloadClientId is a valid client configuration
                     var client = await _configurationService.GetDownloadClientConfigurationAsync(downloadClientId);
                     if (client != null)
                     {
                         removedFromClient = await RemoveFromClientAsync(client, downloadId);
                     }
+                    else
+                    {
+                        // If client not found by ID, this might be a legacy/invalid client ID
+                        // Try to find the download in the database and check if it's DDL or has a valid client
+                        if (downloadRecord != null)
+                        {
+                            if (downloadRecord.DownloadClientId == "DDL")
+                            {
+                                // DDL downloads don't have an external client to remove from
+                                removedFromClient = true;
+                                _logger.LogInformation("Download {DownloadId} is DDL, skipping external client removal", downloadId);
+                            }
+                            else if (!string.IsNullOrEmpty(downloadRecord.DownloadClientId))
+                            {
+                                // Try with the download record's client ID
+                                var recordClient = await _configurationService.GetDownloadClientConfigurationAsync(downloadRecord.DownloadClientId);
+                                if (recordClient != null)
+                                {
+                                    removedFromClient = await RemoveFromClientAsync(recordClient, downloadId);
+                                    downloadClientId = recordClient.Id;
+                                }
+                                else
+                                {
+                                    // Client no longer exists, just remove from database
+                                    removedFromClient = true;
+                                    _logger.LogWarning("Download client {ClientId} not found for download {DownloadId}, removing from database only", 
+                                        downloadRecord.DownloadClientId, downloadId);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Download not in database and invalid client ID provided
+                            // This could be an external queue item with a bad client ID reference
+                            // Try all enabled clients to find and remove it
+                            _logger.LogWarning("Invalid client ID {ClientId} and download {DownloadId} not in database, trying all clients", 
+                                downloadClientId, downloadId);
+                            
+                            var downloadClients = await _configurationService.GetDownloadClientConfigurationsAsync();
+                            var enabledClients = downloadClients.Where(c => c.IsEnabled).ToList();
+
+                            foreach (var tryClient in enabledClients)
+                            {
+                                removedFromClient = await RemoveFromClientAsync(tryClient, downloadId);
+                                if (removedFromClient)
+                                {
+                                    downloadClientId = tryClient.Id;
+                                    _logger.LogInformation("Successfully removed {DownloadId} from client {ClientName}", downloadId, tryClient.Name);
+                                    break;
+                                }
+                            }
+
+                            // If still not removed but not in any queue, consider it success
+                            if (!removedFromClient)
+                            {
+                                _logger.LogInformation("Could not remove {DownloadId} from any client, verifying it's not in any queue", downloadId);
+                                var currentQueue = await GetQueueAsync();
+                                if (!currentQueue.Any(q => q.Id.Equals(downloadId, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    _logger.LogInformation("Download {DownloadId} not found in any queue, treating as successfully removed", downloadId);
+                                    removedFromClient = true;
+                                }
+                            }
+                        }
+                    }
                 }
 
-                // If successfully removed from client, also remove from database
+                // If successfully removed from client (or force=true), also remove from database
                 if (removedFromClient && downloadRecord != null)
                 {
                     // Use a factory-created DbContext instead of resolving a scoped instance from a new scope.
@@ -3092,11 +2998,59 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
-                        return await _clientGateway.RemoveAsync(client, downloadId, false);
+                        var removed = await _clientGateway.RemoveAsync(client, downloadId, false);
+                        if (removed)
+                        {
+                            _logger.LogInformation("Successfully removed {DownloadId} from client {ClientName}", downloadId, client.Name ?? client.Id);
+                            return true;
+                        }
+
+                        // If removal returned false, verify if the item is still in the client's queue
+                        // If it's not in the queue, consider removal successful (item already gone)
+                        _logger.LogWarning("Client reported removal failed for {DownloadId}, checking if item still exists in queue", downloadId);
+                        try
+                        {
+                            var queue = await _clientGateway.GetQueueAsync(client);
+                            var stillExists = queue.Any(q => q.Id.Equals(downloadId, StringComparison.OrdinalIgnoreCase));
+                            
+                            if (!stillExists)
+                            {
+                                _logger.LogInformation("Item {DownloadId} no longer in {ClientName} queue, treating removal as successful", downloadId, client.Name ?? client.Id);
+                                return true;
+                            }
+                            
+                            _logger.LogWarning("Item {DownloadId} still exists in {ClientName} queue after removal attempt", downloadId, client.Name ?? client.Id);
+                            return false;
+                        }
+                        catch (Exception queueEx)
+                        {
+                            _logger.LogWarning(queueEx, "Failed to verify queue status for {DownloadId} on {ClientName}, assuming removal failed", downloadId, client.Name ?? client.Id);
+                            return false;
+                        }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug(ex, "RemoveFromClientAsync: client gateway failed to remove {DownloadId} from {Client}", LogRedaction.SanitizeText(downloadId), LogRedaction.SanitizeText(client.Name ?? client.Id));
+                        _logger.LogWarning(ex, "RemoveFromClientAsync: Exception removing {DownloadId} from {Client}: {Message}", 
+                            LogRedaction.SanitizeText(downloadId), LogRedaction.SanitizeText(client.Name ?? client.Id), ex.Message);
+                        
+                        // Check if item still exists in queue - if not, consider removal successful
+                        try
+                        {
+                            var queue = await _clientGateway.GetQueueAsync(client);
+                            var stillExists = queue.Any(q => q.Id.Equals(downloadId, StringComparison.OrdinalIgnoreCase));
+                            
+                            if (!stillExists)
+                            {
+                                _logger.LogInformation("After exception, item {DownloadId} not found in {ClientName} queue, treating as successfully removed", 
+                                    downloadId, client.Name ?? client.Id);
+                                return true;
+                            }
+                        }
+                        catch (Exception queueEx)
+                        {
+                            _logger.LogDebug(queueEx, "Failed to verify queue after exception for {DownloadId}", downloadId);
+                        }
+                        
                         return false;
                     }
                 }

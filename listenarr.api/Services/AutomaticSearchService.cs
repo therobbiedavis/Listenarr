@@ -256,7 +256,7 @@ namespace Listenarr.Api.Services
             }
 
             var topResult = scoredResults
-                .Where(s => !s.IsRejected && s.TotalScore > 0) // Only results that pass quality filters and are not rejected
+                .Where(s => !s.IsRejected) // Only non-rejected results (matches Sonarr's multilayered decision system)
                 .OrderByDescending(s => s.TotalScore)
                 .FirstOrDefault(); // Pick only the top scoring result
 
