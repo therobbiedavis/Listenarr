@@ -471,7 +471,6 @@ const confirmRemove = async () => {
     // Check if this is a DDL download (from database) or external queue item
     if (itemToRemove.value.downloadClientId === 'DDL' || itemToRemove.value.downloadClientType === 'DDL') {
       // DDL downloads: Cancel/delete from database
-      console.log('[ActivityView] Canceling DDL download:', itemToRemove.value.id)
       await apiService.cancelDownload(itemToRemove.value.id)
       
       // Refresh downloads from store
@@ -482,13 +481,11 @@ const confirmRemove = async () => {
       // Listenarr-only removal (DB cleanup). Otherwise perform the normal
       // remove-from-client flow.
       if (clientHasQueueEntry.value === false) {
-        console.log('[ActivityView] Removing external item only from Listenarr (client missing):', itemToRemove.value.id)
         // Removing the DB record for an external item uses cancelDownload
         // since it's a Listenarr-level cleanup.
         await apiService.cancelDownload(itemToRemove.value.id)
         await downloadsStore.loadDownloads()
       } else {
-        console.log('[ActivityView] Removing from external client queue:', itemToRemove.value.id, itemToRemove.value.downloadClientId)
         await apiService.removeFromQueue(itemToRemove.value.id, itemToRemove.value.downloadClientId)
 
         // Refresh queue

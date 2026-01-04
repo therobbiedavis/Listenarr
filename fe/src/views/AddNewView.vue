@@ -2343,20 +2343,17 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
 
       // Check for Artist field (capital A, from SearchResult.Artist)
       if ((result as any).Artist && typeof (result as any).Artist === 'string' && (result as any).Artist.trim().length) {
-        console.log('Found Artist field:', (result as any).Artist)
         return [(result as any).Artist.trim()]
       }
 
       // Check for artist field (used in advanced search results)
       if (result.artist && typeof result.artist === 'string' && result.artist.trim().length) {
-        console.log('Found artist field:', result.artist)
         return [result.artist.trim()]
       }
 
       // If result contains an authors array (from Audimeta), extract names
       const maybeAuthors = (result as any).authors || (result as any).Authors
       if (Array.isArray(maybeAuthors) && maybeAuthors.length) {
-        console.log('Found authors array:', maybeAuthors)
         return maybeAuthors.map((a: any) => (a?.name || a?.Name || '')).filter((n: any) => !!n)
       }
 
@@ -2364,11 +2361,9 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       const sr = (result as any).searchResult
       const srAuthors = sr ? (sr.authors || sr.Authors) : null
       if (Array.isArray(srAuthors) && srAuthors.length) {
-        console.log('Found searchResult authors:', srAuthors)
         return srAuthors.map((a: any) => (a?.name || a?.Name || '')).filter((n: any) => !!n)
       }
 
-      console.log('No authors found in result:', result)
       return []
     })()
 

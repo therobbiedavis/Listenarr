@@ -284,66 +284,44 @@ const performSearch = async () => {
 }
 
 const cancelSearch = () => {
-  console.log('Cancelling search')
   searchStore.cancel()
 }
 
 // UI state helpers to ensure only one state is shown at a time
 import { computed } from 'vue'
 const showCancelled = computed(() => {
-  const val = !!searchStore.isCancelled
-  console.log('showCancelled:', val, 'isCancelled:', searchStore.isCancelled)
-  return val
+  return !!searchStore.isCancelled
 })
 const showResults = computed(() => {
-  const val = !searchStore.isSearching && !searchStore.isCancelled && searchStore.hasResults
-  console.log('showResults:', val, 'isSearching:', searchStore.isSearching, 'isCancelled:', searchStore.isCancelled, 'hasResults:', searchStore.hasResults)
-  return val
+  return !searchStore.isSearching && !searchStore.isCancelled && searchStore.hasResults
 })
 const showNoResults = computed(() => {
-  const val = !!searchQuery.value && !searchStore.isSearching && !searchStore.isCancelled && !searchStore.hasResults
-  console.log('showNoResults:', val, 'searchQuery:', !!searchQuery.value, 'isSearching:', searchStore.isSearching, 'isCancelled:', searchStore.isCancelled, 'hasResults:', searchStore.hasResults)
-  return val
+  return !!searchQuery.value && !searchStore.isSearching && !searchStore.isCancelled && !searchStore.hasResults
 })
 
 const checkExistingInLibrary = () => {
-  console.log('checkExistingInLibrary called')
-  console.log('Library audiobooks count:', libraryStore.audiobooks.length)
-  
   // Ensure library is loaded
   if (libraryStore.audiobooks.length === 0) {
-    console.log('Library is empty, fetching...')
     libraryStore.fetchLibrary().then(() => {
-      console.log('Library fetched, count:', libraryStore.audiobooks.length)
       markExistingResults()
     })
   } else {
-    console.log('Library already loaded')
     markExistingResults()
   }
 }
 
 const markExistingResults = () => {
-  console.log('markExistingResults called')
-  console.log('Search results count:', searchStore.searchResults.length)
-  
   const libraryAsins = new Set(
     libraryStore.audiobooks
       .filter(book => book.asin)
       .map(book => book.asin!)
   )
   
-  console.log('Library ASINs:', Array.from(libraryAsins))
-  
   searchStore.searchResults.forEach(result => {
-    console.log('Checking result:', result.id, 'ASIN:', result.asin)
     if (result.asin && libraryAsins.has(result.asin)) {
-      console.log('Match found! Adding result ID:', result.id)
       addedResults.value.add(result.id)
     }
   })
-  
-  console.log('Added results:', Array.from(addedResults.value))
 }
 
 // Watch for search results changes to mark existing audiobooks
@@ -361,28 +339,25 @@ watch(() => searchStore.searchResults, (newVal) => {
 }, { deep: true })
 
 const addToLibrary = async (result: SearchResult) => {
-  console.log('addToLibrary called with result:', result)
-  
   if (!result.asin) {
-    console.warn('No ASIN available for result:', result)
+    errorTracking.captureMessage('No ASIN available for result', 'warning', {
+      component: 'SearchView',
+      operation: 'addToLibrary',
+      metadata: { result }
+    })
     toast.warning('Cannot add', 'Cannot add to library: No ASIN available for this result')
     return
   }
 
-  console.log('Adding to library, ASIN:', result.asin)
   isAddingToLibrary.value = true
   try {
     // Fetch full metadata from the backend
-    console.log('Fetching metadata from /api/audible/metadata/' + result.asin)
     const metadata = await apiService.getAudibleMetadata<AudibleBookMetadata>(result.asin)
-    console.log('Metadata fetched:', metadata)
     
     // Add to library
-    console.log('Adding to library via /api/library/add')
     await apiService.addToLibrary(metadata, { searchResult: result })
     
-  console.log('Successfully added to library')
-  toast.success('Added to library', `"${metadata.title}" has been added to your library!`)
+    toast.success('Added to library', `"${metadata.title}" has been added to your library!`)
     
     // Mark this result as added
     addedResults.value.add(result.id)

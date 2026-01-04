@@ -41,12 +41,9 @@ export const useSearchStore = defineStore('search', () => {
       // Default to intelligent (Amazon + Audible enrichment) search for unified searches
       const response: SearchResult[] = await apiService.intelligentSearch(query, category, abortController.signal)
       const results = response
-      console.log('Search results received:', results)
-      console.log('First result:', results[0])
       searchResults.value = results
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        console.log('Search was cancelled')
         isCancelled.value = true
         searchResults.value = []
       } else {
@@ -60,13 +57,11 @@ export const useSearchStore = defineStore('search', () => {
   }
   
   const cancel = () => {
-    console.log('Cancel called, abortController:', !!abortController)
     if (abortController) {
       abortController.abort()
       isCancelled.value = true
       isSearching.value = false
       searchResults.value = [] // Clear results when cancelled
-      console.log('Cancelled: isCancelled set to true, results cleared')
     }
   }
   

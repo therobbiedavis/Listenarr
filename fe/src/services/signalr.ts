@@ -104,11 +104,15 @@ class SignalRService {
         // swallow outer errors
       }
 
-      console.log('[SignalR] Connecting to:', hubUrl)
+      if (import.meta.env.DEV) {
+        console.log('[SignalR] Connecting to:', hubUrl)
+      }
       this.connection = new WebSocket(hubUrl)
       
       this.connection.onopen = () => {
-        console.log('[SignalR] Connected to download hub')
+        if (import.meta.env.DEV) {
+          console.log('[SignalR] Connected to download hub')
+        }
         this.reconnectAttempts = 0
         this.isConnecting = false
         this.sendHandshake()
@@ -132,7 +136,9 @@ class SignalRService {
       }
 
       this.connection.onclose = () => {
-        console.log('[SignalR] Connection closed')
+        if (import.meta.env.DEV) {
+          console.log('[SignalR] Connection closed')
+        }
         this.isConnecting = false
         this.stopPingInterval()
         this.attemptReconnect()
@@ -173,20 +179,28 @@ class SignalRService {
           this.handleInvocation(parsed)
         } else if (parsed.type === 2) {
           // Stream item
-          console.log('[SignalR] Stream item:', parsed)
+          if (import.meta.env.DEV) {
+            console.log('[SignalR] Stream item:', parsed)
+          }
         } else if (parsed.type === 3) {
           // Completion
-          console.log('[SignalR] Completion:', parsed)
+          if (import.meta.env.DEV) {
+            console.log('[SignalR] Completion:', parsed)
+          }
         } else if (parsed.type === 6) {
           // Ping
           this.sendPong()
         } else if (parsed.type === 7) {
           // Close
-          console.log('[SignalR] Server requested close')
+          if (import.meta.env.DEV) {
+            console.log('[SignalR] Server requested close')
+          }
           this.disconnect()
         } else if (!parsed.type) {
           // Handshake response
-          console.log('[SignalR] Handshake response:', parsed)
+          if (import.meta.env.DEV) {
+            console.log('[SignalR] Handshake response:', parsed)
+          }
         }
       }
     } catch (error) {
@@ -197,7 +211,9 @@ class SignalRService {
   private handleInvocation(message: { type: number; invocationId?: string; target: string; arguments: unknown[] }) {
     const { target, arguments: args } = message
     
-    console.log('[SignalR] Received:', target, args)
+    if (import.meta.env.DEV) {
+      console.log('[SignalR] Received:', target, args)
+    }
     
     switch (target) {
       case 'DownloadUpdate':
@@ -334,7 +350,9 @@ class SignalRService {
     try { setReconnectAttempts(this.reconnectAttempts) } catch {}
     const delay = this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1)
     
-    console.log(`[SignalR] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+    if (import.meta.env.DEV) {
+      console.log(`[SignalR] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+    }
     
     setTimeout(() => {
       this.connect()
