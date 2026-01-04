@@ -1649,12 +1649,12 @@ import RootFoldersSettings from '@/components/settings/RootFoldersSettings.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
 import {
   // Settings & Navigation
-  PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhMagnifyingGlass,
-  PhArrowUp, PhDownloadSimple, PhCloudSlash, PhGlobe, PhInfo,
+  PhListMagnifyingGlass, PhDownload, PhStar, PhSliders, PhPlus, PhMagnifyingGlass,
+  PhDownloadSimple, PhGlobe, PhInfo,
   // Form Controls & Actions
   PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink,
   PhListChecks, PhClock, PhXCircle, PhCheck, PhX, PhCheckSquare, PhRuler, PhSparkle,
-  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt, PhBellSlash, PhCaretDown,
+  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt, PhBellSlash,
   // Security & Authentication
   PhShieldCheck, PhLock, PhLockOpen, PhWarning, PhWarningCircle,
   // Files & Folders
@@ -1664,7 +1664,7 @@ import {
   // Bot Controls
   PhRobot, PhPlay, PhStop, PhArrowClockwise, PhCircle,
   // Misc
-  PhTextAa, PhEye, PhEyeSlash, PhPlug, PhSignOut
+  PhTextAa, PhEye, PhEyeSlash
 } from '@phosphor-icons/vue'
 import IndexerFormModal from '@/components/IndexerFormModal.vue'
 import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
@@ -1705,7 +1705,7 @@ const desktopTabsRef = ref<HTMLElement | null>(null)
 const hasTabOverflow = ref(false)
 const showLeftTabChevron = ref(false)
 const showRightTabChevron = ref(false)
-const rootFoldersRef = ref<any>(null)
+const rootFoldersRef = ref<InstanceType<typeof RootFoldersSettings> | null>(null)
 
 function updateTabOverflow() {
   const el = desktopTabsRef.value
@@ -2049,6 +2049,7 @@ const formatApiError = (error: unknown): string => {
   return errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const editApiConfig = (api: ApiConfiguration) => {
   editingApi.value = api
   apiForm.id = api.id
@@ -2083,6 +2084,7 @@ const editClientConfig = (client: DownloadClientConfiguration) => {
 
 const apiToDelete = ref<ApiConfiguration | null>(null)
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const confirmDeleteApi = (api: ApiConfiguration) => {
   apiToDelete.value = api
 }
@@ -2105,6 +2107,7 @@ const executeDeleteApi = async (id?: string) => {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const toggleApiConfig = async (api: ApiConfiguration) => {
   try {
     // Toggle the enabled state
@@ -2851,6 +2854,7 @@ const formatDate = (dateString: string | undefined): string => {
 }
 
 // Helper functions for webhook UI
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getWebhookIcon = (type: string) => {
   const iconMap: Record<string, unknown> = {
     'Slack': PhBell,
@@ -2892,6 +2896,7 @@ const formatTriggerName = (trigger: string): string => {
 }
 
 // Webhook expand/collapse management
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const toggleWebhookExpanded = (webhookId: string) => {
   if (expandedWebhooks.value.has(webhookId)) {
     expandedWebhooks.value.delete(webhookId)
@@ -2900,6 +2905,7 @@ const toggleWebhookExpanded = (webhookId: string) => {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const isWebhookExpanded = (webhookId: string): boolean => {
   return expandedWebhooks.value.has(webhookId)
 }
@@ -3163,7 +3169,7 @@ const resetWebhookFormErrors = () => {
 const syncTabFromHash = () => {
   const hash = route.hash.replace('#', '') as 'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
   if (hash && ['rootfolders', 'indexers', 'clients', 'quality-profiles', 'notifications', 'bot', 'general'].includes(hash)) {
-    activeTab.value = hash as any
+    activeTab.value = hash as typeof activeTab.value
   } else {
     // Default to rootfolders and update URL
     activeTab.value = 'rootfolders'

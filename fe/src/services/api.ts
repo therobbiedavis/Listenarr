@@ -322,7 +322,6 @@ class ApiService {
     const resp = await this.request<any>('/search', { method: 'POST', body: JSON.stringify(body), ...options })
     // Backend returns either an array or an envelope { results: [...] } depending on mode.
     const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
-    try { this.clearFailedImagesForSearchResults(results) } catch {}
     return results
   }
 

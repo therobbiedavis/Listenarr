@@ -693,7 +693,7 @@ const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
 
-watch(() => suggestions.length, () => {
+watch(() => suggestions.value.length, () => {
   // Native lazy loading covers search suggestions automatically
 })
 
@@ -785,6 +785,13 @@ onMounted(async () => {
         else if (lvl === 'error') toast.error(title, msg, timeout)
         else toast.info(title, msg, timeout)
       } catch (e) { logger.error('Toast dispatch error', e) }
+    })
+
+    // Subscribe to notifications (for dropdown/bell icon)
+    signalRService.onNotification((notification) => {
+      try {
+        pushNotification(notification)
+      } catch (e) { logger.error('Notification dispatch error', e) }
     })
 
     // Subscribe to audiobook updates (for wanted badge refresh only, no notifications)

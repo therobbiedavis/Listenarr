@@ -54,6 +54,7 @@ class SignalRService {
   private filesRemovedCallbacks: Set<(payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void> = new Set()
   private searchProgressCallbacks: Map<(payload: { message: string; asin?: string | null; type?: string; audiobookId?: number }) => void, boolean> = new Map()
   private toastCallbacks: Set<(payload: { level: string; title: string; message: string; timeoutMs?: number }) => void> = new Set()
+  private notificationCallbacks: Set<(notification: { id: string; title: string; message: string; icon?: string; timestamp: string; dismissed?: boolean }) => void> = new Set()
   private pingInterval: number | null = null
   private visibilityListener: (() => void) | null = null
   // Connection state listeners (for UI to subscribe to connect/disconnect events)
@@ -263,6 +264,12 @@ class SignalRService {
           this.toastCallbacks.forEach(cb => cb(payload))
         }
         break
+      case 'Notification':
+        if (args && args[0]) {
+          const notification = args[0] as { id: string; title: string; message: string; icon?: string; timestamp: string; dismissed?: boolean }
+          this.notificationCallbacks.forEach(cb => cb(notification))
+        }
+        break
     }
   }
 
@@ -420,6 +427,12 @@ class SignalRService {
   onToast(callback: (payload: { level: string; title: string; message: string; timeoutMs?: number }) => void): () => void {
     this.toastCallbacks.add(callback)
     return () => { this.toastCallbacks.delete(callback) }
+  }
+
+  // Subscribe to notifications (for dropdown/bell icon)
+  onNotification(callback: (notification: { id: string; title: string; message: string; icon?: string; timestamp: string; dismissed?: boolean }) => void): () => void {
+    this.notificationCallbacks.add(callback)
+    return () => { this.notificationCallbacks.delete(callback) }
   }
 
   // Subscribe to files removed notifications

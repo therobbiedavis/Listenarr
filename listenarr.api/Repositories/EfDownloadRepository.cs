@@ -61,13 +61,14 @@ namespace Listenarr.Api.Repositories
         public async Task<List<Download>> GetAllAsync()
         {
             var ctx = await _dbFactory.CreateDbContextAsync();
-            return await ctx.Downloads.ToListAsync();
+            return await ctx.Downloads.AsNoTracking().ToListAsync();
         }
 
         public async Task<List<Download>> GetByClientAsync(string clientId)
         {
             var ctx = await _dbFactory.CreateDbContextAsync();
             return await ctx.Downloads
+                .AsNoTracking()
                 .Where(d => d.DownloadClientId == clientId)
                 .ToListAsync();
         }
@@ -78,6 +79,7 @@ namespace Listenarr.Api.Repositories
             if (!idSet.Any()) return new List<Download>();
             var ctx = await _dbFactory.CreateDbContextAsync();
             return await ctx.Downloads
+                .AsNoTracking()
                 .Where(d => idSet.Contains(d.Id))
                 .ToListAsync();
         }

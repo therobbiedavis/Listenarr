@@ -51,7 +51,7 @@
       </div>
     </div>
 
-    <RootFolderFormModal v-if="showForm" :root="editing" @close="close" @saved="onSaved" />
+    <RootFolderFormModal v-if="showForm" :root="(editing as RootFolder | undefined)" @close="close" @saved="onSaved" />
   </div>
 </template>
 
@@ -61,6 +61,7 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
 import { useToast } from '@/services/toastService'
 import { PhPlus, PhFolder, PhPencil, PhTrash, PhSpinner, PhFolderOpen } from '@phosphor-icons/vue'
+import type { RootFolder } from '@/types'
 
 interface Props {
   hideHeader?: boolean
@@ -72,7 +73,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const store = useRootFoldersStore()
 const showForm = ref(false)
-const editing = ref(null as any)
+const editing = ref<{ id?: number; name: string; path: string } | null>(null)
 const toast = useToast()
 
 onMounted(async () => {
@@ -84,18 +85,19 @@ function openAdd() {
   showForm.value = true
 }
 
-function edit(r: any) {
+function edit(r: { id?: number; name: string; path: string }) {
   editing.value = { ...r }
   showForm.value = true
 }
 
-async function confirmDelete(r: any) {
+async function confirmDelete(r: { id?: number; name: string; path: string }) {
+  if (!r.id) return
   if (!confirm(`Delete root folder '${r.name}'? This will only remove the reference and not delete files on disk. If audiobooks reference it you must reassign them first.`)) return
   try {
     await store.remove(r.id)
     toast.success('Success', 'Root folder deleted')
-  } catch (e: any) {
-    toast.error('Error', e?.message || 'Failed to delete root folder')
+  } catch (e: unknown) {
+    toast.error('Error', (e as Error)?.message || 'Failed to delete root folder')
   }
 }
 

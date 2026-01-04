@@ -1452,9 +1452,6 @@ async function handleBulkEditSaved() {
   
   // Clear selection after successful bulk edit
   libraryStore.clearSelection()
-  
-  // Force reload all lazy images (e.g., after root folder changes)
-  await reloadAllLazyImages()
 }
 
 function openEditModal(audiobook: Audiobook) {
@@ -1481,9 +1478,6 @@ async function handleEditSaved() {
       editAudiobook.value = updated
     }
   }
-  
-  // Force reload all lazy images (e.g., if root folder or image URL changed)
-  await reloadAllLazyImages()
 }
 
 function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: MouseEvent) {

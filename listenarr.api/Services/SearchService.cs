@@ -2468,6 +2468,12 @@ namespace Listenarr.Api.Services
         {
             var results = new List<IndexerSearchResult>();
 
+            if (indexer == null)
+            {
+                _logger.LogError("ParseMyAnonamouseResponse called with null indexer");
+                return results;
+            }
+
             try
             {
                 _logger.LogDebug("Parsing MyAnonamouse response, length: {Length}", jsonResponse.Length);
@@ -2994,19 +3000,19 @@ namespace Listenarr.Api.Services
                         {
                             Id = id ?? Guid.NewGuid().ToString(),
                             Title = title ?? "Unknown",
-                            Artist = author ?? "Unknown Author",
+                            Artist = string.IsNullOrEmpty(author) ? "Unknown Author" : author!,
                             Album = narrator != null ? $"Narrated by {narrator}" : "Unknown",
                             Category = category ?? "Audiobook",
                             Size = size,
                             Seeders = seeders,
                             Leechers = leechers,
-                            Source = indexer.Name ?? "MyAnonamouse",
+                            Source = indexer?.Name ?? "MyAnonamouse",
                             PublishedDate = publishDate?.ToString("o") ?? string.Empty,
                             Quality = finalQuality,
                             Format = finalFormat,
                             TorrentUrl = downloadUrl,
                             // Use MyAnonamouse public item page pattern: https://myanonamouse.net/t/{id}
-                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id!)}" : (indexer.Url ?? ""),
+                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id!)}" : (indexer?.Url ?? ""),
                             MagnetLink = "",
                             NzbUrl = ""
                         };
@@ -3014,9 +3020,12 @@ namespace Listenarr.Api.Services
                         if (!string.IsNullOrEmpty(rawLangCode) && string.IsNullOrEmpty(result.Language))
                         {
                             result.Language = ParseLanguageFromCode(rawLangCode) ?? ParseLanguageFromText(rawLangCode);
-                            if (!string.IsNullOrEmpty(result.Language)) rawLangCode = rawLangCode.ToUpperInvariant();
-                        }                        result.IndexerId = indexer.Id;
-                        result.IndexerImplementation = indexer.Implementation;
+                            if (!string.IsNullOrEmpty(result.Language) && !string.IsNullOrEmpty(rawLangCode)) 
+                            {
+                                rawLangCode = rawLangCode.ToUpperInvariant();
+                            }
+                        }                        result.IndexerId = indexer?.Id;
+                        result.IndexerImplementation = indexer?.Implementation ?? string.Empty;
                         // Robust link detection: prefer magnet/hash/torrent indicators, only treat as NZB when explicit NZB fields exist
                         try
                         {

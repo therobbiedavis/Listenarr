@@ -70,6 +70,22 @@ namespace Listenarr.Api.Services
                     await _downloadRepository.UpdateAsync(download);
                     _logger.LogInformation("Marked download {DownloadId} as Completed (pre-import)", downloadId);
 
+                    // Broadcast queue update immediately after marking as Completed so UI updates
+                    try
+                    {
+                        await Task.Delay(100); // Brief delay for DB commit
+                        var queueAfterComplete = await _downloadQueueService.GetQueueAsync();
+                        if (_hubBroadcaster != null)
+                        {
+                            await _hubBroadcaster.BroadcastQueueUpdateAsync(queueAfterComplete);
+                            _logger.LogDebug("Broadcasted QueueUpdate after marking {DownloadId} as Completed", downloadId);
+                        }
+                    }
+                    catch (Exception broadcastEx)
+                    {
+                        _logger.LogDebug(broadcastEx, "Failed to broadcast after marking as Completed");
+                    }
+
                     try
                     {
                         var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
@@ -534,6 +550,52 @@ namespace Listenarr.Api.Services
                                         }
                                     }
                                     
+                                    // Send toast notification for successful import
+                                    try
+                                    {
+                                        var toastService = cleanupScope.ServiceProvider.GetService<IToastService>();
+                                        if (toastService != null)
+                                        {
+                                            // Get the actual audiobook name from the library
+                                            string audiobookName = "your library";
+                                            if (downloadForCleanup.AudiobookId.HasValue)
+                                            {
+                                                try
+                                                {
+                                                    var audiobookRepo = cleanupScope.ServiceProvider.GetService<IAudiobookRepository>();
+                                                    if (audiobookRepo != null)
+                                                    {
+                                                        var audiobook = await audiobookRepo.GetByIdAsync(downloadForCleanup.AudiobookId.Value);
+                                                        if (audiobook != null && !string.IsNullOrEmpty(audiobook.Title))
+                                                        {
+                                                            audiobookName = audiobook.Title;
+                                                        }
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger.LogDebug(ex, "Failed to fetch audiobook name for notification");
+                                                }
+                                            }
+                                            
+                                            var downloadName = !string.IsNullOrEmpty(downloadForCleanup.Title) ? downloadForCleanup.Title : "Download";
+                                            var message = clientConfig.RemoveCompletedDownloads == "remove_and_delete" 
+                                                ? $"{downloadName} has been imported into {audiobookName} and files deleted"
+                                                : $"{downloadName} has been imported into {audiobookName}";
+                                            
+                                            await toastService.PublishToastAsync(
+                                                "success", 
+                                                "Import Complete", 
+                                                message,
+                                                timeoutMs: 5000); // Auto-dismiss after 5 seconds
+                                            _logger.LogDebug("Sent toast notification for imported download {DownloadId}", downloadId);
+                                        }
+                                    }
+                                    catch (Exception toastEx)
+                                    {
+                                        _logger.LogDebug(toastEx, "Failed to send toast notification for {DownloadId}", downloadId);
+                                    }
+                                    
                                     // Delete the download record from database after successful cleanup
                                     try
                                     {
@@ -546,6 +608,24 @@ namespace Listenarr.Api.Services
                                                 dbContext.Downloads.Remove(downloadToDelete);
                                                 await dbContext.SaveChangesAsync();
                                                 _logger.LogInformation("Deleted download {DownloadId} from database after successful cleanup", downloadId);
+                                                
+                                                // Small delay to ensure database changes are visible to other contexts
+                                                await Task.Delay(100);
+                                                
+                                                // Broadcast queue update after deletion so frontend sees the updated state
+                                                try
+                                                {
+                                                    var currentQueue = await _downloadQueueService.GetQueueAsync();
+                                                    if (_hubBroadcaster != null)
+                                                    {
+                                                        await _hubBroadcaster.BroadcastQueueUpdateAsync(currentQueue);
+                                                        _logger.LogDebug("Broadcasted QueueUpdate after deleting download {DownloadId}", downloadId);
+                                                    }
+                                                }
+                                                catch (Exception broadcastEx)
+                                                {
+                                                    _logger.LogDebug(broadcastEx, "Failed to broadcast QueueUpdate after deletion");
+                                                }
                                             }
                                         }
                                     }
@@ -557,7 +637,7 @@ namespace Listenarr.Api.Services
                                 else
                                 {
                                     _logger.LogWarning("Failed to remove download {DownloadId} from client {ClientName}", 
-                                        download.Id, clientConfig.Name);
+                                        download!.Id, clientConfig.Name);
                                 }
                             }
                         }
