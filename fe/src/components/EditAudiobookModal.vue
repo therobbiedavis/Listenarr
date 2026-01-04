@@ -281,6 +281,7 @@ import { ref, computed, watch } from 'vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
+import { logger } from '@/utils/logger'
 import type { Audiobook, QualityProfile } from '@/types'
 import { PhX, PhPencil } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -437,10 +438,10 @@ async function initializeForm() {
   }
 
   // Determine which root folder matches the existing basePath
-  if (props.audiobook.basePath && rootStore.folders.length > 0) {
+  if (props.audiobook?.basePath && rootStore.folders.length > 0) {
     // Check if basePath starts with any configured root folder
     const matchingRoot = rootStore.folders.find(folder => {
-      const normBase = props.audiobook.basePath!.replace(/\\/g, '/')
+      const normBase = props.audiobook!.basePath!.replace(/\\/g, '/')
       const normRoot = folder.path.replace(/\\/g, '/')
       const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
       return normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())

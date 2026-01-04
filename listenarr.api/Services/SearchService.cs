@@ -3000,7 +3000,7 @@ namespace Listenarr.Api.Services
                         {
                             Id = id ?? Guid.NewGuid().ToString(),
                             Title = title ?? "Unknown",
-                            Artist = string.IsNullOrEmpty(author) ? "Unknown Author" : author!,
+                            Artist = author ?? "Unknown Author",
                             Album = narrator != null ? $"Narrated by {narrator}" : "Unknown",
                             Category = category ?? "Audiobook",
                             Size = size,
