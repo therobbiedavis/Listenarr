@@ -1,3 +1,4 @@
+/* eslint-disable cypress/unsafe-to-chain-command */
 describe('Root Folders Settings', () => {
   beforeEach(() => {
     cy.intercept('GET', '/api/rootfolders', { body: [ { id: 1, name: 'Root1', path: 'C:\\root' } ] }).as('getRoots')
@@ -22,8 +23,10 @@ describe('Root Folders Settings', () => {
     // Confirmation modal should appear — choose Change without moving
     cy.contains('Change without moving').click()
 
-    cy.wait('@putRoot').its('request.url').should('contain', 'moveFiles=false')
-    cy.wait('@putRoot').its('request.body').should('include', { name: 'Root1', path: 'D\\newroot' })
+    cy.wait('@putRoot').then((interception) => {
+      expect(interception.request.url).to.contain('moveFiles=false')
+      expect(interception.request.body).to.include({ name: 'Root1', path: 'D\\newroot' })
+    })
   })
 
   it('renames root and queues moves when Move selected', () => {

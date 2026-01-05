@@ -13,10 +13,13 @@ beforeEach(() => {
 describe('startupConfigCache', () => {
   it('deduplicates concurrent calls', async () => {
     let resolve: (value: unknown) => void
-    const p = new Promise<unknown>(res => { resolve = res })
-    ;(apiService as unknown as { getStartupConfig?: () => Promise<unknown> }).getStartupConfig = () => {
-      return p
-    }
+    const p = new Promise<unknown>((res) => {
+      resolve = res
+    })
+    ;(apiService as unknown as { getStartupConfig?: () => Promise<unknown> }).getStartupConfig =
+      () => {
+        return p
+      }
 
     // Start multiple concurrent callers
     const callers = Promise.all([

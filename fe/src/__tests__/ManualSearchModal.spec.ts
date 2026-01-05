@@ -3,6 +3,35 @@ import { nextTick } from 'vue'
 import { describe, it, expect } from 'vitest'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 
+type ManualSearchResult = {
+  id: string
+  title?: string
+  downloadType?: string
+  resultUrl?: string
+  source?: string
+  nzbUrl?: string
+  sourceLink?: string
+  size?: number
+  quality?: string
+  format?: string
+  language?: string
+}
+
+type QualityScore = {
+  searchResult: ManualSearchResult
+  totalScore: number
+  scoreBreakdown: Record<string, unknown>
+  rejectionReasons: string[]
+  isRejected: boolean
+  smartScore?: number
+  smartScoreBreakdown?: Record<string, unknown>
+}
+
+type QualityScoresMap =
+  | Map<string, QualityScore>
+  | { value?: Map<string, QualityScore>; set?: (k: string, v: QualityScore) => void }
+  | Map<string, QualityScore>
+
 describe('ManualSearchModal.vue', () => {
   const stubs = {
     PhMagnifyingGlass: true,
@@ -15,23 +44,32 @@ describe('ManualSearchModal.vue', () => {
     PhDownloadSimple: true,
     PhArrowsDownUp: true,
     // Ensure ScorePopover renders its default slot in tests so the inner badge is present
-    ScorePopover: { template: '<div><slot /></div>' }
+    ScorePopover: { template: '<div><slot /></div>' },
   }
 
   it('uses details page for Usenet title links instead of direct NZB', async () => {
-    const wrapper = mount(ManualSearchModal as any, { props: { isOpen: true, audiobook: null }, global: { stubs } })
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
 
     // Set a usenet-style result where id is an informational URL that should be used for the title link
-    ;(wrapper.vm as any).results = [{
-      id: 'https://indexer/info/123',
-      title: 'Test Usenet',
-      downloadType: 'Usenet',
-      resultUrl: '',
-      sourceLink: 'https://indexer/info/123',
-      nzbUrl: 'https://indexer/download/123.nzb',
-      source: 'altHUB',
-      size: 123
-    }]
+    vm.results = [
+      {
+        id: 'https://indexer/info/123',
+        title: 'Test Usenet',
+        downloadType: 'Usenet',
+        resultUrl: '',
+        sourceLink: 'https://indexer/info/123',
+        nzbUrl: 'https://indexer/download/123.nzb',
+        source: 'altHUB',
+        size: 123,
+      },
+    ]
 
     await nextTick()
 
@@ -41,17 +79,26 @@ describe('ManualSearchModal.vue', () => {
   })
 
   it('does not show language badge when language is Unknown', async () => {
-    const wrapper = mount(ManualSearchModal as any, { props: { isOpen: true, audiobook: null }, global: { stubs } })
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
 
-    ;(wrapper.vm as any).results = [{
-      id: 'u2',
-      title: 'Lang Test',
-      language: 'Unknown',
-      downloadType: 'Usenet',
-      resultUrl: 'https://indexer/info/2',
-      source: 'alt',
-      size: 0
-    }]
+    vm.results = [
+      {
+        id: 'u2',
+        title: 'Lang Test',
+        language: 'Unknown',
+        downloadType: 'Usenet',
+        resultUrl: 'https://indexer/info/2',
+        source: 'alt',
+        size: 0,
+      },
+    ]
 
     await nextTick()
 
@@ -60,18 +107,27 @@ describe('ManualSearchModal.vue', () => {
   })
 
   it('does not show duplicate format fallback when format equals quality', async () => {
-    const wrapper = mount(ManualSearchModal as any, { props: { isOpen: true, audiobook: null }, global: { stubs } })
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
 
-    ;(wrapper.vm as any).results = [{
-      id: 'q1',
-      title: 'Format Fallback Test',
-      quality: 'FLAC',
-      format: 'FLAC',
-      downloadType: 'Torrent',
-      resultUrl: 'https://indexer/info/4',
-      source: 'test',
-      size: 0
-    }]
+    vm.results = [
+      {
+        id: 'q1',
+        title: 'Format Fallback Test',
+        quality: 'FLAC',
+        format: 'FLAC',
+        downloadType: 'Torrent',
+        resultUrl: 'https://indexer/info/4',
+        source: 'test',
+        size: 0,
+      },
+    ]
 
     await nextTick()
 
@@ -83,7 +139,14 @@ describe('ManualSearchModal.vue', () => {
   })
 
   it('shows rejection reason instead of score for rejected results', async () => {
-    const wrapper = mount(ManualSearchModal as any, { props: { isOpen: true, audiobook: null }, global: { stubs } })
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
 
     const fake = {
       id: 'r3',
@@ -91,27 +154,59 @@ describe('ManualSearchModal.vue', () => {
       downloadType: 'Torrent',
       resultUrl: 'https://indexer/info/3',
       source: 'test',
-      size: 0
+      size: 0,
     }
 
-    ;(wrapper.vm as any).results = [fake]
+    vm.results = [fake]
 
-    const scoreObj: any = {
+    const scoreObj: QualityScore = {
       searchResult: fake,
       totalScore: -1,
       scoreBreakdown: {},
       rejectionReasons: ['No seeds'],
-      isRejected: true
+      isRejected: true,
     }
 
     // Try to set via .value (ref) when available
-    if ((wrapper.vm as any).qualityScores && (wrapper.vm as any).qualityScores.value && typeof (wrapper.vm as any).qualityScores.value.set === 'function') {
-      (wrapper.vm as any).qualityScores.value.set('r3', scoreObj)
+    if (
+      vm.qualityScores &&
+      (
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).value &&
+      typeof (
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).value!.set === 'function'
+    ) {
+      ;(
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).value!.set('r3', scoreObj)
     }
 
     // Also set directly on the unwrapped proxy for compatibility with test runner behavior
-    if ((wrapper.vm as any).qualityScores && typeof (wrapper.vm as any).qualityScores.set === 'function') {
-      (wrapper.vm as any).qualityScores.set('r3', scoreObj)
+    if (
+      vm.qualityScores &&
+      typeof (
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).set === 'function'
+    ) {
+      ;(
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).set!('r3', scoreObj)
     }
 
     await nextTick()
@@ -125,43 +220,84 @@ describe('ManualSearchModal.vue', () => {
   })
 
   it('shows Smart total as the score badge when smartScore is present', async () => {
-    const wrapper = mount(ManualSearchModal as any, { props: { isOpen: true, audiobook: null }, global: { stubs } })
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
 
-    ;(wrapper.vm as any).results = [{
-      id: 'r1',
-      title: 'Smart Score Test',
-      downloadType: 'Torrent',
-      resultUrl: 'https://indexer/info/1',
-      source: 'test',
-      size: 0
-    }]
+    vm.results = [
+      {
+        id: 'r1',
+        title: 'Smart Score Test',
+        downloadType: 'Torrent',
+        resultUrl: 'https://indexer/info/1',
+        source: 'test',
+        size: 0,
+      },
+    ]
 
     // Provide a quality score with a smartScore. Ensure both ref.value and unwrapped Map get the entry
-    const scoreObj: any = {
-      searchResult: (wrapper.vm as any).results[0],
+    const scoreObj: QualityScore = {
+      searchResult: vm.results[0],
       totalScore: 47,
       scoreBreakdown: { Quality: 65 },
       rejectionReasons: [],
       isRejected: false,
       smartScore: 12345,
-      smartScoreBreakdown: { Quality: 65000 }
+      smartScoreBreakdown: { Quality: 65000 },
     }
 
     // Try to set via .value (ref) when available
-    if ((wrapper.vm as any).qualityScores && (wrapper.vm as any).qualityScores.value && typeof (wrapper.vm as any).qualityScores.value.set === 'function') {
-      (wrapper.vm as any).qualityScores.value.set('r1', scoreObj)
+    if (
+      vm.qualityScores &&
+      (
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).value &&
+      typeof (
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).value!.set === 'function'
+    ) {
+      ;(
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).value!.set('r1', scoreObj)
     }
 
     // Also set directly on the unwrapped proxy for compatibility with test runner behavior
-    if ((wrapper.vm as any).qualityScores && typeof (wrapper.vm as any).qualityScores.set === 'function') {
-      (wrapper.vm as any).qualityScores.set('r1', scoreObj)
+    if (
+      vm.qualityScores &&
+      typeof (
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).set === 'function'
+    ) {
+      ;(
+        vm.qualityScores as unknown as {
+          value?: Map<string, QualityScore>
+          set?: (k: string, v: QualityScore) => void
+        }
+      ).set!('r1', scoreObj)
     }
 
     // As a last-resort replace the Map entirely
     // Provide smartScoreBreakdown so the visible total is computed from component averages
     scoreObj.smartScore = 1234.5
     scoreObj.smartScoreBreakdown = { Quality: 90000, Format: 8500, Seed: 2000 }
-    ;(wrapper.vm as any).qualityScores = new Map([[ 'r1', scoreObj ]])
+    vm.qualityScores = new Map([['r1', scoreObj]])
 
     await nextTick()
 

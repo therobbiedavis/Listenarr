@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
+import { errorTracking } from '@/services/errorTracking'
 
 export const useSearchStore = defineStore('search', () => {
   const searchResults = ref<SearchResult[]>([])
@@ -11,7 +12,7 @@ export const useSearchStore = defineStore('search', () => {
   const selectedCategory = ref<string>('')
   const selectedApiIds = ref<string[]>([])
   let abortController: AbortController | null = null
-  
+
   const hasResults = computed(() => searchResults.value.length > 0)
 
   // Expose store refs for debugging in browser DevTools
@@ -27,19 +28,23 @@ export const useSearchStore = defineStore('search', () => {
       // debug functions omitted to avoid forward reference issues
     }
   } catch {}
-  
+
   const search = async (query: string, category?: string, apiIds?: string[]) => {
     isSearching.value = true
     isCancelled.value = false
     searchQuery.value = query
     selectedCategory.value = category || ''
     selectedApiIds.value = apiIds || []
-    
+
     abortController = new AbortController()
-    
+
     try {
       // Default to intelligent (Amazon + Audible enrichment) search for unified searches
-      const response: SearchResult[] = await apiService.intelligentSearch(query, category, abortController.signal)
+      const response: SearchResult[] = await apiService.intelligentSearch(
+        query,
+        category,
+        abortController.signal,
+      )
       const results = response
       searchResults.value = results
     } catch (error) {
@@ -47,7 +52,11 @@ export const useSearchStore = defineStore('search', () => {
         isCancelled.value = true
         searchResults.value = []
       } else {
-        console.error('Search failed:', error)
+        errorTracking.captureException(error as Error, {
+          component: 'SearchStore',
+          operation: 'search',
+          metadata: { query, category },
+        })
         searchResults.value = []
       }
     } finally {
@@ -55,7 +64,7 @@ export const useSearchStore = defineStore('search', () => {
       abortController = null
     }
   }
-  
+
   const cancel = () => {
     if (abortController) {
       abortController.abort()
@@ -64,7 +73,7 @@ export const useSearchStore = defineStore('search', () => {
       searchResults.value = [] // Clear results when cancelled
     }
   }
-  
+
   const clearResults = () => {
     searchResults.value = []
     searchQuery.value = ''
@@ -72,7 +81,7 @@ export const useSearchStore = defineStore('search', () => {
     selectedApiIds.value = []
     isCancelled.value = false
   }
-  
+
   return {
     searchResults,
     isSearching,
@@ -83,6 +92,6 @@ export const useSearchStore = defineStore('search', () => {
     hasResults,
     search,
     cancel,
-    clearResults
+    clearResults,
   }
 })

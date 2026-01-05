@@ -1,6 +1,5 @@
 <template>
   <div class="audiobooks-view" :class="{ 'details-enabled': showItemDetails }">
-    
     <!-- Top Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
@@ -10,15 +9,40 @@
         </button>
         <button
           class="toolbar-btn"
-          :class="{ 'active': showItemDetails }"
+          :class="{ active: showItemDetails }"
           @click="toggleItemDetails"
           :aria-pressed="showItemDetails"
           title="Toggle item details"
         >
           <PhInfo />
         </button>
-        <span v-if="(groupBy === 'books' ? audiobooks.length : (groupedCollections ? groupedCollections.length : 0)) > 0" class="count-badge">
-          {{ groupBy === 'books' ? audiobooks.length : (groupedCollections ? groupedCollections.length : 0) }} {{ groupBy === 'books' ? 'Book' : groupBy === 'authors' ? 'Author' : 'Series' }}{{ (groupBy === 'books' ? audiobooks.length : (groupedCollections ? groupedCollections.length : 0)) !== 1 && groupBy !== 'series' ? 's' : '' }}
+        <span
+          v-if="
+            (groupBy === 'books'
+              ? audiobooks.length
+              : groupedCollections
+                ? groupedCollections.length
+                : 0) > 0
+          "
+          class="count-badge"
+        >
+          {{
+            groupBy === 'books'
+              ? audiobooks.length
+              : groupedCollections
+                ? groupedCollections.length
+                : 0
+          }}
+          {{ groupBy === 'books' ? 'Book' : groupBy === 'authors' ? 'Author' : 'Series'
+          }}{{
+            (groupBy === 'books'
+              ? audiobooks.length
+              : groupedCollections
+                ? groupedCollections.length
+                : 0) !== 1 && groupBy !== 'series'
+              ? 's'
+              : ''
+          }}
         </span>
         <div class="group-dropdown" v-if="audiobooks.length > 0">
           <button class="toolbar-btn group-btn" @click="showGroupMenu = !showGroupMenu">
@@ -47,35 +71,23 @@
           <PhArrowClockwise />
           Refresh
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn"
-          @click="libraryStore.clearSelection()"
-        >
+        <button v-if="selectedCount > 0" class="toolbar-btn" @click="libraryStore.clearSelection()">
           <PhX />
           Clear Selection
         </button>
-        <button 
-          v-if="audiobooks.length > 0 && selectedCount === 0" 
+        <button
+          v-if="audiobooks.length > 0 && selectedCount === 0"
           class="toolbar-btn"
           @click="libraryStore.selectAll()"
         >
           <PhCheckSquare />
           Select All
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn edit-btn"
-          @click="showBulkEdit"
-        >
+        <button v-if="selectedCount > 0" class="toolbar-btn edit-btn" @click="showBulkEdit">
           <PhPencil />
           Edit Selected
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn delete-btn"
-          @click="confirmBulkDelete"
-        >
+        <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
           Delete Selected ({{ selectedCount }})
         </button>
@@ -91,7 +103,12 @@
             @delete="handleDeleteCustomFilter"
             class="toolbar-filter-dropdown"
           />
-          <CustomSelect v-model="sortKeyProxy" :options="sortOptions" class="toolbar-custom-select" aria-label="Sort by" />
+          <CustomSelect
+            v-model="sortKeyProxy"
+            :options="sortOptions"
+            class="toolbar-custom-select"
+            aria-label="Sort by"
+          />
           <input
             type="search"
             v-model="searchQuery"
@@ -108,7 +125,7 @@
       <PhSpinner class="ph-spin" />
       <p>Loading audiobooks...</p>
     </div>
-    
+
     <div v-else-if="error" class="error-state">
       <div class="error-icon">
         <PhWarningCircle />
@@ -120,14 +137,17 @@
         Retry
       </button>
     </div>
-    
-  <div v-else-if="rawAudiobooksLength === 0" class="empty-state">
+
+    <div v-else-if="rawAudiobooksLength === 0" class="empty-state">
       <div class="empty-icon">
         <PhBookOpen />
       </div>
       <template v-if="!hasRootFolderConfigured">
         <h2>Root Folder Not Configured</h2>
-        <p>Please configure a root folder for your audiobook library in settings before adding audiobooks.</p>
+        <p>
+          Please configure a root folder for your audiobook library in settings before adding
+          audiobooks.
+        </p>
         <router-link to="/settings" class="add-button">
           <PhGear />
           Go to Settings
@@ -150,25 +170,21 @@
       </div>
       <h2>No audiobooks match your filters</h2>
       <p>Try clearing your search or filters to see results.</p>
-      <div style="display:flex;gap:8px;margin-top:16px;">
-        <button class="add-button" @click="clearFilters">
-          Clear Filters
-        </button>
-        <button class="add-button" @click="refreshLibrary">
-          Refresh Library
-        </button>
+      <div style="display: flex; gap: 8px; margin-top: 16px">
+        <button class="add-button" @click="clearFilters">Clear Filters</button>
+        <button class="add-button" @click="refreshLibrary">Refresh Library</button>
       </div>
     </div>
-    
+
     <!-- Grouped View -->
     <div v-else-if="groupBy !== 'books'" class="grouped-view">
       <div class="grouped-grid">
         <div
-          v-for="collection in (groupedCollections || [])"
+          v-for="collection in groupedCollections || []"
           :key="collection.name"
           :class="['collection-card', { 'author-collection': groupBy === 'authors' }]"
-          @click="navigateToCollection(collection)">
-        
+          @click="navigateToCollection(collection)"
+        >
           <div class="collection-cover">
             <template v-if="groupBy === 'authors'">
               <div class="audiobook-poster-container">
@@ -188,31 +204,44 @@
 
                 <div class="status-overlay">
                   <div class="audiobook-title">{{ collection.name }}</div>
-                  <div class="audiobook-author">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</div>
+                  <div class="audiobook-author">
+                    {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+                  </div>
                 </div>
 
                 <div class="action-buttons">
-                  <button class="action-btn edit-btn-small" @click.stop="navigateToCollection(collection)" title="Open collection">
+                  <button
+                    class="action-btn edit-btn-small"
+                    @click.stop="navigateToCollection(collection)"
+                    title="Open collection"
+                  >
                     <PhEye />
                   </button>
                 </div>
               </div>
             </template>
             <template v-else-if="groupBy === 'series'">
-              <div v-if="collection.coverUrls && collection.coverUrls.length > 0" class="series-covers-container">
+              <div
+                v-if="collection.coverUrls && collection.coverUrls.length > 0"
+                class="series-covers-container"
+              >
                 <div class="series-covers">
                   <!-- Single cover: blurred background + centered cover -->
                   <template v-if="collection.coverUrls.length === 1">
                     <div
                       class="series-single-bg"
-                      :style="{ backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0]) || getPlaceholderUrl()})` }"
+                      :style="{
+                        backgroundImage: `url(${apiService.getImageUrl(collection.coverUrls[0]) || getPlaceholderUrl()})`,
+                      }"
                     />
                     <div
                       class="series-cover-item"
                       :style="getCoverStyle(0, collection.coverUrls.length)"
                     >
                       <img
-                        :src="apiService.getImageUrl(collection.coverUrls[0]) || getPlaceholderUrl()"
+                        :src="
+                          apiService.getImageUrl(collection.coverUrls[0]) || getPlaceholderUrl()
+                        "
                         :alt="`${collection.name} Cover`"
                         class="series-cover-image centered"
                         loading="lazy"
@@ -255,129 +284,59 @@
             </template>
           </div>
           <!-- Collection content for authors (match book grid bottom details) -->
-          <div v-if="groupBy === 'authors'" :class="{'collection-content': true}">
+          <div v-if="groupBy === 'authors'" :class="{ 'collection-content': true }">
             <div v-if="showItemDetails" class="grid-bottom-details">
               <div class="detail-line title">{{ collection.name }}</div>
-              <div class="detail-line small">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</div>
+              <div class="detail-line small">
+                {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+              </div>
             </div>
           </div>
           <!-- Bottom placard for series (only show when item details are enabled) -->
           <div v-if="groupBy === 'series' && showItemDetails" class="series-bottom-placard">
             <div class="series-bottom-content">
               <p class="series-bottom-title">{{ collection.name }}</p>
-              <p class="series-bottom-count">{{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}</p>
+              <p class="series-bottom-count">
+                {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+              </p>
             </div>
           </div>
         </div>
       </div>
     </div>
-    
-  <div v-else ref="scrollContainer" :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]" @scroll="updateVisibleRange">
+
+    <div
+      v-else
+      ref="scrollContainer"
+      :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
+      @scroll="updateVisibleRange"
+    >
       <div class="audiobooks-scroll-spacer" :style="{ height: `${totalHeight}px` }">
-        <div v-if="viewMode === 'grid'" class="audiobooks-grid" :style="{ transform: `translateY(${topPadding}px)` }">
-<div 
-  v-for="audiobook in visibleAudiobooks"
-  :key="audiobook.id"
-  class="audiobook-wrapper"
->
-  <div 
-    tabindex="0"
-    @keydown.enter="navigateToDetail(audiobook.id)"
-    class="audiobook-item"
-    :class="{ 
-      selected: libraryStore.isSelected(audiobook.id),
-      'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
-      'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
-      'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
-      'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
-    }"
-    @click="navigateToDetail(audiobook.id)"
-  >
-    <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
-    <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
-      <input
-        type="checkbox"
-        :checked="libraryStore.isSelected(audiobook.id)"
-        @change="onCheckboxChange(audiobook, $event)"
-        @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
-      />
-    </div>
-      <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
-      <img 
-        :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
-        :alt="audiobook.title"
-        class="audiobook-poster"
-        loading="lazy"
-        decoding="async"
-        @error="handleImageError"
-      />
-        <div class="status-overlay">
-        <div v-if="!showItemDetails" class="audiobook-title">{{ safeText(audiobook.title) }}</div>
-        <div v-if="!showItemDetails" class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
-        <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-          <PhStar />
-          {{ getQualityProfileName(audiobook.qualityProfileId) }}
-        </div>
-        <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-          <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
-          {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
-        </div>
-      </div>
-      <div class="action-buttons">
-        <button 
-          class="action-btn edit-btn-small" 
-          @click.stop="openEditModal(audiobook)"
-          title="Edit"
+        <div
+          v-if="viewMode === 'grid'"
+          class="audiobooks-grid"
+          :style="{ transform: `translateY(${topPadding}px)` }"
         >
-          <PhPencil />
-        </button>
-        <button 
-          class="action-btn delete-btn-small" 
-          @click.stop="confirmDelete(audiobook)"
-          title="Delete"
-        >
-          <PhTrash />
-        </button>
-      </div>
-    </div>
-    <!-- Extra details shown physically under poster when toggle is enabled -->
-    <div v-if="showItemDetails" class="grid-bottom-details">
-      <div class="detail-line title">{{ safeText(audiobook.title) }}</div>
-      <div class="detail-line small">{{ (audiobook.authors || []).slice(0,2).map(a => safeText(a)).join(', ') || 'Unknown Author' }}
-        <div v-if="(audiobook.narrators || []).length">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') }}</div>
-      </div>
-      <div v-if="audiobook.series" class="detail-line small">Series: {{ safeText(audiobook.series) }}<span v-if="audiobook.seriesNumber"> #{{ audiobook.seriesNumber }}</span></div>
-      <div class="detail-line small">{{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span></div>
-      <div class="detail-line small">{{ statusText(getAudiobookStatus(audiobook)) }}</div>
-    </div>
-  </div>
-</div>
-        </div>
-        <div v-else class="audiobooks-list" :style="{ transform: `translateY(${topPadding}px)` }">
-          <div v-if="audiobooks.length > 0" class="list-header">
-            <div class="col-select"> </div>
-            <div class="col-cover">Cover</div>
-            <div class="col-title">Title / Author</div>
-            <div class="col-status">Status</div>
-            <div class="col-actions">Actions</div>
-          </div>
+          <div v-for="audiobook in visibleAudiobooks" :key="audiobook.id" class="audiobook-wrapper">
             <div
-              v-for="audiobook in visibleAudiobooks"
-              :key="`list-${audiobook.id}`"
               tabindex="0"
               @keydown.enter="navigateToDetail(audiobook.id)"
-              class="audiobook-list-item"
+              class="audiobook-item"
               :class="{
                 selected: libraryStore.isSelected(audiobook.id),
                 'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+                'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
                 'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
                 'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
-                'status-downloading': getAudiobookStatus(audiobook) === 'downloading'
               }"
               @click="navigateToDetail(audiobook.id)"
             >
-
-              <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, 0, $event)" @mousedown.prevent>
+              <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
+              <div
+                class="selection-checkbox"
+                @click.stop="handleCheckboxClick(audiobook, 0, $event)"
+                @mousedown.prevent
+              >
                 <input
                   type="checkbox"
                   :checked="libraryStore.isSelected(audiobook.id)"
@@ -385,56 +344,209 @@
                   @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
                 />
               </div>
-              <img
-                class="list-thumb"
-                :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
-                :alt="audiobook.title"
-                loading="lazy"
-                decoding="async"
-                @error="handleImageError"
-              />
-              <div class="list-details">
-                <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
-                <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
-                <div v-if="showItemDetails" class="list-extra-details">
-                  <div v-if="audiobook.series" class="detail-line small">Series: {{ safeText(audiobook.series) }}<span v-if="audiobook.seriesNumber"> #{{ audiobook.seriesNumber }}</span></div>
-                  <div class="detail-line small">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') || '' }}
-                    <span v-if="audiobook.narrators && audiobook.narrators.length && (audiobook.publisher || audiobook.publishYear)"> • </span>
-                    {{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span>
+              <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
+                <img
+                  :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
+                  :alt="audiobook.title"
+                  class="audiobook-poster"
+                  loading="lazy"
+                  decoding="async"
+                  @error="handleImageError"
+                />
+                <div class="status-overlay">
+                  <div v-if="!showItemDetails" class="audiobook-title">
+                    {{ safeText(audiobook.title) }}
+                  </div>
+                  <div v-if="!showItemDetails" class="audiobook-author">
+                    {{
+                      audiobook.authors?.map((author) => safeText(author)).join(', ') ||
+                      'Unknown Author'
+                    }}
+                  </div>
+                  <div
+                    v-if="getQualityProfileName(audiobook.qualityProfileId)"
+                    class="quality-profile-badge"
+                  >
+                    <PhStar />
+                    {{ getQualityProfileName(audiobook.qualityProfileId) }}
+                  </div>
+                  <div class="monitored-badge" :class="{ unmonitored: !audiobook.monitored }">
+                    <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                    {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
                   </div>
                 </div>
-              </div>
-              <div class="list-badges">
-                <div
-                  class="status-badge"
-                  :class="getAudiobookStatus(audiobook)"
-                  role="button"
-                  tabindex="0"
-                  @click.stop="openStatusDetails(audiobook)"
-                  @keydown.enter.prevent="openStatusDetails(audiobook)"
-                  @keydown.space.prevent="openStatusDetails(audiobook)"
-                  :aria-label="`Show details for ${audiobook.title}`"
-                >
-                  {{ statusText(getAudiobookStatus(audiobook)) }}
-                </div>
-                <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-                  <PhStar />
-                  {{ getQualityProfileName(audiobook.qualityProfileId) }}
-                </div>
-                <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-                  <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
-                  {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+                <div class="action-buttons">
+                  <button
+                    class="action-btn edit-btn-small"
+                    @click.stop="openEditModal(audiobook)"
+                    title="Edit"
+                  >
+                    <PhPencil />
+                  </button>
+                  <button
+                    class="action-btn delete-btn-small"
+                    @click.stop="confirmDelete(audiobook)"
+                    title="Delete"
+                  >
+                    <PhTrash />
+                  </button>
                 </div>
               </div>
-              <div class="list-actions">
-                <button class="action-btn edit-btn-small" @click.stop="openEditModal(audiobook)" title="Edit">
-                  <PhPencil />
-                </button>
-                <button class="action-btn delete-btn-small" @click.stop="confirmDelete(audiobook)" title="Delete">
-                  <PhTrash />
-                </button>
+              <!-- Extra details shown physically under poster when toggle is enabled -->
+              <div v-if="showItemDetails" class="grid-bottom-details">
+                <div class="detail-line title">{{ safeText(audiobook.title) }}</div>
+                <div class="detail-line small">
+                  {{
+                    (audiobook.authors || [])
+                      .slice(0, 2)
+                      .map((a) => safeText(a))
+                      .join(', ') || 'Unknown Author'
+                  }}
+                  <div v-if="(audiobook.narrators || []).length">
+                    {{
+                      (audiobook.narrators || [])
+                        .slice(0, 1)
+                        .map((n) => safeText(n))
+                        .join(', ')
+                    }}
+                  </div>
+                </div>
+                <div v-if="audiobook.series" class="detail-line small">
+                  Series: {{ safeText(audiobook.series)
+                  }}<span v-if="audiobook.seriesNumber"> #{{ audiobook.seriesNumber }}</span>
+                </div>
+                <div class="detail-line small">
+                  {{ safeText(audiobook.publisher)
+                  }}<span v-if="audiobook.publishYear">
+                    • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span
+                  >
+                </div>
+                <div class="detail-line small">{{ statusText(getAudiobookStatus(audiobook)) }}</div>
               </div>
             </div>
+          </div>
+        </div>
+        <div v-else class="audiobooks-list" :style="{ transform: `translateY(${topPadding}px)` }">
+          <div v-if="audiobooks.length > 0" class="list-header">
+            <div class="col-select"></div>
+            <div class="col-cover">Cover</div>
+            <div class="col-title">Title / Author</div>
+            <div class="col-status">Status</div>
+            <div class="col-actions">Actions</div>
+          </div>
+          <div
+            v-for="audiobook in visibleAudiobooks"
+            :key="`list-${audiobook.id}`"
+            tabindex="0"
+            @keydown.enter="navigateToDetail(audiobook.id)"
+            class="audiobook-list-item"
+            :class="{
+              selected: libraryStore.isSelected(audiobook.id),
+              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
+              'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
+            }"
+            @click="navigateToDetail(audiobook.id)"
+          >
+            <div
+              class="selection-checkbox"
+              @click.stop="handleCheckboxClick(audiobook, 0, $event)"
+              @mousedown.prevent
+            >
+              <input
+                type="checkbox"
+                :checked="libraryStore.isSelected(audiobook.id)"
+                @change="onCheckboxChange(audiobook, $event)"
+                @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
+              />
+            </div>
+            <img
+              class="list-thumb"
+              :src="apiService.getImageUrl(audiobook.imageUrl) || getPlaceholderUrl()"
+              :alt="audiobook.title"
+              loading="lazy"
+              decoding="async"
+              @error="handleImageError"
+            />
+            <div class="list-details">
+              <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
+              <div class="audiobook-author">
+                {{
+                  audiobook.authors?.map((author) => safeText(author)).join(', ') ||
+                  'Unknown Author'
+                }}
+              </div>
+              <div v-if="showItemDetails" class="list-extra-details">
+                <div v-if="audiobook.series" class="detail-line small">
+                  Series: {{ safeText(audiobook.series)
+                  }}<span v-if="audiobook.seriesNumber"> #{{ audiobook.seriesNumber }}</span>
+                </div>
+                <div class="detail-line small">
+                  {{
+                    (audiobook.narrators || [])
+                      .slice(0, 1)
+                      .map((n) => safeText(n))
+                      .join(', ') || ''
+                  }}
+                  <span
+                    v-if="
+                      audiobook.narrators &&
+                      audiobook.narrators.length &&
+                      (audiobook.publisher || audiobook.publishYear)
+                    "
+                  >
+                    •
+                  </span>
+                  {{ safeText(audiobook.publisher)
+                  }}<span v-if="audiobook.publishYear">
+                    • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div class="list-badges">
+              <div
+                class="status-badge"
+                :class="getAudiobookStatus(audiobook)"
+                role="button"
+                tabindex="0"
+                @click.stop="openStatusDetails(audiobook)"
+                @keydown.enter.prevent="openStatusDetails(audiobook)"
+                @keydown.space.prevent="openStatusDetails(audiobook)"
+                :aria-label="`Show details for ${audiobook.title}`"
+              >
+                {{ statusText(getAudiobookStatus(audiobook)) }}
+              </div>
+              <div
+                v-if="getQualityProfileName(audiobook.qualityProfileId)"
+                class="quality-profile-badge"
+              >
+                <PhStar />
+                {{ getQualityProfileName(audiobook.qualityProfileId) }}
+              </div>
+              <div class="monitored-badge" :class="{ unmonitored: !audiobook.monitored }">
+                <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+              </div>
+            </div>
+            <div class="list-actions">
+              <button
+                class="action-btn edit-btn-small"
+                @click.stop="openEditModal(audiobook)"
+                title="Edit"
+              >
+                <PhPencil />
+              </button>
+              <button
+                class="action-btn delete-btn-small"
+                @click.stop="confirmDelete(audiobook)"
+                title="Delete"
+              >
+                <PhTrash />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -457,7 +569,7 @@
       @close="closeEditModal"
       @saved="handleEditSaved"
     />
-    
+
     <!-- Custom Filter Modal -->
     <CustomFilterModal
       :isOpen="showCustomFilterModal"
@@ -468,14 +580,35 @@
       @save="handleSaveCustomFilterFromModal"
       @close="() => { showCustomFilterModal = false }"
     />
-    
+
     <!-- Confirm delete custom filter handled via global showConfirm() -->
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
-import { PhGridFour, PhList, PhArrowClockwise, PhPencil, PhTrash, PhCheckSquare, PhBookOpen, PhGear, PhPlus, PhStar, PhEye, PhEyeSlash, PhSpinner, PhWarningCircle, PhInfo, PhCaretUp, PhCaretDown, PhX, PhUser, PhStack } from '@phosphor-icons/vue'
+import {
+  PhGridFour,
+  PhList,
+  PhArrowClockwise,
+  PhPencil,
+  PhTrash,
+  PhCheckSquare,
+  PhBookOpen,
+  PhGear,
+  PhPlus,
+  PhStar,
+  PhEye,
+  PhEyeSlash,
+  PhSpinner,
+  PhWarningCircle,
+  PhInfo,
+  PhCaretUp,
+  PhCaretDown,
+  PhX,
+  PhUser,
+  PhStack,
+} from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -495,6 +628,7 @@ import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { safeText } from '@/utils/textUtils'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { observeLazyImages } from '@/utils/lazyLoad'
+import { errorTracking } from '@/services/errorTracking'
 
 function getAuthorSortKey(author: string): string {
   const parts = author.trim().split(/\s+/)
@@ -547,7 +681,9 @@ try {
 
 // Watch search query changes and persist to localStorage
 watch(searchQuery, (v) => {
-  try { localStorage.setItem(SEARCH_QUERY_KEY, v) } catch {}
+  try {
+    localStorage.setItem(SEARCH_QUERY_KEY, v)
+  } catch {}
 })
 // use string here because CustomSelect emits strings
 const sortKey = ref<string>('title')
@@ -560,7 +696,7 @@ const filterYear = ref<string>('all')
 
 const availableLanguages = computed(() => {
   const langs = new Set<string>()
-  for (const b of (libraryStore.audiobooks || [])) {
+  for (const b of libraryStore.audiobooks || []) {
     if (b.language) langs.add(b.language)
   }
   return Array.from(langs).sort()
@@ -568,7 +704,7 @@ const availableLanguages = computed(() => {
 
 const availableYears = computed(() => {
   const years = new Set<string>()
-  for (const b of (libraryStore.audiobooks || [])) {
+  for (const b of libraryStore.audiobooks || []) {
     if (b.publishYear) years.add(b.publishYear)
   }
   // sort descending numeric where possible
@@ -577,8 +713,16 @@ const availableYears = computed(() => {
 
 // Custom filters stored in localStorage
 const CUSTOM_FILTERS_KEY = 'listenarr.customFilters'
-interface CustomFilterRule { field: string; operator: string; value: string }
-interface CustomFilter { id: string; label: string; rules: CustomFilterRule[] }
+interface CustomFilterRule {
+  field: string
+  operator: string
+  value: string
+}
+interface CustomFilter {
+  id: string
+  label: string
+  rules: CustomFilterRule[]
+}
 
 const customFilters = ref<CustomFilter[]>([])
 const selectedFilterId = ref<string | null>(null)
@@ -597,7 +741,7 @@ function loadCustomFilters() {
 function saveCustomFilters() {
   try {
     localStorage.setItem(CUSTOM_FILTERS_KEY, JSON.stringify(customFilters.value || []))
-  } catch { }
+  } catch {}
 }
 
 function handleCreateCustomFilter() {
@@ -613,9 +757,13 @@ function handleEditCustomFilter(f: CustomFilter) {
 }
 
 async function handleDeleteCustomFilter(f: CustomFilter) {
-  const ok = await showConfirm(`Delete custom filter "${f.label}"? This cannot be undone.`, 'Delete Custom Filter', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  const ok = await showConfirm(
+    `Delete custom filter "${f.label}"? This cannot be undone.`,
+    'Delete Custom Filter',
+    { danger: true, confirmText: 'Delete', cancelText: 'Cancel' },
+  )
   if (!ok) return
-  const idx = customFilters.value.findIndex(x => x.id === f.id)
+  const idx = customFilters.value.findIndex((x) => x.id === f.id)
   if (idx >= 0) {
     customFilters.value.splice(idx, 1)
     saveCustomFilters()
@@ -624,7 +772,7 @@ async function handleDeleteCustomFilter(f: CustomFilter) {
 }
 
 function handleSaveCustomFilter(f: CustomFilter) {
-  const idx = customFilters.value.findIndex(cf => cf.id === f.id)
+  const idx = customFilters.value.findIndex((cf) => cf.id === f.id)
   if (idx >= 0) customFilters.value[idx] = f
   else customFilters.value.push(f)
   saveCustomFilters()
@@ -638,7 +786,9 @@ function handleSaveCustomFilterFromModal(f: CustomFilter) {
 }
 
 // load on mount
-try { loadCustomFilters() } catch {}
+try {
+  loadCustomFilters()
+} catch {}
 
 // sortOrder toggled via sortKeyProxy when selecting same key; explicit toggle removed
 
@@ -647,37 +797,43 @@ const filteredAndSortedAudiobooks = computed(() => {
 
   // Apply search
   const q = (searchQuery.value || '').trim().toLowerCase()
-  let filtered = list.filter(b => {
+  let filtered = list.filter((b) => {
     if (!q) return true
     const title = (b.title || '').toString().toLowerCase()
-    const authors = (b.authors || []).map(a => (a || '').toString().toLowerCase()).join(' ')
-    const narrators = (b.narrators || []).map(n => (n || '').toString().toLowerCase()).join(' ')
+    const authors = (b.authors || []).map((a) => (a || '').toString().toLowerCase()).join(' ')
+    const narrators = (b.narrators || []).map((n) => (n || '').toString().toLowerCase()).join(' ')
     const publisher = (b.publisher || '').toString().toLowerCase()
     const year = (b.publishYear || '').toString().toLowerCase()
-    return title.includes(q) || authors.includes(q) || narrators.includes(q) || publisher.includes(q) || year.includes(q)
+    return (
+      title.includes(q) ||
+      authors.includes(q) ||
+      narrators.includes(q) ||
+      publisher.includes(q) ||
+      year.includes(q)
+    )
   })
 
   // Apply selected filter (built-in or custom)
   if (selectedFilterId.value) {
     const sid = selectedFilterId.value
     if (sid === 'monitored') {
-      filtered = filtered.filter(b => !!b.monitored)
+      filtered = filtered.filter((b) => !!b.monitored)
     } else if (sid === 'unmonitored') {
-      filtered = filtered.filter(b => !b.monitored)
+      filtered = filtered.filter((b) => !b.monitored)
     } else if (sid === 'missing') {
-      filtered = filtered.filter(b => getAudiobookStatus(b) === 'no-file')
+      filtered = filtered.filter((b) => getAudiobookStatus(b) === 'no-file')
     } else if (sid === 'recent') {
       // For now: approximate by publishYear being this year or last year
       const thisYear = new Date().getFullYear()
-      filtered = filtered.filter(b => {
+      filtered = filtered.filter((b) => {
         const y = Number(b.publishYear || 0)
         return !isNaN(y) && (y === thisYear || y === thisYear - 1)
       })
     } else {
       // custom filter (supports grouping/parentheses)
-      const cf = customFilters.value.find(x => x.id === sid)
+      const cf = customFilters.value.find((x) => x.id === sid)
       if (cf) {
-        filtered = filtered.filter(b => {
+        filtered = filtered.filter((b) => {
           // cf.rules is expected to include optional groupStart/groupEnd flags
           // evaluateRules handles conjunction precedence and parentheses
           return evaluateRules(b as Audiobook, cf.rules as RuleLike[])
@@ -688,37 +844,41 @@ const filteredAndSortedAudiobooks = computed(() => {
 
   // Filter monitored
   if (filterMonitored.value === 'monitored') {
-    filtered = filtered.filter(b => !!b.monitored)
+    filtered = filtered.filter((b) => !!b.monitored)
   } else if (filterMonitored.value === 'unmonitored') {
-    filtered = filtered.filter(b => !b.monitored)
+    filtered = filtered.filter((b) => !b.monitored)
   }
 
   // Filter by quality profile
   if (filterQualityProfile.value !== 'all') {
     const qid = Number(filterQualityProfile.value)
-    filtered = filtered.filter(b => (b.qualityProfileId ?? null) === qid)
+    filtered = filtered.filter((b) => (b.qualityProfileId ?? null) === qid)
   }
 
   // Filter by language
   if (filterLanguage.value !== 'all') {
     const target = filterLanguage.value.toLowerCase()
-    filtered = filtered.filter(b => (b.language || '').toString().toLowerCase() === target)
+    filtered = filtered.filter((b) => (b.language || '').toString().toLowerCase() === target)
   }
 
   // Filter by publish year
   if (filterYear.value !== 'all') {
-    filtered = filtered.filter(b => (b.publishYear || '') === filterYear.value)
+    filtered = filtered.filter((b) => (b.publishYear || '') === filterYear.value)
   }
 
   // Filter by status
   if (filterStatus.value !== 'all') {
-    filtered = filtered.filter(b => {
+    filtered = filtered.filter((b) => {
       const s = getAudiobookStatus(b)
       switch (filterStatus.value) {
-        case 'downloaded': return s === 'quality-match'
-        case 'missing': return s === 'no-file'
-        case 'mismatch': return s === 'quality-mismatch'
-        case 'downloading': return s === 'downloading'
+        case 'downloaded':
+          return s === 'quality-match'
+        case 'missing':
+          return s === 'no-file'
+        case 'mismatch':
+          return s === 'quality-mismatch'
+        case 'downloading':
+          return s === 'downloading'
       }
       return true
     })
@@ -734,26 +894,26 @@ const filteredAndSortedAudiobooks = computed(() => {
         bv = (b.title || '').toString().toLowerCase()
         break
       case 'author-last':
-        const aAuthorLast = (a.authors && a.authors[0]) ? a.authors[0] : ''
-        const bAuthorLast = (b.authors && b.authors[0]) ? b.authors[0] : ''
+        const aAuthorLast = a.authors && a.authors[0] ? a.authors[0] : ''
+        const bAuthorLast = b.authors && b.authors[0] ? b.authors[0] : ''
         av = getAuthorSortKey(aAuthorLast)
         bv = getAuthorSortKey(bAuthorLast)
         break
       case 'author-first':
-        const aAuthorFirst = (a.authors && a.authors[0]) ? a.authors[0] : ''
-        const bAuthorFirst = (b.authors && b.authors[0]) ? b.authors[0] : ''
+        const aAuthorFirst = a.authors && a.authors[0] ? a.authors[0] : ''
+        const bAuthorFirst = b.authors && b.authors[0] ? b.authors[0] : ''
         av = getAuthorFirstNameSortKey(aAuthorFirst)
         bv = getAuthorFirstNameSortKey(bAuthorFirst)
         break
       case 'narrator-last':
-        const aNarratorLast = (a.narrators && a.narrators[0]) ? a.narrators[0] : ''
-        const bNarratorLast = (b.narrators && b.narrators[0]) ? b.narrators[0] : ''
+        const aNarratorLast = a.narrators && a.narrators[0] ? a.narrators[0] : ''
+        const bNarratorLast = b.narrators && b.narrators[0] ? b.narrators[0] : ''
         av = getNarratorSortKey(aNarratorLast)
         bv = getNarratorSortKey(bNarratorLast)
         break
       case 'narrator-first':
-        const aNarratorFirst = (a.narrators && a.narrators[0]) ? a.narrators[0] : ''
-        const bNarratorFirst = (b.narrators && b.narrators[0]) ? b.narrators[0] : ''
+        const aNarratorFirst = a.narrators && a.narrators[0] ? a.narrators[0] : ''
+        const bNarratorFirst = b.narrators && b.narrators[0] ? b.narrators[0] : ''
         av = getNarratorFirstNameSortKey(aNarratorFirst)
         bv = getNarratorFirstNameSortKey(bNarratorFirst)
         break
@@ -765,7 +925,9 @@ const filteredAndSortedAudiobooks = computed(() => {
         const ay = Number(a.publishYear || NaN)
         const by = Number(b.publishYear || NaN)
         if (!isNaN(ay) || !isNaN(by)) {
-          return ((isNaN(ay) ? 0 : ay) - (isNaN(by) ? 0 : by)) * (sortOrder.value === 'asc' ? 1 : -1)
+          return (
+            ((isNaN(ay) ? 0 : ay) - (isNaN(by) ? 0 : by)) * (sortOrder.value === 'asc' ? 1 : -1)
+          )
         }
         av = (a.publishYear || '').toString().toLowerCase()
         bv = (b.publishYear || '').toString().toLowerCase()
@@ -781,15 +943,17 @@ const filteredAndSortedAudiobooks = computed(() => {
     }
 
     if (typeof av === 'boolean' && typeof bv === 'boolean') {
-      return (av === bv) ? 0 : (av ? -1 : 1) * (sortOrder.value === 'asc' ? 1 : -1)
+      return av === bv ? 0 : (av ? -1 : 1) * (sortOrder.value === 'asc' ? 1 : -1)
     }
 
-    return ((av as string) < (bv as string) ? -1 : (av as string) > (bv as string) ? 1 : 0) * (sortOrder.value === 'asc' ? 1 : -1)
+    return (
+      ((av as string) < (bv as string) ? -1 : (av as string) > (bv as string) ? 1 : 0) *
+      (sortOrder.value === 'asc' ? 1 : -1)
+    )
   })
 
   return filtered
 })
-
 
 const audiobooks = computed(() => filteredAndSortedAudiobooks.value)
 
@@ -809,11 +973,14 @@ async function ensureAuthorCover(authorName: string) {
       authorCoverOverrides[authorName] = `/config/cache/images/authors/${info.asin}.jpg`
     }
   } catch (e: unknown) {
-    console.error(e)
+    errorTracking.captureException(e as Error, {
+      component: 'AudiobooksView',
+      operation: 'ensureAuthorCover',
+      metadata: { authorName },
+    })
     // ignore network/lookup failures
   }
 }
-
 
 // Grouping mode
 const GROUP_BY_KEY = 'listenarr.groupBy'
@@ -830,16 +997,18 @@ try {
 
 // If the route contains an explicit group query parameter, prefer it on initial load
 try {
-  const initialQ = (route.query.group as string | undefined)
+  const initialQ = route.query.group as string | undefined
   if (initialQ && ['books', 'authors', 'series'].includes(initialQ) && initialQ !== groupBy.value) {
     // Use setGroupBy to ensure the same side-effects (selection clear, lazy image handling, etc.)
     // fire-and-forget to avoid blocking initialization
-    void setGroupBy(initialQ as 'books'|'authors'|'series')
+    void setGroupBy(initialQ as 'books' | 'authors' | 'series')
   }
 } catch {}
 
 watch(groupBy, (v) => {
-  try { localStorage.setItem(GROUP_BY_KEY, v) } catch {}
+  try {
+    localStorage.setItem(GROUP_BY_KEY, v)
+  } catch {}
 })
 
 // (grouping sync handled earlier in file)
@@ -848,9 +1017,12 @@ const groupedCollections = computed(() => {
   if (groupBy.value === 'books') return []
 
   const books = filteredAndSortedAudiobooks.value
-  const groups = new Map<string, { name: string, count: number, coverUrl?: string, coverUrls?: string[] }>()
+  const groups = new Map<
+    string,
+    { name: string; count: number; coverUrl?: string; coverUrls?: string[] }
+  >()
 
-  books.forEach(book => {
+  books.forEach((book) => {
     const key = groupBy.value === 'authors' ? book.authors?.[0] : book.series
     if (key) {
       if (!groups.has(key)) {
@@ -901,20 +1073,22 @@ const groupedCollections = computed(() => {
 // When grouped collections change (or grouping set to authors), fetch missing author images
 // Also re-run the lazy image observer after a short delay so any newly-populated
 // author cover overrides are applied to image `data-src` attributes and observed.
-watch(() => groupedCollections.value.map(g => g.name), async () => {
-  if (groupBy.value !== 'authors') return
-  for (const g of groupedCollections.value) {
-    try {
-      const hasAuthorImage = !!g.coverUrl && g.coverUrl.includes('/config/cache/images/authors/')
-      if (!authorCoverOverrides[g.name] && !hasAuthorImage) {
-        // Kick off fetch but don't await serially to avoid blocking UI
-        void ensureAuthorCover(g.name)
-      }
-    } catch {}
-  }
-}, { immediate: true })
-
-
+watch(
+  () => groupedCollections.value.map((g) => g.name),
+  async () => {
+    if (groupBy.value !== 'authors') return
+    for (const g of groupedCollections.value) {
+      try {
+        const hasAuthorImage = !!g.coverUrl && g.coverUrl.includes('/config/cache/images/authors/')
+        if (!authorCoverOverrides[g.name] && !hasAuthorImage) {
+          // Kick off fetch but don't await serially to avoid blocking UI
+          void ensureAuthorCover(g.name)
+        }
+      } catch {}
+    }
+  },
+  { immediate: true },
+)
 
 // Options for custom selects used in the toolbar
 // Build sort options and attach an up/down caret icon for the currently selected key
@@ -928,13 +1102,14 @@ const sortOptions = computed(() => {
     { value: 'publisher', label: 'Publisher' },
     { value: 'year', label: 'Release Year' },
     { value: 'monitored', label: 'Monitored' },
-    { value: 'status', label: 'Status' }
+    { value: 'status', label: 'Status' },
   ]
 
   // attach icon to the currently selected option to indicate sort direction
-  return opts.map(o => ({
+  return opts.map((o) => ({
     ...o,
-    icon: o.value === sortKey.value ? (sortOrder.value === 'asc' ? PhCaretUp : PhCaretDown) : undefined
+    icon:
+      o.value === sortKey.value ? (sortOrder.value === 'asc' ? PhCaretUp : PhCaretDown) : undefined,
   }))
 })
 
@@ -949,7 +1124,7 @@ const sortKeyProxy = computed<string>({
       sortKey.value = val
       sortOrder.value = 'asc'
     }
-  }
+  },
 })
 
 // toolbar select option helpers were removed in favor of CustomSelect usage per control
@@ -970,9 +1145,11 @@ const loading = computed(() => libraryStore.loading)
 const error = computed(() => libraryStore.error)
 const selectedCount = computed(() => libraryStore.selectedIds.size)
 const hasRootFolderConfigured = computed(() => {
-  return rootFoldersStore.folders.length > 0 ||
-         (configStore.applicationSettings?.outputPath && 
-          configStore.applicationSettings.outputPath.trim().length > 0)
+  return (
+    rootFoldersStore.folders.length > 0 ||
+    (configStore.applicationSettings?.outputPath &&
+      configStore.applicationSettings.outputPath.trim().length > 0)
+  )
 })
 
 // Virtual scrolling supporting grid and list layouts
@@ -1004,21 +1181,28 @@ try {
 } catch {}
 
 watch(showItemDetails, (v) => {
-  try { localStorage.setItem(SHOW_ITEM_DETAILS_KEY, v ? 'true' : 'false') } catch {}
-})
-
-
-watch(() => route.query.group, (g) => {
   try {
-    const q = g as string | undefined
-    const mode = (q && ['books', 'authors', 'series'].includes(q)) ? q as 'books' | 'authors' | 'series' : 'books'
-    // If the route changed the group, use setGroupBy so we run the same DOM/update/observer logic
-    if (mode !== groupBy.value) {
-      // fire-and-forget async to avoid blocking the router navigation
-      void setGroupBy(mode)
-    }
+    localStorage.setItem(SHOW_ITEM_DETAILS_KEY, v ? 'true' : 'false')
   } catch {}
 })
+
+watch(
+  () => route.query.group,
+  (g) => {
+    try {
+      const q = g as string | undefined
+      const mode =
+        q && ['books', 'authors', 'series'].includes(q)
+          ? (q as 'books' | 'authors' | 'series')
+          : 'books'
+      // If the route changed the group, use setGroupBy so we run the same DOM/update/observer logic
+      if (mode !== groupBy.value) {
+        // fire-and-forget async to avoid blocking the router navigation
+        void setGroupBy(mode)
+      }
+    } catch {}
+  },
+)
 
 function toggleItemDetails() {
   showItemDetails.value = !showItemDetails.value
@@ -1082,9 +1266,11 @@ const lastClickedIndex = ref<number | null>(null)
 // - 'no-file': No file downloaded yet (red border)
 // - 'quality-mismatch': Has file but doesn't meet quality cutoff (blue border)
 // - 'quality-match': Has file and meets quality cutoff (green border)
-function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match' {
+function getAudiobookStatus(
+  audiobook: Audiobook,
+): 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match' {
   // Check if this audiobook is currently being downloaded
-  const isDownloading = downloadsStore.activeDownloads.some(d => d.audiobookId === audiobook.id)
+  const isDownloading = downloadsStore.activeDownloads.some((d) => d.audiobookId === audiobook.id)
   if (isDownloading) {
     return 'downloading'
   }
@@ -1094,7 +1280,7 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
     return 'no-file'
   }
 
-  const profile = qualityProfiles.value.find(p => p.id === audiobook.qualityProfileId)
+  const profile = qualityProfiles.value.find((p) => p.id === audiobook.qualityProfileId)
 
   // If no profile or no preferredFormats defined, fall back to the simple existing behavior
   if (!profile) {
@@ -1106,14 +1292,17 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   const normalize = (s?: string) => (s || '').toString().toLowerCase()
 
   // Find any file that matches one of the profile's preferred formats
-  const preferredFormats = (profile.preferredFormats || []).map(f => normalize(f))
+  const preferredFormats = (profile.preferredFormats || []).map((f) => normalize(f))
 
   // If no preferred formats configured, treat any file as a candidate
-  const candidateFiles = audiobook.files.filter(f => {
+  const candidateFiles = audiobook.files.filter((f) => {
     if (!f) return false
     const fileFormat = normalize(f.format) || normalize(f.container) || ''
     if (preferredFormats.length === 0) return true
-    return preferredFormats.includes(fileFormat) || preferredFormats.some(pf => fileFormat.includes(pf))
+    return (
+      preferredFormats.includes(fileFormat) ||
+      preferredFormats.some((pf) => fileFormat.includes(pf))
+    )
   })
 
   if (candidateFiles.length === 0) {
@@ -1134,7 +1323,9 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   }
 
   const cutoff = normalize(profile.cutoffQuality)
-  const cutoffPriority = qualityPriority.has(cutoff) ? qualityPriority.get(cutoff)! : Number.POSITIVE_INFINITY
+  const cutoffPriority = qualityPriority.has(cutoff)
+    ? qualityPriority.get(cutoff)!
+    : Number.POSITIVE_INFINITY
 
   // Helper to derive a quality string for a given file/audiobook
   type FileInfo = {
@@ -1161,7 +1352,12 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
     // If container or codec suggests lossless
     const container = normalize(file?.container)
     const codec = normalize(file?.codec)
-    if (container.includes('flac') || codec.includes('flac') || codec.includes('alac') || codec.includes('wav')) {
+    if (
+      container.includes('flac') ||
+      codec.includes('flac') ||
+      codec.includes('alac') ||
+      codec.includes('wav')
+    ) {
       return 'lossless'
     }
 
@@ -1199,9 +1395,9 @@ onMounted(async () => {
   await Promise.all([
     libraryStore.fetchLibrary(),
     configStore.loadApplicationSettings(),
-    loadQualityProfiles()
+    loadQualityProfiles(),
   ])
-  
+
   // Calculate items per row based on container width
   if (scrollContainer.value) {
     const minItemWidth = 180
@@ -1210,7 +1406,10 @@ onMounted(async () => {
     const recalcItemsPerRow = () => {
       if (!scrollContainer.value) return
       const containerWidth = scrollContainer.value.clientWidth - 40 // Subtract padding
-      const newItems = viewMode.value === 'list' ? 1 : Math.floor((containerWidth + gap) / (minItemWidth + gap)) || 1
+      const newItems =
+        viewMode.value === 'list'
+          ? 1
+          : Math.floor((containerWidth + gap) / (minItemWidth + gap)) || 1
       if (newItems !== ITEMS_PER_ROW.value) {
         ITEMS_PER_ROW.value = newItems
       }
@@ -1233,13 +1432,30 @@ onMounted(async () => {
 
     // Wait for DOM update then attach lazy observer so posters start with placeholder and load when visible
     await nextTick()
-    try { observeLazyImages() } catch (e: unknown) { console.error(e) }
+    try {
+      observeLazyImages()
+    } catch (e: unknown) {
+      errorTracking.captureException(e as Error, {
+        component: 'AudiobooksView',
+        operation: 'observeLazyImages',
+      })
+    }
 
     // Re-run observer when visible range changes (virtual scrolling)
-    watch(() => visibleRange.value, async () => {
-      await nextTick()
-      try { observeLazyImages() } catch (e: unknown) { console.error(e) }
-    })
+    watch(
+      () => visibleRange.value,
+      async () => {
+        await nextTick()
+        try {
+          observeLazyImages()
+        } catch (e: unknown) {
+          errorTracking.captureException(e as Error, {
+            component: 'AudiobooksView',
+            operation: 'observeLazyImages',
+          })
+        }
+      },
+    )
 
     // Add resize observer to recalculate on window resize
     const resizeObserver = new ResizeObserver(() => {
@@ -1281,34 +1497,45 @@ async function loadQualityProfiles() {
   try {
     qualityProfiles.value = await apiService.getQualityProfiles()
   } catch (error) {
-    console.warn('Failed to load quality profiles:', error)
+    logger.warn('Failed to load quality profiles:', error)
   }
 }
 
-  function getQualityProfileName(profileId?: number): string | null {
+function getQualityProfileName(profileId?: number): string | null {
   if (!profileId) return null
-  const profile = qualityProfiles.value.find(p => p.id === profileId)
+  const profile = qualityProfiles.value.find((p) => p.id === profileId)
   return profile?.name ?? null
 }
 
-  function statusText(status: 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match'): string {
-    switch (status) {
-      case 'downloading': return 'Downloading'
-      case 'no-file': return 'Missing'
-      case 'quality-mismatch': return 'Mismatch'
-      case 'quality-match': return 'Downloaded'
-      default: return ''
-    }
+function statusText(
+  status: 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match',
+): string {
+  switch (status) {
+    case 'downloading':
+      return 'Downloading'
+    case 'no-file':
+      return 'Missing'
+    case 'quality-mismatch':
+      return 'Mismatch'
+    case 'quality-match':
+      return 'Downloaded'
+    default:
+      return ''
   }
+}
 
-  function openStatusDetails(audiobook: Audiobook) {
-    try {
-      // Navigate to audiobook detail page and open the downloads tab
-      void router.push({ path: `/audiobooks/${audiobook.id}`, query: { tab: 'downloads' } })
-    } catch (err) {
-      console.error('Failed to open status details', err)
-    }
+function openStatusDetails(audiobook: Audiobook) {
+  try {
+    // Navigate to audiobook detail page and open the downloads tab
+    void router.push({ path: `/audiobooks/${audiobook.id}`, query: { tab: 'downloads' } })
+  } catch (err) {
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobooksView',
+      operation: 'openStatusDetails',
+      metadata: { audiobookId: audiobook.id },
+    })
   }
+}
 
 function navigateToDetail(id: number) {
   router.push(`/audiobooks/${id}`)
@@ -1325,7 +1552,11 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
   try {
     libraryStore.clearSelection()
   } catch (e: unknown) {
-    console.error('Failed to clear selection on group change', e)
+    errorTracking.captureException(e as Error, {
+      component: 'AudiobooksView',
+      operation: 'setGroupBy.clearSelection',
+      metadata: { mode },
+    })
   }
   try {
     // update route query so sidebar subnav and URL stay in sync
@@ -1337,9 +1568,21 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
   // Ensure DOM settles and recalc visible range for the virtual scroller
   try {
     await nextTick()
-    try { updateVisibleRange() } catch (e: unknown) { console.error('updateVisibleRange failed after group change', e) }
+    try {
+      updateVisibleRange()
+    } catch (e: unknown) {
+      errorTracking.captureException(e as Error, {
+        component: 'AudiobooksView',
+        operation: 'setGroupBy.updateVisibleRange',
+        metadata: { mode },
+      })
+    }
   } catch (e) {
-    console.error('Failed to schedule lazy image observation after group change', e)
+    errorTracking.captureException(e as Error, {
+      component: 'AudiobooksView',
+      operation: 'setGroupBy.scheduleObservation',
+      metadata: { mode },
+    })
   }
 
   // If switching to authors, kick off author lookups for missing covers
@@ -1347,17 +1590,22 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
     try {
       for (const g of groupedCollections.value) {
         try {
-          const hasAuthorImage = !!g.coverUrl && g.coverUrl.includes('/config/cache/images/authors/')
+          const hasAuthorImage =
+            !!g.coverUrl && g.coverUrl.includes('/config/cache/images/authors/')
           if (!authorCoverOverrides[g.name] && !hasAuthorImage) {
             void ensureAuthorCover(g.name)
           }
         } catch {}
       }
     } catch (e) {
-      console.error('Failed to kick off author cover lookups on group change', e)
+      errorTracking.captureException(e as Error, {
+        component: 'AudiobooksView',
+        operation: 'setGroupBy.authorCovers',
+        metadata: { mode },
+      })
     }
   }
-} 
+}
 
 function navigateToCollection(collection: { name: string }) {
   const type = groupBy.value === 'authors' ? 'author' : 'series'
@@ -1368,16 +1616,31 @@ function handleImageError(event: Event) {
   try {
     const img = event.target as HTMLImageElement
     if (!img) return
-    try { if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return; (img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true } catch (e: unknown) {
-      console.error(e)
+    try {
+      if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return
+      ;(img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true
+    } catch (e: unknown) {
+      errorTracking.captureException(e as Error, {
+        component: 'AudiobooksView',
+        operation: 'handleImageError.flagCheck',
+      })
     }
-    const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
-
-    try { img.src = apiService.getPlaceholderUrl() } catch {}
-    try { img.removeAttribute('data-src') } catch {}
-    try { img.removeAttribute('data-original-src') } catch {}
-    try { (img as unknown as { onerror?: null }).onerror = null } catch (e: unknown) {
-      console.error(e)
+    try {
+      img.src = apiService.getPlaceholderUrl()
+    } catch {}
+    try {
+      img.removeAttribute('data-src')
+    } catch {}
+    try {
+      img.removeAttribute('data-original-src')
+    } catch {}
+    try {
+      ;(img as unknown as { onerror?: null }).onerror = null
+    } catch (e: unknown) {
+      errorTracking.captureException(e as Error, {
+        component: 'AudiobooksView',
+        operation: 'handleImageError.clearHandler',
+      })
     }
   } catch {}
 }
@@ -1397,7 +1660,7 @@ function getCoverStyle(index: number, count: number) {
     left: `${left}px`,
     zIndex: z,
     boxShadow: 'rgba(17, 17, 17, 0.4) 4px 0px 4px',
-    borderRadius: '6px'
+    borderRadius: '6px',
   }
 }
 
@@ -1407,14 +1670,22 @@ async function refreshLibrary() {
 
 async function confirmDelete(audiobook: Audiobook) {
   const message = `Are you sure you want to delete "${audiobook.title}"? This action cannot be undone. The audiobook data and cached images will be permanently removed.`
-  const ok = await showConfirm(message, 'Confirm Deletion', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  const ok = await showConfirm(message, 'Confirm Deletion', {
+    danger: true,
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+  })
   if (!ok) return
 
   deleting.value = true
   try {
     await libraryStore.removeFromLibrary(audiobook.id)
   } catch (err) {
-    console.error('Delete failed:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobooksView',
+      operation: 'confirmDelete',
+      metadata: { audiobookId: audiobook.id },
+    })
   } finally {
     deleting.value = false
   }
@@ -1424,7 +1695,11 @@ async function confirmBulkDelete() {
   const count = libraryStore.selectedIds.size
   if (count === 0) return
   const message = `Are you sure you want to delete ${count} audiobook${count !== 1 ? 's' : ''}? This action cannot be undone.`
-  const ok = await showConfirm(message, 'Confirm Deletion', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  const ok = await showConfirm(message, 'Confirm Deletion', {
+    danger: true,
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+  })
   if (!ok) return
 
   deleting.value = true
@@ -1432,7 +1707,11 @@ async function confirmBulkDelete() {
     const idsToDelete = Array.from(libraryStore.selectedIds)
     await libraryStore.bulkRemoveFromLibrary(idsToDelete)
   } catch (err) {
-    console.error('Bulk delete failed:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobooksView',
+      operation: 'confirmBulkDelete',
+      metadata: { count: libraryStore.selectedIds.size },
+    })
   } finally {
     deleting.value = false
   }
@@ -1449,7 +1728,7 @@ function closeBulkEdit() {
 async function handleBulkEditSaved() {
   // Refresh library to show updated data
   await libraryStore.fetchLibrary()
-  
+
   // Clear selection after successful bulk edit
   libraryStore.clearSelection()
 }
@@ -1457,7 +1736,7 @@ async function handleBulkEditSaved() {
 function openEditModal(audiobook: Audiobook) {
   // Always get the latest audiobook from the store to ensure we have the most recent data
   // This is important after edits that update the audiobook (like quality profile changes)
-  const freshAudiobook = libraryStore.audiobooks.find(book => book.id === audiobook.id)
+  const freshAudiobook = libraryStore.audiobooks.find((book) => book.id === audiobook.id)
   editAudiobook.value = freshAudiobook || audiobook
   showEditModal.value = true
 }
@@ -1470,10 +1749,10 @@ function closeEditModal() {
 async function handleEditSaved() {
   // Refresh library to show updated data
   await libraryStore.fetchLibrary()
-  
+
   // Update the editAudiobook reference with the fresh data
   if (editAudiobook.value) {
-    const updated = libraryStore.audiobooks.find(book => book.id === editAudiobook.value!.id)
+    const updated = libraryStore.audiobooks.find((book) => book.id === editAudiobook.value!.id)
     if (updated) {
       editAudiobook.value = updated
     }
@@ -1482,15 +1761,15 @@ async function handleEditSaved() {
 
 function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: MouseEvent) {
   event.preventDefault() // Prevent browser text selection
-  
+
   // Get the actual index from the full audiobooks array
-  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
-  
+  const currentIndex = audiobooks.value.findIndex((book) => book.id === audiobook.id)
+
   if (event.shiftKey && lastClickedIndex.value !== null) {
     // Shift+click: select range
     const startIndex = Math.min(lastClickedIndex.value, currentIndex)
     const endIndex = Math.max(lastClickedIndex.value, currentIndex)
-    
+
     // Clear current selection and select the range
     libraryStore.clearSelection()
     for (let i = startIndex; i <= endIndex; i++) {
@@ -1502,14 +1781,14 @@ function handleCheckboxClick(audiobook: Audiobook, virtualIndex: number, event: 
     // Regular click: toggle selection
     libraryStore.toggleSelection(audiobook.id)
   }
-  
+
   // Update last clicked index
   lastClickedIndex.value = currentIndex
 }
 
 function onCheckboxChange(audiobook: Audiobook, event: Event) {
   // Handle native input change (e.g. mouse click)
-  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  const currentIndex = audiobooks.value.findIndex((book) => book.id === audiobook.id)
 
   // Support Shift+click range selection when available
   const shift = (event as MouseEvent | KeyboardEvent).shiftKey
@@ -1531,7 +1810,7 @@ function onCheckboxChange(audiobook: Audiobook, event: Event) {
 
 function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   // Handle keyboard spacebar toggle and support Shift+Space range selection
-  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  const currentIndex = audiobooks.value.findIndex((book) => book.id === audiobook.id)
   if (event.shiftKey && lastClickedIndex.value !== null) {
     const startIndex = Math.min(lastClickedIndex.value, currentIndex)
     const endIndex = Math.max(lastClickedIndex.value, currentIndex)
@@ -1552,7 +1831,7 @@ function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
 defineExpose({
   setGroupBy,
   groupedCollections,
-  showItemDetails
+  showItemDetails,
 })
 </script>
 
@@ -1597,28 +1876,31 @@ defineExpose({
   gap: 8px;
   padding: 8px 14px;
   background-color: transparent;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   color: #e6eef8;
   font-size: 12px;
   cursor: pointer;
-  transition: background-color 0.12s ease, transform 0.08s ease, box-shadow 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    transform 0.08s ease,
+    box-shadow 0.12s ease;
 }
 
 .toolbar-btn:hover {
-  background-color: rgba(255,255,255,0.03);
+  background-color: rgba(255, 255, 255, 0.03);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 .toolbar-btn.active {
-  background-color: #2196F3;
-  border-color: #2196F3;
+  background-color: #2196f3;
+  border-color: #2196f3;
   color: #fff;
 }
 
 .toolbar-btn.edit-btn {
-  background-color: #2196F3;
+  background-color: #2196f3;
   border-color: #1976d2;
   color: #fff;
 }
@@ -1639,7 +1921,7 @@ defineExpose({
 
 /* Accessibility: strong focus ring for keyboard users */
 .toolbar-btn:focus-visible {
-  outline: 3px solid rgba(33,150,243,0.18);
+  outline: 3px solid rgba(33, 150, 243, 0.18);
   outline-offset: 2px;
 }
 
@@ -1652,17 +1934,17 @@ defineExpose({
     font-size: 0;
     gap: unset;
   }
-  
+
   .toolbar-btn svg {
     font-size: 16px;
     width: 16px;
     height: 16px;
   }
-  
+
   .count-badge {
     display: none;
   }
-  
+
   .toolbar-search {
     min-width: 120px;
   }
@@ -1684,8 +1966,8 @@ defineExpose({
   margin-left: 8px;
 }
 .toolbar-search {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   color: #e6eef8;
   padding: 8px 8px;
   border-radius: 6px;
@@ -1693,7 +1975,7 @@ defineExpose({
 }
 .toolbar-select {
   background-color: #2a2a2a; /* match CustomSelect trigger */
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #e6eef8;
   padding: 8px 10px;
   border-radius: 6px;
@@ -1701,9 +1983,15 @@ defineExpose({
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.12) 50%), linear-gradient(135deg, rgba(255,255,255,0.12) 50%, transparent 50%);
-  background-position: calc(100% - 14px) calc(1em + 2px), calc(100% - 10px) calc(1em + 2px);
-  background-size: 6px 6px, 6px 6px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, 0.12) 50%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(1em + 2px),
+    calc(100% - 10px) calc(1em + 2px);
+  background-size:
+    6px 6px,
+    6px 6px;
   background-repeat: no-repeat;
 }
 
@@ -1745,7 +2033,7 @@ defineExpose({
   top: calc(100% + 6px);
   left: 0;
   background: #2a2a2a;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   z-index: 100;
@@ -1767,7 +2055,7 @@ defineExpose({
 }
 
 .menu-item:hover {
-  background: rgba(255,255,255,0.03)
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .menu-item:first-child {
@@ -1849,7 +2137,9 @@ defineExpose({
   z-index: 20;
   min-width: 1.5rem;
   text-align: center;
-  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
   z-index: 100;
 }
 
@@ -1860,7 +2150,7 @@ defineExpose({
 }
 
 .series-count-badge:focus {
-  outline: 2px solid rgba(0,122,204,0.2);
+  outline: 2px solid rgba(0, 122, 204, 0.2);
   outline-offset: 2px;
 }
 
@@ -1937,7 +2227,7 @@ defineExpose({
 }
 
 .series-bottom-placard {
-  margin-top: .5rem;
+  margin-top: 0.5rem;
   display: flex;
   justify-content: center;
   z-index: 10;
@@ -2043,7 +2333,8 @@ defineExpose({
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     border-bottom-color: #3498db;
   }
   50% {
@@ -2077,7 +2368,6 @@ defineExpose({
   border-bottom: 3px solid #2ecc71;
 }
 
-
 .selection-checkbox {
   /* default used in grid; overridden in list below */
   position: absolute;
@@ -2092,7 +2382,7 @@ defineExpose({
   padding: 0;
   box-sizing: border-box;
   background-color: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -2103,7 +2393,7 @@ defineExpose({
   -ms-user-select: none;
 }
 /* Hide the native input visually but keep it accessible and interactive */
-.selection-checkbox input[type="checkbox"] {
+.selection-checkbox input[type='checkbox'] {
   position: absolute;
   inset: 0;
   margin: 0;
@@ -2125,23 +2415,25 @@ defineExpose({
   width: 14px;
   height: 14px;
   border-radius: 4px;
-  border: 2px solid rgba(255,255,255,0.14);
+  border: 2px solid rgba(255, 255, 255, 0.14);
   background: transparent;
   box-sizing: border-box;
-  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
   z-index: 1;
 }
 
 .selection-checkbox:hover {
   background-color: rgba(0, 0, 0, 0.6);
-  border-color: rgba(255,255,255,0.18);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Custom checkmark */
 
-
 /* Remove container hover darkening when focusing the native checkbox so contrast stays good */
-.selection-checkbox:hover input[type="checkbox"] {
+.selection-checkbox:hover input[type='checkbox'] {
   transform: translateY(0);
 }
 
@@ -2160,8 +2452,8 @@ defineExpose({
 .audiobook-list-item.selected .selection-checkbox::before {
   background-color: #007acc;
   border-color: #007acc;
-  box-shadow: 0 0 0 4px rgba(0,122,204,0.12);
-} 
+  box-shadow: 0 0 0 4px rgba(0, 122, 204, 0.12);
+}
 
 .audiobook-item.selected .selection-checkbox::after,
 .audiobook-list-item.selected .selection-checkbox::after {
@@ -2171,23 +2463,25 @@ defineExpose({
 }
 
 /* Checked state for grid and list rows */
-.audiobook-item.selected .selection-checkbox input[type="checkbox"],
-.audiobook-list-item.selected .selection-checkbox input[type="checkbox"] {
+.audiobook-item.selected .selection-checkbox input[type='checkbox'],
+.audiobook-list-item.selected .selection-checkbox input[type='checkbox'] {
   /* keep native checked UI; add slight background for custom look */
   background-color: transparent;
 }
 
 /* Focus outlines for keyboard navigation */
-.selection-checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(0,122,204,0.3);
+.selection-checkbox input[type='checkbox']:focus-visible {
+  outline: 2px solid rgba(0, 122, 204, 0.3);
   outline-offset: 2px;
 }
 
-.audiobook-list-item:focus, .audiobook-list-item:focus-within,
-.audiobook-item:focus, .audiobook-item:focus-within {
-  outline: 2px solid rgba(0,122,204,0.18);
+.audiobook-list-item:focus,
+.audiobook-list-item:focus-within,
+.audiobook-item:focus,
+.audiobook-item:focus-within {
+  outline: 2px solid rgba(0, 122, 204, 0.18);
   outline-offset: 2px;
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
 }
 
 /* List-specific override for the checkbox so it participates in the grid */
@@ -2199,8 +2493,8 @@ defineExpose({
   height: 20px;
   width: 20px;
   margin: 0;
-  background-color: rgba(0,0,0,0.0);
-  border: 1px solid rgba(255,255,255,0.06);
+  background-color: rgba(0, 0, 0, 0);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2213,7 +2507,7 @@ defineExpose({
 .audiobooks-list .selection-checkbox::before {
   opacity: 1;
 }
-.audiobooks-list .selection-checkbox input[type="checkbox"] {
+.audiobooks-list .selection-checkbox input[type='checkbox'] {
   opacity: 0; /* native input remains visually hidden */
 }
 
@@ -2248,7 +2542,9 @@ defineExpose({
   right: 0;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
   padding: 8px;
-  transition: padding 0.2s ease, opacity 0.2s ease;
+  transition:
+    padding 0.2s ease,
+    opacity 0.2s ease;
   opacity: 0;
 }
 
@@ -2375,8 +2671,8 @@ defineExpose({
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   margin-right: 0.5rem;
-  background-color: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   font-size: 10px;
   font-weight: 600;
@@ -2387,26 +2683,26 @@ defineExpose({
 }
 
 .status-badge.no-file {
-  background-color: rgba(231,76,60,0.12);
-  border-color: rgba(231,76,60,0.18);
+  background-color: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.18);
   color: #e74c3c;
 }
 
 .status-badge.downloading {
-  background-color: rgba(52,152,219,0.10);
-  border-color: rgba(52,152,219,0.2);
+  background-color: rgba(52, 152, 219, 0.1);
+  border-color: rgba(52, 152, 219, 0.2);
   color: #3498db;
 }
 
 .status-badge.quality-mismatch {
-  background-color: rgba(243,156,18,0.10);
-  border-color: rgba(243,156,18,0.18);
+  background-color: rgba(243, 156, 18, 0.1);
+  border-color: rgba(243, 156, 18, 0.18);
   color: #f39c12;
 }
 
 .status-badge.quality-match {
-  background-color: rgba(46,204,113,0.10);
-  border-color: rgba(46,204,113,0.18);
+  background-color: rgba(46, 204, 113, 0.1);
+  border-color: rgba(46, 204, 113, 0.18);
   color: #2ecc71;
 }
 
@@ -2493,7 +2789,9 @@ defineExpose({
   background-color: rgba(41, 128, 185, 1);
 }
 
-.loading-state, .empty-state, .error-state {
+.loading-state,
+.empty-state,
+.error-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2503,7 +2801,9 @@ defineExpose({
   text-align: center;
 }
 
-.loading-state i, .empty-icon, .error-icon {
+.loading-state i,
+.empty-icon,
+.error-icon {
   font-size: 4rem;
   color: #555;
   margin-bottom: 1rem;
@@ -2690,19 +2990,21 @@ defineExpose({
   padding: 10px 12px;
   background-color: transparent;
   border-radius: 6px;
-  transition: background-color 0.12s, transform 0.12s;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition:
+    background-color 0.12s,
+    transform 0.12s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   cursor: pointer;
 }
 
 .audiobook-list-item:hover {
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   transform: translateY(-1px);
 }
 
 /* When a row is selected, apply the same hover visual treatment so it appears highlighted */
 .audiobook-list-item.selected {
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   transform: translateY(-1px);
 }
 
@@ -2749,14 +3051,23 @@ defineExpose({
   padding: 8px 12px;
   color: #aaa;
   font-size: 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   align-items: center;
 }
 
-.list-header .col-cover { opacity: 0.9; text-align: center; }
-.list-header .col-title { opacity: 0.9 }
-.list-header .col-status { opacity: 0.9 }
-.list-header .col-actions { text-align: right }
+.list-header .col-cover {
+  opacity: 0.9;
+  text-align: center;
+}
+.list-header .col-title {
+  opacity: 0.9;
+}
+.list-header .col-status {
+  opacity: 0.9;
+}
+.list-header .col-actions {
+  text-align: right;
+}
 
 /* Position badges between details and actions */
 .list-badges {

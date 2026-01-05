@@ -4,7 +4,14 @@
       <div class="modal-header">
         <h3>{{ root?.id ? 'Edit Root Folder' : 'Add Root Folder' }}</h3>
         <button @click="close" class="modal-close">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
@@ -36,12 +43,19 @@
       </div>
 
       <!-- Rename confirmation modal -->
-      <div v-if="showConfirm" class="modal-overlay confirm-modal" @click.self="showConfirm=false">
+      <div v-if="showConfirm" class="modal-overlay confirm-modal" @click.self="showConfirm = false">
         <div class="modal-content">
           <div class="modal-header">
             <h3>Move audiobook files?</h3>
-            <button @click="showConfirm=false" class="modal-close">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button @click="showConfirm = false" class="modal-close">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
               </svg>
@@ -50,9 +64,9 @@
           <div class="modal-body">
             <div class="confirm-body">
               <p>You're changing the root path and may move all files from:</p>
-              <pre>{{ root?.path || '<none>' }}</pre>
+              <pre>{{ root?.path || '&lt;none&gt;' }}</pre>
               <p>to:</p>
-              <pre>{{ form.path || '<none>' }}</pre>
+              <pre>{{ form.path || '&lt;none&gt;' }}</pre>
               <div class="checkbox-row">
                 <label>
                   <input type="checkbox" v-model="modalMoveFiles" />
@@ -68,7 +82,7 @@
             </div>
           </div>
           <div class="modal-actions">
-            <button class="btn" @click="showConfirm=false">Cancel</button>
+            <button class="btn" @click="showConfirm = false">Cancel</button>
             <button class="btn" @click="confirmChange(false)">Change without moving</button>
             <button class="btn primary" @click="confirmChange(true)">Move Files</button>
           </div>
@@ -98,10 +112,15 @@ const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
 
-function close() { emit('close') }
+function close() {
+  emit('close')
+}
 
 async function save() {
-  if (!form.value.name || !form.value.path) { toast.error('Validation Error', 'Name and Path are required'); return }
+  if (!form.value.name || !form.value.path) {
+    toast.error('Validation Error', 'Name and Path are required')
+    return
+  }
   try {
     if (root?.id) {
       // If path changed, show confirmation to choose whether to move files
@@ -109,10 +128,19 @@ async function save() {
         showConfirm.value = true
         return
       }
-      await store.update(root.id, { id: root.id, name: form.value.name, path: form.value.path, isDefault: form.value.isDefault })
+      await store.update(root.id, {
+        id: root.id,
+        name: form.value.name,
+        path: form.value.path,
+        isDefault: form.value.isDefault,
+      })
       toast.success('Success', 'Root folder updated')
     } else {
-      await store.create({ name: form.value.name, path: form.value.path, isDefault: form.value.isDefault })
+      await store.create({
+        name: form.value.name,
+        path: form.value.path,
+        isDefault: form.value.isDefault,
+      })
       toast.success('Success', 'Root folder created')
     }
     emit('saved')
@@ -125,8 +153,20 @@ async function save() {
 async function confirmChange(moveFiles: boolean) {
   showConfirm.value = false
   try {
-    await store.update(root!.id, { id: root!.id, name: form.value.name, path: form.value.path, isDefault: form.value.isDefault }, { moveFiles: moveFiles, deleteEmptySource: modalDeleteEmpty.value })
-    toast.success('Success', moveFiles ? 'Root renamed and move jobs queued' : 'Root renamed (files unchanged)')
+    await store.update(
+      root!.id,
+      {
+        id: root!.id,
+        name: form.value.name,
+        path: form.value.path,
+        isDefault: form.value.isDefault,
+      },
+      { moveFiles: moveFiles, deleteEmptySource: modalDeleteEmpty.value },
+    )
+    toast.success(
+      'Success',
+      moveFiles ? 'Root renamed and move jobs queued' : 'Root renamed (files unchanged)',
+    )
     emit('saved')
   } catch (e: unknown) {
     const error = e as Error
@@ -231,7 +271,7 @@ async function confirmChange(moveFiles: boolean) {
 
 .form-row input:focus {
   outline: none;
-  border-color: #2196F3;
+  border-color: #2196f3;
   box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
 }
 
@@ -249,7 +289,7 @@ async function confirmChange(moveFiles: boolean) {
   padding: 0.5rem 0;
 }
 
-.checkbox-label input[type="checkbox"] {
+.checkbox-label input[type='checkbox'] {
   width: 18px;
   height: 18px;
   margin: 0;
@@ -265,16 +305,16 @@ async function confirmChange(moveFiles: boolean) {
   vertical-align: sub;
 }
 
-.checkbox-label input[type="checkbox"]:hover {
+.checkbox-label input[type='checkbox']:hover {
   border-color: #007acc;
 }
 
-.checkbox-label input[type="checkbox"]:checked {
+.checkbox-label input[type='checkbox']:checked {
   background-color: #007acc;
   border-color: #007acc;
 }
 
-.checkbox-label input[type="checkbox"]:focus {
+.checkbox-label input[type='checkbox']:focus {
   outline: 2px solid rgba(0, 122, 204, 0.3);
   outline-offset: 2px;
 }
@@ -283,7 +323,7 @@ async function confirmChange(moveFiles: boolean) {
   line-height: 1.4;
   font-size: 0.95rem;
   margin-left: 0.25rem;
-} 
+}
 
 .modal-actions {
   display: flex;
@@ -373,7 +413,7 @@ async function confirmChange(moveFiles: boolean) {
   padding: 0.5rem 0;
 }
 
-.checkbox-row label input[type="checkbox"] {
+.checkbox-row label input[type='checkbox'] {
   width: 18px;
   height: 18px;
   margin: 0;
@@ -389,16 +429,16 @@ async function confirmChange(moveFiles: boolean) {
   vertical-align: sub;
 }
 
-.checkbox-row label input[type="checkbox"]:hover {
+.checkbox-row label input[type='checkbox']:hover {
   border-color: #007acc;
 }
 
-.checkbox-row label input[type="checkbox"]:checked {
+.checkbox-row label input[type='checkbox']:checked {
   background-color: #007acc;
   border-color: #007acc;
 }
 
-.checkbox-row label input[type="checkbox"]:checked::after {
+.checkbox-row label input[type='checkbox']:checked::after {
   content: '';
   position: absolute;
   left: 5px;
@@ -410,7 +450,7 @@ async function confirmChange(moveFiles: boolean) {
   transform: rotate(45deg);
 }
 
-.checkbox-row label input[type="checkbox"]:focus {
+.checkbox-row label input[type='checkbox']:focus {
   outline: 2px solid rgba(0, 122, 204, 0.3);
   outline-offset: 2px;
 }

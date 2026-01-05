@@ -9,7 +9,9 @@
       </div>
       <div class="confirm-actions">
         <button class="btn cancel" @click="onCancel">{{ cancelText }}</button>
-        <button class="btn confirm" :class="{ danger }" @click="onConfirm">{{ confirmText }}</button>
+        <button class="btn confirm" :class="{ danger }" @click="onConfirm">
+          {{ confirmText }}
+        </button>
       </div>
     </div>
   </div>
@@ -23,7 +25,7 @@ defineProps({
   message: { type: String, default: '' },
   confirmText: { type: String, default: 'Confirm' },
   cancelText: { type: String, default: 'Cancel' },
-  danger: { type: Boolean, default: false }
+  danger: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'confirm'])
@@ -42,7 +44,7 @@ function onCancel() {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -54,7 +56,7 @@ function onCancel() {
   border-radius: 6px;
   width: 90%;
   max-width: 520px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
   padding: 16px;
 }
 .confirm-header h3 {
@@ -76,7 +78,15 @@ function onCancel() {
   border: none;
   cursor: pointer;
 }
-.btn.cancel { background: #3a3a3a; color: #fff }
-.btn.confirm { background: #2196F3; color: #fff }
-.btn.confirm.danger { background: #e74c3c }
+.btn.cancel {
+  background: #3a3a3a;
+  color: #fff;
+}
+.btn.confirm {
+  background: #2196f3;
+  color: #fff;
+}
+.btn.confirm.danger {
+  background: #e74c3c;
+}
 </style>

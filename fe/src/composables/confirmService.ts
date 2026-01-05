@@ -12,14 +12,20 @@ const danger = ref(false)
 
 let resolver: Resolver | null = null
 
-export function showConfirm(msg: string, t?: string, options?: { confirmText?: string; cancelText?: string; danger?: boolean }): Promise<boolean> {
+export function showConfirm(
+  msg: string,
+  t?: string,
+  options?: { confirmText?: string; cancelText?: string; danger?: boolean },
+): Promise<boolean> {
   message.value = msg
   title.value = t || 'Confirm'
   confirmText.value = options?.confirmText ?? 'Confirm'
   cancelText.value = options?.cancelText ?? 'Cancel'
   danger.value = !!options?.danger
   visible.value = true
-  return new Promise<boolean>((resolve) => { resolver = resolve })
+  return new Promise<boolean>((resolve) => {
+    resolver = resolve
+  })
 }
 
 export function confirm() {
@@ -44,7 +50,7 @@ export function useConfirmService() {
     danger,
     showConfirm,
     confirm,
-    cancel
+    cancel,
   }
 }
 
@@ -59,5 +65,5 @@ export default {
   showConfirm,
   confirm,
   cancel,
-  useConfirmService
+  useConfirmService,
 }

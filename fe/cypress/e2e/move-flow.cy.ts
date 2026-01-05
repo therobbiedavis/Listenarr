@@ -1,3 +1,4 @@
+/* eslint-disable cypress/unsafe-to-chain-command */
 describe('Edit -> Move flow (E2E)', () => {
   beforeEach(() => {
     // Stub startup config and account checks (no auth)
@@ -54,7 +55,8 @@ describe('Edit -> Move flow (E2E)', () => {
 
   it('edits destination, confirms move, enqueues job, and shows toast', () => {
     cy.visit('/')
-    cy.contains('Audiobooks', { timeout: 10000 }).should('be.visible').click()
+    cy.contains('Audiobooks', { timeout: 10000 }).should('be.visible')
+    cy.contains('Audiobooks', { timeout: 10000 }).click()
 
     // Wait for library load
     cy.wait('@getStartupConfig')
@@ -75,12 +77,14 @@ describe('Edit -> Move flow (E2E)', () => {
     cy.get('.confirm-dialog .btn.confirm').contains('Move').click()
 
     // Ensure update and move endpoints were called with expected payloads
-    cy.wait('@updateAudiobook').its('request.body').then((body) => {
+    cy.wait('@updateAudiobook').then((interception) => {
+      const body = interception.request.body
       // basePath sent via PUT should be the combined root + relative
       expect(body.basePath).to.equal('/mnt/audiobooks/New Author/New Book')
     })
 
-    cy.wait('@moveAudiobook').its('request.body').then((body) => {
+    cy.wait('@moveAudiobook').then((interception) => {
+      const body = interception.request.body
       expect(body.destinationPath).to.equal('/mnt/audiobooks/New Author/New Book')
       expect(body.sourcePath).to.equal('/mnt/audiobooks/Test Author/Test Book')
     })
@@ -91,7 +95,7 @@ describe('Edit -> Move flow (E2E)', () => {
 
   it('edits destination and chooses "Change without moving" to update DB only', () => {
     // Override move intercept to fail the test if called
-    cy.intercept('POST', '/api/library/1/move', (req) => {
+    cy.intercept('POST', '/api/library/1/move', () => {
       throw new Error('Move API should not be called when user selects Change without moving')
     }).as('moveShouldNotBeCalled')
 

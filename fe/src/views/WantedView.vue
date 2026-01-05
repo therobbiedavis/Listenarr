@@ -6,7 +6,11 @@
         Wanted
       </h1>
       <div class="wanted-actions">
-        <button class="btn btn-primary" @click="searchMissing" :disabled="categorizedWanted.missing.length === 0">
+        <button
+          class="btn btn-primary"
+          @click="searchMissing"
+          :disabled="categorizedWanted.missing.length === 0"
+        >
           <PhRobot />
           Automatic Search All
         </button>
@@ -20,18 +24,14 @@
     <div class="wanted-filters">
       <!-- Mobile dropdown -->
       <div class="filter-tabs-mobile">
-        <CustomSelect
-          v-model="selectedTab"
-          :options="mobileTabOptions"
-          class="tab-dropdown"
-        />
+        <CustomSelect v-model="selectedTab" :options="mobileTabOptions" class="tab-dropdown" />
       </div>
 
       <!-- Desktop tabs -->
       <div class="filter-tabs-desktop">
         <div class="filter-tabs">
-          <button 
-            v-for="tab in filterTabs" 
+          <button
+            v-for="tab in filterTabs"
             :key="tab.value"
             :class="['tab', { active: selectedTab === tab.value }]"
             @click="selectedTab = tab.value"
@@ -50,85 +50,94 @@
     </div>
 
     <!-- Wanted List -->
-    <div v-else-if="filteredWanted.length > 0" ref="scrollContainer" class="wanted-list-container" @scroll="updateVisibleRange">
+    <div
+      v-else-if="filteredWanted.length > 0"
+      ref="scrollContainer"
+      class="wanted-list-container"
+      @scroll="updateVisibleRange"
+    >
       <div class="wanted-list-spacer" :style="{ height: `${totalHeight}px` }">
         <div class="wanted-list" :style="{ transform: `translateY(${topPadding}px)` }">
-          <div 
-            v-for="item in visibleWanted" 
+          <div
+            v-for="item in visibleWanted"
             :key="item.id"
             v-memo="[item.id, item.monitored, item.filePath]"
             class="wanted-item"
           >
-        <div class="wanted-poster">
-          <img 
-            :src="apiService.getImageUrl(item.imageUrl) || getPlaceholderUrl()"
-            :alt="item.title"
-            loading="lazy"
-            decoding="async"
-            @error="handleImageError"
-          />
-        </div>
-        <div class="wanted-info">
-          <h3>{{ safeText(item.title) }}</h3>
-          <h4 v-if="item.authors?.length">by {{ item.authors.map(author => safeText(author)).join(', ') }}</h4>
-          <div class="wanted-meta">
-            <span v-if="item.series">{{ safeText(item.series) }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span>
-            <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
-            <span v-if="item.runtime">{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span>
+            <div class="wanted-poster">
+              <img
+                :src="apiService.getImageUrl(item.imageUrl) || getPlaceholderUrl()"
+                :alt="item.title"
+                loading="lazy"
+                decoding="async"
+                @error="handleImageError"
+              />
+            </div>
+            <div class="wanted-info">
+              <h3>{{ safeText(item.title) }}</h3>
+              <h4 v-if="item.authors?.length">
+                by {{ item.authors.map((author) => safeText(author)).join(', ') }}
+              </h4>
+              <div class="wanted-meta">
+                <span v-if="item.series"
+                  >{{ safeText(item.series)
+                  }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span
+                >
+                <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
+                <span v-if="item.runtime"
+                  >{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span
+                >
+              </div>
+              <div class="wanted-quality">
+                <template v-if="getQualityProfileForAudiobook(item)">
+                  Wanted Quality:
+                  <span class="profile-name">{{
+                    getQualityProfileForAudiobook(item)?.name ?? 'Unknown'
+                  }}</span>
+                </template>
+                <template v-else-if="item.quality"> Wanted Quality: {{ item.quality }} </template>
+                <template v-else> Wanted Quality: Any </template>
+              </div>
+              <div v-if="searchResults[item.id]" class="search-status">
+                <template v-if="searching[item.id]">
+                  <PhSpinner class="ph-spin" />
+                </template>
+                {{ searchResults[item.id] }}
+              </div>
+            </div>
+            <div class="wanted-status">
+              <span :class="['status-badge', getStatusClass(item)]">
+                {{ getStatusText(item) }}
+              </span>
+            </div>
+            <div class="wanted-actions-cell">
+              <button
+                class="btn-icon"
+                @click="searchAudiobook(item)"
+                :disabled="searching[item.id]"
+                title="Automatic Search"
+              >
+                <PhRobot />
+              </button>
+              <button class="btn-icon" @click="openManualSearch(item)" title="Manual Search">
+                <PhMagnifyingGlass />
+              </button>
+              <button
+                class="btn-icon"
+                @click="markAsSkipped(item)"
+                :disabled="searching[item.id]"
+                title="Unmonitor Audiobook"
+              >
+                <PhX />
+              </button>
+            </div>
           </div>
-          <div class="wanted-quality">
-            <template v-if="getQualityProfileForAudiobook(item)">
-              Wanted Quality:
-              <span class="profile-name">{{ getQualityProfileForAudiobook(item)?.name ?? 'Unknown' }}</span>
-            </template>
-            <template v-else-if="item.quality">
-              Wanted Quality: {{ item.quality }}
-            </template>
-            <template v-else>
-              Wanted Quality: Any
-            </template>
-          </div>
-          <div v-if="searchResults[item.id]" class="search-status">
-            <template v-if="searching[item.id]">
-              <PhSpinner class="ph-spin" />
-            </template>
-            {{ searchResults[item.id] }}
-          </div>
         </div>
-        <div class="wanted-status">
-          <span :class="['status-badge', getStatusClass(item)]">
-            {{ getStatusText(item) }}
-          </span>
-        </div>
-        <div class="wanted-actions-cell">
-          <button 
-            class="btn-icon" 
-            @click="searchAudiobook(item)"
-            :disabled="searching[item.id]"
-            title="Automatic Search"
-          >
-            <PhRobot />
-          </button>
-          <button 
-            class="btn-icon" 
-            @click="openManualSearch(item)"
-            title="Manual Search"
-          >
-            <PhMagnifyingGlass />
-          </button>
-          <button 
-            class="btn-icon" 
-            @click="markAsSkipped(item)"
-            :disabled="searching[item.id]"
-            title="Unmonitor Audiobook"
-          >
-            <PhX />
-          </button>
-        </div>
+        <!-- Close wanted-list -->
       </div>
-        </div>  <!-- Close wanted-list -->
-      </div>    <!-- Close wanted-list-spacer -->
-    </div>      <!-- Close wanted-list-container -->
+      <!-- Close wanted-list-spacer -->
+    </div>
+    <!-- Close wanted-list-container -->
 
     <!-- Empty State -->
     <div v-else class="empty-state">
@@ -161,13 +170,26 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
+import { errorTracking } from '@/services/errorTracking'
 import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
 import type { Audiobook, SearchResult } from '@/types'
 import { safeText } from '@/utils/textUtils'
-import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle, PhBooks, PhQuestion, PhXCircle, PhSkipForward } from '@phosphor-icons/vue'
+import {
+  PhHeart,
+  PhRobot,
+  PhFolderPlus,
+  PhSpinner,
+  PhMagnifyingGlass,
+  PhX,
+  PhCheckCircle,
+  PhBooks,
+  PhQuestion,
+  PhXCircle,
+  PhSkipForward,
+} from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
 import { useDownloadsStore } from '@/stores/downloads'
 
@@ -196,7 +218,10 @@ const updateVisibleRange = () => {
 
   const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
   // filteredWanted may not be initialized yet; guard with optional chaining
-  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, (filteredWanted?.value?.length) || 0)
+  const endIndex = Math.min(
+    firstVisibleIndex + visibleItemCount + BUFFER_ROWS,
+    filteredWanted?.value?.length || 0,
+  )
 
   visibleRange.value = { start: startIndex, end: endIndex }
 }
@@ -206,7 +231,7 @@ const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
     return null
   }
   const profile = configurationStore.qualityProfiles.find(
-    (profile) => profile.id === audiobook.qualityProfileId
+    (profile) => profile.id === audiobook.qualityProfileId,
   )
   return profile || null
 }
@@ -225,7 +250,7 @@ const mobileTabOptions = computed(() => [
   { value: 'missing', label: 'Missing', icon: PhQuestion },
   { value: 'searching', label: 'Searching', icon: PhMagnifyingGlass },
   { value: 'failed', label: 'Failed', icon: PhXCircle },
-  { value: 'skipped', label: 'Skipped', icon: PhSkipForward }
+  { value: 'skipped', label: 'Skipped', icon: PhSkipForward },
 ])
 
 onMounted(async () => {
@@ -233,23 +258,26 @@ onMounted(async () => {
   await libraryStore.fetchLibrary()
   await configurationStore.loadQualityProfiles()
   loading.value = false
-  
+
   // Initialize virtual scrolling
   await nextTick()
   updateVisibleRange()
 })
 
 // Watch the visible range (virtual scroll) to lazy-load images when the viewport changes
-watch(() => visibleRange.value, () => {
-  // No-op: native lazy loading handles image work, but we keep the watcher to retain potential hooks
-})
+watch(
+  () => visibleRange.value,
+  () => {
+    // No-op: native lazy loading handles image work, but we keep the watcher to retain potential hooks
+  },
+)
 
 // Filter audiobooks that are monitored and missing files
 // Prefer the server-provided `wanted` flag when present. If the server
 // does not include the flag (migration / older records), fall back to a
 // local computation: monitored && no files (or no primary filePath).
 const wantedAudiobooks = computed(() => {
-  return libraryStore.audiobooks.filter(audiobook => {
+  return libraryStore.audiobooks.filter((audiobook) => {
     const serverWanted = (audiobook as unknown as Record<string, unknown>)['wanted']
 
     // If server explicitly provided true/false, honor it
@@ -267,12 +295,23 @@ const wantedAudiobooks = computed(() => {
 // Categorize wanted audiobooks by their current search state
 const categorizedWanted = computed(() => {
   const all = wantedAudiobooks.value
-  const searchingItems = all.filter(a => searching.value[a.id])
-  const failedItems = all.filter(a => searchResults.value[a.id] && searchResults.value[a.id] !== 'Searching...' && !searching.value[a.id])
-  const missingItems = all.filter(a => !searching.value[a.id] && !searchResults.value[a.id])
+  const searchingItems = all.filter((a) => searching.value[a.id])
+  const failedItems = all.filter(
+    (a) =>
+      searchResults.value[a.id] &&
+      searchResults.value[a.id] !== 'Searching...' &&
+      !searching.value[a.id],
+  )
+  const missingItems = all.filter((a) => !searching.value[a.id] && !searchResults.value[a.id])
   const skippedItems: Audiobook[] = [] // For future use, currently empty
 
-  return { all, searching: searchingItems, failed: failedItems, missing: missingItems, skipped: skippedItems }
+  return {
+    all,
+    searching: searchingItems,
+    failed: failedItems,
+    missing: missingItems,
+    skipped: skippedItems,
+  }
 })
 
 // Count by status
@@ -281,7 +320,7 @@ const filterTabs = computed(() => [
   { label: 'Missing', value: 'missing', count: categorizedWanted.value.missing.length },
   { label: 'Searching', value: 'searching', count: categorizedWanted.value.searching.length },
   { label: 'Failed', value: 'failed', count: categorizedWanted.value.failed.length },
-  { label: 'Skipped', value: 'skipped', count: categorizedWanted.value.skipped.length }
+  { label: 'Skipped', value: 'skipped', count: categorizedWanted.value.skipped.length },
 ])
 
 const filteredWanted = computed(() => {
@@ -304,8 +343,6 @@ const filteredWanted = computed(() => {
 const visibleWanted = computed(() => {
   return filteredWanted.value.slice(visibleRange.value.start, visibleRange.value.end)
 })
-
-
 
 const totalHeight = computed(() => {
   return filteredWanted.value.length * ROW_HEIGHT
@@ -372,7 +409,11 @@ function getEmptyStateMessage(): string {
 const formatDate = (date: string | undefined): string => {
   if (!date) return 'Unknown'
   try {
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    return new Date(date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
   } catch {
     return date
   }
@@ -380,12 +421,12 @@ const formatDate = (date: string | undefined): string => {
 
 const searchMissing = async () => {
   logger.debug('Automatic search for all missing audiobooks')
-  
+
   // Search all missing audiobooks sequentially
   for (const audiobook of categorizedWanted.value.missing) {
     await searchAudiobook(audiobook)
     // Add a small delay between searches to avoid overwhelming indexers
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise((resolve) => setTimeout(resolve, 1000))
   }
 }
 
@@ -421,7 +462,7 @@ function handleDownloaded(result: SearchResult) {
     try {
       await downloadsStore.loadDownloads()
     } catch (e) {
-      console.warn('Failed to refresh downloads after manual download:', e)
+      logger.warn('Failed to refresh downloads after manual download:', e)
     }
     await libraryStore.fetchLibrary()
     closeManualSearch()
@@ -430,22 +471,22 @@ function handleDownloaded(result: SearchResult) {
 
 const searchAudiobook = async (item: Audiobook) => {
   logger.debug('Searching audiobook:', item.title)
-  
+
   searching.value[item.id] = true
   searchResults.value[item.id] = 'Searching...'
-  
+
   try {
     const result = await apiService.searchAndDownload(item.id)
-    
+
     if (result.success) {
       searchResults.value[item.id] = `Found on ${result.indexerUsed}, downloading...`
-      
+
       // Refresh downloads and library to update status (ensure DDL downloads show up immediately)
       setTimeout(async () => {
         try {
           await downloadsStore.loadDownloads()
         } catch (e) {
-          console.warn('Failed to refresh downloads after search:', e)
+          logger.warn('Failed to refresh downloads after search:', e)
         }
         await libraryStore.fetchLibrary()
         delete searching.value[item.id]
@@ -459,7 +500,11 @@ const searchAudiobook = async (item: Audiobook) => {
       }, 5000)
     }
   } catch (err) {
-    console.error('Search failed:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'WantedView',
+      operation: 'searchWanted',
+      metadata: { itemId: item.id },
+    })
     searchResults.value[item.id] = 'Search failed'
     setTimeout(() => {
       delete searching.value[item.id]
@@ -470,7 +515,7 @@ const searchAudiobook = async (item: Audiobook) => {
 
 const markAsSkipped = async (item: Audiobook) => {
   logger.debug('Mark as skipped:', item.title)
-  
+
   try {
     await apiService.updateAudiobook(item.id, { monitored: false })
     await libraryStore.fetchLibrary()
@@ -504,7 +549,7 @@ const markAsSkipped = async (item: Audiobook) => {
   height: calc(100vh - 291px);
   overflow-y: auto;
   position: relative;
-  padding: 0 .5em 0 0;
+  padding: 0 0.5em 0 0;
   scrollbar-gutter: stable; /* Reserve space for scrollbar to prevent layout shifts */
   width: calc(100% + 0.5em); /* Leaves space for scrollbar without cutting off content */
 }
@@ -823,7 +868,7 @@ const markAsSkipped = async (item: Audiobook) => {
 }
 
 .wanted-meta span span {
-background-color: unset;
+  background-color: unset;
   padding: 0;
   border-radius: unset;
 }
@@ -945,18 +990,18 @@ background-color: unset;
     flex-direction: column;
     align-items: flex-start;
   }
-  
+
   .wanted-poster {
     margin-bottom: 1rem;
     margin-right: 0;
   }
-  
+
   .wanted-status,
   .wanted-actions-cell {
     margin: 1rem 0 0 0;
     align-self: stretch;
   }
-  
+
   .wanted-actions-cell {
     justify-content: flex-end;
     gap: 0.75rem;

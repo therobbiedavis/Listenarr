@@ -4,7 +4,22 @@ import type { QualityScore, SearchResult } from '@/types'
 
 describe('useScore composable', () => {
   it('includes Smart composite breakdown when provided', () => {
-    const fakeResult = { id: 'r1', title: 'T', artist: '', album: '', category: '', source: '', publishedDate: '', format: '', size: 0, magnetLink: '', torrentUrl: '', nzbUrl: '', downloadType: '', quality: '' } as unknown as SearchResult
+    const fakeResult = {
+      id: 'r1',
+      title: 'T',
+      artist: '',
+      album: '',
+      category: '',
+      source: '',
+      publishedDate: '',
+      format: '',
+      size: 0,
+      magnetLink: '',
+      torrentUrl: '',
+      nzbUrl: '',
+      downloadType: '',
+      quality: '',
+    } as unknown as SearchResult
     const score: QualityScore = {
       searchResult: fakeResult,
       totalScore: 100,
@@ -12,7 +27,7 @@ describe('useScore composable', () => {
       rejectionReasons: [],
       isRejected: false,
       smartScore: 1234.5,
-      smartScoreBreakdown: { Quality: 90000, Format: 8500, Seed: 2000 }
+      smartScoreBreakdown: { Quality: 90000, Format: 8500, Seed: 2000 },
     }
 
     const tooltip = getScoreBreakdownTooltip(score)

@@ -8,7 +8,7 @@ vi.mock('@/services/api', () => ({
     previewLibraryPath: vi.fn().mockResolvedValue({ fullPath: '', relativePath: '' }),
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: '' }),
     getQualityProfiles: vi.fn().mockResolvedValue([]),
-  }
+  },
 }))
 
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
@@ -21,15 +21,15 @@ const fakeBook = {
 
 describe('AddLibraryModal accessibility', () => {
   it('renders dialog with proper ARIA and emits close on Escape', async () => {
-    const wrapper = mount(AddLibraryModal as any, {
+    const wrapper = mount(AddLibraryModal, {
       props: {
         visible: false,
         book: fakeBook,
       },
       attachTo: document.body,
       global: {
-        plugins: [ (await import('pinia')).createPinia() ]
-      }
+        plugins: [(await import('pinia')).createPinia()],
+      },
     })
 
     await wrapper.setProps({ visible: true })

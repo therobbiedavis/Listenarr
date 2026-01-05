@@ -32,8 +32,8 @@
 
           <!-- Test Notification Menu (only if webhooks configured) -->
           <div class="test-menu-container" v-if="isDevelopment && hasWebhooksConfigured">
-            <button 
-              class="nav-btn test-menu-btn" 
+            <button
+              class="nav-btn test-menu-btn"
               @click.stop="showTestMenu = !showTestMenu"
               :disabled="sendingNotification"
               title="Test Notifications"
@@ -42,25 +42,34 @@
               Test
             </button>
             <div class="test-dropdown" v-if="showTestMenu" @click.stop>
-              <button 
-                class="dropdown-item" 
-                @click="openTestMenu('book-added'); showTestMenu = false"
+              <button
+                class="dropdown-item"
+                @click="
+                  openTestMenu('book-added')
+                  showTestMenu = false
+                "
                 :disabled="sendingNotification"
               >
                 <PhBookmark />
                 Book Added
               </button>
-              <button 
-                class="dropdown-item" 
-                @click="openTestMenu('book-available'); showTestMenu = false"
+              <button
+                class="dropdown-item"
+                @click="
+                  openTestMenu('book-available')
+                  showTestMenu = false
+                "
                 :disabled="sendingNotification"
               >
                 <PhCheckCircle />
                 Book Available
               </button>
-              <button 
-                class="dropdown-item" 
-                @click="openTestMenu('book-downloading'); showTestMenu = false"
+              <button
+                class="dropdown-item"
+                @click="
+                  openTestMenu('book-downloading')
+                  showTestMenu = false
+                "
                 :disabled="sendingNotification"
               >
                 <PhDownload />
@@ -81,37 +90,79 @@
 
         <!-- Mobile: collapse remaining actions into a More dropdown -->
         <div class="more-wrapper tabs-mobile">
-          <button class="nav-btn more-btn" @click.stop="showMoreActions = !showMoreActions" :aria-expanded="showMoreActions" title="More actions">
+          <button
+            class="nav-btn more-btn"
+            @click.stop="showMoreActions = !showMoreActions"
+            :aria-expanded="showMoreActions"
+            title="More actions"
+          >
             <PhCaretDown />
             More
           </button>
           <div v-if="showMoreActions" class="more-dropdown" @click.stop>
-            <button class="dropdown-item" @click="refresh; showMoreActions = false">
+            <button
+              class="dropdown-item"
+              @click="
+                refresh
+                showMoreActions = false
+              "
+            >
               <PhArrowClockwise />
               <span>Refresh</span>
             </button>
-            <button class="dropdown-item" @click="toggleMonitored; showMoreActions = false">
+            <button
+              class="dropdown-item"
+              @click="
+                toggleMonitored
+                showMoreActions = false
+              "
+            >
               <PhBookmark :weight="audiobook.monitored ? 'fill' : 'regular'" />
               <span>{{ audiobook.monitored ? 'Monitored' : 'Monitor' }}</span>
             </button>
-            <button class="dropdown-item" :disabled="scanning || scanQueued" @click="scanFiles; showMoreActions = false">
+            <button
+              class="dropdown-item"
+              :disabled="scanning || scanQueued"
+              @click="
+                scanFiles
+                showMoreActions = false
+              "
+            >
               <PhMagnifyingGlass />
               <span>Scan Folder</span>
             </button>
 
             <div v-if="isDevelopment && hasWebhooksConfigured" class="mobile-test-group">
-              <button class="dropdown-item" @click="showWebhookSelector = true; showMoreActions = false">
+              <button
+                class="dropdown-item"
+                @click="
+                  showWebhookSelector = true
+                  showMoreActions = false
+                "
+              >
                 <PhBell />
                 <span>Test Notification</span>
               </button>
             </div>
 
-            <button class="dropdown-item" @click="openEditModal; showMoreActions = false">
+            <button
+              class="dropdown-item"
+              @click="
+                openEditModal
+                showMoreActions = false
+              "
+            >
               <PhPencil />
               <span>Edit</span>
             </button>
 
-            <button class="dropdown-item delete" @click="confirmDelete; showMoreActions = false">
+            <button
+              class="dropdown-item delete"
+              @click="
+                confirmDelete
+                showMoreActions = false
+              "
+            >
               <PhTrash />
               <span>Delete</span>
             </button>
@@ -125,7 +176,7 @@
       <div class="backdrop" :style="{ backgroundImage: `url(${coverImageUrl})` }"></div>
       <div class="hero-content">
         <div class="poster-container">
-          <img 
+          <img
             :src="coverImageUrl"
             :alt="audiobook.title"
             class="poster"
@@ -137,7 +188,7 @@
         <div class="info-section">
           <h1 class="title">{{ safeText(audiobook.title) }}</h1>
           <div class="subtitle" v-if="audiobook.subtitle">{{ audiobook.subtitle }}</div>
-          
+
           <div class="meta-info">
             <span class="runtime" v-if="audiobook.runtime">
               <PhClock />
@@ -145,7 +196,6 @@
             </span>
             <span class="genre">{{ audiobook.genres?.join(', ') || 'Audiobook' }}</span>
             <span class="year" v-if="audiobook.publishYear">{{ audiobook.publishYear }}</span>
-            
           </div>
 
           <div class="key-details">
@@ -191,23 +241,19 @@
           </div>
 
           <div class="description" v-if="audiobook.description">
-            <div 
-              class="description-content" 
+            <div
+              class="description-content"
               :class="{ expanded: showFullDescription }"
               v-html="audiobook.description"
             ></div>
-            <button 
-              v-if="!showFullDescription" 
-              class="show-more-btn" 
+            <button
+              v-if="!showFullDescription"
+              class="show-more-btn"
               @click="showFullDescription = true"
             >
               Show More
             </button>
-            <button 
-              v-else 
-              class="show-more-btn" 
-              @click="showFullDescription = false"
-            >
+            <button v-else class="show-more-btn" @click="showFullDescription = false">
               Show Less
             </button>
           </div>
@@ -219,34 +265,30 @@
     <div class="tabs-container">
       <!-- Mobile dropdown -->
       <div class="tabs-mobile">
-        <CustomSelect
-          v-model="activeTab"
-          :options="mobileTabOptions"
-          class="tab-dropdown"
-        />
+        <CustomSelect v-model="activeTab" :options="mobileTabOptions" class="tab-dropdown" />
       </div>
 
       <!-- Desktop tabs -->
       <div class="tabs-desktop">
         <div class="tabs">
-          <button 
-            class="tab" 
+          <button
+            class="tab"
             :class="{ active: activeTab === 'details' }"
             @click="activeTab = 'details'"
           >
             <PhInfo />
             Details
           </button>
-          <button 
-            class="tab" 
+          <button
+            class="tab"
             :class="{ active: activeTab === 'files' }"
             @click="activeTab = 'files'"
           >
             <PhFile />
             Files
           </button>
-          <button 
-            class="tab" 
+          <button
+            class="tab"
             :class="{ active: activeTab === 'history' }"
             @click="activeTab = 'history'"
           >
@@ -260,7 +302,7 @@
     <!-- Tab Content -->
     <div class="tab-content">
       <!-- Details Tab -->
-        <div id="details" v-if="activeTab === 'details'" class="details-content">
+      <div id="details" v-if="activeTab === 'details'" class="details-content">
         <div class="details-grid">
           <div class="detail-card">
             <h3>Author Information</h3>
@@ -334,8 +376,8 @@
         </div>
       </div>
 
-  <!-- Files Tab -->
-  <div id="files" v-if="activeTab === 'files'" class="files-content">
+      <!-- Files Tab -->
+      <div id="files" v-if="activeTab === 'files'" class="files-content">
         <div class="files-header">
           <h3>Files</h3>
           <div class="files-actions">
@@ -354,17 +396,28 @@
           </div>
         </div>
         <div v-if="audiobook.files && audiobook.files.length" class="file-list">
-          <div v-for="f in audiobook.files" :key="f.id" class="file-item" :class="{ 'expanded': isFileAccordionExpanded(f.id) }">
+          <div
+            v-for="f in audiobook.files"
+            :key="f.id"
+            class="file-item"
+            :class="{ expanded: isFileAccordionExpanded(f.id) }"
+          >
             <div class="file-header" @click="toggleFileAccordion(f.id)">
               <div class="file-info">
                 <PhFileAudio />
                 <span class="file-name">{{ getFileName(f.path) }}</span>
-                <small class="file-meta">• {{ f.format ? f.format.toUpperCase() : '' }} {{ f.durationSeconds ? '• ' + formatDuration(f.durationSeconds) : '' }}</small>
+                <small class="file-meta"
+                  >• {{ f.format ? f.format.toUpperCase() : '' }}
+                  {{ f.durationSeconds ? '• ' + formatDuration(f.durationSeconds) : '' }}</small
+                >
               </div>
               <div class="file-actions">
                 <span class="file-size" v-if="f.size">{{ formatFileSize(f.size) }}</span>
                 <span class="file-size" v-else>Unknown size</span>
-                <PhCaretDown class="accordion-toggle" :class="{ 'rotated': isFileAccordionExpanded(f.id) }" />
+                <PhCaretDown
+                  class="accordion-toggle"
+                  :class="{ rotated: isFileAccordionExpanded(f.id) }"
+                />
               </div>
             </div>
             <div v-if="isFileAccordionExpanded(f.id)" class="file-accordion">
@@ -426,29 +479,34 @@
         </div>
       </div>
 
-  <!-- History Tab -->
-  <div id="history" v-if="activeTab === 'history'" class="history-content">
+      <!-- History Tab -->
+      <div id="history" v-if="activeTab === 'history'" class="history-content">
         <div class="history-header">
           <h3>History</h3>
-          <button v-if="historyEntries.length > 0" class="refresh-btn" @click="loadHistory" :disabled="historyLoading">
+          <button
+            v-if="historyEntries.length > 0"
+            class="refresh-btn"
+            @click="loadHistory"
+            :disabled="historyLoading"
+          >
             <PhArrowClockwise :class="{ 'ph-spin': historyLoading }" />
             Refresh
           </button>
         </div>
-        
+
         <!-- Loading State -->
         <div v-if="historyLoading" class="history-loading">
           <PhSpinner class="ph-spin" />
           <p>Loading history...</p>
         </div>
-        
+
         <!-- Error State -->
         <div v-else-if="historyError" class="history-error">
           <PhWarningCircle />
           <p>{{ historyError }}</p>
           <button class="retry-btn" @click="loadHistory">Retry</button>
         </div>
-        
+
         <!-- History List -->
         <div v-else-if="historyEntries.length > 0" class="history-list">
           <div v-for="entry in historyEntries" :key="entry.id" class="history-entry">
@@ -468,7 +526,7 @@
             </div>
           </div>
         </div>
-        
+
         <!-- Empty State -->
         <div v-else class="empty-history">
           <PhClockCounterClockwise />
@@ -488,13 +546,17 @@
           </h3>
         </div>
         <div class="dialog-body">
-          <p>Are you sure you want to delete <strong>{{ audiobook.title }}</strong>?</p>
-          <p class="warning-text">This action cannot be undone. The audiobook data and cached images will be permanently removed.</p>
+          <p>
+            Are you sure you want to delete <strong>{{ audiobook.title }}</strong
+            >?
+          </p>
+          <p class="warning-text">
+            This action cannot be undone. The audiobook data and cached images will be permanently
+            removed.
+          </p>
         </div>
         <div class="dialog-actions">
-          <button class="dialog-btn cancel-btn" @click="cancelDelete">
-            Cancel
-          </button>
+          <button class="dialog-btn cancel-btn" @click="cancelDelete">Cancel</button>
           <button class="dialog-btn confirm-btn" @click="executeDelete" :disabled="deleting">
             <PhSpinner v-if="deleting" class="ph-spin" />
             <PhTrash v-else />
@@ -541,8 +603,8 @@
         <div class="modal-body">
           <p class="modal-description">Choose which webhook to send the test notification to:</p>
           <div class="webhook-list">
-            <button 
-              v-for="webhook in webhooks" 
+            <button
+              v-for="webhook in webhooks"
               :key="webhook.id"
               class="webhook-item"
               @click="selectWebhook(webhook.id)"
@@ -574,16 +636,17 @@ import { signalRService } from '@/services/signalr'
 import type { Audiobook, History } from '@/types'
 import { safeText } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
+import { errorTracking } from '@/services/errorTracking'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
-import { 
-  PhArrowLeft, 
-  PhArrowClockwise, 
-  PhBookmark, 
-  PhSpinner, 
-  PhMagnifyingGlass, 
-  PhTrash, 
-  PhClock, 
+import {
+  PhArrowLeft,
+  PhArrowClockwise,
+  PhBookmark,
+  PhSpinner,
+  PhMagnifyingGlass,
+  PhTrash,
+  PhClock,
   PhFolder,
   PhDatabase,
   PhSpeakerHigh,
@@ -611,7 +674,7 @@ import {
   PhCircle,
   PhDiscordLogo,
   PhBell,
-  PhCheckCircle
+  PhCheckCircle,
 } from '@phosphor-icons/vue'
 
 const route = useRoute()
@@ -653,19 +716,19 @@ const expandedFileAccordions = ref<Set<number>>(new Set())
 const mobileTabOptions = computed(() => [
   { value: 'details', label: 'Details', icon: PhInfo },
   { value: 'files', label: 'Files', icon: PhFile },
-  { value: 'history', label: 'History', icon: PhClockCounterClockwise }
+  { value: 'history', label: 'History', icon: PhClockCounterClockwise },
 ])
 
 // Check if any webhooks are configured
 const hasWebhooksConfigured = computed(() => {
-  return webhooks.value.length > 0 && webhooks.value.some(w => w.isEnabled)
+  return webhooks.value.length > 0 && webhooks.value.some((w) => w.isEnabled)
 })
 
 const assignedProfileName = computed(() => {
   if (!audiobook.value) return null
   const id = audiobook.value.qualityProfileId
   if (!id) return null
-  const p = qualityProfiles.value.find(q => q.id === id)
+  const p = qualityProfiles.value.find((q) => q.id === id)
   return p ? p.name : null
 })
 
@@ -695,7 +758,10 @@ const displayBasePath = computed(() => {
   const pattern = (settings.fileNamingPattern || '').trim()
   if (!root || !pattern) return root || ''
 
-  const author = (audiobook.value?.authors && audiobook.value.authors[0]) ? audiobook.value.authors[0] : 'Unknown Author'
+  const author =
+    audiobook.value?.authors && audiobook.value.authors[0]
+      ? audiobook.value.authors[0]
+      : 'Unknown Author'
   const series = audiobook.value?.series || ''
   const title = audiobook.value?.title || 'Unknown Title'
   const year = audiobook.value?.publishYear || ''
@@ -716,11 +782,10 @@ const displayBasePath = computed(() => {
     .replace(/\{Quality(?::[^}]+)?\}/gi, '')
 
   // Normalize repeated slashes and trim
-  relative = relative
-    .replace(/[\\/]{2,}/g, '/')
-    .replace(/^\/+|\/+$/g, '')
+  relative = relative.replace(/[\\/]{2,}/g, '/').replace(/^\/+|\/+$/g, '')
 
-  const combined = (root.endsWith('/') || root.endsWith('\\')) ? root + relative : root + '/' + relative
+  const combined =
+    root.endsWith('/') || root.endsWith('\\') ? root + relative : root + '/' + relative
   // Base path should be the directory containing the files -> strip the last segment
   const parts = combined.split(/[/\\]+/).filter(Boolean)
   if (parts.length <= 1) return combined
@@ -750,12 +815,12 @@ watch(activeTab, async (newTab) => {
 
 onMounted(async () => {
   await loadAudiobook()
-  
+
   // Setup lazy loading for images
   await nextTick()
   observeLazyImages()
   ensureVisibleImagesLoad()
-  
+
   // subscribe to scan job updates
   signalRService.onScanJobUpdate((job) => {
     if (!audiobook.value) return
@@ -781,7 +846,7 @@ onMounted(() => {
     // small timeout to allow DOM to render
     // setTimeout(() => scrollToAnchor(hash), 150)
   }
-  
+
   // Close test menu when clicking outside
   document.addEventListener('click', handleClickOutside)
 })
@@ -817,13 +882,13 @@ watch(showTestMenu, (newVal) => {
 async function loadAudiobook() {
   loading.value = true
   error.value = null
-  
+
   try {
     const id = parseInt(route.params.id as string)
-    
+
     // If library is already loaded, find the audiobook
     if (libraryStore.audiobooks.length > 0) {
-      const book = libraryStore.audiobooks.find(b => b.id === id)
+      const book = libraryStore.audiobooks.find((b) => b.id === id)
       if (book) {
         audiobook.value = book
         await afterLoad()
@@ -833,7 +898,7 @@ async function loadAudiobook() {
     } else {
       // Load library first
       await libraryStore.fetchLibrary()
-      const book = libraryStore.audiobooks.find(b => b.id === id)
+      const book = libraryStore.audiobooks.find((b) => b.id === id)
       if (book) {
         audiobook.value = book
         await afterLoad()
@@ -843,7 +908,11 @@ async function loadAudiobook() {
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load audiobook'
-    console.error('Failed to load audiobook:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobookDetailView',
+      operation: 'loadAudiobook',
+      metadata: { audiobookId: route.params.id },
+    })
   } finally {
     loading.value = false
   }
@@ -861,8 +930,8 @@ async function loadWebhooks() {
     logger.debug('Loading webhooks, settings:', settings)
     if (settings?.webhooks) {
       webhooks.value = settings.webhooks
-        .filter(w => w.isEnabled)
-        .map(w => ({ id: w.id, name: w.name, isEnabled: w.isEnabled }))
+        .filter((w) => w.isEnabled)
+        .map((w) => ({ id: w.id, name: w.name, isEnabled: w.isEnabled }))
       logger.debug('Loaded webhooks:', webhooks.value)
       logger.debug('hasWebhooksConfigured:', hasWebhooksConfigured.value)
     } else {
@@ -877,7 +946,7 @@ async function loadQualityProfilesForDetail() {
   try {
     qualityProfiles.value = await apiService.getQualityProfiles()
   } catch (err) {
-    console.warn('Failed to load quality profiles for detail view:', err)
+    logger.warn('Failed to load quality profiles for detail view:', err)
   }
 }
 
@@ -895,10 +964,10 @@ async function refresh() {
 
 async function loadHistory() {
   if (!audiobook.value) return
-  
+
   historyLoading.value = true
   historyError.value = null
-  
+
   try {
     historyEntries.value = await apiService.getHistoryByAudiobookId(audiobook.value.id)
     logger.debug('Loaded history:', historyEntries.value)
@@ -916,7 +985,14 @@ async function scanFiles() {
   scanQueued.value = false
   scanJobId.value = null
   try {
-    const res = await apiService.scanAudiobook(audiobook.value.id) as { message: string; scannedPath?: string; found: number; created: number; audiobook?: AudiobookType; jobId?: string }
+    const res = (await apiService.scanAudiobook(audiobook.value.id)) as {
+      message: string
+      scannedPath?: string
+      found: number
+      created: number
+      audiobook?: AudiobookType
+      jobId?: string
+    }
     logger.debug('Scan result:', res)
     // If backend enqueued the job it will return 202 Accepted with { jobId }
     if (res?.jobId) {
@@ -933,37 +1009,46 @@ async function scanFiles() {
       await loadAudiobook()
     }
   } catch (err) {
-    console.error('Scan failed:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobookDetailView',
+      operation: 'scanFiles',
+      metadata: { audiobookId: audiobook.value?.id },
+    })
     // Show a non-blocking toast instead of an alert
     const toast = useToast()
-    toast.error('Scan failed', (err instanceof Error ? err.message : String(err)))
+    toast.error('Scan failed', err instanceof Error ? err.message : String(err))
   } finally {
     scanning.value = false
   }
 }
 
 // Watch library store for updates (SignalR pushes) and refresh audiobook object reactively
-watch(() => libraryStore.audiobooks, () => {
-  if (!audiobook.value) return
-  const updated = libraryStore.audiobooks.find(b => b.id === audiobook.value!.id)
-  if (updated) {
-    // Merge fields to preserve reactivity where possible
-    audiobook.value = { ...audiobook.value, ...updated }
-    // If files were added, clear queued indicators
-    if (scanQueued.value && updated.files && updated.files.length > 0) {
-      scanQueued.value = false
-      scanJobId.value = null
+watch(
+  () => libraryStore.audiobooks,
+  () => {
+    if (!audiobook.value) return
+    const updated = libraryStore.audiobooks.find((b) => b.id === audiobook.value!.id)
+    if (updated) {
+      // Merge fields to preserve reactivity where possible
+      audiobook.value = { ...audiobook.value, ...updated }
+      // If files were added, clear queued indicators
+      if (scanQueued.value && updated.files && updated.files.length > 0) {
+        scanQueued.value = false
+        scanJobId.value = null
+      }
     }
-  }
-}, { deep: true })
+  },
+  { deep: true },
+)
 
 function toggleMonitored() {
   if (audiobook.value) {
     const newMonitoredValue = !audiobook.value.monitored
     audiobook.value = { ...audiobook.value, monitored: newMonitoredValue }
-    
+
     // Persist to API
-    apiService.updateAudiobook(audiobook.value.id, { monitored: newMonitoredValue })
+    apiService
+      .updateAudiobook(audiobook.value.id, { monitored: newMonitoredValue })
       .then(() => {
         logger.debug('Monitored status updated successfully')
       })
@@ -987,7 +1072,7 @@ function cancelDelete() {
 
 async function executeDelete() {
   if (!audiobook.value) return
-  
+
   deleting.value = true
   try {
     const success = await libraryStore.removeFromLibrary(audiobook.value.id)
@@ -996,7 +1081,11 @@ async function executeDelete() {
       router.push('/audiobooks')
     }
   } catch (err) {
-    console.error('Delete failed:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'AudiobookDetailView',
+      operation: 'executeDelete',
+      metadata: { audiobookId: audiobook.value?.id },
+    })
   } finally {
     deleting.value = false
     showDeleteDialog.value = false
@@ -1018,12 +1107,12 @@ async function handleEditSaved() {
 
 function openTestMenu(trigger: 'book-added' | 'book-available' | 'book-downloading') {
   selectedTrigger.value = trigger
-  
+
   if (webhooks.value.length === 0) {
     useToast().error('No webhooks configured', 'Please configure at least one webhook in settings')
     return
   }
-  
+
   if (webhooks.value.length === 1) {
     // Only one webhook, test it directly
     const firstWebhook = webhooks.value[0]
@@ -1045,14 +1134,17 @@ function closeWebhookSelector() {
 function selectWebhook(webhookId: string) {
   const trigger = selectedTrigger.value
   if (!trigger) return
-  
+
   testNotification(trigger, webhookId)
   closeWebhookSelector()
 }
 
-async function testNotification(trigger: 'book-added' | 'book-available' | 'book-downloading', webhookId?: string) {
+async function testNotification(
+  trigger: 'book-added' | 'book-available' | 'book-downloading',
+  webhookId?: string,
+) {
   if (!audiobook.value) return
-  
+
   sendingNotification.value = true
   try {
     // Prepare notification data matching the structure the backend expects
@@ -1065,19 +1157,22 @@ async function testNotification(trigger: 'book-added' | 'book-available' | 'book
       publishedDate: audiobook.value.publishYear?.toString(),
       imageUrl: audiobook.value.imageUrl,
       narrators: audiobook.value.narrators,
-      description: audiobook.value.description
+      description: audiobook.value.description,
     }
-    
+
     logger.debug('Sending test notification:', { trigger, data: notificationData, webhookId })
-    
+
     // Call via the apiService which handles authentication and base URL properly
     await apiService.testNotification(trigger, notificationData, webhookId)
-    
-    const webhookName = webhookId 
-      ? webhooks.value.find(w => w.id === webhookId)?.name 
+
+    const webhookName = webhookId
+      ? webhooks.value.find((w) => w.id === webhookId)?.name
       : 'configured webhook'
-    
-    useToast().success(`Test ${trigger} notification sent to ${webhookName}!`, 'Notification sent successfully')
+
+    useToast().success(
+      `Test ${trigger} notification sent to ${webhookName}!`,
+      'Notification sent successfully',
+    )
   } catch (err) {
     logger.error('Notification test failed:', err)
     useToast().error('Failed to send test notification', String(err))
@@ -1094,16 +1189,16 @@ function formatRuntime(minutes: number): string {
 
 function formatFileSize(bytes?: number): string {
   if (!bytes || bytes === 0) return 'Unknown'
-  
+
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
   let unitIndex = 0
-  
+
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024
     unitIndex++
   }
-  
+
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
 
@@ -1114,68 +1209,68 @@ function formatHistoryTime(timestamp: string): string {
   const diffMins = Math.floor(diffMs / 60000)
   const diffHours = Math.floor(diffMins / 60)
   const diffDays = Math.floor(diffHours / 24)
-  
+
   if (diffMins < 1) return 'Just now'
   if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`
   if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
   if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
-  
-  return date.toLocaleDateString('en-US', { 
-    year: 'numeric', 
-    month: 'short', 
+
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   })
 }
 
 function getEventIconComponent(eventType: string): Component {
   const icons: Record<string, Component> = {
-    'Added': PhPlusCircle,
-    'Downloaded': PhDownload,
-    'Imported': PhUpload,
-    'Deleted': PhTrash,
-    'Updated': PhPencil,
-    'Monitored': PhBookmark,
-    'Unmonitored': PhBookmarkSimple,
-    'Grabbed': PhHandGrabbing,
-    'Failed': PhWarningCircle,
+    Added: PhPlusCircle,
+    Downloaded: PhDownload,
+    Imported: PhUpload,
+    Deleted: PhTrash,
+    Updated: PhPencil,
+    Monitored: PhBookmark,
+    Unmonitored: PhBookmarkSimple,
+    Grabbed: PhHandGrabbing,
+    Failed: PhWarningCircle,
     'File Added': PhFilePlus,
-    'File Removed': PhFileMinus
+    'File Removed': PhFileMinus,
   }
   return icons[eventType] || PhCircle
 }
 
 function getEventTypeClass(eventType: string): string {
   const classes: Record<string, string> = {
-    'Added': 'event-success',
-    'Downloaded': 'event-success',
-    'Imported': 'event-info',
-    'Deleted': 'event-danger',
-    'Updated': 'event-info',
-    'Monitored': 'event-info',
-    'Unmonitored': 'event-warning',
-    'Grabbed': 'event-info',
-    'Failed': 'event-danger',
+    Added: 'event-success',
+    Downloaded: 'event-success',
+    Imported: 'event-info',
+    Deleted: 'event-danger',
+    Updated: 'event-info',
+    Monitored: 'event-info',
+    Unmonitored: 'event-warning',
+    Grabbed: 'event-info',
+    Failed: 'event-danger',
     'File Added': 'event-success',
-    'File Removed': 'event-warning'
+    'File Removed': 'event-warning',
   }
   return classes[eventType] || 'event-default'
 }
 
 function formatEventTitle(eventType: string): string {
   const titles: Record<string, string> = {
-    'Added': 'Added to Library',
-    'Downloaded': 'Downloaded',
-    'Imported': 'Imported',
-    'Deleted': 'Deleted from Library',
-    'Updated': 'Updated',
-    'Monitored': 'Monitoring Enabled',
-    'Unmonitored': 'Monitoring Disabled',
-    'Grabbed': 'Download Started',
-    'Failed': 'Failed',
+    Added: 'Added to Library',
+    Downloaded: 'Downloaded',
+    Imported: 'Imported',
+    Deleted: 'Deleted from Library',
+    Updated: 'Updated',
+    Monitored: 'Monitoring Enabled',
+    Unmonitored: 'Monitoring Disabled',
+    Grabbed: 'Download Started',
+    Failed: 'Failed',
     'File Added': 'File Added',
-    'File Removed': 'File Removed'
+    'File Removed': 'File Removed',
   }
   return titles[eventType] || eventType
 }
@@ -1212,14 +1307,18 @@ function toggleFileAccordion(fileId: number): void {
 
 function getFullPath(relativePath?: string): string {
   if (!relativePath) return 'Unknown'
-  
+
   // Check if path is already absolute (starts with drive letter or root slash)
   const isAbsolute = /^([a-zA-Z]:[\\/]|[\\/])/.test(relativePath)
   if (isAbsolute) return relativePath
-  
+
   if (!audiobook.value?.basePath) return relativePath
   // Combine base path with relative path
-  return audiobook.value.basePath + (audiobook.value.basePath.endsWith('/') || audiobook.value.basePath.endsWith('\\') ? '' : '/') + relativePath
+  return (
+    audiobook.value.basePath +
+    (audiobook.value.basePath.endsWith('/') || audiobook.value.basePath.endsWith('\\') ? '' : '/') +
+    relativePath
+  )
 }
 
 function formatDate(dateString?: string): string {
@@ -1232,7 +1331,7 @@ function formatDate(dateString?: string): string {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   })
 }
 </script>
@@ -1267,6 +1366,8 @@ function formatDate(dateString?: string): string {
 .nav-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 /* Desktop alignment tweaks: ensure primary and secondary actions line up and align to the right */
@@ -1274,7 +1375,8 @@ function formatDate(dateString?: string): string {
   .nav-actions {
     align-items: center;
     display: flex;
-    gap: 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
   }
 
   .primary-actions {
@@ -1291,7 +1393,7 @@ function formatDate(dateString?: string): string {
 
   /* small spacing between primary and secondary groups */
   .primary-actions + .secondary-actions {
-    margin-left: 8px;
+    margin-left: 0;
   }
 
   .more-wrapper {
@@ -1303,36 +1405,35 @@ function formatDate(dateString?: string): string {
 /* Desktop: tighter, consistent sizing and ordering for nav buttons */
 @media (min-width: 769px) {
   .top-nav {
-    padding: 12px 28px; /* a touch more right padding so actions don't touch edge */
-  }
-
-  /* Keep the back button at the left and force actions to the right */
-  .top-nav > .nav-btn:first-of-type {
-    margin-right: 12px;
+    padding: 12px 20px;
   }
 
   /* Ensure nav-actions stays on the right and items don't wrap */
   .nav-actions {
     margin-left: auto;
     display: flex;
-    gap: 12px;
+    gap: 8px;
     align-items: center;
-    white-space: nowrap;
+    flex-wrap: nowrap;
   }
 
   /* Make each button a uniform height and inline-flex for better baseline alignment */
   .nav-actions .nav-btn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     height: 36px;
     padding: 8px 12px;
     white-space: nowrap;
   }
 
-  /* Keep primary and secondary groups visually separated but inline */
-  .primary-actions { margin-right: 6px }
-  .secondary-actions { margin-left: 6px }
+  /* Remove extra margins */
+  .primary-actions {
+    margin-right: 0;
+  }
+  .secondary-actions {
+    margin-left: 0;
+  }
 
   /* Make delete button always appear last and slightly emphasized */
   .secondary-actions .delete-btn {
@@ -1370,12 +1471,12 @@ function formatDate(dateString?: string): string {
 }
 
 .nav-btn.debug-btn {
-  background-color: #5865F2;
-  border-color: #4752C4;
+  background-color: #5865f2;
+  border-color: #4752c4;
 }
 
 .nav-btn.debug-btn:hover {
-  background-color: #4752C4;
+  background-color: #4752c4;
 }
 
 /* Test Menu Styles */
@@ -1384,12 +1485,12 @@ function formatDate(dateString?: string): string {
 }
 
 .test-menu-btn {
-  background-color: #5865F2;
-  border-color: #4752C4;
+  background-color: #5865f2;
+  border-color: #4752c4;
 }
 
 .test-menu-btn:hover {
-  background-color: #4752C4;
+  background-color: #4752c4;
 }
 
 .test-dropdown {
@@ -1496,7 +1597,7 @@ function formatDate(dateString?: string): string {
 
 .webhook-item:hover:not(:disabled) {
   background-color: #3a3a3a;
-  border-color: #5865F2;
+  border-color: #5865f2;
   transform: translateX(4px);
 }
 
@@ -1631,7 +1732,8 @@ function formatDate(dateString?: string): string {
   gap: 4px;
 }
 
-.runtime i, .rating i {
+.runtime i,
+.rating i {
   color: #007acc;
 }
 
@@ -2078,14 +2180,16 @@ function formatDate(dateString?: string): string {
   color: white;
 }
 
-.files-content, .history-content {
+.files-content,
+.history-content {
   background-color: #2a2a2a;
   border: 1px solid #333;
   border-radius: 6px;
   padding: 20px;
 }
 
-.files-header, .history-header {
+.files-header,
+.history-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2094,7 +2198,8 @@ function formatDate(dateString?: string): string {
   border-bottom: 1px solid #333;
 }
 
-.files-header h3, .history-header h3 {
+.files-header h3,
+.history-header h3 {
   margin: 0;
   color: #fff;
 }
@@ -2376,7 +2481,8 @@ function formatDate(dateString?: string): string {
 }
 
 /* History Styles */
-.history-loading, .history-error {
+.history-loading,
+.history-error {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2396,7 +2502,8 @@ function formatDate(dateString?: string): string {
   color: #e74c3c;
 }
 
-.retry-btn, .refresh-btn {
+.retry-btn,
+.refresh-btn {
   margin-top: 12px;
   padding: 8px 16px;
   background-color: #007acc;
@@ -2408,7 +2515,8 @@ function formatDate(dateString?: string): string {
   transition: background-color 0.2s;
 }
 
-.retry-btn:hover, .refresh-btn:hover {
+.retry-btn:hover,
+.refresh-btn:hover {
   background-color: #005fa3;
 }
 
@@ -2430,7 +2538,9 @@ function formatDate(dateString?: string): string {
   background-color: #333;
   border-radius: 6px;
   border-left: 3px solid #555;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .history-entry:hover {
@@ -2499,7 +2609,7 @@ function formatDate(dateString?: string): string {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: #5865F2;
+  color: #5865f2;
   background-color: rgba(88, 101, 242, 0.15);
   padding: 2px 8px;
   border-radius: 6px;
@@ -2527,7 +2637,8 @@ function formatDate(dateString?: string): string {
   font-size: 12px;
 }
 
-.loading-container, .error-container {
+.loading-container,
+.error-container {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2537,7 +2648,8 @@ function formatDate(dateString?: string): string {
   background-color: #1a1a1a;
 }
 
-.loading-container i, .error-container i {
+.loading-container i,
+.error-container i {
   font-size: 48px;
   margin-bottom: 16px;
 }
@@ -2677,6 +2789,4 @@ function formatDate(dateString?: string): string {
   opacity: 0.6;
   cursor: not-allowed;
 }
-
 </style>
-

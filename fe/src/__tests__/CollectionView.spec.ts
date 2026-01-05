@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -10,8 +9,8 @@ vi.mock('@/services/api', () => ({
   apiService: {
     getImageUrl: vi.fn((url: string) => url || 'https://via.placeholder.com/300x450?text=No+Image'),
     getStartupConfig: vi.fn(async () => ({})),
-    getApplicationSettings: vi.fn(async () => ({}))
-  }
+    getApplicationSettings: vi.fn(async () => ({})),
+  },
 }))
 
 describe('CollectionView', () => {
@@ -21,29 +20,58 @@ describe('CollectionView', () => {
   })
 
   it('shows collection content details', async () => {
-    if (!(global as any).ResizeObserver) {
-      (global as any).ResizeObserver = class { observe() {}; disconnect() {}; }
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
     }
-    if (!(global as any).WebSocket) {
-      (global as any).WebSocket = function () { /* noop */ }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
     }
 
     const pinia = createPinia()
     setActivePinia(pinia)
 
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', name: 'home', component: { template: '<div />' } }, { path: '/collection/:type/:name', name: 'collection', component: CollectionView }] })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
     await router.push('/collection/series/Series%201')
     await router.isReady().catch(() => {})
 
     const store = useLibraryStore()
     store.audiobooks = [
-      { id: 1, title: 'Book A', authors: ['Author A'], series: 'Series 1', imageUrl: 'c1.jpg', files: [] },
-      { id: 2, title: 'Book B', authors: ['Author B'], series: 'Series 1', imageUrl: 'c2.jpg', files: [] }
+      {
+        id: 1,
+        title: 'Book A',
+        authors: ['Author A'],
+        series: 'Series 1',
+        imageUrl: 'c1.jpg',
+        files: [],
+      },
+      {
+        id: 2,
+        title: 'Book B',
+        authors: ['Author B'],
+        series: 'Series 1',
+        imageUrl: 'c2.jpg',
+        files: [],
+      },
     ] as unknown as import('@/types').Audiobook[]
 
     store.fetchLibrary = vi.fn(async () => undefined)
-    const wrapper = mount(CollectionView, { global: { plugins: [pinia, router], stubs: ['EditAudiobookModal', 'CustomSelect'] } })
-    await new Promise(r => setTimeout(r, 0))
+    const wrapper = mount(CollectionView, {
+      global: { plugins: [pinia, router], stubs: ['EditAudiobookModal', 'CustomSelect'] },
+    })
+    await new Promise((r) => setTimeout(r, 0))
 
     // ensure grid view
     expect(wrapper.vm.viewMode).toBe('grid')

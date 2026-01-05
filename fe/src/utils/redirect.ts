@@ -15,5 +15,5 @@ export function isSafeRedirect(path: string | undefined | null): boolean {
 }
 
 export function normalizeRedirect(path: string | undefined | null): string {
-  return isSafeRedirect(path) ? path as string : '/'
+  return isSafeRedirect(path) ? (path as string) : '/'
 }

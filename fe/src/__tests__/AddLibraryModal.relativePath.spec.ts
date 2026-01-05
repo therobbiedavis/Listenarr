@@ -5,10 +5,12 @@ import { vi, describe, it, expect } from 'vitest'
 vi.mock('@/services/api', () => ({
   apiService: {
     getMetadata: vi.fn().mockResolvedValue(null),
-    previewLibraryPath: vi.fn().mockResolvedValue({ fullPath: 'C:\\root\\Author\\Title', relativePath: '' }),
+    previewLibraryPath: vi
+      .fn()
+      .mockResolvedValue({ fullPath: 'C:\\root\\Author\\Title', relativePath: '' }),
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: 'C:\\root' }),
     getQualityProfiles: vi.fn().mockResolvedValue([]),
-  }
+  },
 }))
 
 import AddLibraryModal from '@/components/AddLibraryModal.vue'
@@ -21,15 +23,15 @@ const fakeBook = {
 
 describe('AddLibraryModal relative path derivation', () => {
   it('shows relative path (full minus root) when preview returns fullPath and root configured', async () => {
-    const wrapper = mount(AddLibraryModal as any, {
+    const wrapper = mount(AddLibraryModal, {
       props: {
         visible: false,
         book: fakeBook,
       },
       attachTo: document.body,
       global: {
-        plugins: [ (await import('pinia')).createPinia() ]
-      }
+        plugins: [(await import('pinia')).createPinia()],
+      },
     })
 
     await wrapper.setProps({ visible: true })

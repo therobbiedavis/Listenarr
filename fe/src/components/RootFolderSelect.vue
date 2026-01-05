@@ -2,7 +2,9 @@
   <div class="root-folder-select">
     <select v-model="localId" class="form-select">
       <option :value="null">(Use default)</option>
-      <option v-for="r in store.folders" :key="r.id" :value="r.id">{{ r.name }} — {{ r.path }}</option>
+      <option v-for="r in store.folders" :key="r.id" :value="r.id">
+        {{ r.name }} — {{ r.path }}
+      </option>
       <option :value="0">Custom path...</option>
     </select>
     <div v-if="localId === 0" class="custom-path">
@@ -35,8 +37,14 @@ watch(localCustomPath, (v) => emit('update:customPath', v))
 </script>
 
 <style scoped>
-.root-folder-select { display:flex; flex-direction:column; gap:0.5rem }
-.custom-path { margin-top:0.5rem }
+.root-folder-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.custom-path {
+  margin-top: 0.5rem;
+}
 
 .form-select {
   padding: 0.75rem 1rem;

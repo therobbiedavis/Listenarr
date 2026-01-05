@@ -1,7 +1,7 @@
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
@@ -39,14 +39,14 @@ app.config.errorHandler = (err, instance, info) => {
   errorTracking.captureException(err, {
     component: instance?.$options?.name || 'Unknown',
     operation: 'vueErrorHandler',
-    metadata: { info }
+    metadata: { info },
   })
-  
+
   // Show user-friendly error message
   try {
     const toast = useToast()
     toast.error('Unexpected Error', 'Something went wrong. Please refresh the page.')
-  } catch (e) {
+  } catch {
     // Fallback if toast service fails
     alert('An unexpected error occurred. Please refresh the page.')
   }
@@ -56,10 +56,10 @@ app.config.errorHandler = (err, instance, info) => {
 window.addEventListener('unhandledrejection', (event) => {
   errorTracking.captureException(event.reason, {
     component: 'Global',
-    operation: 'unhandledRejection'
+    operation: 'unhandledRejection',
   })
   event.preventDefault()
-  
+
   try {
     const toast = useToast()
     toast.error('Error', 'An unexpected error occurred.')
@@ -67,7 +67,7 @@ window.addEventListener('unhandledrejection', (event) => {
     // Fallback if toast service fails
     errorTracking.captureException(err as Error, {
       component: 'Global',
-      operation: 'toastServiceFallback'
+      operation: 'toastServiceFallback',
     })
   }
 })
@@ -81,52 +81,54 @@ app.mount('#app')
 // NOTE: Analytics integration point - when adding analytics service (Google Analytics, Plausible, etc.),
 // send these metrics to your analytics platform for performance tracking.
 if (import.meta.env.PROD) {
-  import('web-vitals').then(({ onCLS, onINP, onFCP, onLCP, onTTFB }) => {
-    // Core Web Vitals - Good thresholds: CLS < 0.1, INP < 200ms, LCP < 2.5s
-    onCLS((metric) => {
-      // Cumulative Layout Shift - measures visual stability
-      if (import.meta.env.DEV) {
-        console.log('[Web Vitals] CLS:', metric.value)
-      }
-      // Analytics integration: analyticsService.trackMetric('CLS', metric.value)
+  import('web-vitals')
+    .then(({ onCLS, onINP, onFCP, onLCP, onTTFB }) => {
+      // Core Web Vitals - Good thresholds: CLS < 0.1, INP < 200ms, LCP < 2.5s
+      onCLS((metric) => {
+        // Cumulative Layout Shift - measures visual stability
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] CLS:', metric.value)
+        }
+        // Analytics integration: analyticsService.trackMetric('CLS', metric.value)
+      })
+
+      onINP((metric) => {
+        // Interaction to Next Paint - measures responsiveness
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] INP:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('INP', metric.value)
+      })
+
+      onLCP((metric) => {
+        // Largest Contentful Paint - measures loading performance
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] LCP:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('LCP', metric.value)
+      })
+
+      // Additional metrics
+      onFCP((metric) => {
+        // First Contentful Paint - measures perceived load speed
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] FCP:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('FCP', metric.value)
+      })
+
+      onTTFB((metric) => {
+        // Time to First Byte - measures server response time
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] TTFB:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('TTFB', metric.value)
+      })
     })
-    
-    onINP((metric) => {
-      // Interaction to Next Paint - measures responsiveness
-      if (import.meta.env.DEV) {
-        console.log('[Web Vitals] INP:', metric.value, 'ms')
-      }
-      // Analytics integration: analyticsService.trackMetric('INP', metric.value)
+    .catch((err) => {
+      errorTracking.captureException(err as Error, {
+        component: 'WebVitals',
+        operation: 'loadModule',
+      })
     })
-    
-    onLCP((metric) => {
-      // Largest Contentful Paint - measures loading performance
-      if (import.meta.env.DEV) {
-        console.log('[Web Vitals] LCP:', metric.value, 'ms')
-      }
-      // Analytics integration: analyticsService.trackMetric('LCP', metric.value)
-    })
-    
-    // Additional metrics
-    onFCP((metric) => {
-      // First Contentful Paint - measures perceived load speed
-      if (import.meta.env.DEV) {
-        console.log('[Web Vitals] FCP:', metric.value, 'ms')
-      }
-      // Analytics integration: analyticsService.trackMetric('FCP', metric.value)
-    })
-    
-    onTTFB((metric) => {
-      // Time to First Byte - measures server response time
-      if (import.meta.env.DEV) {
-        console.log('[Web Vitals] TTFB:', metric.value, 'ms')
-      }
-      // Analytics integration: analyticsService.trackMetric('TTFB', metric.value)
-    })
-  }).catch((err) => {
-    errorTracking.captureException(err as Error, {
-      component: 'WebVitals',
-      operation: 'loadModule'
-    })
-  })
 }

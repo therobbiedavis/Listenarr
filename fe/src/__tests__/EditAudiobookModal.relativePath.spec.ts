@@ -5,10 +5,10 @@ vi.mock('@/services/api', () => ({
   apiService: {
     getQualityProfiles: vi.fn().mockResolvedValue([]),
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: 'C:\\root' }),
-    getRootFolders: vi.fn().mockResolvedValue([
-      { id: 1, name: 'Default', path: 'C:\\root', isDefault: true }
-    ])
-  }
+    getRootFolders: vi
+      .fn()
+      .mockResolvedValue([{ id: 1, name: 'Default', path: 'C:\\root', isDefault: true }]),
+  },
 }))
 
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
@@ -24,15 +24,15 @@ const audiobook = {
 
 describe('EditAudiobookModal relative path calculation', () => {
   it('shows full path in readonly input by default', async () => {
-    const wrapper = mount(EditAudiobookModal as any, {
+    const wrapper = mount(EditAudiobookModal, {
       props: {
         isOpen: true,
-        audiobook
+        audiobook,
       },
       attachTo: document.body,
       global: {
-        plugins: [ (await import('pinia')).createPinia() ]
-      }
+        plugins: [(await import('pinia')).createPinia()],
+      },
     })
 
     // allow async init
@@ -41,19 +41,21 @@ describe('EditAudiobookModal relative path calculation', () => {
     // Check that readonly input shows the full path
     const readonlyInput = wrapper.find('.readonly-input')
     expect(readonlyInput.exists()).toBe(true)
-    expect((readonlyInput.element as HTMLInputElement).value).toBe('C:\\root/Some Author\\Some Title')
+    expect((readonlyInput.element as HTMLInputElement).value).toBe(
+      'C:\\root/Some Author\\Some Title',
+    )
   })
 
   it('derives relative path from stored basePath when root configured', async () => {
-    const wrapper = mount(EditAudiobookModal as any, {
+    const wrapper = mount(EditAudiobookModal, {
       props: {
         isOpen: true,
-        audiobook
+        audiobook,
       },
       attachTo: document.body,
       global: {
-        plugins: [ (await import('pinia')).createPinia() ]
-      }
+        plugins: [(await import('pinia')).createPinia()],
+      },
     })
 
     // allow async init

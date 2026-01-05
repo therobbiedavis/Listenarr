@@ -1,6 +1,13 @@
 import type { Audiobook } from '@/types'
 
-export type RuleLike = { field: string; operator: string; value: string; conjunction?: string; groupStart?: boolean; groupEnd?: boolean }
+export type RuleLike = {
+  field: string
+  operator: string
+  value: string
+  conjunction?: string
+  groupStart?: boolean
+  groupEnd?: boolean
+}
 
 function normalizeString(s: unknown) {
   return (s ?? '').toString().toLowerCase()
@@ -12,18 +19,46 @@ function evalSingle(a: Audiobook, r: RuleLike): boolean {
   const val = (r.value || '').toString()
   let left = ''
   switch (field) {
-    case 'monitored': left = String(!!a.monitored); break
-    case 'title': left = String(a.title || ''); break
-    case 'author': left = (a.authors || []).map(x => String(x)).join(' '); break
-    case 'narrator': left = (a.narrators || []).map(x => String(x)).join(' '); break
-    case 'language': left = String(a.language || ''); break
-    case 'publisher': left = String(a.publisher || ''); break
-    case 'qualityProfileId': left = String(a.qualityProfileId ?? ''); break
-  case 'publishYear': left = String((a as unknown as Record<string, unknown>)['publishYear'] ?? '') ; break
-  case 'publishedYear': left = String((a as unknown as Record<string, unknown>)['publishYear'] ?? '') ; break
-  case 'path': left = String((a as unknown as Record<string, unknown>)['filePath'] || (a as unknown as Record<string, unknown>)['path'] || ''); break
-    case 'files': left = String((a.files && a.files.length) ? a.files.length : 0); break
-  case 'filesize': left = String((a as unknown as Record<string, unknown>)['fileSize'] ?? ''); break
+    case 'monitored':
+      left = String(!!a.monitored)
+      break
+    case 'title':
+      left = String(a.title || '')
+      break
+    case 'author':
+      left = (a.authors || []).map((x) => String(x)).join(' ')
+      break
+    case 'narrator':
+      left = (a.narrators || []).map((x) => String(x)).join(' ')
+      break
+    case 'language':
+      left = String(a.language || '')
+      break
+    case 'publisher':
+      left = String(a.publisher || '')
+      break
+    case 'qualityProfileId':
+      left = String(a.qualityProfileId ?? '')
+      break
+    case 'publishYear':
+      left = String((a as unknown as Record<string, unknown>)['publishYear'] ?? '')
+      break
+    case 'publishedYear':
+      left = String((a as unknown as Record<string, unknown>)['publishYear'] ?? '')
+      break
+    case 'path':
+      left = String(
+        (a as unknown as Record<string, unknown>)['filePath'] ||
+          (a as unknown as Record<string, unknown>)['path'] ||
+          '',
+      )
+      break
+    case 'files':
+      left = String(a.files && a.files.length ? a.files.length : 0)
+      break
+    case 'filesize':
+      left = String((a as unknown as Record<string, unknown>)['fileSize'] ?? '')
+      break
     default:
       left = String((a as unknown as Record<string, unknown>)[field] ?? '')
       break
@@ -38,24 +73,38 @@ function evalSingle(a: Audiobook, r: RuleLike): boolean {
     const valNum = Number(val)
     if (isNaN(leftNum) || isNaN(valNum)) return false
     switch (op) {
-      case 'eq': return leftNum === valNum
-      case 'ne': return leftNum !== valNum
-      case 'lt': return leftNum < valNum
-      case 'lte': return leftNum <= valNum
-      case 'gt': return leftNum > valNum
-      case 'gte': return leftNum >= valNum
-      case 'is': return leftNum === valNum
-      case 'is_not': return leftNum !== valNum
-      default: return true
+      case 'eq':
+        return leftNum === valNum
+      case 'ne':
+        return leftNum !== valNum
+      case 'lt':
+        return leftNum < valNum
+      case 'lte':
+        return leftNum <= valNum
+      case 'gt':
+        return leftNum > valNum
+      case 'gte':
+        return leftNum >= valNum
+      case 'is':
+        return leftNum === valNum
+      case 'is_not':
+        return leftNum !== valNum
+      default:
+        return true
     }
   }
 
   switch (op) {
-    case 'is': return left === val
-    case 'is_not': return left !== val
-    case 'contains': return l.includes(v)
-    case 'not_contains': return !l.includes(v)
-    default: return true
+    case 'is':
+      return left === val
+    case 'is_not':
+      return left !== val
+    case 'contains':
+      return l.includes(v)
+    case 'not_contains':
+      return !l.includes(v)
+    default:
+      return true
   }
 }
 

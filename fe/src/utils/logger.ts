@@ -45,5 +45,5 @@ export const logger = {
     if (isDev) {
       console.log(`[${category}] ${message}`, ...args)
     }
-  }
+  },
 }

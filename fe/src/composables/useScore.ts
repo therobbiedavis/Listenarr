@@ -1,7 +1,10 @@
 import type { QualityScore } from '@/types'
 
 // Exported helper: compute normalized components and normalized total from a smart breakdown
-export function computeNormalizedSmart(breakdown?: Record<string, number>): { components: Record<string, number>, total: number } {
+export function computeNormalizedSmart(breakdown?: Record<string, number>): {
+  components: Record<string, number>
+  total: number
+} {
   const comp: Record<string, number> = {}
   if (!breakdown) return { components: comp, total: 0 }
 
@@ -16,12 +19,13 @@ export function computeNormalizedSmart(breakdown?: Record<string, number>): { co
     return Math.round(raw / 1000)
   }
 
-  Object.keys(breakdown).forEach(k => {
+  Object.keys(breakdown).forEach((k) => {
     comp[k] = normalizeComponent(k, breakdown[k] ?? 0)
   })
 
   const keys = Object.keys(comp)
-  const total = keys.length > 0 ? Math.round(Object.values(comp).reduce((s, v) => s + v, 0) / keys.length) : 0
+  const total =
+    keys.length > 0 ? Math.round(Object.values(comp).reduce((s, v) => s + v, 0) / keys.length) : 0
   return { components: comp, total }
 }
 
@@ -30,7 +34,8 @@ export function getScoreBreakdownTooltip(score: QualityScore | undefined): strin
 
   const scoreMeta = score as unknown as { isRejected?: boolean; rejectionReasons?: string[] }
   // Treat a negative total score or explicit isRejected flag as a rejection.
-  const isRejected = (typeof score.totalScore === 'number' && score.totalScore < 0) || Boolean(scoreMeta.isRejected)
+  const isRejected =
+    (typeof score.totalScore === 'number' && score.totalScore < 0) || Boolean(scoreMeta.isRejected)
   const parts: string[] = []
 
   // If this is a backend rejection, show only the rejection reason for clarity
@@ -43,7 +48,10 @@ export function getScoreBreakdownTooltip(score: QualityScore | undefined): strin
   }
 
   // If a Prowlarr-style smart composite was provided by the backend, show only that breakdown
-  const smart = score as unknown as { smartScore?: number; smartScoreBreakdown?: Record<string, number> }
+  const smart = score as unknown as {
+    smartScore?: number
+    smartScoreBreakdown?: Record<string, number>
+  }
   if (typeof smart.smartScore === 'number' && smart.smartScore > 0) {
     parts.push('Smart (composite) breakdown:')
     const sb = smart.smartScoreBreakdown || {}
@@ -51,7 +59,7 @@ export function getScoreBreakdownTooltip(score: QualityScore | undefined): strin
     // Use shared helper to compute normalized components and total
     const { components, total } = computeNormalizedSmart(sb)
 
-    Object.keys(components).forEach(k => {
+    Object.keys(components).forEach((k) => {
       const v = components[k] ?? 0
       const sign = v > 0 ? '+' : ''
       parts.push(`${k}: ${sign}${v}`)
@@ -94,7 +102,7 @@ export function getScoreBreakdownTooltip(score: QualityScore | undefined): strin
   // Add any other keys present in the breakdown that weren't added yet
   // Include all numeric keys (including diagnostic keys) so the popover shows every
   // parameter that affected the score. Quality is handled separately.
-  Object.keys(breakdown).forEach(k => {
+  Object.keys(breakdown).forEach((k) => {
     if (k === 'Quality') return
     if (detailOrder.includes(k)) return
     pushNonQuality(k)
@@ -122,7 +130,7 @@ export function getScoreBreakdownTooltip(score: QualityScore | undefined): strin
   parts.push('Base: 100')
 
   // Render other contribution lines (include diagnostic keys)
-  contributions.forEach(c => {
+  contributions.forEach((c) => {
     const sign = c.value > 0 ? '+' : ''
     parts.push(`${c.key}: ${sign}${c.value}`)
   })

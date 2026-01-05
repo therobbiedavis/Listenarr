@@ -7,28 +7,34 @@
           <PhX />
         </button>
       </div>
-      
+
       <div class="modal-body">
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" @error="handleImageError" />
+            <img
+              v-if="book.imageUrl"
+              :src="apiService.getImageUrl(book.imageUrl)"
+              :alt="book.title"
+              loading="lazy"
+              @error="handleImageError"
+            />
             <div v-else class="placeholder-cover">
               <PhImage />
               <span>No Cover</span>
             </div>
           </div>
-          
+
           <!-- Book Details -->
           <div class="book-details">
             <div class="detail-section">
               <h3>
                 {{ book.title }}
-                <span v-if="assignedProfileName" class="profile-badge">{{ assignedProfileName }}</span>
+                <span v-if="assignedProfileName" class="profile-badge">{{
+                  assignedProfileName
+                }}</span>
               </h3>
-              <p v-if="book.authors?.length" class="authors">
-                by {{ book.authors.join(', ') }}
-              </p>
+              <p v-if="book.authors?.length" class="authors">by {{ book.authors.join(', ') }}</p>
               <p v-if="book.narrators?.length" class="narrators">
                 Narrated by {{ book.narrators.join(', ') }}
               </p>
@@ -124,37 +130,34 @@
               <div class="quality-profile-selector">
                 <select v-model="selectedQualityProfileId" class="profile-select">
                   <option :value="null">Use Default Profile</option>
-                  <option 
-                    v-for="profile in qualityProfiles" 
-                    :key="profile.id" 
-                    :value="profile.id"
-                  >
+                  <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
                     {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
                   </option>
                 </select>
                 <small class="profile-help">
-                  Select the quality profile to use for this audiobook. The quality profile determines which releases to download and prefer.
+                  Select the quality profile to use for this audiobook. The quality profile
+                  determines which releases to download and prefer.
                 </small>
               </div>
             </div>
           </div>
         </div>
       </div>
-      
-            <div class="modal-footer">
-              <button class="btn btn-secondary" @click="closeModal">
-                <PhX />
-                Close
-              </button>
-              <button
-                :class="['btn', isAdded ? 'btn-success' : 'btn-primary']"
-                @click="addToLibrary"
-                :disabled="isAdded"
-              >
-                <component :is="isAdded ? PhCheck : PhPlus" />
-                {{ isAdded ? 'Added' : 'Add to Library' }}
-              </button>
-            </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" @click="closeModal">
+          <PhX />
+          Close
+        </button>
+        <button
+          :class="['btn', isAdded ? 'btn-success' : 'btn-primary']"
+          @click="addToLibrary"
+          :disabled="isAdded"
+        >
+          <component :is="isAdded ? PhCheck : PhPlus" />
+          {{ isAdded ? 'Added' : 'Add to Library' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -186,8 +189,12 @@ const libraryStore = useLibraryStore()
 
 const isAdded = computed(() => {
   try {
-    const asins = new Set(libraryStore.audiobooks.map(b => b.asin).filter((x): x is string => !!x))
-    const olids = new Set(libraryStore.audiobooks.map(b => b.openLibraryId).filter((x): x is string => !!x))
+    const asins = new Set(
+      libraryStore.audiobooks.map((b) => b.asin).filter((x): x is string => !!x),
+    )
+    const olids = new Set(
+      libraryStore.audiobooks.map((b) => b.openLibraryId).filter((x): x is string => !!x),
+    )
     if (props.book?.asin && asins.has(props.book.asin)) return true
     if (props.book?.openLibraryId && olids.has(props.book.openLibraryId)) return true
     return false
@@ -199,7 +206,7 @@ const isAdded = computed(() => {
 const assignedProfileName = computed(() => {
   const id = props.book?.qualityProfileId
   if (!id) return null
-  const p = qualityProfiles.value.find(q => q.id === id)
+  const p = qualityProfiles.value.find((q) => q.id === id)
   return p ? p.name : 'Unknown'
 })
 
@@ -220,7 +227,7 @@ const loadQualityProfiles = async () => {
   try {
     qualityProfiles.value = await getQualityProfiles()
     // Select the default profile
-    const defaultProfile = qualityProfiles.value.find(p => p.isDefault)
+    const defaultProfile = qualityProfiles.value.find((p) => p.isDefault)
     if (defaultProfile) {
       selectedQualityProfileId.value = defaultProfile.id || null
     }
@@ -229,13 +236,16 @@ const loadQualityProfiles = async () => {
   }
 }
 
-watch(() => props.visible, async (val) => {
-  if (val) {
-    await loadQualityProfiles()
-    // If the audiobook has an assigned profile, reflect it in the selector
-    selectedQualityProfileId.value = props.book?.qualityProfileId ?? null
-  }
-})
+watch(
+  () => props.visible,
+  async (val) => {
+    if (val) {
+      await loadQualityProfiles()
+      // If the audiobook has an assigned profile, reflect it in the selector
+      selectedQualityProfileId.value = props.book?.qualityProfileId ?? null
+    }
+  },
+)
 
 const formatRuntime = (minutes: number): string => {
   if (!minutes) return 'Unknown'
@@ -506,26 +516,26 @@ const capitalizeFirst = (str: string): string => {
     margin: 0.5rem;
     max-height: 95vh;
   }
-  
+
   .book-layout {
     grid-template-columns: 1fr;
     gap: 1.5rem;
   }
-  
+
   .book-image {
     position: static;
     max-width: 200px;
     margin: 0 auto;
   }
-  
+
   .detail-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .modal-footer {
     flex-direction: column-reverse;
   }
-  
+
   .btn {
     justify-content: center;
   }
@@ -535,17 +545,17 @@ const capitalizeFirst = (str: string): string => {
   .modal-overlay {
     padding: 0.5rem;
   }
-  
+
   .modal-header,
   .modal-body,
   .modal-footer {
     padding: 1rem;
   }
-  
+
   .modal-header h2 {
     font-size: 1.25rem;
   }
-  
+
   .detail-section h3 {
     font-size: 1.5rem;
   }

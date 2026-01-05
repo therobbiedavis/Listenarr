@@ -6,7 +6,7 @@
         {{ isEdit ? 'Edit' : 'Add' }} Path Mapping
       </h4>
     </div>
-    
+
     <form @submit.prevent="handleSubmit">
       <div v-if="error" class="error-banner">
         <i class="ph ph-warning-circle"></i>
@@ -96,7 +96,7 @@ const emit = defineEmits<Emits>()
 const formData = ref({
   name: '',
   remotePath: '',
-  localPath: ''
+  localPath: '',
 })
 
 const loading = ref(false)
@@ -105,8 +105,7 @@ const error = ref<string | null>(null)
 const isEdit = computed(() => !!props.mapping)
 
 const isValid = computed(() => {
-  return formData.value.remotePath.trim().length > 0 &&
-         formData.value.localPath.trim().length > 0
+  return formData.value.remotePath.trim().length > 0 && formData.value.localPath.trim().length > 0
 })
 
 // Load existing mapping data when in edit mode
@@ -123,7 +122,7 @@ watch(
       formData.value.localPath = ''
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 const handleSubmit = () => {
@@ -137,7 +136,7 @@ const handleSubmit = () => {
       downloadClientId: props.downloadClientId,
       name: formData.value.name.trim() || undefined,
       remotePath: formData.value.remotePath.trim(),
-      localPath: formData.value.localPath.trim()
+      localPath: formData.value.localPath.trim(),
     })
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to save mapping'
@@ -322,8 +321,12 @@ label.required::after {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 768px) {

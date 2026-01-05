@@ -12,12 +12,13 @@ export async function getStartupConfigCached(ttlMs = 5000): Promise<StartupConfi
   const now = Date.now()
   // If we have a recent cached value (even if it's null from a previous failed fetch),
   // return it to avoid repeated immediate retries.
-  if (_cacheTs !== 0 && (now - _cacheTs) <= ttlMs) return _cache
+  if (_cacheTs !== 0 && now - _cacheTs <= ttlMs) return _cache
 
   if (!_inflight) {
     fetchCount++
-    _inflight = apiService.getStartupConfig()
-      .then(cfg => {
+    _inflight = apiService
+      .getStartupConfig()
+      .then((cfg) => {
         _cache = cfg
         _cacheTs = Date.now()
         return cfg
@@ -29,7 +30,9 @@ export async function getStartupConfigCached(ttlMs = 5000): Promise<StartupConfi
         _cacheTs = Date.now()
         return null
       })
-      .finally(() => { _inflight = null })
+      .finally(() => {
+        _inflight = null
+      })
   }
 
   return _inflight

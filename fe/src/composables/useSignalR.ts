@@ -7,7 +7,7 @@ export function useSignalR() {
     lastError: events.lastError,
     reconnectAttempts: events.reconnectAttempts,
     onConnected: events.onConnected,
-    onDisconnected: events.onDisconnected
+    onDisconnected: events.onDisconnected,
   }
 }
 

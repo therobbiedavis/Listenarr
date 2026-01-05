@@ -2,7 +2,7 @@
   <div v-if="isOpen" class="modal-overlay" @click="close">
     <div class="modal-content" @click.stop>
       <div class="modal-header">
-          <h2>
+        <h2>
           <PhFolderOpen />
           Manual Import - Select Folder
         </h2>
@@ -14,9 +14,9 @@
       <div class="modal-body" :class="{ 'browser-mode': browserMode }">
         <!-- Top folder input (full width) - hidden when preview is active -->
         <div v-if="!showPreview" class="top-path">
-          <FolderBrowser 
-            v-model="selectedPath" 
-            placeholder="Select a folder..." 
+          <FolderBrowser
+            v-model="selectedPath"
+            placeholder="Select a folder..."
             :inline="true"
             :show-files="true"
             @browser-opened="browserMode = true"
@@ -26,11 +26,19 @@
 
         <!-- Centered action buttons - shown when valid path exists -->
         <div v-if="!showPreview && isPathValid && !browserMode" class="center-actions">
-          <button class="btn btn-info" @click="startAutomaticImport" :disabled="!isPathValid || loading">
+          <button
+            class="btn btn-info"
+            @click="startAutomaticImport"
+            :disabled="!isPathValid || loading"
+          >
             <PhRocket />
             Automatic Import
           </button>
-          <button class="btn btn-primary" @click="startInteractiveImport" :disabled="!isPathValid || loading">
+          <button
+            class="btn btn-primary"
+            @click="startInteractiveImport"
+            :disabled="!isPathValid || loading"
+          >
             <PhUser />
             Interactive Import
           </button>
@@ -40,12 +48,19 @@
         <div v-if="!showPreview && recentFolders.length > 0" class="recent-folders">
           <div class="recent-title">Recent folders</div>
           <div class="recent-list">
-            <button v-for="p in recentFolders" :key="p" class="recent-item" @click="selectRecent(p)">{{ p }}</button>
+            <button
+              v-for="p in recentFolders"
+              :key="p"
+              class="recent-item"
+              @click="selectRecent(p)"
+            >
+              {{ p }}
+            </button>
           </div>
         </div>
 
-  <!-- Preview area (hidden until Interactive Import is clicked) -->
-  <div v-if="showPreview" class="preview-area">
+        <!-- Preview area (hidden until Interactive Import is clicked) -->
+        <div v-if="showPreview" class="preview-area">
           <div v-if="loading" class="loading-state">
             <PhSpinner class="ph-spin" />
             Loading files...
@@ -72,7 +87,9 @@
                   <div class="col col-path relative">{{ it.relativePath }}</div>
                   <div class="col col-audiobook">
                     <div class="clickable-cell" @click="openCellEditor(it, 'audiobook')">
-                      <span v-if="it.matchedAudiobookId">{{ getLibraryTitle(it.matchedAudiobookId) }}</span>
+                      <span v-if="it.matchedAudiobookId">{{
+                        getLibraryTitle(it.matchedAudiobookId)
+                      }}</span>
                       <span v-else class="placeholder">&nbsp;</span>
                     </div>
                   </div>
@@ -84,7 +101,9 @@
                   </div>
                   <div class="col col-quality">
                     <div class="clickable-cell" @click="openCellEditor(it, 'quality')">
-                      <span v-if="it.qualityProfileId">{{ getQualityName(it.qualityProfileId) }}</span>
+                      <span v-if="it.qualityProfileId">{{
+                        getQualityName(it.qualityProfileId)
+                      }}</span>
                       <span v-else class="placeholder">&nbsp;</span>
                     </div>
                   </div>
@@ -96,7 +115,11 @@
                   </div>
                   <div class="col col-size">{{ it.size || '' }}</div>
                   <div class="col col-action">
-                    <div v-if="getItemIssues(it).length > 0" class="info-icon" :title="getItemIssues(it).join(', ')">
+                    <div
+                      v-if="getItemIssues(it).length > 0"
+                      class="info-icon"
+                      :title="getItemIssues(it).join(', ')"
+                    >
                       <PhInfo />
                     </div>
                   </div>
@@ -123,17 +146,32 @@
           <button class="btn btn-secondary" @click="close">Cancel</button>
           <!-- Show Interactive/Automatic Import when browser is open and not in preview mode -->
           <template v-if="!showPreview && browserMode">
-            <button class="btn btn-info" @click="startAutomaticImport" :disabled="!isPathValid || loading">
+            <button
+              class="btn btn-info"
+              @click="startAutomaticImport"
+              :disabled="!isPathValid || loading"
+            >
               <PhRocket />
               Automatic Import
             </button>
-            <button class="btn btn-primary" @click="startInteractiveImport" :disabled="!isPathValid || loading">
+            <button
+              class="btn btn-primary"
+              @click="startInteractiveImport"
+              :disabled="!isPathValid || loading"
+            >
               <PhUser />
               Interactive Import
             </button>
           </template>
           <!-- Show Import button in preview mode -->
-          <button v-else-if="showPreview" class="btn btn-success" @click="importSelected" :disabled="selectedCount === 0 || loading">Import</button>
+          <button
+            v-else-if="showPreview"
+            class="btn btn-success"
+            @click="importSelected"
+            :disabled="selectedCount === 0 || loading"
+          >
+            Import
+          </button>
         </div>
       </div>
     </div>
@@ -143,7 +181,9 @@
       <div class="match-content">
         <h4>Match file to audiobook</h4>
         <select v-model="matchSelection">
-          <option v-for="book in library" :key="book.id" :value="book.id">{{ getBookDisplay(book) }}</option>
+          <option v-for="book in library" :key="book.id" :value="book.id">
+            {{ getBookDisplay(book) }}
+          </option>
         </select>
         <div class="match-actions">
           <button class="btn btn-secondary" @click="closeMatch">Cancel</button>
@@ -167,7 +207,13 @@
             <div class="table-col col-asin">ASIN</div>
           </div>
           <div class="table-body">
-            <div v-for="book in library" :key="book.id" class="table-row" :class="{ active: cellEditorValue === book.id }" @click="selectEditorChoice(book.id)">
+            <div
+              v-for="book in library"
+              :key="book.id"
+              class="table-row"
+              :class="{ active: cellEditorValue === book.id }"
+              @click="selectEditorChoice(book.id)"
+            >
               <div class="table-col col-audiobook">{{ book.title || 'Unknown' }}</div>
               <div class="table-col col-author">{{ getBookAuthor(book) }}</div>
               <div class="table-col col-year">{{ getBookYear(book) }}</div>
@@ -184,7 +230,13 @@
             <div class="table-col col-quality-description">Description</div>
           </div>
           <div class="table-body">
-            <div v-for="q in qualityProfiles" :key="q.id" class="table-row" :class="{ active: cellEditorValue == q.id }" @click="selectEditorChoice(q.id ?? null)">
+            <div
+              v-for="q in qualityProfiles"
+              :key="q.id"
+              class="table-row"
+              :class="{ active: cellEditorValue == q.id }"
+              @click="selectEditorChoice(q.id ?? null)"
+            >
               <div class="table-col col-quality-profile">{{ q.name }}</div>
               <div class="table-col col-quality-description">{{ q.description || '' }}</div>
             </div>
@@ -198,7 +250,13 @@
             <div class="table-col col-language-name">Language</div>
           </div>
           <div class="table-body">
-            <div v-for="(name, code) in languageMap" :key="code" class="table-row" :class="{ active: cellEditorValue === code }" @click="selectEditorChoice(code)">
+            <div
+              v-for="(name, code) in languageMap"
+              :key="code"
+              class="table-row"
+              :class="{ active: cellEditorValue === code }"
+              @click="selectEditorChoice(code)"
+            >
               <div class="table-col col-language-name">{{ name }}</div>
             </div>
           </div>
@@ -212,7 +270,13 @@
 
       <div class="match-actions">
         <button class="btn btn-secondary" @click="closeCellEditor">Cancel</button>
-        <button v-if="cellEditorField === 'releaseGroup'" class="btn btn-primary" @click="saveCellEditor">Save</button>
+        <button
+          v-if="cellEditorField === 'releaseGroup'"
+          class="btn btn-primary"
+          @click="saveCellEditor"
+        >
+          Save
+        </button>
       </div>
     </div>
   </div>
@@ -227,14 +291,17 @@ import { apiService } from '@/services/api'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 
-const props = withDefaults(defineProps<{ isOpen?: boolean; initialPath?: string }>(), { isOpen: false, initialPath: '' })
+const props = withDefaults(defineProps<{ isOpen?: boolean; initialPath?: string }>(), {
+  isOpen: false,
+  initialPath: '',
+})
 
 const emit = defineEmits(['close', 'imported'] as const)
 
 const selectedPath = ref(props.initialPath || '')
 const loading = ref(false)
 const browserMode = ref(false)
-const inputMode = ref<'move'|'copy'|''>('')
+const inputMode = ref<'move' | 'copy' | ''>('')
 const showPreview = ref(false)
 interface PreviewItem {
   relativePath: string
@@ -258,7 +325,7 @@ const recentFolders = ref<string[]>([])
 const loadRecentFolders = () => {
   try {
     const raw = sessionStorage.getItem(RECENT_KEY)
-    if (!raw) return recentFolders.value = []
+    if (!raw) return (recentFolders.value = [])
     const arr = JSON.parse(raw) as string[]
     recentFolders.value = Array.isArray(arr) ? arr : []
   } catch {
@@ -269,9 +336,11 @@ const loadRecentFolders = () => {
 const saveRecentFolder = (path: string) => {
   if (!path) return
   // keep most recent first, dedupe, cap at 10
-  const arr = [path, ...recentFolders.value.filter(p => p !== path)].slice(0, 10)
+  const arr = [path, ...recentFolders.value.filter((p) => p !== path)].slice(0, 10)
   recentFolders.value = arr
-  try { sessionStorage.setItem(RECENT_KEY, JSON.stringify(arr)) } catch {}
+  try {
+    sessionStorage.setItem(RECENT_KEY, JSON.stringify(arr))
+  } catch {}
 }
 
 const selectRecent = (path: string) => {
@@ -295,8 +364,8 @@ const cellEditorValue = ref<number | string | null>(null)
 // Helper display names
 const getLibraryTitle = (id?: number | null) => {
   if (!id) return ''
-  const found = library.value.find(b => b.id === id)
-  return found ? (found.title || 'Unknown') : String(id)
+  const found = library.value.find((b) => b.id === id)
+  return found ? found.title || 'Unknown' : String(id)
 }
 
 type Book = {
@@ -312,8 +381,11 @@ type Book = {
 
 const getBookDisplay = (book: Book) => {
   const title = book.title ?? 'Untitled'
-  const author = (book.authors && book.authors.length > 0) ? book.authors[0] : ''
-  const yearCandidate = book.year ?? book.publishYear ?? (book.releaseDate ? String(book.releaseDate).slice(0,4) : undefined)
+  const author = book.authors && book.authors.length > 0 ? book.authors[0] : ''
+  const yearCandidate =
+    book.year ??
+    book.publishYear ??
+    (book.releaseDate ? String(book.releaseDate).slice(0, 4) : undefined)
   const year = yearCandidate ? Number(String(yearCandidate)) : undefined
   const asin = book.asin ?? book.asin13 ?? undefined
   const meta: string[] = []
@@ -324,26 +396,38 @@ const getBookDisplay = (book: Book) => {
 }
 
 const getBookAuthor = (book: Book) => {
-  return (book.authors && book.authors.length > 0) ? book.authors[0] : ''
+  return book.authors && book.authors.length > 0 ? book.authors[0] : ''
 }
 
 const getBookYear = (book: Book) => {
-  const rawYear = book.year ?? book.publishYear ?? (book.releaseDate ? String(book.releaseDate).slice(0,4) : undefined)
+  const rawYear =
+    book.year ??
+    book.publishYear ??
+    (book.releaseDate ? String(book.releaseDate).slice(0, 4) : undefined)
   return rawYear != null ? String(rawYear).replace(/[^0-9]/g, '') : ''
 }
 
 const getBookAsin = (book: Book) => {
-  return (book.asin && String(book.asin).trim()) || (book.asin13 && String(book.asin13).trim()) || ''
+  return (
+    (book.asin && String(book.asin).trim()) || (book.asin13 && String(book.asin13).trim()) || ''
+  )
 }
 
 const getQualityName = (id?: number | null) => {
   if (!id) return ''
-  const found = (qualityProfiles.value || []).find((q: { id?: number; name?: string } ) => q.id === id)
+  const found = (qualityProfiles.value || []).find(
+    (q: { id?: number; name?: string }) => q.id === id,
+  )
   return found ? (found.name ?? String(id)) : String(id)
 }
 
-const languageMap: Record<string,string> = {
-  en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', ja: 'Japanese'
+const languageMap: Record<string, string> = {
+  en: 'English',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+  it: 'Italian',
+  ja: 'Japanese',
 }
 
 const getLanguageName = (code?: string | null) => {
@@ -391,12 +475,15 @@ onMounted(async () => {
   loadRecentFolders()
 })
 
-watch(() => props.isOpen, async (v) => {
-  // only auto-load preview when modal opens AND interactive preview mode is active
-  if (v && selectedPath.value && showPreview.value) {
-    await loadPreview()
-  }
-})
+watch(
+  () => props.isOpen,
+  async (v) => {
+    // only auto-load preview when modal opens AND interactive preview mode is active
+    if (v && selectedPath.value && showPreview.value) {
+      await loadPreview()
+    }
+  },
+)
 
 watch(selectedPath, async (v) => {
   // only load preview automatically when interactive flow is active
@@ -411,26 +498,32 @@ const loadPreview = async () => {
   try {
     const resp = await apiService.previewManualImport(selectedPath.value)
     // resp.items expected to be an array of detected files with metadata
-    const items = Array.isArray(resp?.items) ? resp.items as unknown[] : []
+    const items = Array.isArray(resp?.items) ? (resp.items as unknown[]) : []
     // only include common audio file extensions
     const audioExts = ['.mp3', '.m4b', '.m4a', '.flac', '.aac', '.ogg', '.wav', '.wma', '.opus']
-    const filtered = items.filter(it => {
+    const filtered = items.filter((it) => {
       const obj = it as Record<string, unknown>
-      const name = (typeof obj.relativePath === 'string' ? obj.relativePath : (typeof obj.fullPath === 'string' ? obj.fullPath : ''))
+      const name =
+        typeof obj.relativePath === 'string'
+          ? obj.relativePath
+          : typeof obj.fullPath === 'string'
+            ? obj.fullPath
+            : ''
       const lower = name.toLowerCase()
-      return audioExts.some(ext => lower.endsWith(ext))
+      return audioExts.some((ext) => lower.endsWith(ext))
     })
-    previewItems.value = filtered.map(i => {
+    previewItems.value = filtered.map((i) => {
       const obj = i as Record<string, unknown>
       const it: PreviewItem = {
         relativePath: typeof obj.relativePath === 'string' ? obj.relativePath : '',
         selected: false,
-        matchedAudiobookId: typeof obj.matchedAudiobookId === 'number' ? obj.matchedAudiobookId : null,
+        matchedAudiobookId:
+          typeof obj.matchedAudiobookId === 'number' ? obj.matchedAudiobookId : null,
         releaseGroup: typeof obj.releaseGroup === 'string' ? obj.releaseGroup : null,
         qualityProfileId: typeof obj.qualityProfileId === 'number' ? obj.qualityProfileId : null,
         language: typeof obj.language === 'string' ? obj.language : null,
         size: typeof obj.size === 'string' ? obj.size : null,
-        fullPath: typeof obj.fullPath === 'string' ? obj.fullPath : null
+        fullPath: typeof obj.fullPath === 'string' ? obj.fullPath : null,
       }
       return it
     })
@@ -455,7 +548,8 @@ const startAutomaticImport = async () => {
   try {
     // When running automatic import, send minimal request; backend will handle scanning
     const autoPayload: ManualImportRequest = { path: selectedPath.value, mode: 'automatic' }
-    if (inputMode.value === 'move' || inputMode.value === 'copy') autoPayload.inputMode = inputMode.value
+    if (inputMode.value === 'move' || inputMode.value === 'copy')
+      autoPayload.inputMode = inputMode.value
     const resp = await apiService.startManualImport(autoPayload)
     // resp should contain import summary
     emit('imported', { imported: resp.importedCount ?? 0 })
@@ -476,24 +570,29 @@ const startInteractiveImport = async () => {
 }
 
 const importSelected = async () => {
-  const selected = previewItems.value.filter(i => i.selected)
+  const selected = previewItems.value.filter((i) => i.selected)
   if (selected.length === 0) return
   loading.value = true
   try {
     // Map items to the payload the backend expects and ensure required fields are present
     const payloadItems = selected
-      .filter(i => i.fullPath && i.fullPath.length > 0)
-      .map(i => ({
+      .filter((i) => i.fullPath && i.fullPath.length > 0)
+      .map((i) => ({
         relativePath: i.relativePath,
         fullPath: i.fullPath as string,
         matchedAudiobookId: i.matchedAudiobookId ?? undefined,
         releaseGroup: i.releaseGroup ?? undefined,
         qualityProfileId: i.qualityProfileId ?? undefined,
         language: i.language ?? undefined,
-        size: i.size ?? undefined
+        size: i.size ?? undefined,
       }))
 
-    const manualPayload: ManualImportRequest = { path: selectedPath.value, mode: 'interactive', items: payloadItems, inputMode: inputMode.value || 'copy' }
+    const manualPayload: ManualImportRequest = {
+      path: selectedPath.value,
+      mode: 'interactive',
+      items: payloadItems,
+      inputMode: inputMode.value || 'copy',
+    }
     const resp = await apiService.startManualImport(manualPayload)
     emit('imported', { imported: resp.importedCount ?? selected.length })
     close()
@@ -511,9 +610,13 @@ const close = () => {
   emit('close')
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const openMatchDialog = (item: PreviewItem) => {
   matchTarget.value = item
-  matchSelection.value = (library.value && library.value.length > 0 && library.value[0] && library.value[0].id) ? library.value[0].id : null
+  matchSelection.value =
+    library.value && library.value.length > 0 && library.value[0] && library.value[0].id
+      ? library.value[0].id
+      : null
   showMatch.value = true
 }
 
@@ -529,23 +632,25 @@ const confirmMatch = async () => {
   closeMatch()
 }
 
-const selectedCount = computed(() => previewItems.value.filter(i => i.selected).length)
+const selectedCount = computed(() => previewItems.value.filter((i) => i.selected).length)
 
-const allSelected = computed(() => previewItems.value.length > 0 && previewItems.value.every(i => i.selected))
+const allSelected = computed(
+  () => previewItems.value.length > 0 && previewItems.value.every((i) => i.selected),
+)
 
 const toggleSelectAll = (ev: Event) => {
   const checked = (ev.target as HTMLInputElement).checked
-  previewItems.value.forEach(i => i.selected = checked)
+  previewItems.value.forEach((i) => (i.selected = checked))
 }
 
 const getItemIssues = (item: PreviewItem): string[] => {
   const issues: string[] = []
-  
+
   // Check for rejections from backend
   if (item.rejections && item.rejections.length > 0) {
     issues.push(...item.rejections)
   }
-  
+
   // Check for missing required fields
   if (!item.matchedAudiobookId) {
     issues.push('No audiobook matched')
@@ -556,7 +661,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   if (!item.language) {
     issues.push('No language specified')
   }
-  
+
   return issues
 }
 </script>
@@ -687,7 +792,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   justify-content: center;
 }
 
-.col-check input[type="checkbox"] {
+.col-check input[type='checkbox'] {
   width: 18px;
   height: 18px;
   accent-color: #ffffff;
@@ -767,17 +872,17 @@ const getItemIssues = (item: PreviewItem): string[] => {
   display: inline-block;
   width: 100%;
   height: 100%;
-  border: 1px dashed rgba(255,255,255,0.12);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   box-sizing: border-box;
 }
 
 .clickable-cell:hover .placeholder {
-  border-color: rgba(255,255,255,0.22);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .clickable-cell:focus-within .placeholder {
-  border-color: #2196F3;
+  border-color: #2196f3;
 }
 
 /* Form elements */
@@ -929,7 +1034,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   /* place behind content but above page */
   z-index: 1105;
 }
@@ -1022,7 +1127,7 @@ const getItemIssues = (item: PreviewItem): string[] => {
   padding: 0.6rem 0.75rem;
   color: #e8e8e8;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   transition: background-color 0.2s;
 }
 
@@ -1031,8 +1136,8 @@ const getItemIssues = (item: PreviewItem): string[] => {
 }
 
 .table-row.active {
-  background: linear-gradient(90deg, rgba(33,150,243,0.06), rgba(33,150,243,0.02));
-  border-left: 4px solid #2196F3;
+  background: linear-gradient(90deg, rgba(33, 150, 243, 0.06), rgba(33, 150, 243, 0.02));
+  border-left: 4px solid #2196f3;
 }
 
 .table-col {
@@ -1092,8 +1197,25 @@ const getItemIssues = (item: PreviewItem): string[] => {
   gap: 0.45rem;
   align-items: center;
 }
-.recent-title { color: #cfcfcf; font-weight: 600 }
-.recent-list { display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center }
-.recent-item { background:#1f1f1f; border:1px solid #333; color:#e8e8e8; padding:0.45rem 0.6rem; border-radius:6px; cursor:pointer }
-.recent-item:hover { border-color:#444 }
+.recent-title {
+  color: #cfcfcf;
+  font-weight: 600;
+}
+.recent-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.recent-item {
+  background: #1f1f1f;
+  border: 1px solid #333;
+  color: #e8e8e8;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.recent-item:hover {
+  border-color: #444;
+}
 </style>

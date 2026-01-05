@@ -223,12 +223,12 @@ export interface ApplicationSettings {
   enableCoverArtDownload: boolean
   audnexusApiUrl: string
   maxConcurrentDownloads: number
-    pollingIntervalSeconds?: number
-    // How many seconds a download must be observed as complete by the client before finalization begins
-    downloadCompletionStabilitySeconds?: number
-    // Retry/backoff settings used by the server when a finalized download's source file is not yet present
-    missingSourceRetryInitialDelaySeconds?: number
-    missingSourceMaxRetries?: number
+  pollingIntervalSeconds?: number
+  // How many seconds a download must be observed as complete by the client before finalization begins
+  downloadCompletionStabilitySeconds?: number
+  // Retry/backoff settings used by the server when a finalized download's source file is not yet present
+  missingSourceRetryInitialDelaySeconds?: number
+  missingSourceMaxRetries?: number
   enableNotifications: boolean
   allowedFileExtensions: string[]
   // Action to perform for completed downloads: 'Move' or 'Copy'
@@ -259,7 +259,7 @@ export interface ApplicationSettings {
     triggers: string[]
     isEnabled: boolean
   }>
-  
+
   // Discord bot integration settings (optional)
   discordBotEnabled?: boolean
   discordApplicationId?: string
@@ -274,20 +274,20 @@ export interface ApplicationSettings {
   // Optional bot appearance customization
   discordBotUsername?: string
   discordBotAvatar?: string
-  
-    // Search behavior settings
-    // Toggle whether to include Amazon/Audible provider searches when performing intelligent search
-    enableAmazonSearch?: boolean
-    enableAudibleSearch?: boolean
-    // Enable OpenLibrary augmentation/search
-    enableOpenLibrarySearch?: boolean
-    // Limits and scoring thresholds used during search
-    // Maximum number of candidate ASINs to consider (candidateLimit)
-    searchCandidateCap?: number
-    // Maximum number of results to return to the UI (returnLimit)
-    searchResultCap?: number
-    // Fuzzy matching threshold used when comparing titles/authors (0.0 - 1.0)
-    searchFuzzyThreshold?: number
+
+  // Search behavior settings
+  // Toggle whether to include Amazon/Audible provider searches when performing intelligent search
+  enableAmazonSearch?: boolean
+  enableAudibleSearch?: boolean
+  // Enable OpenLibrary augmentation/search
+  enableOpenLibrarySearch?: boolean
+  // Limits and scoring thresholds used during search
+  // Maximum number of candidate ASINs to consider (candidateLimit)
+  searchCandidateCap?: number
+  // Maximum number of results to return to the UI (returnLimit)
+  searchResultCap?: number
+  // Fuzzy matching threshold used when comparing titles/authors (0.0 - 1.0)
+  searchFuzzyThreshold?: number
 }
 
 export interface StartupConfig {
@@ -545,7 +545,15 @@ export interface QualityScore {
   smartScoreBreakdown?: Record<string, number>
 }
 
-export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Source' | 'Language' | 'Quality' | 'Grabs' 
+export type SearchSortBy =
+  | 'Seeders'
+  | 'Size'
+  | 'PublishedDate'
+  | 'Title'
+  | 'Source'
+  | 'Language'
+  | 'Quality'
+  | 'Grabs'
 
 export type SearchSortDirection = 'Ascending' | 'Descending'
 
@@ -659,14 +667,14 @@ export interface AudimetaSearchResult {
  * Response wrapper for search operations that can contain different types of results
  */
 export interface SearchResponse {
-  indexerResults: IndexerSearchResult[];
-  metadataResults: MetadataSearchResult[];
-  totalCount: number;
+  indexerResults: IndexerSearchResult[]
+  metadataResults: MetadataSearchResult[]
+  totalCount: number
 }
 
 export interface RootFolder {
-  id: number;
-  name: string;
-  path: string;
-  isDefault: boolean;
+  id: number
+  name: string
+  path: string
+  isDefault: boolean
 }

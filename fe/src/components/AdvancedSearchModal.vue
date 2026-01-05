@@ -10,8 +10,8 @@
 
       <div class="modal-body">
         <p class="help-text">
-          Enter multiple search criteria to find audiobooks. When both Title and Author are provided, 
-          searches using Audimeta's combined search for more accurate results.
+          Enter multiple search criteria to find audiobooks. When both Title and Author are
+          provided, searches using Audimeta's combined search for more accurate results.
         </p>
 
         <div class="form-group">
@@ -96,11 +96,9 @@
       </div>
 
       <div class="modal-footer">
-        <button @click="clearForm" class="btn btn-secondary">
-          <PhTrash /> Clear
-        </button>
-        <button 
-          @click="performSearch" 
+        <button @click="clearForm" class="btn btn-secondary"><PhTrash /> Clear</button>
+        <button
+          @click="performSearch"
           :disabled="!isValidSearch || isSearching"
           class="btn btn-primary"
         >
@@ -115,7 +113,14 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { PhFunnelSimple, PhX, PhMagnifyingGlass, PhSpinner, PhWarningCircle, PhTrash } from '@phosphor-icons/vue'
+import {
+  PhFunnelSimple,
+  PhX,
+  PhMagnifyingGlass,
+  PhSpinner,
+  PhWarningCircle,
+  PhTrash,
+} from '@phosphor-icons/vue'
 import { apiService } from '@/services/api'
 import type { SearchResult } from '@/types'
 
@@ -134,15 +139,20 @@ const searchParams = ref({
   series: '',
   isbn: '',
   asin: '',
-  language: ''
+  language: '',
 })
 
 const isSearching = ref(false)
 const error = ref('')
 
 const isValidSearch = computed(() => {
-  return !!(searchParams.value.title || searchParams.value.author || 
-            searchParams.value.isbn || searchParams.value.asin || searchParams.value.series)
+  return !!(
+    searchParams.value.title ||
+    searchParams.value.author ||
+    searchParams.value.isbn ||
+    searchParams.value.asin ||
+    searchParams.value.series
+  )
 })
 
 const closeModal = () => {
@@ -158,7 +168,7 @@ const clearForm = () => {
     series: '',
     isbn: '',
     asin: '',
-    language: ''
+    language: '',
   }
   error.value = ''
 }

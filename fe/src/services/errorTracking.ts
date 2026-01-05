@@ -1,6 +1,6 @@
 /**
  * Error Tracking Service
- * 
+ *
  * Centralized error tracking and logging service for production use.
  * In production, errors can be sent to external services (e.g., Sentry, LogRocket).
  * In development, errors are logged to the console for debugging.
@@ -32,7 +32,7 @@ class ErrorTrackingService {
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
       context,
-      timestamp: new Date()
+      timestamp: new Date(),
     }
 
     // Store for potential retrieval
@@ -46,7 +46,7 @@ class ErrorTrackingService {
       console.error('[ErrorTracking]', {
         error: trackedError.message,
         context: trackedError.context,
-        stack: trackedError.stack
+        stack: trackedError.stack,
       })
     }
 
@@ -59,11 +59,15 @@ class ErrorTrackingService {
   /**
    * Capture a message with severity level
    */
-  captureMessage(message: string, level: 'info' | 'warning' | 'error' = 'info', context?: ErrorContext): void {
+  captureMessage(
+    message: string,
+    level: 'info' | 'warning' | 'error' = 'info',
+    context?: ErrorContext,
+  ): void {
     const trackedError: TrackedError = {
       message: `[${level.toUpperCase()}] ${message}`,
       context,
-      timestamp: new Date()
+      timestamp: new Date(),
     }
 
     this.errors.push(trackedError)
@@ -72,7 +76,8 @@ class ErrorTrackingService {
     }
 
     if (import.meta.env.DEV) {
-      const logFn = level === 'error' ? console.error : level === 'warning' ? console.warn : console.info
+      const logFn =
+        level === 'error' ? console.error : level === 'warning' ? console.warn : console.info
       logFn('[ErrorTracking]', message, context)
     }
 
@@ -107,7 +112,7 @@ class ErrorTrackingService {
     //     custom: error.context
     //   }
     // })
-    
+
     // For now, just log that we would send it
     if (import.meta.env.DEV) {
       console.log('[ErrorTracking] Would send to external service:', error.message)
@@ -121,7 +126,7 @@ class ErrorTrackingService {
     // TODO: Implement user context tracking
     // Example with Sentry:
     // Sentry.setUser({ id: userId, email, username })
-    
+
     if (import.meta.env.DEV) {
       console.log('[ErrorTracking] User context set:', { userId, email, username })
     }
@@ -134,7 +139,7 @@ class ErrorTrackingService {
     // TODO: Implement breadcrumb tracking
     // Example with Sentry:
     // Sentry.addBreadcrumb({ message, category, data })
-    
+
     if (import.meta.env.DEV) {
       console.log('[ErrorTracking] Breadcrumb:', { message, category, data })
     }
@@ -149,14 +154,14 @@ if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
     errorTracking.captureException(event.error, {
       component: 'Global',
-      operation: 'unhandledError'
+      operation: 'unhandledError',
     })
   })
 
   window.addEventListener('unhandledrejection', (event) => {
     errorTracking.captureException(event.reason, {
       component: 'Global',
-      operation: 'unhandledRejection'
+      operation: 'unhandledRejection',
     })
   })
 }

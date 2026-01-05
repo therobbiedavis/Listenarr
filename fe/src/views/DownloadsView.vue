@@ -10,31 +10,27 @@
     <div class="downloads-tabs">
       <!-- Mobile dropdown -->
       <div class="downloads-tabs-mobile">
-        <CustomSelect
-          v-model="activeTab"
-          :options="mobileTabOptions"
-          class="tab-dropdown"
-        />
+        <CustomSelect v-model="activeTab" :options="mobileTabOptions" class="tab-dropdown" />
       </div>
 
       <!-- Desktop tabs -->
       <div class="downloads-tabs-desktop">
-        <button 
-          @click="activeTab = 'active'" 
+        <button
+          @click="activeTab = 'active'"
           :class="{ active: activeTab === 'active' }"
           class="tab-button"
         >
           Active ({{ downloadsStore.activeDownloads.length }})
         </button>
-        <button 
-          @click="activeTab = 'completed'" 
+        <button
+          @click="activeTab = 'completed'"
           :class="{ active: activeTab === 'completed' }"
           class="tab-button"
         >
           Completed ({{ downloadsStore.completedDownloads.length }})
         </button>
-        <button 
-          @click="activeTab = 'failed'" 
+        <button
+          @click="activeTab = 'failed'"
           :class="{ active: activeTab === 'failed' }"
           class="tab-button"
         >
@@ -47,90 +43,100 @@
       <div v-if="currentDownloads.length === 0" class="empty-state">
         <p>{{ getEmptyMessage() }}</p>
       </div>
-      
-      <div v-else ref="scrollContainer" class="downloads-list-container" @scroll="updateVisibleRange">
+
+      <div
+        v-else
+        ref="scrollContainer"
+        class="downloads-list-container"
+        @scroll="updateVisibleRange"
+      >
         <div class="downloads-list-spacer" :style="{ height: `${totalHeight}px` }">
           <div class="downloads-list" :style="{ transform: `translateY(${topPadding}px)` }">
-            <div 
-              v-for="download in visibleDownloads" 
+            <div
+              v-for="download in visibleDownloads"
               :key="download.id"
               v-memo="[download.id, download.status, download.progress]"
               class="download-card"
             >
-          <div class="download-info">
-            <h3>{{ download.title }}</h3>
-            <p class="download-artist">{{ download.artist }}</p>
-            <p class="download-album">{{ download.album }}</p>
-            
-            <div class="download-meta">
-              <span class="download-size">{{ formatFileSize(download.totalSize) }}</span>
-              <span class="download-client">{{ download.downloadClientId }}</span>
-              <span class="download-date">{{ formatDate(download.startedAt) }}</span>
-            </div>
-          </div>
+              <div class="download-info">
+                <h3>{{ download.title }}</h3>
+                <p class="download-artist">{{ download.artist }}</p>
+                <p class="download-album">{{ download.album }}</p>
 
-          <div class="download-status-section">
-            <div class="download-status" :class="download.status.toLowerCase()">
-              {{ download.status }}
-            </div>
-            
-            <div v-if="download.status === 'Downloading'" class="download-progress">
-              <div class="progress-bar">
-                <div 
-                  class="progress-fill" 
-                  :style="{ width: download.progress + '%' }"
-                ></div>
+                <div class="download-meta">
+                  <span class="download-size">{{ formatFileSize(download.totalSize) }}</span>
+                  <span class="download-client">{{ download.downloadClientId }}</span>
+                  <span class="download-date">{{ formatDate(download.startedAt) }}</span>
+                </div>
               </div>
-              <div class="progress-info">
-                <span>{{ Math.round(download.progress) }}%</span>
-                <span>{{ formatFileSize(download.downloadedSize) }} / {{ formatFileSize(download.totalSize) }}</span>
+
+              <div class="download-status-section">
+                <div class="download-status" :class="download.status.toLowerCase()">
+                  {{ download.status }}
+                </div>
+
+                <div v-if="download.status === 'Downloading'" class="download-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill" :style="{ width: download.progress + '%' }"></div>
+                  </div>
+                  <div class="progress-info">
+                    <span>{{ Math.round(download.progress) }}%</span>
+                    <span
+                      >{{ formatFileSize(download.downloadedSize) }} /
+                      {{ formatFileSize(download.totalSize) }}</span
+                    >
+                  </div>
+                </div>
+
+                <div v-if="download.errorMessage" class="error-message">
+                  {{ download.errorMessage }}
+                </div>
+              </div>
+
+              <div class="download-actions">
+                <button
+                  v-if="['Queued', 'Downloading'].includes(download.status)"
+                  @click="cancelDownload(download.id)"
+                  class="action-button cancel"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  v-if="download.status === 'Failed'"
+                  @click="retryDownload(download)"
+                  class="action-button retry"
+                >
+                  Retry
+                </button>
+
+                <button
+                  v-if="download.finalPath"
+                  @click="openFolder(download.finalPath)"
+                  class="action-button open"
+                >
+                  Open Folder
+                </button>
+
+                <button @click="openInspect(download)" class="action-button inspect">
+                  Inspect
+                </button>
               </div>
             </div>
-
-            <div v-if="download.errorMessage" class="error-message">
-              {{ download.errorMessage }}
-            </div>
           </div>
-
-          <div class="download-actions">
-            <button 
-              v-if="['Queued', 'Downloading'].includes(download.status)"
-              @click="cancelDownload(download.id)"
-              class="action-button cancel"
-            >
-              Cancel
-            </button>
-            
-            <button 
-              v-if="download.status === 'Failed'"
-              @click="retryDownload(download)"
-              class="action-button retry"
-            >
-              Retry
-            </button>
-            
-            <button 
-              v-if="download.finalPath"
-              @click="openFolder(download.finalPath)"
-              class="action-button open"
-            >
-              Open Folder
-            </button>
-
-            <button
-              @click="openInspect(download)"
-              class="action-button inspect"
-            >
-              Inspect
-            </button>
-          </div>
+          <!-- Close downloads-list -->
         </div>
-          </div>  <!-- Close downloads-list -->
-        </div>    <!-- Close downloads-list-spacer -->
-      </div>      <!-- Close downloads-list-container -->
+        <!-- Close downloads-list-spacer -->
+      </div>
+      <!-- Close downloads-list-container -->
     </div>
 
-    <InspectTorrentModal v-if="inspectState.show" :downloadId="inspectState.downloadId" :initialAnnounces="inspectState.announces" @close="closeInspect" />
+    <InspectTorrentModal
+      v-if="inspectState.show"
+      :downloadId="inspectState.downloadId"
+      :initialAnnounces="inspectState.announces"
+      @close="closeInspect"
+    />
   </div>
 </template>
 
@@ -140,7 +146,9 @@ import { useDownloadsStore } from '@/stores/downloads'
 import CustomSelect from '@/components/CustomSelect.vue'
 import type { Download } from '@/types'
 import { useToast } from '@/services/toastService'
-import { PhDownloadSimple, PhCheckCircle, PhXCircle, PhEye } from '@phosphor-icons/vue'
+import { errorTracking } from '@/services/errorTracking'
+import { logger } from '@/utils/logger'
+import { PhDownloadSimple, PhCheckCircle, PhXCircle } from '@phosphor-icons/vue'
 import InspectTorrentModal from '@/components/InspectTorrentModal.vue'
 import { apiService } from '@/services/api'
 
@@ -151,7 +159,7 @@ const activeTab = ref<'active' | 'completed' | 'failed'>('active')
 const mobileTabOptions = computed(() => [
   { value: 'active', label: 'Active', icon: PhDownloadSimple },
   { value: 'completed', label: 'Completed', icon: PhCheckCircle },
-  { value: 'failed', label: 'Failed', icon: PhXCircle }
+  { value: 'failed', label: 'Failed', icon: PhXCircle },
 ])
 
 // const onTabChange = () => {
@@ -184,16 +192,19 @@ const visibleDownloads = computed(() => {
 
 const updateVisibleRange = () => {
   if (!scrollContainer.value) return
-  
+
   const scrollTop = scrollContainer.value.scrollTop
   const viewportHeight = scrollContainer.value.clientHeight
-  
+
   const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
   const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
-  
+
   const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
-  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, currentDownloads.value.length)
-  
+  const endIndex = Math.min(
+    firstVisibleIndex + visibleItemCount + BUFFER_ROWS,
+    currentDownloads.value.length,
+  )
+
   visibleRange.value = { start: startIndex, end: endIndex }
 }
 
@@ -214,12 +225,21 @@ const cancelDownload = async (downloadId: string) => {
     await downloadsStore.cancelDownload(downloadId)
     toast.success('Success', 'Download canceled successfully')
   } catch (error) {
-    console.error('Failed to cancel download:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'DownloadsView',
+      operation: 'cancelDownload',
+      metadata: { downloadId },
+    })
     toast.error('Error', 'Failed to cancel download')
   }
 }
 
-const inspectState = ref({ show: false, downloadId: '', announces: null as string[] | null, loading: false })
+const inspectState = ref({
+  show: false,
+  downloadId: '',
+  announces: null as string[] | null,
+  loading: false,
+})
 
 const openInspect = async (download: Download) => {
   inspectState.value.show = true
@@ -229,7 +249,7 @@ const openInspect = async (download: Download) => {
     const res = await apiService.getCachedAnnounces(download.id)
     inspectState.value.announces = res?.announces ?? null
   } catch (e) {
-    console.warn('Failed to fetch cached announces', e)
+    logger.warn('Failed to fetch cached announces', e)
     inspectState.value.announces = null
   } finally {
     inspectState.value.loading = false
@@ -275,27 +295,25 @@ const formatFileSize = (bytes: number): string => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
   if (bytes === 0) return '0 Bytes'
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
+  return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i]
 }
 
 const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleDateString() + ' ' + 
-         new Date(dateString).toLocaleTimeString()
+  return new Date(dateString).toLocaleDateString() + ' ' + new Date(dateString).toLocaleTimeString()
 }
 
 onMounted(() => {
   // Load initial downloads from API
   refreshDownloads()
-  
+
   // Initialize virtual scrolling
   nextTick(() => {
     updateVisibleRange()
   })
-  
+
   // No polling needed - SignalR pushes updates in real-time!
   // The downloads store automatically receives updates via WebSocket
 })
-
 </script>
 
 <style scoped>
@@ -394,7 +412,7 @@ onMounted(() => {
   color: #666;
   background: white;
   border-radius: 6px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .downloads-list {
@@ -407,7 +425,7 @@ onMounted(() => {
   background: white;
   border-radius: 6px;
   padding: 1.5rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 2rem;
@@ -574,7 +592,7 @@ onMounted(() => {
     grid-template-columns: 1fr;
     gap: 1rem;
   }
-  
+
   .download-actions {
     flex-direction: row;
   }

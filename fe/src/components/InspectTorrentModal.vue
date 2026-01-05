@@ -22,7 +22,9 @@
       </div>
 
       <footer>
-        <button @click="downloadTorrent" :disabled="loading || !hasTorrent">Download Torrent</button>
+        <button @click="downloadTorrent" :disabled="loading || !hasTorrent">
+          Download Torrent
+        </button>
         <button @click="close">Close</button>
       </footer>
     </div>
@@ -32,6 +34,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { apiService } from '@/services/api'
+import { logger } from '@/utils/logger'
 
 const props = defineProps<{
   downloadId: string
@@ -44,25 +47,33 @@ const loading = ref(false)
 const announces = ref<string[] | null>(props.initialAnnounces ?? null)
 let cachedTorrent: { blob: Blob; filename?: string } | null = null
 
-watch(() => props.downloadId, async (id) => {
-  if (!id) return
-  loading.value = true
-  try {
-    const r = await apiService.getCachedAnnounces(id)
-    announces.value = r?.announces ?? null
+watch(
+  () => props.downloadId,
+  async (id) => {
+    if (!id) return
+    loading.value = true
+    try {
+      const r = await apiService.getCachedAnnounces(id)
+      announces.value = r?.announces ?? null
 
-    // Pre-fetch torrent blob so download is instant
-    cachedTorrent = await apiService.getCachedTorrent(id)
-  } catch (e) {
-    console.warn('Failed to fetch cached torrent/announces', e)
-  } finally {
-    loading.value = false
-  }
-}, { immediate: true })
+      // Pre-fetch torrent blob so download is instant
+      cachedTorrent = await apiService.getCachedTorrent(id)
+    } catch (e) {
+      logger.warn('Failed to fetch cached torrent/announces', e)
+    } finally {
+      loading.value = false
+    }
+  },
+  { immediate: true },
+)
 
-function close() { emits('close') }
+function close() {
+  emits('close')
+}
 
-function hasTorrent() { return !!cachedTorrent?.blob }
+function hasTorrent() {
+  return !!cachedTorrent?.blob
+}
 
 function downloadTorrent() {
   if (!cachedTorrent) return
@@ -84,7 +95,7 @@ function downloadTorrent() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0,0,0,0.4);
+  background: rgba(0, 0, 0, 0.4);
   z-index: 1000;
 }
 .modal {
@@ -98,7 +109,17 @@ header {
   justify-content: space-between;
   align-items: center;
 }
-.modal-body { min-height: 120px }
-footer { display:flex; justify-content:flex-end; gap:0.5rem }
-.close { background: none; border: none; font-size: 1.2rem }
+.modal-body {
+  min-height: 120px;
+}
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+}
 </style>

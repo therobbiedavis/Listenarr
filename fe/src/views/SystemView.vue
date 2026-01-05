@@ -18,7 +18,7 @@
 
     <div class="system-status">
       <div v-if="error" class="error-message">
-  <PhWarning />
+        <PhWarning />
         {{ error }}
       </div>
 
@@ -30,7 +30,7 @@
       <div v-else class="status-grid">
         <div class="status-card">
           <div class="status-header">
-              <div class="card-title">
+            <div class="card-title">
               <PhCheckCircle />
               <h3>API Status</h3>
             </div>
@@ -54,7 +54,7 @@
 
         <div class="status-card">
           <div class="status-header">
-              <div class="card-title">
+            <div class="card-title">
               <PhDownload />
               <h3>Download Clients</h3>
             </div>
@@ -64,12 +64,15 @@
           </div>
           <div class="status-details">
             <div v-if="downloadClients.length === 0" class="empty-message">
-          <PhInfo />
+              <PhInfo />
               <span>No download clients configured</span>
             </div>
             <div v-else>
               <div v-for="client in downloadClients" :key="client.name" class="client-status">
-                <component :is="client.status === 'connected' ? PhCheckCircle : PhXCircle" :class="client.status === 'connected' ? 'success' : 'error'" />
+                <component
+                  :is="client.status === 'connected' ? PhCheckCircle : PhXCircle"
+                  :class="client.status === 'connected' ? 'success' : 'error'"
+                />
                 <span class="client-name">{{ client.name }}</span>
                 <span :class="['client-indicator', client.status]">{{ client.status }}</span>
               </div>
@@ -79,7 +82,7 @@
 
         <div class="status-card">
           <div class="status-header">
-              <div class="card-title">
+            <div class="card-title">
               <PhHardDrives />
               <h3>Storage</h3>
             </div>
@@ -92,10 +95,13 @@
           </div>
           <div v-if="storageInfo" class="status-details">
             <div class="storage-bar">
-              <div 
-                class="storage-fill" 
+              <div
+                class="storage-fill"
                 :style="{ width: storageInfo.usedPercentage + '%' }"
-                :class="{ warning: storageInfo.usedPercentage > 80, danger: storageInfo.usedPercentage > 90 }"
+                :class="{
+                  warning: storageInfo.usedPercentage > 80,
+                  danger: storageInfo.usedPercentage > 90,
+                }"
               ></div>
             </div>
             <div class="detail-row">
@@ -113,7 +119,7 @@
 
         <div class="status-card">
           <div class="status-header">
-              <div class="card-title">
+            <div class="card-title">
               <PhCloud />
               <h3>External APIs</h3>
             </div>
@@ -128,7 +134,10 @@
             </div>
             <div v-else>
               <div v-for="api in externalApis.apis" :key="api.name" class="client-status">
-                <component :is="api.status === 'connected' ? PhCheckCircle : PhXCircle" :class="api.status === 'connected' ? 'success' : 'error'" />
+                <component
+                  :is="api.status === 'connected' ? PhCheckCircle : PhXCircle"
+                  :class="api.status === 'connected' ? 'success' : 'error'"
+                />
                 <span class="client-name">{{ api.name }}</span>
                 <span :class="['client-indicator', api.status]">{{ api.status }}</span>
               </div>
@@ -138,7 +147,7 @@
 
         <div class="status-card">
           <div class="status-header">
-              <div class="card-title">
+            <div class="card-title">
               <PhWifiX />
               <h3>WebSockets</h3>
             </div>
@@ -189,7 +198,10 @@
             <PhMemory />
             <div class="info-content">
               <label>Memory Usage</label>
-              <span>{{ systemInfo.memory.usedFormatted }} / {{ systemInfo.memory.totalFormatted }}</span>
+              <span
+                >{{ systemInfo.memory.usedFormatted }} /
+                {{ systemInfo.memory.totalFormatted }}</span
+              >
               <span class="percentage">({{ systemInfo.memory.usedPercentage.toFixed(1) }}%)</span>
             </div>
           </div>
@@ -215,7 +227,10 @@
               <PhFileText />
               Recent Logs
             </h2>
-            <div class="connection-status" :class="{ connected: logsConnected, disconnected: !logsConnected }">
+            <div
+              class="connection-status"
+              :class="{ connected: logsConnected, disconnected: !logsConnected }"
+            >
               <span class="status-dot"></span>
               {{ logsConnected ? 'Live' : 'Disconnected' }}
             </div>
@@ -233,11 +248,7 @@
           </div>
         </div>
         <div class="logs-container">
-          <div 
-            v-for="log in recentLogs" 
-            :key="log.id"
-            :class="['log-entry', log.level]"
-          >
+          <div v-for="log in recentLogs" :key="log.id" :class="['log-entry', log.level]">
             <component :is="getLogIconComponent(log.level)" class="log-icon" />
             <span class="log-time">{{ formatLogTime(log.timestamp) }}</span>
             <span class="log-level">{{ log.level.toUpperCase() }}</span>
@@ -251,11 +262,40 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { PhCpu, PhSpinner, PhArrowClockwise, PhWarning, PhCheckCircle, PhXCircle, PhCode, PhClock, PhDownload, PhInfo, PhHardDrives, PhFolderOpen, PhChartBar, PhCloud, PhWifiX, PhBroadcast, PhActivity, PhDesktopTower, PhMemory, PhFileText, PhEye, PhDownloadSimple, PhTrash } from '@phosphor-icons/vue'
+import {
+  PhCpu,
+  PhSpinner,
+  PhArrowClockwise,
+  PhWarning,
+  PhCheckCircle,
+  PhXCircle,
+  PhCode,
+  PhClock,
+  PhDownload,
+  PhInfo,
+  PhHardDrives,
+  PhFolderOpen,
+  PhChartBar,
+  PhCloud,
+  PhWifiX,
+  PhBroadcast,
+  PhActivity,
+  PhDesktopTower,
+  PhMemory,
+  PhFileText,
+  PhEye,
+  PhDownloadSimple,
+  PhTrash,
+} from '@phosphor-icons/vue'
 import { useSignalR } from '@/composables/useSignalR'
 import { useSystemLogs } from '@/composables/useSystemLogs'
 import { useRouter } from 'vue-router'
-import { getSystemInfo, getStorageInfo, getServiceHealth, downloadLogs as downloadLogsApi } from '@/services/api'
+import {
+  getSystemInfo,
+  getStorageInfo,
+  getServiceHealth,
+  downloadLogs as downloadLogsApi,
+} from '@/services/api'
 import type { SystemInfo, StorageInfo, ServiceHealth } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -272,13 +312,13 @@ const error = ref<string | null>(null)
 const apiStatus = ref({
   status: 'unknown' as string,
   version: '',
-  uptime: ''
+  uptime: '',
 })
 
 const downloadClientsStatus = ref({
   status: 'unknown' as string,
   connected: 0,
-  total: 0
+  total: 0,
 })
 
 const downloadClients = ref<Array<{ name: string; status: string }>>([])
@@ -287,59 +327,62 @@ const externalApis = ref({
   status: 'unknown' as string,
   connected: 0,
   total: 0,
-  apis: [] as Array<{ name: string; status: string }>
+  apis: [] as Array<{ name: string; status: string }>,
 })
 
 // Real-time logs using SignalR
-const { logs: recentLogs, isConnected: logsConnected, clearLogs: clearSystemLogs } = useSystemLogs(50)
+const {
+  logs: recentLogs,
+  isConnected: logsConnected,
+  clearLogs: clearSystemLogs,
+} = useSystemLogs(50)
 
 // Load all system data
 const loadSystemData = async () => {
   loading.value = true
   error.value = null
-  
+
   try {
     // Load all data in parallel
     const [sysInfo, storage, health] = await Promise.all([
       getSystemInfo(),
       getStorageInfo(),
-      getServiceHealth()
+      getServiceHealth(),
     ])
-    
+
     systemInfo.value = sysInfo
     storageInfo.value = storage
     serviceHealth.value = health
-    
+
     // Update API status
     apiStatus.value = {
       status: health.status,
       version: health.version,
-      uptime: health.uptime
+      uptime: health.uptime,
     }
-    
+
     // Update download clients status
     downloadClientsStatus.value = {
       status: health.downloadClients.status,
       connected: health.downloadClients.connected,
-      total: health.downloadClients.total
+      total: health.downloadClients.total,
     }
-    
-    downloadClients.value = health.downloadClients.clients.map(client => ({
+
+    downloadClients.value = health.downloadClients.clients.map((client) => ({
       name: client.name,
-      status: client.status
+      status: client.status,
     }))
-    
+
     // Update external APIs status
     externalApis.value = {
       status: health.externalApis.status,
       connected: health.externalApis.connected,
       total: health.externalApis.total,
-      apis: health.externalApis.apis.map(api => ({
+      apis: health.externalApis.apis.map((api) => ({
         name: api.name,
-        status: api.status
-      }))
+        status: api.status,
+      })),
     }
-    
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load system data'
     logger.error('Error loading system data:', err)
@@ -697,7 +740,9 @@ onMounted(() => {
 .storage-fill {
   height: 100%;
   background: linear-gradient(90deg, #007acc, #0098ff);
-  transition: width 0.5s ease, background 0.3s;
+  transition:
+    width 0.5s ease,
+    background 0.3s;
   border-radius: 6px;
 }
 
@@ -786,8 +831,13 @@ onMounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .section-actions {
@@ -936,25 +986,33 @@ onMounted(() => {
   color: #007acc;
 }
 
-.log-entry.info .log-icon svg { color: #007acc; }
+.log-entry.info .log-icon svg {
+  color: #007acc;
+}
 
 .log-entry.warning > i {
   color: #f39c12;
 }
 
-.log-entry.warning .log-icon svg { color: #f39c12; }
+.log-entry.warning .log-icon svg {
+  color: #f39c12;
+}
 
 .log-entry.error > i {
   color: #e74c3c;
 }
 
-.log-entry.error .log-icon svg { color: #e74c3c; }
+.log-entry.error .log-icon svg {
+  color: #e74c3c;
+}
 
 .log-entry.success > i {
   color: #27ae60;
 }
 
-.log-entry.success .log-icon svg { color: #27ae60; }
+.log-entry.success .log-icon svg {
+  color: #27ae60;
+}
 
 .log-time {
   color: #666;

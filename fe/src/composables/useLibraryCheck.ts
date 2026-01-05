@@ -26,16 +26,14 @@ export function useLibraryCheck() {
     logger.debug('Marking existing results...')
 
     const libraryAsins = new Set(
-      libraryStore.audiobooks
-        .map(book => book.asin)
-        .filter((asin): asin is string => !!asin)
+      libraryStore.audiobooks.map((book) => book.asin).filter((asin): asin is string => !!asin),
     )
 
     // Also collect stored OpenLibrary IDs from the library (if any)
     const libraryOlIds = new Set(
       libraryStore.audiobooks
-        .map(book => book.openLibraryId)
-        .filter((id: unknown): id is string => !!id)
+        .map((book) => book.openLibraryId)
+        .filter((id: unknown): id is string => !!id),
     )
 
     logger.debug('Library ASINs:', Array.from(libraryAsins))
@@ -76,14 +74,20 @@ export function useLibraryCheck() {
     logger.debug('Added ASINs after cleanup and marking:', Array.from(addedAsins.value))
   }
 
-  const isAudibleAdded = (audibleResult: any): boolean => {
+  type AudibleResult = { asin?: string; openLibraryId?: string } | null | undefined
+  const isAudibleAdded = (audibleResult: AudibleResult): boolean => {
     if (!audibleResult) return false
     if (audibleResult.asin && addedAsins.value.has(audibleResult.asin)) return true
-    if (audibleResult.openLibraryId && addedOpenLibraryIds.value.has(audibleResult.openLibraryId)) return true
+    if (audibleResult.openLibraryId && addedOpenLibraryIds.value.has(audibleResult.openLibraryId))
+      return true
     return false
   }
 
-  const isTitleResultAdded = (book: any): boolean => {
+  type TitleResultLike = {
+    searchResult?: { asin?: string; id?: string } | undefined
+    asin?: string
+  }
+  const isTitleResultAdded = (book: TitleResultLike): boolean => {
     const asin = book.searchResult?.asin || book.asin
     const olid = book.searchResult?.id
     if (asin && addedAsins.value.has(asin)) return true
@@ -107,6 +111,6 @@ export function useLibraryCheck() {
     isAudibleAdded,
     isTitleResultAdded,
     markAsinAdded,
-    markOpenLibraryIdAdded
+    markOpenLibraryIdAdded,
   }
 }

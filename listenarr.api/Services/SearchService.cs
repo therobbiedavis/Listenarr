@@ -61,6 +61,7 @@ namespace Listenarr.Api.Services
         private readonly SearchResultScorer _searchResultScorer;
         private readonly AsinSearchHandler _asinSearchHandler;
         private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _cache;
+        private readonly IEnumerable<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider> _searchProviders;
 
         public SearchService(
             HttpClient httpClient,
@@ -85,7 +86,9 @@ namespace Listenarr.Api.Services
             AsinEnricher asinEnricher,
             FallbackScraper fallbackScraper,
             SearchResultScorer searchResultScorer,
-            AsinSearchHandler asinSearchHandler, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null)
+            AsinSearchHandler asinSearchHandler,
+            IEnumerable<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider> searchProviders,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
@@ -108,6 +111,7 @@ namespace Listenarr.Api.Services
             _asinCandidateCollector = asinCandidateCollector;
             _asinEnricher = asinEnricher;
             _fallbackScraper = fallbackScraper;
+            _searchProviders = searchProviders;
             _searchResultScorer = searchResultScorer;
             _asinSearchHandler = asinSearchHandler;
             _cache = cache;
@@ -2084,33 +2088,26 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
+                // Try to find a matching provider for this indexer type
+                var provider = _searchProviders.FirstOrDefault(p => 
+                    p.IndexerType.Equals(indexer.Implementation, StringComparison.OrdinalIgnoreCase) ||
+                    (p.IndexerType.Equals("Torznab", StringComparison.OrdinalIgnoreCase) && indexer.Implementation.Equals("Newznab", StringComparison.OrdinalIgnoreCase)));
+                
+                if (provider != null)
                 {
-                    var iaResults = await SearchInternetArchiveAsync(indexer, query, category);
+                    var providerResults = await provider.SearchAsync(indexer, query, category, request);
                     // Ensure Source is set for all results
-                    foreach (var r in iaResults)
+                    foreach (var r in providerResults)
                     {
                         if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
                     }
-                    return iaResults;
-                }
-                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
-                {
-                    var mamResults = await SearchMyAnonamouseAsync(indexer, query, category, request);
-                    foreach (var r in mamResults)
-                    {
-                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
-                    }
-                    return mamResults;
+                    return providerResults;
                 }
                 else
                 {
-                    var tnResults = await SearchTorznabNewznabAsync(indexer, query, category);
-                    foreach (var r in tnResults)
-                    {
-                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
-                    }
-                    return tnResults;
+                    // Default fallback if no provider matches
+                    _logger.LogWarning("No provider found for indexer type: {Implementation}", indexer.Implementation);
+                    return new List<IndexerSearchResult>();
                 }
             }
             catch (Exception ex)

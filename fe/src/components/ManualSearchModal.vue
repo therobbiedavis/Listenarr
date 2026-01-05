@@ -33,7 +33,7 @@
                   @keyup.enter="search"
                   :disabled="searching"
                 />
-                <button 
+                <button
                   class="search-btn"
                   @click="search"
                   :disabled="searching || !searchQuery.trim()"
@@ -47,19 +47,13 @@
                   Search
                 </button>
               </div>
-
-
             </div>
-            
+
             <div class="results-controls">
               <div class="results-count">
                 {{ displayResults.length }} result{{ displayResults.length !== 1 ? 's' : '' }} found
               </div>
-              <button 
-                v-if="!searching" 
-                class="btn btn-secondary btn-sm"
-                @click="search"
-              >
+              <button v-if="!searching" class="btn btn-secondary btn-sm" @click="search">
                 <PhArrowClockwise />
                 Refresh
               </button>
@@ -118,7 +112,11 @@
                       <component :is="getSortIcon('Grabs')" class="sort-icon" />
                     </span>
                   </th>
-                  <th v-if="anyHasLanguage" class="col-language sortable" @click="setSort('Language')">
+                  <th
+                    v-if="anyHasLanguage"
+                    class="col-language sortable"
+                    @click="setSort('Language')"
+                  >
                     <span class="header-content">
                       Languages
                       <component :is="getSortIcon('Language')" class="sort-icon" />
@@ -140,11 +138,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr 
-                  v-for="result in displayResults" 
-                  :key="result.id"
-                  class="result-row"
-                >
+                <tr v-for="result in displayResults" :key="result.id" class="result-row">
                   <td class="col-source">
                     <span :class="['source-badge', getSourceType(result)]">
                       {{ getSourceType(result) }}
@@ -173,17 +167,31 @@
                   </td>
                   <td class="col-size">{{ formatSize(result.size) }}</td>
                   <td v-if="anyHasPeers" class="col-peers">
-                    <div class="peers-cell" v-if="result.seeders !== undefined && result.seeders !== null">
-                      <span class="seeders" :class="{ 'good': (result.seeders ?? 0) > 10, 'medium': (result.seeders ?? 0) > 0 && (result.seeders ?? 0) <= 10 }">
+                    <div
+                      class="peers-cell"
+                      v-if="result.seeders !== undefined && result.seeders !== null"
+                    >
+                      <span
+                        class="seeders"
+                        :class="{
+                          good: (result.seeders ?? 0) > 10,
+                          medium: (result.seeders ?? 0) > 0 && (result.seeders ?? 0) <= 10,
+                        }"
+                      >
                         <PhArrowUp /> {{ result.seeders }}
                       </span>
-                      <span class="leechers" v-if="result.leechers !== undefined && result.leechers !== null">
+                      <span
+                        class="leechers"
+                        v-if="result.leechers !== undefined && result.leechers !== null"
+                      >
                         <PhArrowDown /> {{ result.leechers }}
                       </span>
                     </div>
                   </td>
                   <td class="col-grabs">
-                    <span v-if="result.grabs !== undefined" class="grabs">✚ {{ result.grabs }}</span>
+                    <span v-if="result.grabs !== undefined" class="grabs"
+                      >✚ {{ result.grabs }}</span
+                    >
                     <span v-else class="grabs unknown">-</span>
                   </td>
                   <td v-if="anyHasLanguage" class="col-language">
@@ -206,7 +214,7 @@
                     <div v-if="getResultScore(result.id)" class="score-cell">
                       <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
                         <template #default>
-                          <span 
+                          <span
                             v-if="getResultScore(result.id)?.isRejected"
                             class="score-badge rejected"
                             :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
@@ -223,7 +231,7 @@
                     <span v-else class="score-badge loading">-</span>
                   </td>
                   <td class="col-actions">
-                    <button 
+                    <button
                       class="btn-icon btn-download"
                       @click="downloadResult(result)"
                       :disabled="downloading[result.id]"
@@ -249,10 +257,28 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { PhMagnifyingGlass, PhX, PhSpinner, PhArrowClockwise, PhArrowUp, PhArrowDown, PhXCircle, PhDownloadSimple, PhArrowsDownUp } from '@phosphor-icons/vue'
+import {
+  PhMagnifyingGlass,
+  PhX,
+  PhSpinner,
+  PhArrowClockwise,
+  PhArrowUp,
+  PhArrowDown,
+  PhXCircle,
+  PhDownloadSimple,
+  PhArrowsDownUp,
+} from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
-import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
+import { logger } from '@/utils/logger'
+import type {
+  Audiobook,
+  SearchResult,
+  QualityScore,
+  QualityProfile,
+  SearchSortBy,
+  SearchSortDirection,
+} from '@/types'
 import { getScoreBreakdownTooltip, computeNormalizedSmart } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
 import { safeText } from '@/utils/textUtils'
@@ -279,14 +305,16 @@ const sortBy = ref<SearchSortBy | 'Score'>('Score')
 const sortDirection = ref<SearchSortDirection>('Descending')
 const searchQuery = ref('')
 
-
-watch(() => props.isOpen, (isOpen) => {
-  if (isOpen && props.audiobook) {
-    // Initialize search query with default query and auto-search
-    searchQuery.value = buildSearchQuery()
-    search()
-  }
-})
+watch(
+  () => props.isOpen,
+  (isOpen) => {
+    if (isOpen && props.audiobook) {
+      // Initialize search query with default query and auto-search
+      searchQuery.value = buildSearchQuery()
+      search()
+    }
+  },
+)
 
 const displayResults = computed(() => {
   // When sorting by Score, return a sorted copy derived from `results` so
@@ -317,13 +345,17 @@ const displayResults = computed(() => {
     // scoreA and scoreB are guaranteed to be numbers here (checked above), coerce to number for TS
     const sA = scoreA as number
     const sB = scoreB as number
-    return asc ? (sA - sB) : (sB - sA)
+    return asc ? sA - sB : sB - sA
   })
   return copy
 })
 
-const anyHasPeers = computed(() => displayResults.value.some(r => r.seeders !== undefined && r.seeders !== null))
-const anyHasLanguage = computed(() => displayResults.value.some(r => !!normalizeLanguage(r.language)))
+const anyHasPeers = computed(() =>
+  displayResults.value.some((r) => r.seeders !== undefined && r.seeders !== null),
+)
+const anyHasLanguage = computed(() =>
+  displayResults.value.some((r) => !!normalizeLanguage(r.language)),
+)
 
 // Normalize language values from DTOs/indexers: treat explicit 'unknown' strings as absent
 const normalizeLanguage = (value?: string | null): string | undefined => {
@@ -333,7 +365,7 @@ const normalizeLanguage = (value?: string | null): string | undefined => {
   if (v.toLowerCase() === 'unknown') return undefined
   return v
 }
-const anyHasQuality = computed(() => displayResults.value.some(r => !!r.quality || !!r.format))
+const anyHasQuality = computed(() => displayResults.value.some((r) => !!r.quality || !!r.format))
 
 function shouldShowFormatFallback(result: SearchResult): boolean {
   if (!result) return false
@@ -354,7 +386,7 @@ function setSort(column: SearchSortBy | 'Score') {
     sortBy.value = column as SearchSortBy
     sortDirection.value = 'Descending'
   }
-  
+
   // For Score sorting, sort frontend results, otherwise re-search with backend sorting
   if (column === 'Score') {
     // Frontend sorting for Score column
@@ -399,7 +431,7 @@ function sortFrontendResults() {
     const scoreB = qb!.totalScore
 
     if (scoreA === scoreB) return 0
-    return ascending ? (scoreA - scoreB) : (scoreB - scoreA)
+    return ascending ? scoreA - scoreB : scoreB - scoreA
   })
 }
 
@@ -415,48 +447,65 @@ async function search() {
     // Get count of enabled indexers first
     const enabledIndexers = await apiService.getEnabledIndexers()
     totalIndexers.value = enabledIndexers.length
-    
+
     // Build search query from title and author (fallback if no manual query)
     const query = searchQuery.value.trim() || buildSearchQuery()
-    
+
     // Search each indexer individually to show progress
     const allResults: SearchResult[] = []
     const searchPromises = enabledIndexers.map(async (indexer) => {
       try {
         // Map MyAnonamouse indexer options (if present on the indexer) to searchByApi opts so backend can apply them
-    let opts: any = undefined
-    if (indexer.implementation === 'MyAnonamouse') {
-      try {
-        const settings = indexer.additionalSettings ? JSON.parse(indexer.additionalSettings) : {}
-        const mam = settings.mam_options ?? settings
-        opts = {
-          mamFilter: mam?.filter || undefined,
-          mamSearchInDescription: mam?.searchInDescription !== undefined ? mam?.searchInDescription : undefined,
-          mamSearchInSeries: mam?.searchInSeries !== undefined ? mam?.searchInSeries : undefined,
-          mamSearchInFilenames: mam?.searchInFilenames !== undefined ? mam?.searchInFilenames : undefined,
-          mamLanguage: mam?.language || undefined,
-          mamFreeleechWedge: mam?.freeleechWedge || undefined,
-          mamEnrichResults: mam?.enrichResults !== undefined ? mam?.enrichResults : undefined,
-          mamEnrichTopResults: mam?.enrichTopResults !== undefined ? mam?.enrichTopResults : undefined
+        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+        let opts: any = undefined
+        if (indexer.implementation === 'MyAnonamouse') {
+          try {
+            const settings = indexer.additionalSettings
+              ? JSON.parse(indexer.additionalSettings)
+              : {}
+            const mam = settings.mam_options ?? settings
+            opts = {
+              mamFilter: mam?.filter || undefined,
+              mamSearchInDescription:
+                mam?.searchInDescription !== undefined ? mam?.searchInDescription : undefined,
+              mamSearchInSeries:
+                mam?.searchInSeries !== undefined ? mam?.searchInSeries : undefined,
+              mamSearchInFilenames:
+                mam?.searchInFilenames !== undefined ? mam?.searchInFilenames : undefined,
+              mamLanguage: mam?.language || undefined,
+              mamFreeleechWedge: mam?.freeleechWedge || undefined,
+              mamEnrichResults: mam?.enrichResults !== undefined ? mam?.enrichResults : undefined,
+              mamEnrichTopResults:
+                mam?.enrichTopResults !== undefined ? mam?.enrichTopResults : undefined,
+            }
+          } catch (e) {
+            logger.warn('Failed to parse MyAnonamouse options from indexer.additionalSettings', e)
+          }
         }
-      } catch (e) {
-        console.warn('Failed to parse MyAnonamouse options from indexer.additionalSettings', e)
-      }
-    }
 
-    const indexerResultsRaw: any[] = await apiService.searchByApi(indexer.id.toString(), query, undefined, opts)
+        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+        const indexerResultsRaw: any[] = await apiService.searchByApi(
+          indexer.id.toString(),
+          query,
+          undefined,
+          opts,
+        )
 
         // Normalize Prowlarr-like IndexerResultDto into local SearchResult shape for the UI
         let normalized: SearchResult[] = []
-        if (indexerResultsRaw && indexerResultsRaw.length > 0 && (indexerResultsRaw[0] as any).guid !== undefined) {
-          normalized = indexerResultsRaw.map((dto: any) => ({
+        if (
+          Array.isArray(indexerResultsRaw) &&
+          indexerResultsRaw.length > 0 &&
+          (indexerResultsRaw[0] as Record<string, unknown>).guid !== undefined
+        ) {
+          normalized = (indexerResultsRaw as Record<string, unknown>[]).map((dto) => ({
             id: dto.guid ?? dto.infoUrl ?? dto.fileName ?? String(Math.random()),
             title: dto.title ?? '',
-            size: typeof dto.size === 'string' ? Number(dto.size) || 0 : dto.size ?? 0,
+            size: typeof dto.size === 'string' ? Number(dto.size) || 0 : (dto.size ?? 0),
             seeders: dto.seeders ?? null,
             leechers: dto.leechers ?? null,
-            grabs: typeof dto.grabs === 'string' ? Number(dto.grabs) || 0 : dto.grabs ?? 0,
-            files: typeof dto.files === 'string' ? Number(dto.files) || 0 : dto.files ?? 0,
+            grabs: typeof dto.grabs === 'string' ? Number(dto.grabs) || 0 : (dto.grabs ?? 0),
+            files: typeof dto.files === 'string' ? Number(dto.files) || 0 : (dto.files ?? 0),
             magnetLink: '',
             torrentUrl: dto.downloadUrl ?? '',
             nzbUrl: '',
@@ -488,26 +537,28 @@ async function search() {
             publishedDate: dto.publishDate ?? dto.added ?? dto.publish_date ?? '',
             // Use filetype when available (MP3/M4B/etc), fallback to protocol (torrent/nzb)
             format: dto.filetype ?? dto.protocol ?? '',
-            score: 0
+            score: 0,
           }))
         } else {
           // Already in SearchResult shape
-          normalized = (indexerResultsRaw as SearchResult[])
+          normalized = indexerResultsRaw as SearchResult[]
         }
 
         // Normalize any 'unknown' language tokens to undefined so Usenet/DDL results don't show 'Unknown' in UI
-        normalized.forEach(r => { r.language = normalizeLanguage((r as any).language) })
+        normalized.forEach((r) => {
+          r.language = normalizeLanguage(r.language as string | undefined)
+        })
         allResults.push(...normalized)
         searchedIndexers.value++
       } catch (error) {
-        console.warn(`Failed to search indexer ${indexer.name}:`, error)
+        logger.warn(`Failed to search indexer ${indexer.name}:`, error)
         searchedIndexers.value++ // Still count as completed even if failed
       }
     })
-    
+
     // Wait for all searches to complete
     await Promise.all(searchPromises)
-    
+
     // Apply backend sorting if needed (for non-Score columns)
     if (sortBy.value !== 'Score') {
       const backendSortBy = sortBy.value as SearchSortBy
@@ -515,7 +566,7 @@ async function search() {
       allResults.sort((a, b) => {
         switch (backendSortBy) {
           case 'Seeders':
-            return sortDirection.value === 'Ascending' 
+            return sortDirection.value === 'Ascending'
               ? (a.seeders ?? 0) - (b.seeders ?? 0)
               : (b.seeders ?? 0) - (a.seeders ?? 0)
           case 'Grabs':
@@ -523,20 +574,18 @@ async function search() {
               ? (a.grabs ?? 0) - (b.grabs ?? 0)
               : (b.grabs ?? 0) - (a.grabs ?? 0)
           case 'Size':
-            return sortDirection.value === 'Ascending' 
-              ? a.size - b.size 
-              : b.size - a.size
+            return sortDirection.value === 'Ascending' ? a.size - b.size : b.size - a.size
           case 'PublishedDate':
-            return sortDirection.value === 'Ascending' 
+            return sortDirection.value === 'Ascending'
               ? new Date(a.publishedDate).getTime() - new Date(b.publishedDate).getTime()
               : new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
           case 'Title':
-            return sortDirection.value === 'Ascending' 
-              ? a.title.localeCompare(b.title) 
+            return sortDirection.value === 'Ascending'
+              ? a.title.localeCompare(b.title)
               : b.title.localeCompare(a.title)
           case 'Source':
-            return sortDirection.value === 'Ascending' 
-              ? a.source.localeCompare(b.source) 
+            return sortDirection.value === 'Ascending'
+              ? a.source.localeCompare(b.source)
               : b.source.localeCompare(a.source)
           case 'Language':
             // Normalize undefined/unknown languages to empty string for comparison
@@ -544,30 +593,29 @@ async function search() {
               ? (a.language ?? '').localeCompare(b.language ?? '')
               : (b.language ?? '').localeCompare(a.language ?? '')
           case 'Quality':
-            return sortDirection.value === 'Ascending' 
-              ? (a.quality ?? '').localeCompare(b.quality ?? '') 
+            return sortDirection.value === 'Ascending'
+              ? (a.quality ?? '').localeCompare(b.quality ?? '')
               : (b.quality ?? '').localeCompare(a.quality ?? '')
           default:
             return 0
         }
       })
     }
-    
+
     // Deduplicate results by id (multiple indexers can return the same release)
     const seen = new Map<string, SearchResult>()
     for (const r of allResults) {
       if (!seen.has(r.id)) seen.set(r.id, r)
     }
     results.value = Array.from(seen.values())
-    
+
     // Load quality profile and score results (always needed for Score column or display)
     await loadQualityProfileAndScore()
-    
+
     // If sorting by Score, apply frontend sorting
     if (sortBy.value === 'Score') {
       sortFrontendResults()
     }
-    
   } catch (err) {
     console.error('Manual search failed:', err)
   } finally {
@@ -579,78 +627,70 @@ async function loadQualityProfileAndScore() {
   try {
     // Get the audiobook's quality profile or default
     if (props.audiobook?.qualityProfileId) {
-      qualityProfile.value = await apiService.getQualityProfileById(props.audiobook.qualityProfileId)
+      qualityProfile.value = await apiService.getQualityProfileById(
+        props.audiobook.qualityProfileId,
+      )
     } else {
       qualityProfile.value = await apiService.getDefaultQualityProfile()
     }
-    
+
     // Score the search results
     if (qualityProfile.value?.id && results.value.length > 0) {
-      const scores = await apiService.scoreSearchResults(
-        qualityProfile.value.id,
-        results.value
-      )
-      
+      const scores = await apiService.scoreSearchResults(qualityProfile.value.id, results.value)
+
       // Map scores by search result ID
       qualityScores.value.clear()
-      scores.forEach(score => {
+      scores.forEach((score) => {
         qualityScores.value.set(score.searchResult.id, score)
       })
     }
   } catch (error) {
-    console.warn('Failed to load quality profile or score results:', error)
+    logger.warn('Failed to load quality profile or score results:', error)
   }
 }
 
 function buildSearchQuery(): string {
   if (!props.audiobook) return ''
-  
+
   const parts: string[] = []
-  
+
   if (props.audiobook.title) {
     parts.push(props.audiobook.title)
   }
-  
+
   if (props.audiobook.authors && props.audiobook.authors.length > 0 && props.audiobook.authors[0]) {
     parts.push(props.audiobook.authors[0])
   }
-  
+
   return parts.join(' ')
 }
 
 async function downloadResult(result: SearchResult) {
   downloading.value[result.id] = true
   const toast = useToast()
-  
+
   try {
     // Check if this is a DDL
     const isDDL = getSourceType(result) === 'ddl'
     const audiobookId = props.audiobook?.id
-    
+
     if (isDDL) {
       // For DDL, start download in background and add to activity
-      console.log('Starting DDL download:', result.title)
-      console.log('Download type:', result.downloadType)
-      console.log('Download URL:', result.torrentUrl)
-      console.log('Audiobook ID:', audiobookId)
-      
-      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
-      console.log('DDL download started:', response)
-      
+      await apiService.sendToDownloadClient(result, undefined, audiobookId)
+
       // Add to activity/downloads view (will be tracked there)
       // Show success message
       emit('downloaded', result)
-      
+
       // Show feedback briefly
       setTimeout(() => {
         delete downloading.value[result.id]
       }, 1000)
     } else {
       // For torrents/NZB, send to download client (also pass audiobookId for future processing)
-      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
-      console.log('Download started:', response)
+      await apiService.sendToDownloadClient(result, undefined, audiobookId)
       emit('downloaded', result)
-      
+
       // Show success feedback briefly, then remove
       setTimeout(() => {
         delete downloading.value[result.id]
@@ -659,13 +699,14 @@ async function downloadResult(result: SearchResult) {
   } catch (err) {
     console.error('Download failed:', err)
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-    
+
     // Show error in alert with more context
     let userMessage = `Download failed: ${errorMessage}`
     if (errorMessage.includes('Output path not configured')) {
-      userMessage = 'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
+      userMessage =
+        'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
     }
-    
+
     // Show error as a non-blocking toast instead of a modal alert
     toast.error('Download failed', userMessage)
     delete downloading.value[result.id]
@@ -681,7 +722,7 @@ function getSourceType(result: SearchResult): string {
   if (result.downloadType) {
     return result.downloadType.toLowerCase()
   }
-  
+
   // Fallback to legacy detection logic
   // Check for torrent indicators
   if (result.magnetLink || result.torrentUrl) {
@@ -704,7 +745,7 @@ function formatAge(date: Date | string): string {
   const published = new Date(date)
   const diffMs = now.getTime() - published.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-  
+
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return '1 day'
   if (diffDays < 30) return `${diffDays} days`
@@ -718,27 +759,29 @@ function formatAge(date: Date | string): string {
 
 function formatSize(bytes: number): string {
   if (!bytes || bytes === 0) return '-'
-  
+
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
   let unitIndex = 0
-  
+
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024
     unitIndex++
   }
-  
+
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
 
 function getResultScore(resultId: string): QualityScore | undefined {
   // Support both runtime shapes (ref<Map>) and test runner proxied Map (unwrapped)
-  const qsRef: any = qualityScores
-  if (qsRef && qsRef.value && typeof qsRef.value.get === 'function') {
+  const qsRef = qualityScores as unknown as
+    | { value?: Map<string, QualityScore> }
+    | Map<string, QualityScore>
+  if ('value' in qsRef && qsRef.value && typeof qsRef.value.get === 'function') {
     return qsRef.value.get(resultId)
   }
-  if (qsRef && typeof qsRef.get === 'function') {
-    return qsRef.get(resultId)
+  if (typeof (qsRef as Map<string, QualityScore>).get === 'function') {
+    return (qsRef as Map<string, QualityScore>).get(resultId)
   }
   return undefined
 }
@@ -780,21 +823,24 @@ function getResultLink(result: SearchResult): string | undefined {
     // For Usenet results prefer the ID URL if it is a URL (some indexers populate guid as an informational link),
     // otherwise fall back to the indexer/details page (resultUrl / sourceLink / productUrl) before the NZB download.
     if (typeof r.id === 'string' && /^(https?:)?\/\//.test(r.id)) return r.id as string
-    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
+    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+      return r.resultUrl as string
     if (result.productUrl) return result.productUrl
-    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0) return r.sourceLink as string
+    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0)
+      return r.sourceLink as string
     if (result.nzbUrl) return result.nzbUrl
     return undefined
   }
 
   // Torrent / DDL fallback behavior
-  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
+  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+    return r.resultUrl as string
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
   if (result.magnetLink) return result.magnetLink
   return undefined
-} 
+}
 
 function getScoreClass(score: number): string {
   const s = score
@@ -944,7 +990,9 @@ function getScoreClass(score: number): string {
   border-radius: 6px;
   color: white;
   font-size: 1rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   height: 40px;
   box-sizing: border-box;
 }
@@ -1196,7 +1244,9 @@ function getScoreClass(score: number): string {
   padding: 0.35rem 0.7rem;
   border-radius: 6px;
   white-space: nowrap;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .title-cell {
@@ -1354,11 +1404,11 @@ function getScoreClass(score: number): string {
   .modal-container {
     max-width: 95%;
   }
-  
+
   .results-table {
     font-size: 0.8rem;
   }
-  
+
   .col-title {
     min-width: 200px;
   }

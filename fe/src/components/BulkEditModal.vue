@@ -15,12 +15,13 @@
         <div class="info-section">
           <i class="ph ph-info"></i>
           <p>
-            Editing <strong>{{ selectedCount }}</strong> audiobook{{ selectedCount !== 1 ? 's' : '' }}.
-            Only the fields you change will be updated.
+            Editing <strong>{{ selectedCount }}</strong> audiobook{{
+              selectedCount !== 1 ? 's' : ''
+            }}. Only the fields you change will be updated.
           </p>
         </div>
 
-  <form @submit.prevent="handleSave" class="edit-form">
+        <form @submit.prevent="handleSave" class="edit-form">
           <!-- Monitored Status -->
           <div class="form-group">
             <label class="form-label">
@@ -29,35 +30,21 @@
             </label>
             <div class="radio-group">
               <label class="radio-label">
-                <input 
-                  type="radio" 
-                  v-model="formData.monitored" 
-                  :value="null"
-                  name="monitored"
-                />
+                <input type="radio" v-model="formData.monitored" :value="null" name="monitored" />
                 <span>No Change</span>
               </label>
               <label class="radio-label">
-                <input 
-                  type="radio" 
-                  v-model="formData.monitored" 
-                  :value="true"
-                  name="monitored"
-                />
+                <input type="radio" v-model="formData.monitored" :value="true" name="monitored" />
                 <span>Monitored</span>
               </label>
               <label class="radio-label">
-                <input 
-                  type="radio" 
-                  v-model="formData.monitored" 
-                  :value="false"
-                  name="monitored"
-                />
+                <input type="radio" v-model="formData.monitored" :value="false" name="monitored" />
                 <span>Unmonitored</span>
               </label>
             </div>
             <p class="help-text">
-              Monitored audiobooks will be automatically upgraded when better quality releases are found
+              Monitored audiobooks will be automatically upgraded when better quality releases are
+              found
             </p>
           </div>
 
@@ -67,17 +54,9 @@
               <i class="ph ph-star"></i>
               Quality Profile
             </label>
-            <select 
-              id="quality-profile"
-              v-model="formData.qualityProfileId" 
-              class="form-select"
-            >
+            <select id="quality-profile" v-model="formData.qualityProfileId" class="form-select">
               <option :value="null">No Change</option>
-              <option 
-                v-for="profile in qualityProfiles" 
-                :key="profile.id" 
-                :value="profile.id"
-              >
+              <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
                 {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
               </option>
             </select>
@@ -95,10 +74,10 @@
 
             <label class="radio-label">
               <input type="checkbox" v-model="formData.rootChangeEnabled" />
-              <span style="margin-left:0.5rem">Change root folder</span>
+              <span style="margin-left: 0.5rem">Change root folder</span>
             </label>
 
-            <div v-if="formData.rootChangeEnabled" style="margin-top:0.75rem">
+            <div v-if="formData.rootChangeEnabled" style="margin-top: 0.75rem">
               <RootFolderSelect
                 v-model:rootId="formData.rootId"
                 v-model:customPath="formData.rootCustomPath"
@@ -106,21 +85,16 @@
               />
 
               <p class="help-text">
-                Select a named root or provide a custom path. If you choose "Use default" and no named default exists, the application default output path will be used.
+                Select a named root or provide a custom path. If you choose "Use default" and no
+                named default exists, the application default output path will be used.
               </p>
             </div>
           </div>
 
           <!-- Action Buttons -->
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="close">
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              class="btn btn-primary" 
-              :disabled="saving || !hasChanges"
-            >
+            <button type="button" class="btn btn-secondary" @click="close">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="saving || !hasChanges">
               <i v-if="saving" class="ph ph-spinner ph-spin"></i>
               <i v-else class="ph ph-check"></i>
               {{ saving ? 'Saving...' : 'Save Changes' }}
@@ -130,13 +104,18 @@
 
         <div v-if="showResults" class="results-section">
           <h4>Bulk Update Results</h4>
-          <p>{{ results.filter(r => r.success).length }} succeeded, {{ results.filter(r => !r.success).length }} failed</p>
+          <p>
+            {{ results.filter((r) => r.success).length }} succeeded,
+            {{ results.filter((r) => !r.success).length }} failed
+          </p>
 
           <div class="results-list">
             <div v-for="res in results" :key="res.id" class="result-item">
               <div class="result-header">
                 <strong>Audiobook ID {{ res.id }}</strong>
-                <span class="status" :class="{ success: res.success, error: !res.success }">{{ res.success ? 'Success' : 'Failed' }}</span>
+                <span class="status" :class="{ success: res.success, error: !res.success }">{{
+                  res.success ? 'Success' : 'Failed'
+                }}</span>
               </div>
               <ul v-if="res.errors && res.errors.length > 0" class="error-list">
                 <li v-for="(err, idx) in res.errors" :key="idx">{{ err }}</li>
@@ -193,35 +172,42 @@ const formData = ref<FormData>({
   qualityProfileId: null,
   rootChangeEnabled: false,
   rootId: null,
-  rootCustomPath: null
+  rootCustomPath: null,
 })
 
 const hasChanges = computed(() => {
-  return formData.value.monitored !== null ||
-         formData.value.qualityProfileId !== null ||
-         (formData.value.rootChangeEnabled === true && (formData.value.rootId !== null || (formData.value.rootCustomPath && formData.value.rootCustomPath.length > 0)))
+  return (
+    formData.value.monitored !== null ||
+    formData.value.qualityProfileId !== null ||
+    (formData.value.rootChangeEnabled === true &&
+      (formData.value.rootId !== null ||
+        (formData.value.rootCustomPath && formData.value.rootCustomPath.length > 0)))
+  )
 })
 
 const toast = useToast()
 
-watch(() => props.isOpen, async (isOpen) => {
-  if (isOpen) {
-    await loadData()
-    resetForm()
-  }
-})
+watch(
+  () => props.isOpen,
+  async (isOpen) => {
+    if (isOpen) {
+      await loadData()
+      resetForm()
+    }
+  },
+)
 
 async function loadData() {
   try {
     // Load quality profiles
     qualityProfiles.value = await apiService.getQualityProfiles()
-    
-      // Load root folders from configuration
+
+    // Load root folders from configuration
     await rootStore.load()
     if (rootStore.folders.length > 0) {
-      rootFolders.value = rootStore.folders.map(f => f.path)
+      rootFolders.value = rootStore.folders.map((f) => f.path)
       // Capture default output path for fallback when user picks "Use default"
-      const def = rootStore.folders.find(f => f.isDefault)
+      const def = rootStore.folders.find((f) => f.isDefault)
       defaultOutputPath.value = def?.path ?? null
     } else {
       const appSettings = await apiService.getApplicationSettings()
@@ -241,7 +227,7 @@ function resetForm() {
     qualityProfileId: null,
     rootChangeEnabled: false,
     rootId: null,
-    rootCustomPath: null
+    rootCustomPath: null,
   }
 }
 
@@ -254,22 +240,22 @@ async function handleSave() {
   try {
     // Build update payload with only changed fields
     const updates: Record<string, boolean | number | string> = {}
-    
+
     if (formData.value.monitored !== null) {
       updates.monitored = formData.value.monitored
     }
-    
+
     if (formData.value.qualityProfileId !== null) {
       updates.qualityProfileId = formData.value.qualityProfileId
     }
-    
+
     if (formData.value.rootChangeEnabled === true) {
       // Resolve chosen root path: named root, custom path or default
       let chosen: string | null = null
       if (formData.value.rootId === 0) {
         chosen = formData.value.rootCustomPath || null
       } else if (formData.value.rootId && formData.value.rootId > 0) {
-        const found = rootStore.folders.find(f => f.id === formData.value.rootId)
+        const found = rootStore.folders.find((f) => f.id === formData.value.rootId)
         chosen = found?.path ?? null
       } else if (formData.value.rootId === null) {
         // Use default path (if available)
@@ -291,26 +277,26 @@ async function handleSave() {
         ids,
         updates,
         navigatorOnline: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       })
     } catch {
       // ignore logging errors in non-browser envs
     }
-    
-  // Call bulk update API
-  const resp = await apiService.bulkUpdateAudiobooks(ids, updates)
 
-  // Save per-id results for display
-  results.value = resp.results || []
-  showResults.value = true
+    // Call bulk update API
+    const resp = await apiService.bulkUpdateAudiobooks(ids, updates)
 
-  // Count successes
-  const successCount = results.value.filter(r => r.success).length
-  toast.success('Bulk update', `Updated ${successCount} of ${results.value.length} audiobook(s)`)
+    // Save per-id results for display
+    results.value = resp.results || []
+    showResults.value = true
 
-  // Notify parent and leave modal open so user can review results
-  emit('saved')
-  } catch (error){
+    // Count successes
+    const successCount = results.value.filter((r) => r.success).length
+    toast.success('Bulk update', `Updated ${successCount} of ${results.value.length} audiobook(s)`)
+
+    // Notify parent and leave modal open so user can review results
+    emit('saved')
+  } catch (error) {
     // Enhanced error logging so browser console shows more details
     try {
       const err = error as Error & { url?: string }
@@ -318,7 +304,7 @@ async function handleSave() {
         name: err?.name,
         message: err?.message,
         stack: err?.stack,
-        url: err?.url || '/api/library/bulk-update'
+        url: err?.url || '/api/library/bulk-update',
       })
     } catch {
       // fallback
@@ -342,7 +328,7 @@ async function handleSave() {
     } catch {
       // fallback
     }
-  toast.error('Bulk update failed', message)
+    toast.error('Bulk update failed', message)
   } finally {
     saving.value = false
   }
@@ -544,14 +530,14 @@ function close() {
   border-color: #007acc;
 }
 
-.radio-label input[type="radio"] {
+.radio-label input[type='radio'] {
   width: 18px;
   height: 18px;
   cursor: pointer;
   accent-color: #007acc;
 }
 
-.radio-label input[type="radio"]:checked + span {
+.radio-label input[type='radio']:checked + span {
   color: white;
   font-weight: 500;
 }

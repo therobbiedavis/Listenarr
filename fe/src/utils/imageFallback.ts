@@ -1,4 +1,3 @@
-import { apiService } from '@/services/api'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 
 export function handleImageError(ev: Event) {
@@ -7,16 +6,24 @@ export function handleImageError(ev: Event) {
     if (!img) return
 
     // Prevent loops
-    try { if ((img as any).__imageFallbackDone) return; (img as any).__imageFallbackDone = true } catch {}
-
-    // Try to extract identifier from data-original-src or src that points to /api/images/{id}
-    const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
-
+    try {
+      const imgRec = img as unknown as Record<string, unknown>
+      if (imgRec.__imageFallbackDone) return
+      imgRec.__imageFallbackDone = true
+    } catch {}
 
     // Set placeholder and clear lazy attributes
-    try { img.src = getPlaceholderUrl() } catch {}
-    try { img.removeAttribute('data-src') } catch {}
-    try { img.removeAttribute('data-original-src') } catch {}
-    try { (img as any).onerror = null } catch {}
+    try {
+      img.src = getPlaceholderUrl()
+    } catch {}
+    try {
+      img.removeAttribute('data-src')
+    } catch {}
+    try {
+      img.removeAttribute('data-original-src')
+    } catch {}
+    try {
+      ;(img as unknown as { onerror?: ((ev: Event) => void) | null }).onerror = null
+    } catch {}
   } catch {}
 }

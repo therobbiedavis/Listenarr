@@ -18,11 +18,18 @@
             <div class="rules">
               <div v-for="(r, idx) in local.rules" :key="idx" class="rule-row">
                 <!-- Group start toggle -->
-                <button type="button" class="group-toggle" :class="{ active: r.groupStart }" @click.prevent="r.groupStart = !r.groupStart">(</button>
+                <button
+                  type="button"
+                  class="group-toggle"
+                  :class="{ active: r.groupStart }"
+                  @click.prevent="r.groupStart = !r.groupStart"
+                >
+                  (
+                </button>
 
                 <!-- Show conjunction selector before each rule except the first -->
                 <template v-if="idx > 0">
-                  <select v-model="r.conjunction" class="form-select" style="width:80px;">
+                  <select v-model="r.conjunction" class="form-select" style="width: 80px">
                     <option value="and">AND</option>
                     <option value="or">OR</option>
                   </select>
@@ -47,7 +54,11 @@
                     <option value="is">is</option>
                     <option value="is_not">is not</option>
                   </template>
-                  <template v-else-if="['publishYear','publishedYear','files','filesize'].includes(r.field)">
+                  <template
+                    v-else-if="
+                      ['publishYear', 'publishedYear', 'files', 'filesize'].includes(r.field)
+                    "
+                  >
                     <option value="eq">=</option>
                     <option value="ne">!=</option>
                     <option value="lt">&lt;</option>
@@ -73,7 +84,9 @@
                 <template v-else-if="r.field === 'qualityProfileId'">
                   <select v-model="r.value" class="form-select">
                     <option value="">(any)</option>
-                    <option v-for="p in qualityProfiles" :key="p.id" :value="String(p.id)">{{ p.name }}</option>
+                    <option v-for="p in qualityProfiles" :key="p.id" :value="String(p.id)">
+                      {{ p.name }}
+                    </option>
                   </select>
                 </template>
 
@@ -86,19 +99,39 @@
 
                 <template v-else-if="r.field === 'publishYear' || r.field === 'publishedYear'">
                   <!-- Numeric input for year so users can use comparisons -->
-                  <input v-model.number="r.value" type="number" class="form-input" placeholder="e.g. 2023" />
+                  <input
+                    v-model.number="r.value"
+                    type="number"
+                    class="form-input"
+                    placeholder="e.g. 2023"
+                  />
                 </template>
 
                 <template v-else-if="r.field === 'files'">
                   <!-- Numeric input for file count -->
-                  <input v-model.number="r.value" type="number" class="form-input" placeholder="Number of files" />
+                  <input
+                    v-model.number="r.value"
+                    type="number"
+                    class="form-input"
+                    placeholder="Number of files"
+                  />
                 </template>
 
                 <template v-else-if="r.field === 'filesize'">
                   <!-- Number + unit selector for filesize -->
-                  <div style="display:flex;gap:8px;align-items:center;">
-                    <input :value="getFileSizeDisplay(r).num" @input.prevent="onFileSizeInputEvent(r, $event)" type="number" class="form-input" placeholder="Size" />
-                    <select :value="getFileSizeDisplay(r).unit" @change.prevent="onFileSizeUnitChangeEvent(r, $event)" class="form-select small">
+                  <div style="display: flex; gap: 8px; align-items: center">
+                    <input
+                      :value="getFileSizeDisplay(r).num"
+                      @input.prevent="onFileSizeInputEvent(r, $event)"
+                      type="number"
+                      class="form-input"
+                      placeholder="Size"
+                    />
+                    <select
+                      :value="getFileSizeDisplay(r).unit"
+                      @change.prevent="onFileSizeUnitChangeEvent(r, $event)"
+                      class="form-select small"
+                    >
                       <option v-for="u in SIZE_UNITS" :key="u" :value="u">{{ u }}</option>
                     </select>
                   </div>
@@ -109,13 +142,24 @@
                 </template>
 
                 <div class="rule-actions">
-              <button type="button" class="btn btn-secondary" @click.prevent="removeRule(idx)">−</button>
-              <button type="button" class="group-toggle end" :class="{ active: r.groupEnd }" @click.prevent="r.groupEnd = !r.groupEnd">)</button>
+                  <button type="button" class="btn btn-secondary" @click.prevent="removeRule(idx)">
+                    −
+                  </button>
+                  <button
+                    type="button"
+                    class="group-toggle end"
+                    :class="{ active: r.groupEnd }"
+                    @click.prevent="r.groupEnd = !r.groupEnd"
+                  >
+                    )
+                  </button>
                 </div>
               </div>
 
               <div class="rules-actions">
-                <button type="button" class="btn btn-primary" @click.prevent="addRule">＋ Add rule</button>
+                <button type="button" class="btn btn-primary" @click.prevent="addRule">
+                  ＋ Add rule
+                </button>
               </div>
             </div>
           </div>
@@ -134,7 +178,14 @@
 import { ref, watch, toRaw } from 'vue'
 
 // Types
-type Rule = { field: string; operator: string; value: string; conjunction?: 'and' | 'or'; groupStart?: boolean; groupEnd?: boolean }
+type Rule = {
+  field: string
+  operator: string
+  value: string
+  conjunction?: 'and' | 'or'
+  groupStart?: boolean
+  groupEnd?: boolean
+}
 type CustomFilter = { id?: string; label: string; rules: Rule[] }
 
 // Props
@@ -155,18 +206,25 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const
 
 function unitMultiplier(u: string) {
   switch (u) {
-    case 'KB': return 1024
-    case 'MB': return 1024 * 1024
-    case 'GB': return 1024 * 1024 * 1024
-    default: return 1
+    case 'KB':
+      return 1024
+    case 'MB':
+      return 1024 * 1024
+    case 'GB':
+      return 1024 * 1024 * 1024
+    default:
+      return 1
   }
 }
 
 function displayForBytes(bytes: number) {
   if (!bytes || isNaN(bytes)) return { num: '', unit: 'MB' }
-  if (bytes >= unitMultiplier('GB')) return { num: +(bytes / unitMultiplier('GB')).toFixed(2), unit: 'GB' }
-  if (bytes >= unitMultiplier('MB')) return { num: +(bytes / unitMultiplier('MB')).toFixed(2), unit: 'MB' }
-  if (bytes >= unitMultiplier('KB')) return { num: +(bytes / unitMultiplier('KB')).toFixed(2), unit: 'KB' }
+  if (bytes >= unitMultiplier('GB'))
+    return { num: +(bytes / unitMultiplier('GB')).toFixed(2), unit: 'GB' }
+  if (bytes >= unitMultiplier('MB'))
+    return { num: +(bytes / unitMultiplier('MB')).toFixed(2), unit: 'MB' }
+  if (bytes >= unitMultiplier('KB'))
+    return { num: +(bytes / unitMultiplier('KB')).toFixed(2), unit: 'KB' }
   return { num: bytes, unit: 'B' }
 }
 
@@ -218,18 +276,25 @@ watch(
           value: String(rr.value ?? ''),
           conjunction: rr.conjunction === 'or' ? 'or' : 'and',
           groupStart: !!rr.groupStart,
-          groupEnd: !!rr.groupEnd
+          groupEnd: !!rr.groupEnd,
         } as Rule
       })
     } else {
       local.value = { label: '', rules: [] }
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 function addRule() {
-  local.value.rules.push({ field: 'title', operator: 'contains', value: '', conjunction: 'and', groupStart: false, groupEnd: false })
+  local.value.rules.push({
+    field: 'title',
+    operator: 'contains',
+    value: '',
+    conjunction: 'and',
+    groupStart: false,
+    groupEnd: false,
+  })
 }
 
 function removeRule(index: number) {
@@ -285,36 +350,89 @@ function onClose() {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
-.modal-body { padding: 16px }
-.btn-close { background: transparent; border: none; color: #fff; font-size: 18px }
-.form-row { margin-bottom: 12px }
-.form-label { display: block; margin-bottom: 6px; color: #ddd }
-.form-input, .form-select { width: 100%; padding: 8px 10px; border-radius: 6px; background: #121212; border: 1px solid rgba(255,255,255,0.06); color: #fff }
-.form-select.small { width: 140px }
-.rules { display: flex; flex-direction: column; gap: 8px }
-.rule-row { display: flex; gap: 8px; align-items: center }
-.rule-actions { margin-left: auto }
-.rules-actions { margin-top: 8px }
-.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px }
-.btn { padding: 8px 12px; border-radius: 6px; cursor: pointer }
-.btn-primary { background: #2196F3; color: #fff; border: none }
-.btn-secondary { background: #333; color: #fff; border: none }
+.modal-body {
+  padding: 16px;
+}
+.btn-close {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+}
+.form-row {
+  margin-bottom: 12px;
+}
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #ddd;
+}
+.form-input,
+.form-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+.form-select.small {
+  width: 140px;
+}
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rule-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.rule-actions {
+  margin-left: auto;
+}
+.rules-actions {
+  margin-top: 8px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-primary {
+  background: #2196f3;
+  color: #fff;
+  border: none;
+}
+.btn-secondary {
+  background: #333;
+  color: #fff;
+  border: none;
+}
 
 .group-toggle {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: #ddd;
   padding: 4px 8px;
   border-radius: 6px;
   cursor: pointer;
 }
 .group-toggle.active {
-  background: rgba(33,150,243,0.12);
-  border-color: rgba(33,150,243,0.24);
+  background: rgba(33, 150, 243, 0.12);
+  border-color: rgba(33, 150, 243, 0.24);
   color: #4dabf7;
 }
-.group-toggle.end { margin-left: 8px }
+.group-toggle.end {
+  margin-left: 8px;
+}
 </style>
-

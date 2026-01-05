@@ -7,20 +7,20 @@
           <i class="ph ph-x"></i>
         </button>
       </div>
-      
+
       <div class="modal-body">
         <form @submit.prevent="handleSubmit">
           <!-- Basic Information -->
           <div class="form-section">
             <h3>Basic Information</h3>
-            
+
             <div class="form-group">
               <label for="name">Name *</label>
-              <input 
-                id="name" 
-                v-model="formData.name" 
-                type="text" 
-                required 
+              <input
+                id="name"
+                v-model="formData.name"
+                type="text"
+                required
                 placeholder="e.g., My Indexer"
               />
             </div>
@@ -38,34 +38,36 @@
 
             <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
               <label for="url">URL *</label>
-              <input 
-                id="url" 
-                v-model="formData.url" 
-                type="url" 
+              <input
+                id="url"
+                v-model="formData.url"
+                type="url"
                 required
                 :placeholder="
-                  formData.implementation === 'MyAnonamouse' ? 'https://www.myanonamouse.net' :
-                  'https://indexer.example.com'
+                  formData.implementation === 'MyAnonamouse'
+                    ? 'https://www.myanonamouse.net'
+                    : 'https://indexer.example.com'
                 "
               />
             </div>
 
-                    <!-- MyAnonamouse Authentication & Options -->
+            <!-- MyAnonamouse Authentication & Options -->
             <div v-if="formData.implementation === 'MyAnonamouse'" class="form-section">
               <h4>MyAnonamouse Settings</h4>
               <div class="form-group">
                 <label for="mam-id">MAM ID *</label>
-                <input 
-                  id="mam-id" 
-                  v-model="mamId" 
-                  type="text" 
+                <input
+                  id="mam-id"
+                  v-model="mamId"
+                  type="text"
                   :required="formData.implementation === 'MyAnonamouse'"
                   placeholder="Your MyAnonamouse MAM ID"
                 />
               </div>
               <small class="info-text">
                 <i class="ph ph-info"></i>
-                MyAnonamouse requires your MAM ID for authentication. This is a unique identifier for your account. These are stored securely and only used to search the indexer.
+                MyAnonamouse requires your MAM ID for authentication. This is a unique identifier
+                for your account. These are stored securely and only used to search the indexer.
               </small>
 
               <div class="form-row mam-options">
@@ -127,9 +129,9 @@
               <h4>Collection</h4>
               <div class="form-group">
                 <label for="ia-collection">Collection *</label>
-                <select 
-                  id="ia-collection" 
-                  v-model="iaCollection" 
+                <select
+                  id="ia-collection"
+                  v-model="iaCollection"
                   :required="formData.implementation === 'InternetArchive'"
                 >
                   <option value="librivoxaudio">Librivox (Free Audiobooks)</option>
@@ -138,27 +140,29 @@
               </div>
               <small class="info-text">
                 <i class="ph ph-info"></i>
-                Choose which Internet Archive collection to search. Librivox contains public domain audiobooks read by volunteers.
+                Choose which Internet Archive collection to search. Librivox contains public domain
+                audiobooks read by volunteers.
               </small>
             </div>
 
             <!-- API Key for other implementations -->
-            <div v-if="formData.implementation !== 'MyAnonamouse' && formData.implementation !== 'InternetArchive'" class="form-group">
+            <div
+              v-if="
+                formData.implementation !== 'MyAnonamouse' &&
+                formData.implementation !== 'InternetArchive'
+              "
+              class="form-group"
+            >
               <label for="apiKey">API Key</label>
-              <input 
-                id="apiKey" 
-                v-model="formData.apiKey" 
-                type="text" 
-                placeholder="Your API key"
-              />
+              <input id="apiKey" v-model="formData.apiKey" type="text" placeholder="Your API key" />
             </div>
 
             <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
               <label for="categories">Categories</label>
-              <input 
-                id="categories" 
-                v-model="formData.categories" 
-                type="text" 
+              <input
+                id="categories"
+                v-model="formData.categories"
+                type="text"
                 placeholder="Comma-separated category IDs (e.g., 3030,3040)"
               />
               <small>Leave empty to search all categories</small>
@@ -168,7 +172,7 @@
           <!-- Features -->
           <div class="form-section">
             <h3>Features</h3>
-            
+
             <div v-if="formData.implementation !== 'InternetArchive'" class="checkbox-group">
               <label>
                 <input type="checkbox" v-model="formData.enableRss" />
@@ -203,15 +207,15 @@
           <!-- Advanced Settings -->
           <div class="form-section">
             <h3>Advanced Settings</h3>
-            
+
             <div class="form-row">
               <div class="form-group">
                 <label for="priority">Priority</label>
-                <input 
-                  id="priority" 
-                  v-model.number="formData.priority" 
-                  type="number" 
-                  min="1" 
+                <input
+                  id="priority"
+                  v-model.number="formData.priority"
+                  type="number"
+                  min="1"
                   max="100"
                 />
                 <small>Higher priority indexers are searched first (1-100)</small>
@@ -219,12 +223,7 @@
 
               <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
                 <label for="minimumAge">Minimum Age (minutes)</label>
-                <input 
-                  id="minimumAge" 
-                  v-model.number="formData.minimumAge" 
-                  type="number" 
-                  min="0"
-                />
+                <input id="minimumAge" v-model.number="formData.minimumAge" type="number" min="0" />
                 <small>Wait time before grabbing new releases (0 = disabled)</small>
               </div>
             </div>
@@ -232,30 +231,20 @@
             <div class="form-row" v-if="formData.implementation === 'Newznab'">
               <div class="form-group">
                 <label for="retention">Retention (days)</label>
-                <input 
-                  id="retention" 
-                  v-model.number="formData.retention" 
-                  type="number" 
-                  min="0"
-                />
+                <input id="retention" v-model.number="formData.retention" type="number" min="0" />
                 <small>Usenet retention in days (0 = unlimited)</small>
               </div>
             </div>
 
             <div class="form-group">
               <label for="maximumSize">Maximum Size (MB)</label>
-              <input 
-                id="maximumSize" 
-                v-model.number="formData.maximumSize" 
-                type="number" 
-                min="0"
-              />
+              <input id="maximumSize" v-model.number="formData.maximumSize" type="number" min="0" />
               <small>Maximum allowed size in megabytes (0 = unlimited)</small>
             </div>
           </div>
         </form>
       </div>
-      
+
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" @click="closeModal">
           <i class="ph ph-x"></i>
@@ -277,7 +266,11 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { Indexer } from '@/types'
-import { createIndexer, updateIndexer, testIndexerDraft as apiTestIndexerDraft } from '@/services/api'
+import {
+  createIndexer,
+  updateIndexer,
+  testIndexerDraft as apiTestIndexerDraft,
+} from '@/services/api'
 import { useToast } from '@/services/toastService'
 
 interface Props {
@@ -328,7 +321,7 @@ const defaultFormData = {
   minimumAge: 0,
   retention: 0,
   maximumSize: 0,
-  additionalSettings: ''
+  additionalSettings: '',
 }
 
 const formData = ref({ ...defaultFormData })
@@ -340,7 +333,7 @@ const buildIndexerPayload = (): IndexerPayload => {
   payload.additionalSettings = payload.additionalSettings || ''
 
   if (payload.implementation === 'MyAnonamouse') {
-    const mamOpts: any = {
+    const mamOpts: Record<string, unknown> = {
       searchInDescription: mamSearchInDescription.value,
       searchInSeries: mamSearchInSeries.value,
       searchInFilenames: mamSearchInFilenames.value,
@@ -348,7 +341,7 @@ const buildIndexerPayload = (): IndexerPayload => {
       filter: mamFilter.value || undefined,
       freeleechWedge: mamFreeleechWedge.value || undefined,
       enrichResults: mamEnrichResults.value,
-      enrichTopResults: mamEnrichTopResults.value
+      enrichTopResults: mamEnrichTopResults.value,
     }
     payload.additionalSettings = JSON.stringify({ mam_id: mamId.value, mam_options: mamOpts })
     payload.apiKey = ''
@@ -367,95 +360,106 @@ const buildIndexerPayload = (): IndexerPayload => {
 }
 
 // Watch for editing indexer changes
-watch(() => props.editingIndexer, (newIndexer) => {
-  if (newIndexer) {
-    formData.value = {
-      name: newIndexer.name,
-      type: newIndexer.type,
-      implementation: newIndexer.implementation,
-      url: newIndexer.url,
-      apiKey: newIndexer.apiKey || '',
-      categories: newIndexer.categories || '',
-      enableRss: newIndexer.enableRss,
-      enableAutomaticSearch: newIndexer.enableAutomaticSearch,
-      enableInteractiveSearch: newIndexer.enableInteractiveSearch,
-      enableAnimeStandardSearch: newIndexer.enableAnimeStandardSearch,
-      isEnabled: newIndexer.isEnabled,
-      priority: newIndexer.priority,
-      minimumAge: newIndexer.minimumAge,
-      retention: newIndexer.retention,
-      maximumSize: newIndexer.maximumSize,
-      additionalSettings: newIndexer.additionalSettings || ''
-    }
-    
-    // Parse MyAnonamouse credentials from additionalSettings
-    if (newIndexer.implementation === 'MyAnonamouse' && newIndexer.additionalSettings) {
-      try {
-        const settings = JSON.parse(newIndexer.additionalSettings)
-        mamId.value = settings.mam_id || ''
-        // Parse options if present
-        if (settings.mam_options) {
-          mamSearchInDescription.value = settings.mam_options.searchInDescription ?? mamSearchInDescription.value
-          mamSearchInSeries.value = settings.mam_options.searchInSeries ?? mamSearchInSeries.value
-          mamSearchInFilenames.value = settings.mam_options.searchInFilenames ?? mamSearchInFilenames.value
-          mamLanguage.value = settings.mam_options.language ?? mamLanguage.value
-          mamFilter.value = settings.mam_options.filter ?? mamFilter.value
-          mamFreeleechWedge.value = settings.mam_options.freeleechWedge ?? mamFreeleechWedge.value
-          mamEnrichResults.value = settings.mam_options.enrichResults ?? mamEnrichResults.value
-          mamEnrichTopResults.value = settings.mam_options.enrichTopResults ?? mamEnrichTopResults.value
-        } else {
-          // Also allow flat properties for backward compatibility
-          mamSearchInDescription.value = settings.searchInDescription ?? mamSearchInDescription.value
-          mamSearchInSeries.value = settings.searchInSeries ?? mamSearchInSeries.value
-          mamSearchInFilenames.value = settings.searchInFilenames ?? mamSearchInFilenames.value
-          mamLanguage.value = settings.language ?? mamLanguage.value
-          mamFilter.value = settings.filter ?? mamFilter.value
-          mamFreeleechWedge.value = settings.freeleechWedge ?? mamFreeleechWedge.value
-          mamEnrichResults.value = settings.enrichResults ?? mamEnrichResults.value
-          mamEnrichTopResults.value = settings.enrichTopResults ?? mamEnrichTopResults.value
-        }
-      } catch (e) {
-        console.error('Failed to parse MyAnonamouse settings:', e)
-        mamId.value = ''
+watch(
+  () => props.editingIndexer,
+  (newIndexer) => {
+    if (newIndexer) {
+      formData.value = {
+        name: newIndexer.name,
+        type: newIndexer.type,
+        implementation: newIndexer.implementation,
+        url: newIndexer.url,
+        apiKey: newIndexer.apiKey || '',
+        categories: newIndexer.categories || '',
+        enableRss: newIndexer.enableRss,
+        enableAutomaticSearch: newIndexer.enableAutomaticSearch,
+        enableInteractiveSearch: newIndexer.enableInteractiveSearch,
+        enableAnimeStandardSearch: newIndexer.enableAnimeStandardSearch,
+        isEnabled: newIndexer.isEnabled,
+        priority: newIndexer.priority,
+        minimumAge: newIndexer.minimumAge,
+        retention: newIndexer.retention,
+        maximumSize: newIndexer.maximumSize,
+        additionalSettings: newIndexer.additionalSettings || '',
       }
-    }
 
-    // Parse Internet Archive collection from additionalSettings
-    if (newIndexer.implementation === 'InternetArchive' && newIndexer.additionalSettings) {
-      try {
-        const settings = JSON.parse(newIndexer.additionalSettings)
-        iaCollection.value = settings.collection || 'librivoxaudio'
-      } catch (e) {
-        console.error('Failed to parse Internet Archive settings:', e)
-        iaCollection.value = 'librivoxaudio'
+      // Parse MyAnonamouse credentials from additionalSettings
+      if (newIndexer.implementation === 'MyAnonamouse' && newIndexer.additionalSettings) {
+        try {
+          const settings = JSON.parse(newIndexer.additionalSettings)
+          mamId.value = settings.mam_id || ''
+          // Parse options if present
+          if (settings.mam_options) {
+            mamSearchInDescription.value =
+              settings.mam_options.searchInDescription ?? mamSearchInDescription.value
+            mamSearchInSeries.value = settings.mam_options.searchInSeries ?? mamSearchInSeries.value
+            mamSearchInFilenames.value =
+              settings.mam_options.searchInFilenames ?? mamSearchInFilenames.value
+            mamLanguage.value = settings.mam_options.language ?? mamLanguage.value
+            mamFilter.value = settings.mam_options.filter ?? mamFilter.value
+            mamFreeleechWedge.value = settings.mam_options.freeleechWedge ?? mamFreeleechWedge.value
+            mamEnrichResults.value = settings.mam_options.enrichResults ?? mamEnrichResults.value
+            mamEnrichTopResults.value =
+              settings.mam_options.enrichTopResults ?? mamEnrichTopResults.value
+          } else {
+            // Also allow flat properties for backward compatibility
+            mamSearchInDescription.value =
+              settings.searchInDescription ?? mamSearchInDescription.value
+            mamSearchInSeries.value = settings.searchInSeries ?? mamSearchInSeries.value
+            mamSearchInFilenames.value = settings.searchInFilenames ?? mamSearchInFilenames.value
+            mamLanguage.value = settings.language ?? mamLanguage.value
+            mamFilter.value = settings.filter ?? mamFilter.value
+            mamFreeleechWedge.value = settings.freeleechWedge ?? mamFreeleechWedge.value
+            mamEnrichResults.value = settings.enrichResults ?? mamEnrichResults.value
+            mamEnrichTopResults.value = settings.enrichTopResults ?? mamEnrichTopResults.value
+          }
+        } catch (e) {
+          console.error('Failed to parse MyAnonamouse settings:', e)
+          mamId.value = ''
+        }
       }
+
+      // Parse Internet Archive collection from additionalSettings
+      if (newIndexer.implementation === 'InternetArchive' && newIndexer.additionalSettings) {
+        try {
+          const settings = JSON.parse(newIndexer.additionalSettings)
+          iaCollection.value = settings.collection || 'librivoxaudio'
+        } catch (e) {
+          console.error('Failed to parse Internet Archive settings:', e)
+          iaCollection.value = 'librivoxaudio'
+        }
+      }
+    } else {
+      formData.value = { ...defaultFormData }
+      mamId.value = ''
+      iaCollection.value = 'librivoxaudio'
     }
-  } else {
-    formData.value = { ...defaultFormData }
-    mamId.value = ''
-    iaCollection.value = 'librivoxaudio'
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 // Watch for implementation changes to auto-set type
-watch(() => formData.value.implementation, (newImplementation) => {
-  // Internet Archive is DDL only, set type to Usenet
-  if (newImplementation === 'InternetArchive') {
-    formData.value.type = 'Usenet'
-  }
-  // MyAnonamouse is torrent only
-  else if (newImplementation === 'MyAnonamouse') {
-    formData.value.type = 'Torrent'
-  }
-  // Torznab defaults to Torrent
-  else if (newImplementation === 'Torznab') {
-    formData.value.type = 'Torrent'
-  }
-  // Newznab defaults to Usenet
-  else if (newImplementation === 'Newznab') {
-    formData.value.type = 'Usenet'
-  }
-})
+watch(
+  () => formData.value.implementation,
+  (newImplementation) => {
+    // Internet Archive is DDL only, set type to Usenet
+    if (newImplementation === 'InternetArchive') {
+      formData.value.type = 'Usenet'
+    }
+    // MyAnonamouse is torrent only
+    else if (newImplementation === 'MyAnonamouse') {
+      formData.value.type = 'Torrent'
+    }
+    // Torznab defaults to Torrent
+    else if (newImplementation === 'Torznab') {
+      formData.value.type = 'Torrent'
+    }
+    // Newznab defaults to Usenet
+    else if (newImplementation === 'Newznab') {
+      formData.value.type = 'Usenet'
+    }
+  },
+)
 
 const closeModal = () => {
   formData.value = { ...defaultFormData }
@@ -473,14 +477,20 @@ const testConnection = async () => {
     }
   } catch (error: unknown) {
     console.error('Failed to test indexer:', error)
-    
+
     // Try to parse error response body for detailed message
     let errorMessage = 'Failed to test indexer connection'
     const err = error as { body?: unknown; message?: string }
     if (err?.body) {
       try {
-        const errorData = typeof err.body === 'string' ? JSON.parse(err.body) : err.body as Record<string, unknown>
-        errorMessage = (errorData as { message?: string; error?: string }).message || (errorData as { message?: string; error?: string }).error || errorMessage
+        const errorData =
+          typeof err.body === 'string'
+            ? JSON.parse(err.body)
+            : (err.body as Record<string, unknown>)
+        errorMessage =
+          (errorData as { message?: string; error?: string }).message ||
+          (errorData as { message?: string; error?: string }).error ||
+          errorMessage
       } catch {
         // If body isn't JSON, use it as-is if it's a string
         if (typeof err.body === 'string' && err.body.length > 0) {
@@ -490,7 +500,7 @@ const testConnection = async () => {
     } else if (err?.message) {
       errorMessage = err.message
     }
-    
+
     toast.error('Test failed', errorMessage)
   } finally {
     testing.value = false
@@ -501,7 +511,7 @@ const handleSubmit = async () => {
   saving.value = true
   try {
     const submitData = buildIndexerPayload()
-    
+
     if (props.editingIndexer) {
       // Update existing indexer
       await updateIndexer(props.editingIndexer.id, submitData)
@@ -511,7 +521,7 @@ const handleSubmit = async () => {
       await createIndexer(submitData)
       toast.success('Indexer saved', 'Indexer created successfully')
     }
-    
+
     emit('saved')
     closeModal()
   } catch (error) {
@@ -678,7 +688,7 @@ const handleSubmit = async () => {
   background-color: #222;
 }
 
-.checkbox-group input[type="checkbox"] {
+.checkbox-group input[type='checkbox'] {
   margin-top: 0.25rem;
   width: auto;
   cursor: pointer;

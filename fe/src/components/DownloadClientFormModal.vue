@@ -2,25 +2,28 @@
   <div v-if="visible" class="modal-overlay" @click="closeModal">
     <div class="modal-content" @click.stop>
       <div class="modal-header">
-        <h2>{{ editingClient ? 'Edit Download Client' : 'Add Download Client' }} - {{ formData.type.toUpperCase() }}</h2>
+        <h2>
+          {{ editingClient ? 'Edit Download Client' : 'Add Download Client' }} -
+          {{ formData.type.toUpperCase() }}
+        </h2>
         <button class="close-btn" @click="closeModal">
           <i class="ph ph-x"></i>
         </button>
       </div>
-      
+
       <div class="modal-body">
         <form @submit.prevent="handleSubmit">
           <!-- Basic Information -->
           <div class="form-section">
             <h3>Basic</h3>
-            
+
             <div class="form-group">
               <label for="name">Name *</label>
-              <input 
-                id="name" 
-                v-model="formData.name" 
-                type="text" 
-                required 
+              <input
+                id="name"
+                v-model="formData.name"
+                type="text"
+                required
                 placeholder="e.g., SABnzbd, qBittorrent"
               />
             </div>
@@ -47,22 +50,22 @@
 
             <div class="form-group">
               <label for="host">Host *</label>
-              <input 
-                id="host" 
-                v-model="formData.host" 
-                type="text" 
-                required 
+              <input
+                id="host"
+                v-model="formData.host"
+                type="text"
+                required
                 :placeholder="getHostPlaceholder()"
               />
             </div>
 
             <div class="form-group">
               <label for="port">Port *</label>
-              <input 
-                id="port" 
-                v-model.number="formData.port" 
-                type="number" 
-                required 
+              <input
+                id="port"
+                v-model.number="formData.port"
+                type="number"
+                required
                 min="1"
                 max="65535"
                 :placeholder="getPortPlaceholder()"
@@ -71,13 +74,16 @@
 
             <div class="form-group">
               <label for="downloadPath">Download Path</label>
-              <input 
-                id="downloadPath" 
-                v-model="formData.downloadPath" 
-                type="text" 
+              <input
+                id="downloadPath"
+                v-model="formData.downloadPath"
+                type="text"
                 placeholder="Leave blank to use client's default"
               />
-              <small>Optional: Override the download client's default save path. Leave blank to use the client's configured download directory.</small>
+              <small
+                >Optional: Override the download client's default save path. Leave blank to use the
+                client's configured download directory.</small
+              >
             </div>
 
             <div class="checkbox-group">
@@ -94,14 +100,14 @@
           <!-- Authentication -->
           <div class="form-section" v-if="requiresAuth">
             <h3>Authentication</h3>
-            
+
             <div class="form-group" v-if="requiresApiKey">
               <label for="apiKey">API Key *</label>
-              <input 
-                id="apiKey" 
-                v-model="formData.apiKey" 
-                type="password" 
-                required 
+              <input
+                id="apiKey"
+                v-model="formData.apiKey"
+                type="password"
+                required
                 placeholder="********"
               />
             </div>
@@ -109,26 +115,30 @@
             <div v-else>
               <div class="form-group">
                 <label for="username">Username</label>
-                <input 
-                  id="username" 
-                  v-model="formData.username" 
-                  type="text" 
+                <input
+                  id="username"
+                  v-model="formData.username"
+                  type="text"
                   placeholder="admin"
                   :required="formData.type === 'nzbget'"
                 />
-                <small v-if="formData.type === 'nzbget'">Required when NZBGet authentication is enabled.</small>
+                <small v-if="formData.type === 'nzbget'"
+                  >Required when NZBGet authentication is enabled.</small
+                >
               </div>
 
               <div class="form-group">
                 <label for="password">Password</label>
-                <input 
-                  id="password" 
-                  v-model="formData.password" 
-                  type="password" 
+                <input
+                  id="password"
+                  v-model="formData.password"
+                  type="password"
                   placeholder="********"
                   :required="formData.type === 'nzbget'"
                 />
-                <small v-if="formData.type === 'nzbget'">Use the NZBGet RPC password (default: nzbget).</small>
+                <small v-if="formData.type === 'nzbget'"
+                  >Use the NZBGet RPC password (default: nzbget).</small
+                >
               </div>
             </div>
           </div>
@@ -136,13 +146,13 @@
           <!-- Category & Tags -->
           <div class="form-section">
             <h3>{{ isUsenet ? 'Category' : 'Category & Tags' }}</h3>
-            
+
             <div class="form-group">
               <label for="category">Category</label>
-              <input 
-                id="category" 
-                v-model="formData.category" 
-                type="text" 
+              <input
+                id="category"
+                v-model="formData.category"
+                type="text"
                 :placeholder="isUsenet ? 'e.g., audiobooks' : 'e.g., audiobooks'"
               />
               <small>{{ getCategoryHelp() }}</small>
@@ -150,20 +160,23 @@
 
             <div class="form-group" v-if="!isUsenet">
               <label for="tags">Tags</label>
-              <input 
-                id="tags" 
-                v-model="formData.tags" 
-                type="text" 
+              <input
+                id="tags"
+                v-model="formData.tags"
+                type="text"
                 placeholder="Leave blank to use with all series"
               />
-              <small>Only use this download client for series with at least one matching tag. Leave blank to use with all series.</small>
+              <small
+                >Only use this download client for series with at least one matching tag. Leave
+                blank to use with all series.</small
+              >
             </div>
           </div>
 
           <!-- Priority -->
           <div class="form-section">
             <h3>Priority</h3>
-            
+
             <div class="form-group">
               <label for="recentPriority">Recent Priority</label>
               <select id="recentPriority" v-model="formData.recentPriority">
@@ -171,7 +184,9 @@
                 <option value="last">Last</option>
                 <option value="first">First</option>
               </select>
-              <small>Priority to use when grabbing episodes that aired within the last 14 days</small>
+              <small
+                >Priority to use when grabbing episodes that aired within the last 14 days</small
+              >
             </div>
 
             <div class="form-group">
@@ -188,15 +203,20 @@
           <!-- Client Specific Settings -->
           <div class="form-section">
             <h3>Completed Download Handling</h3>
-            
+
             <div class="form-group">
               <label for="removeCompletedDownloads">Completed Download Action</label>
               <select id="removeCompletedDownloads" v-model="formData.removeCompletedDownloads">
                 <option value="none">None - Keep in client</option>
                 <option value="remove">Remove - Remove from client</option>
-                <option value="remove_and_delete">Remove and Delete - Remove from client and delete files</option>
+                <option value="remove_and_delete">
+                  Remove and Delete - Remove from client and delete files
+                </option>
               </select>
-              <small>Action to take after a download is successfully imported. "Remove and Delete" will delete the downloaded files from the download client after import.</small>
+              <small
+                >Action to take after a download is successfully imported. "Remove and Delete" will
+                delete the downloaded files from the download client after import.</small
+              >
             </div>
 
             <div class="checkbox-group" v-if="isUsenet">
@@ -222,7 +242,7 @@
 
           <div class="form-section" v-if="formData.type === 'qbittorrent'">
             <h3>Advanced Settings</h3>
-            
+
             <div class="form-group">
               <label for="initialState">Initial State</label>
               <select id="initialState" v-model="formData.initialState">
@@ -231,7 +251,10 @@
                 <option value="forceStart">Force Start</option>
                 <option value="pause">Pause</option>
               </select>
-              <small>Initial state for torrents added to qBittorrent. Note that Forced Torrents do not abide by seed restrictions</small>
+              <small
+                >Initial state for torrents added to qBittorrent. Note that Forced Torrents do not
+                abide by seed restrictions</small
+              >
             </div>
 
             <div class="checkbox-group">
@@ -262,7 +285,11 @@
                 <option value="subfolder">Create Subfolder</option>
                 <option value="nosubfolder">Don't Create Subfolder</option>
               </select>
-              <small>Whether to use qBittorrent's configured content layout. Use qBittorrent's 4.3.2 layout if the original layout from the torrent cannot be used (Default = Original layout)</small>
+              <small
+                >Whether to use qBittorrent's configured content layout. Use qBittorrent's 4.3.2
+                layout if the original layout from the torrent cannot be used (Default = Original
+                layout)</small
+              >
             </div>
           </div>
 
@@ -272,14 +299,19 @@
             <div class="form-group">
               <label for="remoteMappings">Select Remote Path Mappings</label>
               <select id="remoteMappings" v-model="formData.remotePathMappingIds" multiple size="5">
-                <option v-for="m in remotePathMappings" :key="m.id" :value="m.id">{{ m.name }} — {{ m.remotePath }}</option>
+                <option v-for="m in remotePathMappings" :key="m.id" :value="m.id">
+                  {{ m.name }} — {{ m.remotePath }}
+                </option>
               </select>
-              <small>Choose one or more remote path mappings to apply for this download client (Shift + Click to select multiple). If none selected, no mapping will be applied.</small>
+              <small
+                >Choose one or more remote path mappings to apply for this download client (Shift +
+                Click to select multiple). If none selected, no mapping will be applied.</small
+              >
             </div>
           </div>
         </form>
       </div>
-      
+
       <div class="modal-footer">
         <button type="button" class="btn btn-danger" @click="handleDelete" v-if="editingClient">
           <i class="ph ph-trash"></i>
@@ -307,7 +339,7 @@ import { ref, computed, watch } from 'vue'
 import type { DownloadClientConfiguration, DownloadClientSettings } from '@/types'
 import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
-import { getRemotePathMappings } from '@/services/api'
+import { getRemotePathMappings, testDownloadClient } from '@/services/api'
 import { logger } from '@/utils/logger'
 import type { RemotePathMapping } from '@/types'
 
@@ -352,8 +384,8 @@ const defaultFormData = {
   sequentialOrder: false,
   firstAndLastFirst: false,
   contentLayout: 'default',
-  settings: {}
-  , remotePathMappingIds: [] as number[]
+  settings: {},
+  remotePathMappingIds: [] as number[],
 }
 
 const formData = ref({ ...defaultFormData })
@@ -386,7 +418,7 @@ const getHostPlaceholder = () => {
     qbittorrent: 'qbittorrent.tld.com',
     transmission: 'transmission.tld.com',
     sabnzbd: 'sabnzbd.tld.com',
-    nzbget: 'nzbget.tld.com'
+    nzbget: 'nzbget.tld.com',
   }
   return placeholders[formData.value.type] || 'localhost'
 }
@@ -396,7 +428,7 @@ const getPortPlaceholder = () => {
     qbittorrent: 8080,
     transmission: 9091,
     sabnzbd: 8080,
-    nzbget: 6789
+    nzbget: 6789,
   }
   return ports[formData.value.type]?.toString() || '8080'
 }
@@ -414,7 +446,7 @@ const onTypeChange = () => {
     qbittorrent: 8080,
     transmission: 9091,
     sabnzbd: 8080,
-    nzbget: 6789
+    nzbget: 6789,
   }
   formData.value.port = defaultPorts[formData.value.type] || 8080
 
@@ -427,40 +459,45 @@ const onTypeChange = () => {
 }
 
 // Watch for editing client changes
-watch(() => props.editingClient, (newClient) => {
-  if (newClient) {
-    const settings = newClient.settings as DownloadClientSettings
-    formData.value = {
-      name: newClient.name,
-      type: newClient.type,
-      host: newClient.host,
-      port: newClient.port,
-      username: newClient.username || '',
-      password: newClient.password || '',
-      apiKey: (settings?.apiKey as string) || '',
-  downloadPath: newClient.downloadPath,
-      useSSL: newClient.useSSL,
-      isEnabled: newClient.isEnabled,
-      category: (settings?.category as string) || '',
-      tags: (settings?.tags as string) || '',
-      recentPriority: (settings?.recentPriority as string) || 'default',
-      olderPriority: (settings?.olderPriority as string) || 'default',
-      removeCompleted: (settings?.removeCompleted as boolean) || false,
-      removeFailed: (settings?.removeFailed as boolean) || false,
-      removeCompletedDownloads: (settings?.removeCompletedDownloads as string) || 'none',
-      initialState: (settings?.initialState as string) || 'default',
-      sequentialOrder: (settings?.sequentialOrder as boolean) || false,
-      firstAndLastFirst: (settings?.firstAndLastFirst as boolean) || false,
-      contentLayout: (settings?.contentLayout as string) || 'default',
-      settings: newClient.settings || {}
-      , remotePathMappingIds: (settings && settings.remotePathMappingIds) ? settings.remotePathMappingIds : []
+watch(
+  () => props.editingClient,
+  (newClient) => {
+    if (newClient) {
+      const settings = newClient.settings as DownloadClientSettings
+      formData.value = {
+        name: newClient.name,
+        type: newClient.type,
+        host: newClient.host,
+        port: newClient.port,
+        username: newClient.username || '',
+        password: newClient.password || '',
+        apiKey: (settings?.apiKey as string) || '',
+        downloadPath: newClient.downloadPath,
+        useSSL: newClient.useSSL,
+        isEnabled: newClient.isEnabled,
+        category: (settings?.category as string) || '',
+        tags: (settings?.tags as string) || '',
+        recentPriority: (settings?.recentPriority as string) || 'default',
+        olderPriority: (settings?.olderPriority as string) || 'default',
+        removeCompleted: (settings?.removeCompleted as boolean) || false,
+        removeFailed: (settings?.removeFailed as boolean) || false,
+        removeCompletedDownloads: (settings?.removeCompletedDownloads as string) || 'none',
+        initialState: (settings?.initialState as string) || 'default',
+        sequentialOrder: (settings?.sequentialOrder as boolean) || false,
+        firstAndLastFirst: (settings?.firstAndLastFirst as boolean) || false,
+        contentLayout: (settings?.contentLayout as string) || 'default',
+        settings: newClient.settings || {},
+        remotePathMappingIds:
+          settings && settings.remotePathMappingIds ? settings.remotePathMappingIds : [],
+      }
+      // Load available mappings when editing a client so the dropdown can show options
+      void loadRemotePathMappings()
+    } else {
+      formData.value = { ...defaultFormData }
     }
-    // Load available mappings when editing a client so the dropdown can show options
-    void loadRemotePathMappings()
-  } else {
-    formData.value = { ...defaultFormData }
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 const closeModal = () => {
   formData.value = { ...defaultFormData }
@@ -470,12 +507,24 @@ const closeModal = () => {
 const testConnection = async () => {
   testing.value = true
   try {
-    // TODO: Implement actual test endpoint
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    toast.success('Test successful', 'Connection test successful')
+    // Build config with id from editing client or empty string for new clients
+    const configToTest: DownloadClientConfiguration = {
+      id: props.editingClient?.id || '',
+      ...formData.value,
+    }
+
+    const result = await testDownloadClient(configToTest)
+    if (result.success) {
+      toast.success(
+        'Connection successful',
+        result.message || 'Download client connection test successful',
+      )
+    } else {
+      toast.error('Connection failed', result.message || 'Failed to connect to download client')
+    }
   } catch (error) {
-    console.error('Failed to test download client:', error)
-    toast.error('Test failed', 'Failed to test download client connection')
+    logger.error('Failed to test download client connection:', error)
+    toast.error('Test failed', 'An error occurred while testing the download client connection')
   } finally {
     testing.value = false
   }
@@ -497,12 +546,14 @@ const handleSubmit = async () => {
       port: formData.value.port,
       username: formData.value.username || '',
       password: formData.value.password || '',
-  downloadPath: formData.value.downloadPath || '',
+      downloadPath: formData.value.downloadPath || '',
       useSSL: formData.value.useSSL,
       isEnabled: formData.value.isEnabled,
       removeCompletedDownloads: formData.value.removeCompletedDownloads,
       settings: {
-        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey ? { apiKey: formData.value.apiKey } : {}),
+        ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
+          ? { apiKey: formData.value.apiKey }
+          : {}),
         ...(formData.value.category && { category: formData.value.category }),
         ...(formData.value.tags && { tags: formData.value.tags }),
         recentPriority: formData.value.recentPriority,
@@ -512,20 +563,27 @@ const handleSubmit = async () => {
         initialState: formData.value.initialState,
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,
-        contentLayout: formData.value.contentLayout
-        , ...(formData.value.remotePathMappingIds && formData.value.remotePathMappingIds.length > 0 ? { remotePathMappingIds: formData.value.remotePathMappingIds } : {})
-      }
+        contentLayout: formData.value.contentLayout,
+        ...(formData.value.remotePathMappingIds && formData.value.remotePathMappingIds.length > 0
+          ? { remotePathMappingIds: formData.value.remotePathMappingIds }
+          : {}),
+      },
     }
 
-  console.log('Saving download client configuration:', clientConfig)
-  await configStore.saveDownloadClientConfiguration(clientConfig)
-  toast.success('Saved', `Download client ${props.editingClient ? 'updated' : 'created'} successfully`)
-    
+    await configStore.saveDownloadClientConfiguration(clientConfig)
+    toast.success(
+      'Saved',
+      `Download client ${props.editingClient ? 'updated' : 'created'} successfully`,
+    )
+
     emit('saved')
     closeModal()
   } catch (error) {
-  console.error('Failed to save download client:', error)
-  toast.error('Save failed', `Failed to save download client: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    logger.error('Failed to save download client:', error)
+    toast.error(
+      'Save failed',
+      `Failed to save download client: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    )
   } finally {
     saving.value = false
   }
@@ -685,7 +743,7 @@ const handleDelete = () => {
   background-color: #222;
 }
 
-.checkbox-group input[type="checkbox"] {
+.checkbox-group input[type='checkbox'] {
   margin-top: 0.25rem;
   width: auto;
   cursor: pointer;

@@ -1,5 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
@@ -27,8 +27,8 @@ describe('AddNewView pagination', () => {
 
   it('maps audimeta metadata to result fields', async () => {
     const apiModule = await import('@/services/api')
-    const apiService = apiModule.apiService as any
-    apiService.searchAudimetaByTitleAndAuthor.mockResolvedValue({
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
       totalResults: 1,
       results: [
         {
@@ -43,14 +43,20 @@ describe('AddNewView pagination', () => {
           publisher: 'Chilton',
           narrators: [{ name: 'Scott Brick' }],
           releaseDate: '1965-08-01',
-          link: 'https://www.audible.com/pd/B000123'
-        }
-      ]
+          link: 'https://www.audible.com/pd/B000123',
+        },
+      ],
     })
 
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+      performAdvancedSearch?: () => Promise<void>
+      allAudimetaResults?: unknown[]
+      titleResults?: unknown[]
+    }
 
     // Use advanced search with title to trigger audimeta path
     vm.showAdvancedSearch = true
@@ -60,7 +66,7 @@ describe('AddNewView pagination', () => {
 
     expect(vm.allAudimetaResults.length).toBe(1)
     expect(vm.titleResults.length).toBe(1)
-    const tr = vm.titleResults[0]
+    const tr = vm.titleResults[0] as any
     expect(tr.searchResult.narrator).toBe('Scott Brick')
     expect(tr.searchResult.subtitle).toBe('A Heroic Saga')
     expect(tr.searchResult.series).toBe('Dune Series')
@@ -77,8 +83,8 @@ describe('AddNewView pagination', () => {
 
   it('sets data-src for lazy images on advanced search results', async () => {
     const apiModule = await import('@/services/api')
-    const apiService = apiModule.apiService as any
-    apiService.searchAudimetaByTitleAndAuthor.mockResolvedValue({
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
       totalResults: 1,
       results: [
         {
@@ -87,14 +93,20 @@ describe('AddNewView pagination', () => {
           authors: [{ name: 'Frank Herbert' }],
           imageUrl: 'http://img2',
           runtimeLengthMin: 720,
-          language: 'english'
-        }
-      ]
+          language: 'english',
+        },
+      ],
     })
 
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+      performAdvancedSearch?: () => Promise<void>
+      allAudimetaResults?: unknown[]
+      titleResults?: unknown[]
+    }
 
     vm.showAdvancedSearch = true
     vm.advancedSearchParams = { title: 'Dune' }
@@ -110,8 +122,8 @@ describe('AddNewView pagination', () => {
 
   it('maps runtime from runtimeLengthMin (minutes) to seconds', async () => {
     const apiModule = await import('@/services/api')
-    const apiService = apiModule.apiService as any
-    apiService.searchAudimetaByTitleAndAuthor.mockResolvedValue({
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
       totalResults: 1,
       results: [
         {
@@ -120,28 +132,34 @@ describe('AddNewView pagination', () => {
           authors: [{ name: 'Frank Herbert' }],
           imageUrl: 'http://img3',
           runtimeLengthMin: 10,
-          language: 'english'
-        }
-      ]
+          language: 'english',
+        },
+      ],
     })
 
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+      performAdvancedSearch?: () => Promise<void>
+      allAudimetaResults?: unknown[]
+      titleResults?: unknown[]
+    }
 
     vm.showAdvancedSearch = true
     vm.advancedSearchParams = { title: 'Children of Dune' }
 
     await vm.performAdvancedSearch()
     expect(vm.titleResults.length).toBe(1)
-    const tr = vm.titleResults[0]
+    const tr = vm.titleResults[0] as any
     expect(tr.searchResult.runtime).toBe(10 * 60)
   })
 
   it('maps runtime from lengthMinutes (metadata field) to seconds', async () => {
     const apiModule = await import('@/services/api')
-    const apiService = apiModule.apiService as any
-    apiService.searchAudimetaByTitleAndAuthor.mockResolvedValue({
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
       totalResults: 1,
       results: [
         {
@@ -150,32 +168,40 @@ describe('AddNewView pagination', () => {
           authors: [{ name: 'Frank Herbert' }],
           imageUrl: 'http://img4',
           lengthMinutes: 12,
-          language: 'english'
-        }
-      ]
+          language: 'english',
+        },
+      ],
     })
 
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+      performAdvancedSearch?: () => Promise<void>
+      titleResults?: unknown[]
+    }
 
     vm.showAdvancedSearch = true
     vm.advancedSearchParams = { title: 'Heretics of Dune' }
 
     await vm.performAdvancedSearch()
     expect(vm.titleResults.length).toBe(1)
-    const tr = vm.titleResults[0]
+    const tr = vm.titleResults[0] as any
     expect(tr.searchResult.runtime).toBe(12 * 60)
   })
 
   it('shows metadata badge linking to internal Audimeta endpoint and source badge linking to Audible product', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as {
+      searchType?: string
+      audibleResult?: Record<string, unknown>
+    }
 
     // Simulate an ASIN-based audimeta result (single result view)
     vm.searchType = 'asin'
-    vm.audibleResult = {
+    ;(vm as any).audibleResult = {
       asin: 'BAUD1',
       title: 'Title',
       authors: [{ name: 'Author Name' }],
@@ -185,7 +211,7 @@ describe('AddNewView pagination', () => {
       source: 'Audible',
       sourceLink: 'https://www.audible.com/pd/BAUD1',
       series: 'Series Name',
-      seriesList: ['Series Name', 'Other Series']
+      seriesList: ['Series Name', 'Other Series'],
     }
 
     await wrapper.vm.$nextTick()
@@ -206,11 +232,17 @@ describe('AddNewView pagination', () => {
   it('shows full series list on hover (title and asin result views)', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as { searchType?: string; titleResults?: unknown[] }
 
     // Title-list item case
     vm.searchType = 'title'
-    vm.titleResults = [{ title: 'Book', key: 'k1', searchResult: { series: 'Main Series', seriesList: ['Main Series', 'Alt Series'] } }]
+    vm.titleResults = [
+      {
+        title: 'Book',
+        key: 'k1',
+        searchResult: { series: 'Main Series', seriesList: ['Main Series', 'Alt Series'] },
+      },
+    ]
 
     await wrapper.vm.$nextTick()
 
@@ -220,7 +252,7 @@ describe('AddNewView pagination', () => {
 
     // ASIN result case
     vm.searchType = 'asin'
-    vm.audibleResult = { asin: 'BAUD2', title: 'B', series: 'X', seriesList: ['X', 'Y'] }
+    ;(vm as any).audibleResult = { asin: 'BAUD2', title: 'B', series: 'X', seriesList: ['X', 'Y'] }
     await wrapper.vm.$nextTick()
     const seriesBadgeAsin = wrapper.find('.search-results .title-result-card .series-badge[title]')
     expect(seriesBadgeAsin.exists()).toBe(true)
@@ -230,7 +262,11 @@ describe('AddNewView pagination', () => {
   it('shows "Added" and disables add button when result is already in library', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
-    const vm: any = wrapper.vm
+    const vm = wrapper.vm as unknown as {
+      searchType?: string
+      audibleResult?: Record<string, unknown>
+      checkExistingInLibrary?: () => Promise<void>
+    }
 
     // Simulate library already containing the ASIN
     const lib = useLibraryStore()

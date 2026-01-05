@@ -1,9 +1,7 @@
 <template>
   <div class="root-folders-settings">
     <div v-if="!props.hideHeader" class="section-header">
-      <h3>
-        Root Folders
-      </h3>
+      <h3>Root Folders</h3>
     </div>
     <div v-if="store.loading" class="loading-state">
       <PhSpinner class="ph-spin" />
@@ -14,7 +12,10 @@
       <div v-if="store.folders.length === 0" class="empty-state">
         <PhFolderOpen />
         <h4>No root folders configured</h4>
-        <p>Add a root folder to organize your audiobook library. You can create multiple named root folders for different storage locations.</p>
+        <p>
+          Add a root folder to organize your audiobook library. You can create multiple named root
+          folders for different storage locations.
+        </p>
         <button class="btn primary" @click="openAdd()">
           <PhPlus />
           Add Your First Root Folder
@@ -22,7 +23,12 @@
       </div>
 
       <div v-else class="folders-list">
-        <div v-for="folder in store.folders" :key="folder.id" class="folder-card" :class="{ 'is-default': folder.isDefault }">
+        <div
+          v-for="folder in store.folders"
+          :key="folder.id"
+          class="folder-card"
+          :class="{ 'is-default': folder.isDefault }"
+        >
           <div class="folder-info">
             <div class="folder-header">
               <div class="folder-title-section">
@@ -34,10 +40,28 @@
                 </div>
               </div>
               <div class="folder-actions">
-                <button class="icon-button" @click="edit(folder)" title="Edit" data-cy="edit-root-folder">
+                <button
+                  class="icon-button"
+                  @click="edit(folder)"
+                  title="Edit"
+                  data-cy="edit-root-folder"
+                >
                   <PhPencil />
                 </button>
-                <button class="icon-button danger" @click="confirmDelete(folder)" title="Delete" data-cy="delete-root-folder">
+                <button
+                  v-if="!folder.isDefault"
+                  class="icon-button"
+                  @click="setDefaultFolder(folder)"
+                  title="Set as Default"
+                >
+                  <PhStar />
+                </button>
+                <button
+                  class="icon-button danger"
+                  @click="confirmDelete(folder)"
+                  title="Delete"
+                  data-cy="delete-root-folder"
+                >
                   <PhTrash />
                 </button>
               </div>
@@ -51,7 +75,42 @@
       </div>
     </div>
 
-    <RootFolderFormModal v-if="showForm" :root="(editing as RootFolder | undefined)" @close="close" @saved="onSaved" />
+    <RootFolderFormModal
+      v-if="showForm"
+      :root="editingRoot"
+      @close="close"
+      @saved="onSaved"
+    />
+
+    <!-- Delete Root Folder Confirmation Modal -->
+    <div v-if="folderToDelete" class="modal-overlay" @click="folderToDelete = null">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>
+            <PhWarningCircle />
+            Delete Root Folder
+          </h3>
+          <button @click="folderToDelete = null" class="modal-close">
+            <PhX />
+          </button>
+        </div>
+        <div class="modal-body">
+          <p>
+            Are you sure you want to delete the root folder
+            <strong>{{ folderToDelete.name }}</strong
+            >?
+          </p>
+          <p>This will only remove the reference and will not delete files from disk.</p>
+        </div>
+        <div class="modal-actions">
+          <button @click="folderToDelete = null" class="cancel-button">Cancel</button>
+          <button @click="executeDeleteFolder()" class="delete-button">
+            <PhTrash />
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -60,7 +119,18 @@ import { ref, onMounted } from 'vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
 import { useToast } from '@/services/toastService'
-import { PhPlus, PhFolder, PhPencil, PhTrash, PhSpinner, PhFolderOpen } from '@phosphor-icons/vue'
+import { errorTracking } from '@/services/errorTracking'
+import {
+  PhPlus,
+  PhFolder,
+  PhPencil,
+  PhTrash,
+  PhSpinner,
+  PhFolderOpen,
+  PhWarningCircle,
+  PhX,
+  PhStar,
+} from '@phosphor-icons/vue'
 import type { RootFolder } from '@/types'
 
 interface Props {
@@ -68,12 +138,14 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  hideHeader: false
+  hideHeader: false,
 })
 
 const store = useRootFoldersStore()
 const showForm = ref(false)
 const editing = ref<{ id?: number; name: string; path: string } | null>(null)
+import { computed } from 'vue'
+const editingRoot = computed(() => editing.value as RootFolder | undefined)
 const toast = useToast()
 
 onMounted(async () => {
@@ -90,28 +162,57 @@ function edit(r: { id?: number; name: string; path: string }) {
   showForm.value = true
 }
 
-async function confirmDelete(r: { id?: number; name: string; path: string }) {
+const folderToDelete = ref<{ id?: number; name: string; path: string } | null>(null)
+
+function confirmDelete(r: { id?: number; name: string; path: string }) {
   if (!r.id) return
-  if (!confirm(`Delete root folder '${r.name}'? This will only remove the reference and not delete files on disk. If audiobooks reference it you must reassign them first.`)) return
+  folderToDelete.value = r
+}
+
+const executeDeleteFolder = async () => {
+  if (!folderToDelete.value?.id) return
   try {
-    await store.remove(r.id)
+    await store.remove(folderToDelete.value.id)
     toast.success('Success', 'Root folder deleted')
+    folderToDelete.value = null
   } catch (e: unknown) {
+    errorTracking.captureException(e as Error, {
+      component: 'RootFoldersSettings',
+      operation: 'deleteRootFolder',
+    })
     toast.error('Error', (e as Error)?.message || 'Failed to delete root folder')
   }
 }
 
-function close() { showForm.value = false }
-function onSaved() { showForm.value = false; store.load().catch(() => {}) }
+const setDefaultFolder = async (folder: RootFolder) => {
+  if (!folder.id) return
+  try {
+    await store.update(folder.id, { ...folder, isDefault: true })
+    toast.success('Root folder', `${folder.name} set as default`)
+  } catch (e: unknown) {
+    errorTracking.captureException(e as Error, {
+      component: 'RootFoldersSettings',
+      operation: 'setDefaultFolder',
+    })
+    toast.error('Set default failed', (e as Error)?.message || 'Failed to set default root folder')
+  }
+}
+
+function close() {
+  showForm.value = false
+}
+function onSaved() {
+  showForm.value = false
+  store.load().catch(() => {})
+}
 
 // Expose the openAdd method so parent components can call it
 defineExpose({
-  openAdd
+  openAdd,
 })
 </script>
 
 <style scoped>
-
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -265,14 +366,15 @@ defineExpose({
   border: 1px solid rgba(76, 175, 80, 0.3);
 }
 
-.folder-info h4, .folder-header h4 {
+.folder-info h4,
+.folder-header h4 {
   margin: 0;
   color: #fff;
   font-size: 1.1rem;
   font-weight: 600;
 }
 
-  .folder-path {
+.folder-path {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -356,5 +458,104 @@ defineExpose({
 .btn.primary:hover {
   background-color: #005a9e;
   transform: translateY(-1px);
+}
+
+/* Modal Styles (canonical) */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  max-width: 700px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #444;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.25rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.modal-close:hover {
+  background: #333;
+  color: #fff;
+}
+
+.modal-body {
+  padding: 2rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  padding: 1.5rem;
+  border-top: 1px solid #444;
+}
+
+/* Ensure modal context delete buttons are full-size */
+.modal-overlay .modal-content .modal-actions .delete-button,
+.modal-content .modal-actions .delete-button,
+.modal-overlay .modal-content .modal-actions .modal-delete-button,
+.modal-content .modal-actions .modal-delete-button {
+  padding: 0.75rem 1.25rem;
+  background-color: rgba(231, 76, 60, 0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1rem;
+  min-width: 120px;
+  height: auto;
+  box-shadow: 0 6px 16px rgba(231, 76, 60, 0.12);
+}
+
+.modal-overlay .modal-content .modal-actions .delete-button:hover,
+.modal-content .modal-actions .delete-button:hover {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: #fff;
 }
 </style>

@@ -10,7 +10,9 @@ const amazonDomainMap: Record<string, string> = {
   fr: 'www.amazon.fr',
   it: 'www.amazon.it',
   es: 'www.amazon.es',
-  jp: 'www.amazon.co.jp'
+  jp: 'www.amazon.co.jp',
+  br: 'www.amazon.com.br',
+  in: 'www.amazon.in',
 }
 
 const audibleDomainMap: Record<string, string> = {
@@ -23,7 +25,9 @@ const audibleDomainMap: Record<string, string> = {
   fr: 'www.audible.fr',
   it: 'www.audible.it',
   es: 'www.audible.es',
-  jp: 'www.audible.co.jp'
+  jp: 'www.audible.co.jp',
+  br: 'www.audible.com.br',
+  in: 'www.audible.in',
 }
 
 export function getAmazonDomain(region?: string): string {

@@ -8,7 +8,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
   const folders = ref<RootFolder[]>([])
   const loading = ref(false)
 
-  const defaultFolder = computed(() => folders.value.find(f => f.isDefault) || null)
+  const defaultFolder = computed(() => folders.value.find((f) => f.isDefault) || null)
 
   async function load() {
     loading.value = true
@@ -33,7 +33,11 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     return r
   }
 
-  async function update(id: number, payload: { id: number; name: string; path: string; isDefault?: boolean }, opts?: { moveFiles?: boolean; deleteEmptySource?: boolean }) {
+  async function update(
+    id: number,
+    payload: { id: number; name: string; path: string; isDefault?: boolean },
+    opts?: { moveFiles?: boolean; deleteEmptySource?: boolean },
+  ) {
     const r = await apiService.updateRootFolder(id, payload, opts)
     await load()
     return r

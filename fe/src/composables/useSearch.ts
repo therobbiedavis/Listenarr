@@ -2,7 +2,6 @@ import { ref, computed } from 'vue'
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 import { logger } from '@/utils/logger'
-import { isbnService } from '@/services/isbn'
 
 export function useSearch() {
   // Reactive state
@@ -118,7 +117,9 @@ export function useSearch() {
       results = await searchByTitle(query)
     }
 
-    try { lastResults.value = results ?? null } catch {}
+    try {
+      lastResults.value = results ?? null
+    } catch {}
     return results
   }
 
@@ -140,19 +141,20 @@ export function useSearch() {
 
     try {
       // Cancel any previous search and create controller for this request
-      try { searchAbortController.value?.abort() } catch {}
+      try {
+        searchAbortController.value?.abort()
+      } catch {}
       searchAbortController.value = new AbortController()
 
       const results = await apiService.searchByTitle(`ASIN:${cleanAsin}`, {
         signal: searchAbortController.value.signal,
-        language: searchLanguage.value
+        language: searchLanguage.value,
       })
 
       logger.debug('ASIN search results:', results)
 
       // Process results - this will be handled by the component
       return results
-
     } catch (error) {
       logger.error('ASIN search failed:', error)
       searchError.value = error instanceof Error ? error.message : 'Failed to search for audiobook'
@@ -160,7 +162,9 @@ export function useSearch() {
     } finally {
       isSearching.value = false
       // Keep a brief 'done' status then clear
-      setTimeout(() => { searchStatus.value = '' }, 1200)
+      setTimeout(() => {
+        searchStatus.value = ''
+      }, 1200)
     }
   }
 
@@ -173,12 +177,14 @@ export function useSearch() {
 
     try {
       // Cancel any previous search
-      try { searchAbortController.value?.abort() } catch {}
+      try {
+        searchAbortController.value?.abort()
+      } catch {}
       searchAbortController.value = new AbortController()
 
       const results = await apiService.searchByTitle(query, {
         signal: searchAbortController.value.signal,
-        language: searchLanguage.value
+        language: searchLanguage.value,
       })
 
       logger.debug('Title search returned:', results)
@@ -187,20 +193,22 @@ export function useSearch() {
       searchStatus.value = 'Processing search results...'
 
       return results
-
     } catch (error) {
       if (error && (error as Error).name === 'AbortError') {
         logger.debug('Title search aborted by user')
         searchError.value = 'Search cancelled'
       } else {
         logger.error('Title search failed:', error)
-        searchError.value = error instanceof Error ? error.message : 'Failed to search for audiobooks'
+        searchError.value =
+          error instanceof Error ? error.message : 'Failed to search for audiobooks'
       }
       throw error
     } finally {
       isSearching.value = false
       // Clear status shortly after completion
-      setTimeout(() => { searchStatus.value = '' }, 1000)
+      setTimeout(() => {
+        searchStatus.value = ''
+      }, 1000)
     }
   }
 
@@ -223,7 +231,9 @@ export function useSearch() {
     }
     isSearching.value = false
     // Clear controller reference
-    try { searchAbortController.value = null } catch {}
+    try {
+      searchAbortController.value = null
+    } catch {}
   }
 
   return {
@@ -248,6 +258,6 @@ export function useSearch() {
     cancelSearch,
 
     // Extras
-    lastResults
+    lastResults,
   }
 }

@@ -36,7 +36,7 @@
   --section-gap: 160px;
 
   /* App-level aliases (keeps older/legacy view vars working) */
-  --primary-color: #2196F3; /* Listenarr branding */
+  --primary-color: #2196f3; /* Listenarr branding */
   --card-bg: var(--color-background-soft);
   --border-color: var(--color-border);
   --text-color: var(--color-text);

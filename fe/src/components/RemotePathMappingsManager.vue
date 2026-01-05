@@ -3,8 +3,8 @@
     <div class="section-header">
       <h3>Remote Path Mappings</h3>
       <p class="description">
-        Configure path mappings to translate file locations between the download client and Listenarr.
-        This is essential for Docker setups where containers have different mount points.
+        Configure path mappings to translate file locations between the download client and
+        Listenarr. This is essential for Docker setups where containers have different mount points.
       </p>
     </div>
 
@@ -52,11 +52,7 @@
 
     <!-- Mappings List -->
     <div v-if="!loading && mappings.length > 0 && !showForm" class="mappings-list">
-      <div
-        v-for="mapping in mappings"
-        :key="mapping.id"
-        class="mapping-card"
-      >
+      <div v-for="mapping in mappings" :key="mapping.id" class="mapping-card">
         <div class="mapping-header">
           <div class="mapping-info">
             <h4>{{ mapping.name || 'Path Mapping' }}</h4>
@@ -68,11 +64,7 @@
             </span>
           </div>
           <div class="mapping-actions">
-            <button
-              class="btn btn-icon"
-              title="Edit mapping"
-              @click="handleEdit(mapping)"
-            >
+            <button class="btn btn-icon" title="Edit mapping" @click="handleEdit(mapping)">
               <i class="ph ph-pencil"></i>
             </button>
             <button
@@ -112,7 +104,8 @@
       <i class="ph ph-folder-open empty-icon"></i>
       <h4>No Path Mappings</h4>
       <p>
-        No remote path mappings configured for this download client yet. Add one to enable path translation for Docker environments.
+        No remote path mappings configured for this download client yet. Add one to enable path
+        translation for Docker environments.
       </p>
     </div>
 
@@ -130,16 +123,16 @@
           class="test-input"
           @keyup.enter="handleTestPath"
         />
-        <button 
-          class="btn btn-secondary" 
-          @click="handleTestPath" 
+        <button
+          class="btn btn-secondary"
+          @click="handleTestPath"
           :disabled="!testPath.trim() || testing"
         >
           <i :class="testing ? 'ph ph-spinner ph-spin' : 'ph ph-play'"></i>
           {{ testing ? 'Testing...' : 'Translate' }}
         </button>
       </div>
-      
+
       <div v-if="testResult" class="test-result">
         <div v-if="testResult.translated" class="result-success">
           <div class="result-header">
@@ -170,7 +163,7 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Confirm dialog removed: using centralized showConfirm service mounted in App.vue -->
   </div>
 </template>
@@ -185,7 +178,7 @@ import {
   createRemotePathMapping,
   updateRemotePathMapping,
   deleteRemotePathMapping,
-  translatePath
+  translatePath,
 } from '@/services/api'
 
 interface Props {
@@ -231,10 +224,12 @@ const handleEdit = (mapping: RemotePathMapping) => {
   successMessage.value = null
 }
 
-const handleSave = async (mappingData: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>) => {
+const handleSave = async (
+  mappingData: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>,
+) => {
   loading.value = true
   error.value = null
-  
+
   try {
     if (editingMapping.value) {
       // Update existing
@@ -245,11 +240,11 @@ const handleSave = async (mappingData: Omit<RemotePathMapping, 'id' | 'createdAt
       await createRemotePathMapping(mappingData)
       successMessage.value = 'Path mapping created successfully!'
     }
-    
+
     showForm.value = false
     editingMapping.value = null
     await loadMappings()
-    
+
     // Clear success message after 3 seconds
     setTimeout(() => {
       successMessage.value = null
@@ -270,19 +265,19 @@ const handleCancelForm = () => {
 const handleDelete = async (mapping: RemotePathMapping) => {
   const ok = await showConfirm(
     `Are you sure you want to delete the path mapping "${mapping.name || mapping.remotePath}"?\n\n` +
-    `This will stop translating paths for this download client.`,
-    'Delete Path Mapping'
+      `This will stop translating paths for this download client.`,
+    'Delete Path Mapping',
   )
   if (!ok) return
-  
+
   loading.value = true
   error.value = null
-  
+
   try {
     await deleteRemotePathMapping(mapping.id)
     successMessage.value = 'Path mapping deleted successfully!'
     await loadMappings()
-    
+
     setTimeout(() => {
       successMessage.value = null
     }, 3000)
@@ -293,18 +288,16 @@ const handleDelete = async (mapping: RemotePathMapping) => {
   }
 }
 
-
-
 const handleTestPath = async () => {
   if (!testPath.value.trim()) return
-  
+
   testing.value = true
   error.value = null
-  
+
   try {
     testResult.value = await translatePath({
       downloadClientId: props.downloadClientId,
-      remotePath: testPath.value.trim()
+      remotePath: testPath.value.trim(),
     })
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to test path translation'
@@ -370,8 +363,12 @@ onMounted(() => {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Error and Success Banners */

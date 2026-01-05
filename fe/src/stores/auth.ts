@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { apiService } from '@/services/api'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { clearAllAuthData } from '@/utils/sessionDebug'
+import { errorTracking } from '@/services/errorTracking'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<{ authenticated: boolean; name?: string }>({ authenticated: false })
@@ -19,7 +20,10 @@ export const useAuthStore = defineStore('auth', () => {
       loaded.value = true
     } catch (error) {
       console.warn('[AuthStore] Failed to load current user:', error)
-  const status = (error && typeof error === 'object' && 'status' in error) ? (error as unknown as { status?: number }).status ?? 0 : 0
+      const status =
+        error && typeof error === 'object' && 'status' in error
+          ? ((error as unknown as { status?: number }).status ?? 0)
+          : 0
       if (status === 401 || status === 403) {
         console.log('[AuthStore] Authentication error - clearing session')
         // Clear any stale tokens when we get auth errors
@@ -32,7 +36,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  const login = async (username: string, password: string, rememberMe: boolean, csrfToken?: string) => {
+  const login = async (
+    username: string,
+    password: string,
+    rememberMe: boolean,
+    csrfToken?: string,
+  ) => {
     await apiService.login(username, password, rememberMe, csrfToken)
     await loadCurrentUser()
   }
@@ -56,7 +65,9 @@ export const useAuthStore = defineStore('auth', () => {
             }
           }
         } catch {
-          try { window.location.href = '/login' } catch {}
+          try {
+            window.location.href = '/login'
+          } catch {}
         }
       }
     })
@@ -68,7 +79,10 @@ export const useAuthStore = defineStore('auth', () => {
       await apiService.logout()
       console.log('[AuthStore] Logout API call successful')
     } catch (error) {
-      console.error('[AuthStore] Logout API call failed:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'AuthStore',
+        operation: 'logout',
+      })
       // Continue with local logout even if API call fails
     } finally {
       // Ensure all client-side auth data is cleared even if the API call failed

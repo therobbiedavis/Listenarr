@@ -1,6 +1,5 @@
 <template>
   <div class="collection-view">
-
     <!-- Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
@@ -14,7 +13,7 @@
         </button>
         <button
           class="toolbar-btn"
-          :class="{ 'active': showItemDetails }"
+          :class="{ active: showItemDetails }"
           @click="toggleItemDetails"
           :aria-pressed="showItemDetails"
           title="Toggle item details"
@@ -25,42 +24,35 @@
           <PhArrowClockwise />
           Refresh
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn"
-          @click="libraryStore.clearSelection()"
-        >
+        <button v-if="selectedCount > 0" class="toolbar-btn" @click="libraryStore.clearSelection()">
           <PhX />
           Clear Selection
         </button>
-        <button 
-          v-if="audiobooks.length > 0 && selectedCount === 0" 
+        <button
+          v-if="audiobooks.length > 0 && selectedCount === 0"
           class="toolbar-btn"
           @click="libraryStore.selectAll()"
         >
           <PhCheckSquare />
           Select All
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn edit-btn"
-          @click="showBulkEdit"
-        >
+        <button v-if="selectedCount > 0" class="toolbar-btn edit-btn" @click="showBulkEdit">
           <PhPencil />
           Edit Selected
         </button>
-        <button 
-          v-if="selectedCount > 0" 
-          class="toolbar-btn delete-btn"
-          @click="confirmBulkDelete"
-        >
+        <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
           Delete Selected ({{ selectedCount }})
         </button>
       </div>
       <div class="toolbar-right">
         <div class="toolbar-filters">
-          <CustomSelect v-model="sortKeyProxy" :options="sortOptions" class="toolbar-custom-select" aria-label="Sort by" />
+          <CustomSelect
+            v-model="sortKeyProxy"
+            :options="sortOptions"
+            class="toolbar-custom-select"
+            aria-label="Sort by"
+          />
           <input
             type="search"
             v-model="searchQuery"
@@ -74,14 +66,15 @@
 
     <!-- Top Navigation Bar -->
     <div class="top-nav">
-
       <div class="nav-title">
         <h1>
           <PhUser v-if="type === 'author'" />
           <PhBooks v-else />
           {{ type === 'author' ? 'Author' : 'Series' }}: {{ name }}
         </h1>
-        <span class="count-badge">{{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}</span>
+        <span class="count-badge"
+          >{{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}</span
+        >
       </div>
     </div>
 
@@ -115,7 +108,7 @@
       <!-- List View (match AudiobooksView styling) -->
       <div v-if="viewMode === 'list'" class="audiobooks-list">
         <div v-if="audiobooks.length > 0" class="list-header">
-          <div class="col-select"> </div>
+          <div class="col-select"></div>
           <div class="col-cover">Cover</div>
           <div class="col-title">Title / Author</div>
           <div class="col-status">Status</div>
@@ -133,16 +126,22 @@
             'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
             'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
             'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
-            'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
+            'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
           }"
           @click="handleRowClick(audiobook)"
         >
-          <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, $event)" @mousedown.prevent>
+          <div
+            class="selection-checkbox"
+            @click.stop="handleCheckboxClick(audiobook, $event)"
+            @mousedown.prevent
+          >
             <input
               type="checkbox"
               :checked="isSelected(audiobook.id)"
               @change="onCheckboxChange(audiobook, $event)"
-              @keydown.space.prevent="handleCheckboxKeydown && handleCheckboxKeydown(audiobook, $event)"
+              @keydown.space.prevent="
+                handleCheckboxKeydown && handleCheckboxKeydown(audiobook, $event)
+              "
             />
           </div>
 
@@ -157,34 +156,76 @@
 
           <div class="list-details">
             <div class="audiobook-title">{{ safeText(audiobook.title) }}</div>
-            <div class="audiobook-author">{{ audiobook.authors?.map(author => safeText(author)).slice(0,2).join(', ') || 'Unknown Author' }}</div>
+            <div class="audiobook-author">
+              {{
+                audiobook.authors
+                  ?.map((author) => safeText(author))
+                  .slice(0, 2)
+                  .join(', ') || 'Unknown Author'
+              }}
+            </div>
             <div v-if="showItemDetails" class="list-extra-details">
-              <div class="detail-line small">{{ (audiobook.narrators || []).slice(0,1).map(n => safeText(n)).join(', ') || '' }}
-                <span v-if="audiobook.narrators && audiobook.narrators.length && (audiobook.publisher || audiobook.publishYear)"> • </span>
-                {{ safeText(audiobook.publisher) }}<span v-if="audiobook.publishYear"> • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span>
+              <div class="detail-line small">
+                {{
+                  (audiobook.narrators || [])
+                    .slice(0, 1)
+                    .map((n) => safeText(n))
+                    .join(', ') || ''
+                }}
+                <span
+                  v-if="
+                    audiobook.narrators &&
+                    audiobook.narrators.length &&
+                    (audiobook.publisher || audiobook.publishYear)
+                  "
+                >
+                  •
+                </span>
+                {{ safeText(audiobook.publisher)
+                }}<span v-if="audiobook.publishYear">
+                  • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span
+                >
               </div>
             </div>
           </div>
 
           <div class="list-badges">
-            <div class="status-badge" :class="getAudiobookStatus(audiobook)" role="button" tabindex="0" @click.stop="() => {}" :aria-label="`Status for ${audiobook.title}`">
+            <div
+              class="status-badge"
+              :class="getAudiobookStatus(audiobook)"
+              role="button"
+              tabindex="0"
+              @click.stop="() => {}"
+              :aria-label="`Status for ${audiobook.title}`"
+            >
               {{ statusText(getAudiobookStatus(audiobook)) }}
             </div>
-            <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
+            <div
+              v-if="getQualityProfileName(audiobook.qualityProfileId)"
+              class="quality-profile-badge"
+            >
               <PhStar />
               {{ getQualityProfileName(audiobook.qualityProfileId) }}
             </div>
-            <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
+            <div class="monitored-badge" :class="{ unmonitored: !audiobook.monitored }">
               <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
               {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
             </div>
           </div>
 
           <div class="list-actions">
-            <button class="action-btn edit-btn-small" @click.stop="editAudiobook(audiobook)" title="Edit">
+            <button
+              class="action-btn edit-btn-small"
+              @click.stop="editAudiobook(audiobook)"
+              title="Edit"
+            >
               <PhPencil />
             </button>
-            <button class="action-btn delete-btn-small" @click.stop="deleteAudiobook(audiobook)" title="Delete">
+            <button
+              class="action-btn delete-btn-small"
+              @click.stop="deleteAudiobook(audiobook)"
+              title="Delete"
+            >
               <PhTrash />
             </button>
           </div>
@@ -196,17 +237,21 @@
         <div
           v-for="audiobook in paginatedAudiobooks"
           :key="audiobook.id"
-            class="collection-card"
-            :class="{ 
-              'selected': isSelected(audiobook.id),
-              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
-              'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
-              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
-              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match'
-            }"
+          class="collection-card"
+          :class="{
+            selected: isSelected(audiobook.id),
+            'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+            'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
+            'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+            'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
+          }"
           @click="handleCardClick(audiobook)"
         >
-          <div class="selection-checkbox" @click.stop="handleCheckboxClick(audiobook, $event)" @mousedown.prevent>
+          <div
+            class="selection-checkbox"
+            @click.stop="handleCheckboxClick(audiobook, $event)"
+            @mousedown.prevent
+          >
             <input
               type="checkbox"
               :checked="isSelected(audiobook.id)"
@@ -227,38 +272,50 @@
             <div v-else class="no-cover">
               <PhBookOpen />
             </div>
-        <div class="status-overlay">
-        <div v-if="!showItemDetails" class="audiobook-title collection-title">{{ safeText(audiobook.title) }}</div>
-        <div v-if="!showItemDetails" class="audiobook-author collection-author">{{ audiobook.authors?.map(author => safeText(author)).join(', ') || 'Unknown Author' }}</div>
-        <div v-if="getQualityProfileName(audiobook.qualityProfileId)" class="quality-profile-badge">
-          <PhStar />
-          {{ getQualityProfileName(audiobook.qualityProfileId) }}
-        </div>
-        <div class="monitored-badge" :class="{ 'unmonitored': !audiobook.monitored }">
-          <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
-          {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
-        </div>
-      </div>
+            <div class="status-overlay">
+              <div v-if="!showItemDetails" class="audiobook-title collection-title">
+                {{ safeText(audiobook.title) }}
+              </div>
+              <div v-if="!showItemDetails" class="audiobook-author collection-author">
+                {{
+                  audiobook.authors?.map((author) => safeText(author)).join(', ') ||
+                  'Unknown Author'
+                }}
+              </div>
+              <div
+                v-if="getQualityProfileName(audiobook.qualityProfileId)"
+                class="quality-profile-badge"
+              >
+                <PhStar />
+                {{ getQualityProfileName(audiobook.qualityProfileId) }}
+              </div>
+              <div class="monitored-badge" :class="{ unmonitored: !audiobook.monitored }">
+                <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+              </div>
+            </div>
           </div>
           <!-- Bottom placard (only show when item details are enabled) -->
           <div v-if="showItemDetails" class="series-bottom-placard">
             <div class="series-bottom-content">
               <p class="series-bottom-title">{{ safeText(audiobook.title) }}</p>
-              <p class="series-bottom-author" v-if="audiobook.authors?.[0]">{{ audiobook.authors[0] }}</p>
+              <p class="series-bottom-author" v-if="audiobook.authors?.[0]">
+                {{ audiobook.authors[0] }}
+              </p>
               <p class="series-bottom-meta">{{ statusText(getAudiobookStatus(audiobook)) }}</p>
             </div>
           </div>
           <!-- Action buttons -->
           <div class="action-buttons">
-            <button 
-              class="action-btn edit-btn-small" 
+            <button
+              class="action-btn edit-btn-small"
               @click.stop="editAudiobook(audiobook)"
               title="Edit"
             >
               <PhPencil />
             </button>
-            <button 
-              class="action-btn delete-btn-small" 
+            <button
+              class="action-btn delete-btn-small"
               @click.stop="deleteAudiobook(audiobook)"
               title="Delete"
             >
@@ -277,9 +334,7 @@
         >
           <PhCaretLeft />
         </button>
-        <span class="page-info">
-          Page {{ currentPage }} of {{ totalPages }}
-        </span>
+        <span class="page-info"> Page {{ currentPage }} of {{ totalPages }} </span>
         <button
           @click="currentPage = Math.min(totalPages, currentPage + 1)"
           :disabled="currentPage === totalPages"
@@ -310,13 +365,34 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhUser, PhBooks, PhGridFour, PhList, PhCheckSquare, PhX, PhArrowClockwise, PhInfo, PhBookOpen, PhSpinner, PhWarningCircle, PhPencil, PhTrash, PhCaretLeft, PhCaretRight, PhStar, PhEye, PhEyeSlash } from '@phosphor-icons/vue'
+import {
+  PhArrowLeft,
+  PhUser,
+  PhBooks,
+  PhGridFour,
+  PhList,
+  PhCheckSquare,
+  PhX,
+  PhArrowClockwise,
+  PhInfo,
+  PhBookOpen,
+  PhSpinner,
+  PhWarningCircle,
+  PhPencil,
+  PhTrash,
+  PhCaretLeft,
+  PhCaretRight,
+  PhStar,
+  PhEye,
+  PhEyeSlash,
+} from '@phosphor-icons/vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
+import { errorTracking } from '@/services/errorTracking'
 import EditAudiobookModal from '@/components/EditAudiobookModal.vue'
 import BulkEditModal from '@/components/BulkEditModal.vue'
 import { showConfirm } from '@/composables/useConfirm'
@@ -349,7 +425,7 @@ const qualityProfiles = computed(() => configStore.qualityProfiles)
 
 const audiobooks = computed(() => {
   const allBooks = libraryStore.audiobooks
-  const filtered = allBooks.filter(book => {
+  const filtered = allBooks.filter((book) => {
     if (type.value === 'author') {
       return book.authors?.includes(name.value)
     } else if (type.value === 'series') {
@@ -359,14 +435,14 @@ const audiobooks = computed(() => {
   })
 
   // Apply search
-  const searched = filtered.filter(book =>
-    book.title.toLowerCase().includes(searchQuery.value.toLowerCase())
+  const searched = filtered.filter((book) =>
+    book.title.toLowerCase().includes(searchQuery.value.toLowerCase()),
   )
 
   // Apply sorting
   return searched.sort((a, b) => {
-    const aVal = safeText(a[sortKey.value as keyof Audiobook] as string || '')
-    const bVal = safeText(b[sortKey.value as keyof Audiobook] as string || '')
+    const aVal = safeText((a[sortKey.value as keyof Audiobook] as string) || '')
+    const bVal = safeText((b[sortKey.value as keyof Audiobook] as string) || '')
     return aVal.localeCompare(bVal)
   })
 })
@@ -379,7 +455,7 @@ const baseSortOptions = [
 ]
 
 const sortOptions = computed(() => {
-  return baseSortOptions.filter(o => {
+  return baseSortOptions.filter((o) => {
     if (type.value === 'author' && o.value === 'author') return false
     if (type.value === 'series' && o.value === 'series') return false
     return true
@@ -388,7 +464,7 @@ const sortOptions = computed(() => {
 
 // Ensure current sortKey is valid for the current view; reset to title if not
 watch(sortOptions, (newOpts) => {
-  const vals = newOpts.map(o => o.value)
+  const vals = newOpts.map((o) => o.value)
   if (!vals.includes(sortKey.value)) {
     sortKey.value = 'title'
   }
@@ -399,7 +475,7 @@ const sortKeyProxy = computed({
   set: (value: string) => {
     sortKey.value = value
     currentPage.value = 1
-  }
+  },
 })
 
 const paginatedAudiobooks = computed(() => {
@@ -414,7 +490,6 @@ const selectedCount = computed(() => libraryStore.selectedIds.size)
 
 const isSelected = (id: number) => libraryStore.isSelected(id)
 const toggleSelection = (id: number) => libraryStore.toggleSelection(id)
-
 
 const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
@@ -445,7 +520,11 @@ async function confirmBulkDelete() {
   const count = libraryStore.selectedIds.size
   if (count === 0) return
   const message = `Are you sure you want to delete ${count} audiobook${count !== 1 ? 's' : ''}? This action cannot be undone.`
-  const ok = await showConfirm(message, 'Confirm Deletion', { danger: true, confirmText: 'Delete', cancelText: 'Cancel' })
+  const ok = await showConfirm(message, 'Confirm Deletion', {
+    danger: true,
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+  })
   if (!ok) return
   deleting.value = true
   try {
@@ -488,7 +567,7 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
   // Prevent default native checkbox toggle; handle selection consistently
   event.preventDefault()
 
-  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  const currentIndex = audiobooks.value.findIndex((book) => book.id === audiobook.id)
   if (event.shiftKey && lastClickedIndex.value !== null) {
     const start = Math.min(lastClickedIndex.value, currentIndex)
     const end = Math.max(lastClickedIndex.value, currentIndex)
@@ -505,7 +584,7 @@ function handleCheckboxClick(audiobook: Audiobook, event: MouseEvent) {
 }
 
 function onCheckboxChange(audiobook: Audiobook, event: Event) {
-  const currentIndex = audiobooks.value.findIndex(book => book.id === audiobook.id)
+  const currentIndex = audiobooks.value.findIndex((book) => book.id === audiobook.id)
   const shift = (event as MouseEvent | KeyboardEvent).shiftKey
   if (shift && lastClickedIndex.value !== null) {
     const start = Math.min(lastClickedIndex.value, currentIndex)
@@ -542,44 +621,65 @@ const handleImageError = (event: Event) => {
     const img = event.target as HTMLImageElement
     if (!img) return
     // prevent repeated handling on same element
-    try { if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return; (img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true } catch (e: unknown) {
-      console.error(e)
+    try {
+      if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return
+      ;(img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true
+    } catch (e: unknown) {
+      errorTracking.captureException(e as Error, {
+        component: 'CollectionView',
+        operation: 'handleImageError',
+      })
     }
 
-    // try to extract identifier from src or data-original-src
-    const original = img.dataset?.originalSrc || img.getAttribute('src') || ''
-
-
     // set placeholder and clear lazy attributes
-    try { img.src = apiService.getPlaceholderUrl() } catch {}
-    try { img.removeAttribute('data-src') } catch {}
-    try { img.removeAttribute('data-original-src') } catch {}
-    try { (img as unknown as { onerror?: null }).onerror = null } catch (e: unknown) {
-      console.error(e)
+    try {
+      img.src = apiService.getPlaceholderUrl()
+    } catch {}
+    try {
+      img.removeAttribute('data-src')
+    } catch {}
+    try {
+      img.removeAttribute('data-original-src')
+    } catch {}
+    try {
+      ;(img as unknown as { onerror?: null }).onerror = null
+    } catch (e: unknown) {
+      errorTracking.captureException(e as Error, {
+        component: 'CollectionView',
+        operation: 'handleImageErrorCleanup',
+      })
     }
   } catch {}
 }
 
-
 function getQualityProfileName(profileId?: number): string | null {
   if (!profileId) return null
-  const profile = qualityProfiles.value.find(p => p.id === profileId)
+  const profile = qualityProfiles.value.find((p) => p.id === profileId)
   return profile?.name ?? null
 }
 
-function statusText(status: 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match'): string {
+function statusText(
+  status: 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match',
+): string {
   switch (status) {
-    case 'downloading': return 'Downloading'
-    case 'no-file': return 'Missing'
-    case 'quality-mismatch': return 'Mismatch'
-    case 'quality-match': return 'Downloaded'
-    default: return ''
+    case 'downloading':
+      return 'Downloading'
+    case 'no-file':
+      return 'Missing'
+    case 'quality-mismatch':
+      return 'Mismatch'
+    case 'quality-match':
+      return 'Downloaded'
+    default:
+      return ''
   }
 }
 
-function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match' {
+function getAudiobookStatus(
+  audiobook: Audiobook,
+): 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match' {
   // Check if this audiobook is currently being downloaded
-  const isDownloading = downloadsStore.activeDownloads.some(d => d.audiobookId === audiobook.id)
+  const isDownloading = downloadsStore.activeDownloads.some((d) => d.audiobookId === audiobook.id)
   if (isDownloading) {
     return 'downloading'
   }
@@ -589,7 +689,7 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
     return 'no-file'
   }
 
-  const profile = qualityProfiles.value.find(p => p.id === audiobook.qualityProfileId)
+  const profile = qualityProfiles.value.find((p) => p.id === audiobook.qualityProfileId)
 
   // If no profile or no preferredFormats defined, fall back to the simple existing behavior
   if (!profile) {
@@ -601,14 +701,17 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   const normalize = (s?: string) => (s || '').toString().toLowerCase()
 
   // Find any file that matches one of the profile's preferred formats
-  const preferredFormats = (profile.preferredFormats || []).map(f => normalize(f))
+  const preferredFormats = (profile.preferredFormats || []).map((f) => normalize(f))
 
   // If no preferred formats configured, treat any file as a candidate
-  const candidateFiles = audiobook.files.filter(f => {
+  const candidateFiles = audiobook.files.filter((f) => {
     if (!f) return false
     const fileFormat = normalize(f.format) || normalize(f.container) || ''
     if (preferredFormats.length === 0) return true
-    return preferredFormats.includes(fileFormat) || preferredFormats.some(pf => fileFormat.includes(pf))
+    return (
+      preferredFormats.includes(fileFormat) ||
+      preferredFormats.some((pf) => fileFormat.includes(pf))
+    )
   })
 
   if (candidateFiles.length === 0) {
@@ -629,7 +732,9 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
   }
 
   const cutoff = normalize(profile.cutoffQuality)
-  const cutoffPriority = qualityPriority.has(cutoff) ? qualityPriority.get(cutoff)! : Number.POSITIVE_INFINITY
+  const cutoffPriority = qualityPriority.has(cutoff)
+    ? qualityPriority.get(cutoff)!
+    : Number.POSITIVE_INFINITY
 
   // Helper to derive a quality string for a given file/audiobook
   type FileInfo = {
@@ -656,7 +761,12 @@ function getAudiobookStatus(audiobook: Audiobook): 'downloading' | 'no-file' | '
     // If container or codec suggests lossless
     const container = normalize(file?.container)
     const codec = normalize(file?.codec)
-    if (container.includes('flac') || codec.includes('flac') || codec.includes('alac') || codec.includes('wav')) {
+    if (
+      container.includes('flac') ||
+      codec.includes('flac') ||
+      codec.includes('alac') ||
+      codec.includes('wav')
+    ) {
       return 'lossless'
     }
 
@@ -701,7 +811,7 @@ watch(searchQuery, () => {
 defineExpose({
   viewMode,
   showItemDetails,
-  toggleItemDetails
+  toggleItemDetails,
 })
 </script>
 
@@ -796,28 +906,31 @@ defineExpose({
   gap: 8px;
   padding: 8px 14px;
   background-color: transparent;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   color: #e6eef8;
   font-size: 12px;
   cursor: pointer;
-  transition: background-color 0.12s ease, transform 0.08s ease, box-shadow 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    transform 0.08s ease,
+    box-shadow 0.12s ease;
 }
 
 .toolbar-btn:hover {
-  background-color: rgba(255,255,255,0.03);
+  background-color: rgba(255, 255, 255, 0.03);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 .toolbar-btn.active {
-  background-color: #2196F3;
-  border-color: #2196F3;
+  background-color: #2196f3;
+  border-color: #2196f3;
   color: #fff;
 }
 
 .toolbar-btn.edit-btn {
-  background-color: #2196F3;
+  background-color: #2196f3;
   border-color: #1976d2;
   color: #fff;
 }
@@ -838,7 +951,7 @@ defineExpose({
 
 /* Accessibility: strong focus ring for keyboard users */
 .toolbar-btn:focus-visible {
-  outline: 3px solid rgba(33,150,243,0.18);
+  outline: 3px solid rgba(33, 150, 243, 0.18);
   outline-offset: 2px;
 }
 
@@ -851,17 +964,17 @@ defineExpose({
     font-size: 0;
     gap: unset;
   }
-  
+
   .toolbar-btn svg {
     font-size: 16px;
     width: 16px;
     height: 16px;
   }
-  
+
   .count-badge {
     display: none;
   }
-  
+
   .toolbar-search {
     min-width: 120px;
   }
@@ -883,8 +996,8 @@ defineExpose({
   margin-left: 8px;
 }
 .toolbar-search {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   color: #e6eef8;
   padding: 8px 8px;
   border-radius: 6px;
@@ -892,7 +1005,7 @@ defineExpose({
 }
 .toolbar-select {
   background-color: #2a2a2a; /* match CustomSelect trigger */
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #e6eef8;
   padding: 8px 10px;
   border-radius: 6px;
@@ -900,9 +1013,15 @@ defineExpose({
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.12) 50%), linear-gradient(135deg, rgba(255,255,255,0.12) 50%, transparent 50%);
-  background-position: calc(100% - 14px) calc(1em + 2px), calc(100% - 10px) calc(1em + 2px);
-  background-size: 6px 6px, 6px 6px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, 0.12) 50%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(1em + 2px),
+    calc(100% - 10px) calc(1em + 2px);
+  background-size:
+    6px 6px,
+    6px 6px;
   background-repeat: no-repeat;
 }
 
@@ -1068,7 +1187,7 @@ defineExpose({
   overflow: hidden;
   position: relative;
   border-radius: 6px;
-  box-shadow: inset 0 8px 20px rgba(0,0,0,0.6);
+  box-shadow: inset 0 8px 20px rgba(0, 0, 0, 0.6);
 }
 
 .collection-cover img {
@@ -1083,18 +1202,30 @@ defineExpose({
   outline-offset: 2px;
 }
 
-.collection-image { display: block; width:100%; height:100%; border-radius: 6px; }
+.collection-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
 
-.collection-card.status-no-file .collection-cover { border-bottom: 4px solid #e74c3c }
+.collection-card.status-no-file .collection-cover {
+  border-bottom: 4px solid #e74c3c;
+}
 .collection-card.status-downloading .collection-cover {
   border-bottom: 3px solid #3498db;
   animation: pulse 2s ease-in-out infinite;
 }
-.collection-card.status-quality-mismatch .collection-cover { border-bottom: 4px solid #f39c12; }
-.collection-card.status-quality-match .collection-cover { border-bottom: 4px solid #2ecc71; }
+.collection-card.status-quality-mismatch .collection-cover {
+  border-bottom: 4px solid #f39c12;
+}
+.collection-card.status-quality-match .collection-cover {
+  border-bottom: 4px solid #2ecc71;
+}
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     border-bottom-color: #3498db;
   }
   50% {
@@ -1253,8 +1384,8 @@ defineExpose({
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   margin-right: 0.5rem;
-  background-color: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   font-size: 10px;
   font-weight: 600;
@@ -1265,26 +1396,26 @@ defineExpose({
 }
 
 .status-badge.no-file {
-  background-color: rgba(231,76,60,0.12);
-  border-color: rgba(231,76,60,0.18);
+  background-color: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.18);
   color: #e74c3c;
 }
 
 .status-badge.downloading {
-  background-color: rgba(52,152,219,0.10);
-  border-color: rgba(52,152,219,0.2);
+  background-color: rgba(52, 152, 219, 0.1);
+  border-color: rgba(52, 152, 219, 0.2);
   color: #3498db;
 }
 
 .status-badge.quality-mismatch {
-  background-color: rgba(243,156,18,0.10);
-  border-color: rgba(243,156,18,0.18);
+  background-color: rgba(243, 156, 18, 0.1);
+  border-color: rgba(243, 156, 18, 0.18);
   color: #f39c12;
 }
 
 .status-badge.quality-match {
-  background-color: rgba(46,204,113,0.10);
-  border-color: rgba(46,204,113,0.18);
+  background-color: rgba(46, 204, 113, 0.1);
+  border-color: rgba(46, 204, 113, 0.18);
   color: #2ecc71;
 }
 
@@ -1365,7 +1496,9 @@ defineExpose({
   background-color: rgba(41, 128, 185, 1);
 }
 
-.loading-state, .empty-state, .error-state {
+.loading-state,
+.empty-state,
+.error-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1375,7 +1508,9 @@ defineExpose({
   text-align: center;
 }
 
-.loading-state i, .empty-icon, .error-icon {
+.loading-state i,
+.empty-icon,
+.error-icon {
   font-size: 4rem;
   color: #555;
   margin-bottom: 1rem;
@@ -1443,10 +1578,23 @@ defineExpose({
   background-color: #005fa3;
 }
 
-.collection-cover:hover .status-overlay { padding: 56px 8px 8px; }
-.status-overlay .overlay-title { color: #fff; font-weight: 600; }
-.status-overlay .overlay-author { color: #bfcad6; font-size: 13px; }
-.overlay-badges { display:flex; gap:6px; align-items:center; margin-top:4px; }
+.collection-cover:hover .status-overlay {
+  padding: 56px 8px 8px;
+}
+.status-overlay .overlay-title {
+  color: #fff;
+  font-weight: 600;
+}
+.status-overlay .overlay-author {
+  color: #bfcad6;
+  font-size: 13px;
+}
+.overlay-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
 
 .collection-content {
   padding: 1rem;
@@ -1476,7 +1624,7 @@ defineExpose({
 }
 
 .series-bottom-placard {
-  margin-top: .5rem;
+  margin-top: 0.5rem;
   display: flex;
   justify-content: center;
   z-index: 10;
@@ -1528,7 +1676,7 @@ defineExpose({
   padding: 0;
   box-sizing: border-box;
   background-color: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -1539,7 +1687,7 @@ defineExpose({
   -ms-user-select: none;
 }
 /* Hide the native input visually but keep it accessible and interactive */
-.selection-checkbox input[type="checkbox"] {
+.selection-checkbox input[type='checkbox'] {
   position: absolute;
   inset: 0;
   margin: 0;
@@ -1561,26 +1709,27 @@ defineExpose({
   width: 14px;
   height: 14px;
   border-radius: 4px;
-  border: 2px solid rgba(255,255,255,0.14);
+  border: 2px solid rgba(255, 255, 255, 0.14);
   background: transparent;
   box-sizing: border-box;
-  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
   z-index: 1;
 }
 
 /* Custom checkmark uses pseudo-element ::after - no need to hide it */
 
-
 .selection-checkbox:hover {
   background-color: rgba(0, 0, 0, 0.6);
-  border-color: rgba(255,255,255,0.18);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Custom checkmark */
 
-
 /* Remove container hover darkening when focusing the native checkbox so contrast stays good */
-.selection-checkbox:hover input[type="checkbox"] {
+.selection-checkbox:hover input[type='checkbox'] {
   transform: translateY(0);
 }
 
@@ -1599,8 +1748,8 @@ defineExpose({
 .audiobook-list-item.selected .selection-checkbox::before {
   background-color: #007acc;
   border-color: #007acc;
-  box-shadow: 0 0 0 4px rgba(0,122,204,0.12);
-} 
+  box-shadow: 0 0 0 4px rgba(0, 122, 204, 0.12);
+}
 
 .audiobook-item.selected .selection-checkbox::after,
 .audiobook-list-item.selected .selection-checkbox::after {
@@ -1609,18 +1758,19 @@ defineExpose({
   transform: translate(-50%, -50%) rotate(45deg) scale(1);
 }
 
-
 /* Focus outlines for keyboard navigation */
-.selection-checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(0,122,204,0.3);
+.selection-checkbox input[type='checkbox']:focus-visible {
+  outline: 2px solid rgba(0, 122, 204, 0.3);
   outline-offset: 2px;
 }
 
-.audiobook-list-item:focus, .audiobook-list-item:focus-within,
-.collection-card:focus, .collection-card:focus-within {
-  outline: 2px solid rgba(0,122,204,0.18);
+.audiobook-list-item:focus,
+.audiobook-list-item:focus-within,
+.collection-card:focus,
+.collection-card:focus-within {
+  outline: 2px solid rgba(0, 122, 204, 0.18);
   outline-offset: 2px;
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
 }
 
 /* List-specific override for the checkbox so it participates in the grid */
@@ -1632,8 +1782,8 @@ defineExpose({
   height: 20px;
   width: 20px;
   margin: 0;
-  background-color: rgba(0,0,0,0.0);
-  border: 1px solid rgba(255,255,255,0.06);
+  background-color: rgba(0, 0, 0, 0);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1646,7 +1796,7 @@ defineExpose({
 .audiobooks-list .selection-checkbox::before {
   opacity: 1;
 }
-.audiobooks-list .selection-checkbox input[type="checkbox"] {
+.audiobooks-list .selection-checkbox input[type='checkbox'] {
   opacity: 0; /* native input remains visually hidden */
 }
 
@@ -1659,7 +1809,8 @@ defineExpose({
   top: 2px;
 }
 
-.collection-card:focus, .collection-card:focus-within {
+.collection-card:focus,
+.collection-card:focus-within {
   outline: 2px solid var(--primary-color);
   outline-offset: 2px;
 }
@@ -1715,8 +1866,8 @@ defineExpose({
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   margin-right: 0.5rem;
-  background-color: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   font-size: 10px;
   font-weight: 600;
@@ -1727,26 +1878,26 @@ defineExpose({
 }
 
 .status-badge.no-file {
-  background-color: rgba(231,76,60,0.12);
-  border-color: rgba(231,76,60,0.18);
+  background-color: rgba(231, 76, 60, 0.12);
+  border-color: rgba(231, 76, 60, 0.18);
   color: #e74c3c;
 }
 
 .status-badge.downloading {
-  background-color: rgba(52,152,219,0.10);
-  border-color: rgba(52,152,219,0.2);
+  background-color: rgba(52, 152, 219, 0.1);
+  border-color: rgba(52, 152, 219, 0.2);
   color: #3498db;
 }
 
 .status-badge.quality-mismatch {
-  background-color: rgba(243,156,18,0.10);
-  border-color: rgba(243,156,18,0.18);
+  background-color: rgba(243, 156, 18, 0.1);
+  border-color: rgba(243, 156, 18, 0.18);
   color: #f39c12;
 }
 
 .status-badge.quality-match {
-  background-color: rgba(46,204,113,0.10);
-  border-color: rgba(46,204,113,0.18);
+  background-color: rgba(46, 204, 113, 0.1);
+  border-color: rgba(46, 204, 113, 0.18);
   color: #2ecc71;
 }
 
@@ -1829,18 +1980,20 @@ defineExpose({
   padding: 10px 12px;
   background-color: transparent;
   border-radius: 6px;
-  transition: background-color 0.12s, transform 0.12s;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition:
+    background-color 0.12s,
+    transform 0.12s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   cursor: pointer;
 }
 
 .audiobook-list-item:hover {
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   transform: translateY(-1px);
 }
 
 .audiobook-list-item.selected {
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   transform: translateY(-1px);
 }
 
@@ -1886,14 +2039,23 @@ defineExpose({
   padding: 8px 12px;
   color: #aaa;
   font-size: 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   align-items: center;
 }
 
-.list-header .col-cover { opacity: 0.9; text-align: center; }
-.list-header .col-title { opacity: 0.9 }
-.list-header .col-status { opacity: 0.9 }
-.list-header .col-actions { text-align: right }
+.list-header .col-cover {
+  opacity: 0.9;
+  text-align: center;
+}
+.list-header .col-title {
+  opacity: 0.9;
+}
+.list-header .col-status {
+  opacity: 0.9;
+}
+.list-header .col-actions {
+  text-align: right;
+}
 
 .list-badges {
   display: flex;

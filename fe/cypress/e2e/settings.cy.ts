@@ -1,3 +1,4 @@
+ 
 describe('Settings UI - e2e', () => {
   beforeEach(() => {
     // Stub startup config to indicate authentication is NOT required so the
@@ -171,7 +172,8 @@ describe('Settings UI - e2e', () => {
     cy.contains('Save Settings').click()
 
     // Confirm save request was made with expected payload
-    cy.wait('@saveSettings').its('request.body').then((body) => {
+    cy.wait('@saveSettings').then((interception) => {
+      const body = interception.request.body
       expect(body.outputPath).to.equal('/mnt/audiobooks')
       expect(body.useUsProxy).to.equal(true)
       expect(body.usProxyHost).to.equal('proxy.test.local')

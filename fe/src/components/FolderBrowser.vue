@@ -10,12 +10,21 @@
         v-bind:data-cy="props.inputDataCy"
       />
       <!-- Folder icon button opens inline browser beneath the input -->
-      <button @click="toggleBrowser" class="browse-button" type="button" aria-label="Browse folders">
+      <button
+        @click="toggleBrowser"
+        class="browse-button"
+        type="button"
+        aria-label="Browse folders"
+      >
         <PhFolderOpen />
       </button>
     </div>
 
-    <div v-if="validationMessage" class="validation-message" :class="{ error: !isValid, success: isValid }">
+    <div
+      v-if="validationMessage"
+      class="validation-message"
+      :class="{ error: !isValid, success: isValid }"
+    >
       <component :is="isValid ? PhCheckCircle : PhWarningCircle" />
       {{ validationMessage }}
     </div>
@@ -24,7 +33,7 @@
     <div v-if="showBrowser" class="browser-inline">
       <div class="browser-body">
         <div class="current-path">
-          <button 
+          <button
             v-if="parentPath !== null"
             @click="navigateToParent"
             class="back-button"
@@ -84,7 +93,16 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { apiService } from '@/services/api'
-import { PhFolderOpen, PhCheckCircle, PhWarningCircle, PhArrowLeft, PhFolder, PhSpinner, PhArrowUp, PhFile } from '@phosphor-icons/vue'
+import {
+  PhFolderOpen,
+  PhCheckCircle,
+  PhWarningCircle,
+  PhArrowLeft,
+  PhFolder,
+  PhSpinner,
+  PhArrowUp,
+  PhFile,
+} from '@phosphor-icons/vue'
 
 interface Props {
   modelValue?: string
@@ -109,7 +127,7 @@ const props = withDefaults(defineProps<BrowserProps>(), {
   placeholder: 'Select a folder...',
   inline: false,
   inputDataCy: '',
-  showFiles: false
+  showFiles: false,
 })
 
 const emit = defineEmits<{
@@ -129,13 +147,16 @@ const validationMessage = ref('')
 const isValid = ref(false)
 
 // Watch for external changes to modelValue
-watch(() => props.modelValue, (newValue) => {
-  localPath.value = newValue
-  // Trigger validation when path is set externally
-  if (newValue) {
-    validatePath()
-  }
-})
+watch(
+  () => props.modelValue,
+  (newValue) => {
+    localPath.value = newValue
+    // Trigger validation when path is set externally
+    if (newValue) {
+      validatePath()
+    }
+  },
+)
 
 // Watch for local changes
 watch(localPath, (newValue) => {
@@ -160,14 +181,16 @@ const closeBrowser = () => {
 const browseDirectory = async (path: string) => {
   isLoading.value = true
   error.value = ''
-  
+
   try {
     const response = await apiService.browseDirectory(path || undefined)
-    
+
     currentPath.value = response.currentPath
     parentPath.value = response.parentPath
     // Filter to only show directories unless showFiles prop is true
-    items.value = props.showFiles ? response.items : response.items.filter(item => item.isDirectory)
+    items.value = props.showFiles
+      ? response.items
+      : response.items.filter((item) => item.isDirectory)
   } catch (err: unknown) {
     error.value = err instanceof Error ? err.message : 'Failed to browse directory'
     console.error('Error browsing directory:', err)
@@ -214,7 +237,7 @@ const validatePath = async () => {
 
   try {
     const response = await apiService.validatePath(localPath.value)
-    
+
     isValid.value = response.isValid
     validationMessage.value = response.message
   } catch (err) {
@@ -424,7 +447,9 @@ const validatePath = async () => {
   padding: 0.25rem;
 }
 
-.select-inline i { font-size: 1.1rem }
+.select-inline i {
+  font-size: 1.1rem;
+}
 
 .loading-state,
 .error-state,

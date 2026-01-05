@@ -18,15 +18,15 @@
         <div v-for="day in weekDays" :key="day" class="day-header">{{ day }}</div>
       </div>
       <div class="calendar-body">
-        <div 
-          v-for="date in calendarDates" 
+        <div
+          v-for="date in calendarDates"
           :key="date.date"
-          :class="['calendar-day', { 'other-month': !date.currentMonth, 'today': date.isToday }]"
+          :class="['calendar-day', { 'other-month': !date.currentMonth, today: date.isToday }]"
         >
           <div class="day-number">{{ date.day }}</div>
           <div class="day-episodes">
-            <div 
-              v-for="episode in date.episodes" 
+            <div
+              v-for="episode in date.episodes"
               :key="episode.id"
               class="episode-dot"
               :title="episode.title"
@@ -82,25 +82,25 @@ const calendarDates = computed(() => {
   const firstDay = new Date(year, month, 1)
   const startDate = new Date(firstDay)
   startDate.setDate(startDate.getDate() - firstDay.getDay())
-  
+
   const dates: CalendarDate[] = []
   const currentDateObj = new Date(startDate)
-  
+
   for (let i = 0; i < 42; i++) {
     const isCurrentMonth = currentDateObj.getMonth() === month
     const isToday = currentDateObj.toDateString() === new Date().toDateString()
-    
+
     dates.push({
       date: currentDateObj.toISOString(),
       day: currentDateObj.getDate(),
       currentMonth: isCurrentMonth,
       isToday,
-      episodes: [] as Episode[] // Would be populated with actual episodes
+      episodes: [] as Episode[], // Would be populated with actual episodes
     })
-    
+
     currentDateObj.setDate(currentDateObj.getDate() + 1)
   }
-  
+
   return dates
 })
 
@@ -109,14 +109,14 @@ const upcomingEpisodes = ref([
     id: '1',
     series: 'The Joe Rogan Experience',
     title: 'Episode #1985',
-    airDate: new Date(Date.now() + 24 * 60 * 60 * 1000)
+    airDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
   },
   {
     id: '2',
     series: 'This American Life',
     title: 'Episode #790',
-    airDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
-  }
+    airDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+  },
 ])
 
 const previousMonth = () => {
@@ -275,6 +275,10 @@ const formatDate = (date: Date): string => {
   margin: 0;
 }
 
-.icon-prev::before { content: '◀'; }
-.icon-next::before { content: '▶'; }
+.icon-prev::before {
+  content: '◀';
+}
+.icon-next::before {
+  content: '▶';
+}
 </style>

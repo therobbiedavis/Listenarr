@@ -6,19 +6,45 @@
     </div>
 
     <!-- Quick raw-fetch debug control -->
-    <div style="margin-bottom:1rem;">
-      <button @click="fetchRawDebug(searchQuery || 'Harry')" class="search-button" style="background:#6c757d">Fetch Raw API Results (apiService)</button>
-      <button @click="fetchRawDebugWindow(searchQuery || 'Harry')" class="search-button" style="background:#495057;margin-left:0.5rem">Fetch Raw API Results (window.fetch)</button>
+    <div style="margin-bottom: 1rem">
+      <button
+        @click="fetchRawDebug(searchQuery || 'Harry')"
+        class="search-button"
+        style="background: #6c757d"
+      >
+        Fetch Raw API Results (apiService)
+      </button>
+      <button
+        @click="fetchRawDebugWindow(searchQuery || 'Harry')"
+        class="search-button"
+        style="background: #495057; margin-left: 0.5rem"
+      >
+        Fetch Raw API Results (window.fetch)
+      </button>
     </div>
 
     <!-- Debug: show raw search results (temporary) -->
-    <div v-if="!searchStore.isSearching && !searchStore.isCancelled" class="debug-results" style="background:#fff;border:1px solid #eee;padding:1rem;border-radius:6px;margin-top:1rem;">
+    <div
+      v-if="!searchStore.isSearching && !searchStore.isCancelled"
+      class="debug-results"
+      style="
+        background: #fff;
+        border: 1px solid #eee;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-top: 1rem;
+      "
+    >
       <strong>Debug: raw searchStore.searchResults</strong>
-      <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(searchStore.searchResults, null, 2) }}</pre>
-      <div style="margin-top:0.5rem">
+      <pre style="max-height: 300px; overflow: auto; font-size: 12px">{{
+        JSON.stringify(searchStore.searchResults, null, 2)
+      }}</pre>
+      <div style="margin-top: 0.5rem">
         <strong>Raw debug fetch results (window.rawDebugResults):</strong>
         <div>Count: {{ rawDebugResults ? rawDebugResults.length : 0 }}</div>
-        <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(rawDebugResults, null, 2) }}</pre>
+        <pre style="max-height: 300px; overflow: auto; font-size: 12px">{{
+          JSON.stringify(rawDebugResults, null, 2)
+        }}</pre>
       </div>
     </div>
 
@@ -31,14 +57,14 @@
           class="search-input"
           @keyup.enter="performSearch"
         />
-        <button 
-          @click="performSearch" 
+        <button
+          @click="performSearch"
           :disabled="!searchQuery.trim() || searchStore.isSearching"
           class="search-button"
         >
           {{ searchStore.isSearching ? 'Searching...' : 'Search' }}
         </button>
-        <button 
+        <button
           v-if="searchStore.isSearching"
           @click="cancelSearch"
           class="search-button cancel-button"
@@ -69,11 +95,7 @@
     <div v-else-if="showResults" class="search-results">
       <h3>Search Results ({{ searchStore.searchResults.length }})</h3>
       <div class="results-grid">
-        <div 
-          v-for="result in searchStore.searchResults" 
-          :key="result.id"
-          class="result-card"
-        >
+        <div v-for="result in searchStore.searchResults" :key="result.id" class="result-card">
           <div class="result-info">
             <h4>
               <a
@@ -88,12 +110,12 @@
             </h4>
             <p class="result-artist">{{ safeText(result.artist) }}</p>
             <p class="result-album">{{ safeText(result.album) }}</p>
-            
+
             <!-- Quality Score Badge -->
             <div v-if="getResultScore(result.id)" class="quality-score">
               <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
                 <template #default>
-                  <span 
+                  <span
                     v-if="getResultScore(result.id)?.isRejected"
                     class="score-badge rejected"
                     :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
@@ -108,7 +130,7 @@
                 </template>
               </ScorePopover>
             </div>
-            
+
             <!-- Audiobook metadata -->
             <div v-if="result.narrator || result.runtime || result.series" class="audiobook-meta">
               <p v-if="result.narrator" class="meta-narrator">
@@ -119,11 +141,12 @@
                   ⏱ {{ formatRuntime(result.runtime) }}
                 </span>
                 <span v-if="result.series" class="meta-series">
-                  Series: {{ safeText(result.series) }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
+                  Series: {{ safeText(result.series)
+                  }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
                 </span>
               </div>
             </div>
-            
+
             <div class="result-meta">
               <span class="result-size">{{ formatFileSize(result.size) }}</span>
               <span v-if="result.quality" class="result-quality">{{ result.quality }}</span>
@@ -133,16 +156,22 @@
               </span>
             </div>
             <div class="result-stats">
-              <span v-if="result.seeders !== undefined && result.seeders !== null" class="seeders">↑ {{ result.seeders }}</span>
-              <span v-if="result.leechers !== undefined && result.leechers !== null" class="leechers">↓ {{ result.leechers }}</span>
+              <span v-if="result.seeders !== undefined && result.seeders !== null" class="seeders"
+                >↑ {{ result.seeders }}</span
+              >
+              <span
+                v-if="result.leechers !== undefined && result.leechers !== null"
+                class="leechers"
+                >↓ {{ result.leechers }}</span
+              >
               <span v-if="result.grabs !== undefined" class="grabs">✚ {{ result.grabs }}</span>
               <span v-if="result.files !== undefined" class="files">📁 {{ result.files }}</span>
             </div>
           </div>
           <div class="result-actions">
-            <button 
+            <button
               @click="addToLibrary(result)"
-              :class="['add-button', { 'added': addedResults.has(result.id) }]"
+              :class="['add-button', { added: addedResults.has(result.id) }]"
               :disabled="isAddingToLibrary || addedResults.has(result.id)"
             >
               <template v-if="addedResults.has(result.id)">
@@ -195,7 +224,7 @@ onMounted(async () => {
   try {
     defaultProfile.value = await apiService.getDefaultQualityProfile()
   } catch (error) {
-    console.warn('No default quality profile found:', error)
+    logger.warn('No default quality profile found:', error)
   }
   // Expose the search store and search results for quick debugging in DevTools
   try {
@@ -207,15 +236,17 @@ onMounted(async () => {
 })
 
 const fetchRawDebug = async (q: string) => {
+  try {
+    const results = await apiService.intelligentSearch(q || 'Harry')
+    rawDebugResults.value = results as unknown[]
     try {
-      const results = await apiService.intelligentSearch(q || 'Harry')
-      rawDebugResults.value = results as unknown[]
-      try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
-      logger.debug('[SearchView] Raw debug results fetched (apiService)', results)
-    } catch (e) {
-      logger.error('[SearchView] Raw debug fetch failed (apiService)', e as Error)
-      rawDebugResults.value = null
-    }
+      ;(window as unknown as Record<string, unknown>).rawDebugResults = results
+    } catch {}
+    logger.debug('[SearchView] Raw debug results fetched (apiService)', results)
+  } catch (e) {
+    logger.error('[SearchView] Raw debug fetch failed (apiService)', e as Error)
+    rawDebugResults.value = null
+  }
 }
 
 const capitalizeLanguage = (language: string | undefined): string => {
@@ -224,34 +255,38 @@ const capitalizeLanguage = (language: string | undefined): string => {
 }
 
 const fetchRawDebugWindow = async (q: string) => {
+  try {
+    const body = JSON.stringify({ mode: 'Simple', query: q })
+    const resp = await window.fetch('/api/search', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const results = await resp.json()
+    rawDebugResults.value = results as unknown[]
     try {
-      const body = JSON.stringify({ mode: 'Simple', query: q })
-      const resp = await window.fetch('/api/search', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const results = await resp.json()
-      rawDebugResults.value = results as unknown[]
-      try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
-      logger.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
-    } catch (e) {
-      logger.error('[SearchView] Raw debug fetch failed (window.fetch)', e as Error)
-      rawDebugResults.value = null
-    }
+      ;(window as unknown as Record<string, unknown>).rawDebugResults = results
+    } catch {}
+    logger.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
+  } catch (e) {
+    logger.error('[SearchView] Raw debug fetch failed (window.fetch)', e as Error)
+    rawDebugResults.value = null
+  }
 }
 
 const performSearch = async () => {
   if (!searchQuery.value.trim()) {
     return
   }
-  
+
   // Clear added results and scores for new search
   addedResults.value.clear()
   qualityScores.value.clear()
-  
-  await searchStore.search(
-    searchQuery.value.trim(),
-    selectedCategory.value || undefined
-  )
-  
+
+  await searchStore.search(searchQuery.value.trim(), selectedCategory.value || undefined)
+
   // Ensure the store and results are available on window for debugging (dev only)
   try {
     const w = window as unknown as Record<string, unknown>
@@ -259,19 +294,19 @@ const performSearch = async () => {
     w.searchResults = searchStore.searchResults
     logger.debug('[SearchView] Bound searchStore/searchResults to window after search')
   } catch {}
-  
+
   // Wait for next tick to ensure searchResults are updated
   await nextTick()
-  
+
   // Score search results if we have a default profile
   if (defaultProfile.value?.id && searchStore.searchResults.length > 0) {
     try {
       const scores = await apiService.scoreSearchResults(
         defaultProfile.value.id,
-        searchStore.searchResults
+        searchStore.searchResults,
       )
       // Map scores by search result ID
-      scores.forEach(score => {
+      scores.forEach((score) => {
         qualityScores.value.set(score.searchResult.id, score)
       })
       logger.debug('Quality scores loaded:', scores.length)
@@ -279,7 +314,7 @@ const performSearch = async () => {
       logger.warn('Failed to score search results:', error)
     }
   }
-  
+
   // Check which results are already in library
   checkExistingInLibrary()
 }
@@ -297,7 +332,12 @@ const showResults = computed(() => {
   return !searchStore.isSearching && !searchStore.isCancelled && searchStore.hasResults
 })
 const showNoResults = computed(() => {
-  return !!searchQuery.value && !searchStore.isSearching && !searchStore.isCancelled && !searchStore.hasResults
+  return (
+    !!searchQuery.value &&
+    !searchStore.isSearching &&
+    !searchStore.isCancelled &&
+    !searchStore.hasResults
+  )
 })
 
 const checkExistingInLibrary = () => {
@@ -313,12 +353,10 @@ const checkExistingInLibrary = () => {
 
 const markExistingResults = () => {
   const libraryAsins = new Set(
-    libraryStore.audiobooks
-      .filter(book => book.asin)
-      .map(book => book.asin!)
+    libraryStore.audiobooks.filter((book) => book.asin).map((book) => book.asin!),
   )
-  
-  searchStore.searchResults.forEach(result => {
+
+  searchStore.searchResults.forEach((result) => {
     if (result.asin && libraryAsins.has(result.asin)) {
       addedResults.value.add(result.id)
     }
@@ -326,25 +364,29 @@ const markExistingResults = () => {
 }
 
 // Watch for search results changes to mark existing audiobooks
-watch(() => searchStore.searchResults, (newVal) => {
-  // Keep a developer-friendly reference for debugging
-  try {
-    const w = window as unknown as Record<string, unknown>
-    w.searchResults = newVal
-    w.searchStore = searchStore
-  } catch {}
+watch(
+  () => searchStore.searchResults,
+  (newVal) => {
+    // Keep a developer-friendly reference for debugging
+    try {
+      const w = window as unknown as Record<string, unknown>
+      w.searchResults = newVal
+      w.searchStore = searchStore
+    } catch {}
 
-  if (searchStore.searchResults.length > 0) {
-    checkExistingInLibrary()
-  }
-}, { deep: true })
+    if (searchStore.searchResults.length > 0) {
+      checkExistingInLibrary()
+    }
+  },
+  { deep: true },
+)
 
 const addToLibrary = async (result: SearchResult) => {
   if (!result.asin) {
     errorTracking.captureMessage('No ASIN available for result', 'warning', {
       component: 'SearchView',
       operation: 'addToLibrary',
-      metadata: { result }
+      metadata: { result },
     })
     toast.warning('Cannot add', 'Cannot add to library: No ASIN available for this result')
     return
@@ -354,20 +396,24 @@ const addToLibrary = async (result: SearchResult) => {
   try {
     // Fetch full metadata from the backend
     const metadata = await apiService.getAudibleMetadata<AudibleBookMetadata>(result.asin)
-    
+
     // Add to library
     await apiService.addToLibrary(metadata, { searchResult: result })
-    
+
     toast.success('Added to library', `"${metadata.title}" has been added to your library!`)
-    
+
     // Mark this result as added
     addedResults.value.add(result.id)
   } catch (error: unknown) {
-    console.error('Failed to add audiobook:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SearchView',
+      operation: 'addToLibrary',
+      metadata: { resultId: result.id },
+    })
     const errorMessage = error instanceof Error ? error.message : String(error)
-    
+
     // Check if it's a conflict (already exists)
-      if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
+    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
       toast.warning('Already exists', 'This audiobook is already in your library.')
     } else {
       toast.error('Add failed', 'Failed to add audiobook. Please try again.')
@@ -381,7 +427,7 @@ const formatFileSize = (bytes: number): string => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
   if (bytes === 0) return '0 Bytes'
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
+  return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i]
 }
 
 const formatRuntime = (minutes: number): string => {
@@ -408,15 +454,18 @@ function getResultLink(result: SearchResult): string | undefined {
 
   if (src === 'usenet' || src === 'nzb') {
     // For Usenet results prefer the ID URL if present and looks like a URL (guid/info page), otherwise prefer details page before NZB download
-    if (typeof (result as any).id === 'string' && /^(https?:)?\/\//.test((result as any).id)) return (result as any).id
-    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
+    if (typeof r.id === 'string' && /^(https?:)?\/\//.test(r.id)) return r.id as string
+    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+      return r.resultUrl as string
     if (result.productUrl) return result.productUrl
-    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0) return r.sourceLink as string
+    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0)
+      return r.sourceLink as string
     if (result.nzbUrl) return result.nzbUrl
     return undefined
   }
 
-  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0) return r.resultUrl as string
+  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+    return r.resultUrl as string
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
@@ -444,7 +493,8 @@ function getVisibleScoreValue(resultId: string): number | undefined {
   }
 
   // Fallback to smartScore numeric normalization
-  if (typeof q.smartScore === 'number' && !isNaN(q.smartScore)) return Math.round(Math.min(100, q.smartScore / 100))
+  if (typeof q.smartScore === 'number' && !isNaN(q.smartScore))
+    return Math.round(Math.min(100, q.smartScore / 100))
   if (typeof q.totalScore === 'number') return q.totalScore
   return undefined
 }
