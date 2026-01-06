@@ -745,17 +745,27 @@ defineExpose({
   }
 }
 
+.general-settings-tab {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .section-header h3 {
+  margin: 0;
+  color: #fff;
   font-size: 1.5rem;
   font-weight: 600;
-  margin: 0;
 }
 
 .error-summary {
@@ -784,10 +794,17 @@ defineExpose({
 }
 
 .form-section {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  background-color: #2a2a2a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
   padding: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.form-section:hover {
+  border-color: rgba(77, 171, 247, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(77, 171, 247, 0.12);
 }
 
 .form-section h4 {
@@ -797,13 +814,13 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: var(--text-primary);
+  color: #fff;
 }
 
 .info-inline {
   background: none;
   border: none;
-  color: var(--primary-color);
+  color: #4dabf7;
   cursor: pointer;
   padding: 0.25rem;
   display: inline-flex;
@@ -829,7 +846,7 @@ defineExpose({
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: var(--text-primary);
+  color: #fff;
 }
 
 .form-group input[type='text'],
@@ -839,10 +856,10 @@ defineExpose({
 .form-group select {
   width: 100%;
   padding: 0.75rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: #1a1a1a;
+  color: #fff;
   font-size: 0.95rem;
   transition: all 0.2s;
 }
@@ -850,8 +867,8 @@ defineExpose({
 .form-group input:focus,
 .form-group select:focus {
   outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+  border-color: #4dabf7;
+  box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.1);
 }
 
 .form-group input:disabled {
@@ -863,12 +880,12 @@ defineExpose({
   display: block;
   margin-top: 0.5rem;
   font-size: 0.85rem;
-  color: var(--text-secondary);
+  color: #adb5bd;
   line-height: 1.5;
 }
 
 .form-help code {
-  background: var(--bg-tertiary);
+  background: rgba(255, 255, 255, 0.05);
   padding: 0.2rem 0.4rem;
   border-radius: 3px;
   font-family: 'Courier New', monospace;
@@ -898,7 +915,7 @@ defineExpose({
 }
 
 .checkbox-group label:hover {
-  background: var(--bg-hover);
+  background: rgba(77, 171, 247, 0.08);
 }
 
 .checkbox-group input[type='checkbox'] {
@@ -917,12 +934,12 @@ defineExpose({
 }
 
 .checkbox-group strong {
-  color: var(--text-primary);
+  color: #fff;
   font-weight: 500;
 }
 
 .checkbox-group small {
-  color: var(--text-secondary);
+  color: #adb5bd;
   font-size: 0.85rem;
   line-height: 1.4;
 }
@@ -932,20 +949,15 @@ defineExpose({
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
-  background: var(--bg-tertiary);
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 6px;
-}
-
-.auth-row input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
 }
 
 .auth-row label {
   margin: 0;
   cursor: pointer;
   font-weight: normal;
+  color: #fff;
 }
 
 .admin-credentials {
@@ -957,10 +969,10 @@ defineExpose({
 .admin-input {
   width: 100%;
   padding: 0.75rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: #1a1a1a;
+  color: #fff;
   font-size: 0.95rem;
 }
 
@@ -980,7 +992,7 @@ defineExpose({
   right: 0.75rem;
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: #adb5bd;
   cursor: pointer;
   padding: 0.5rem;
   display: flex;
@@ -992,8 +1004,8 @@ defineExpose({
 }
 
 .password-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: rgba(77, 171, 247, 0.1);
+  color: #4dabf7;
 }
 
 .input-group {
@@ -1016,9 +1028,9 @@ defineExpose({
   border-bottom-left-radius: 0;
   border-left: none;
   padding: 0.75rem 1rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1029,8 +1041,9 @@ defineExpose({
 }
 
 .input-group-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--primary-color);
+  background: rgba(77, 171, 247, 0.15);
+  border-color: #4dabf7;
+  color: #4dabf7;
 }
 
 .input-group-btn:disabled {
@@ -1133,7 +1146,7 @@ defineExpose({
   gap: 1rem;
   justify-content: flex-end;
   padding: 1.5rem;
-  border-top: 1px solid #444;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Ensure modal context delete buttons are full-size */
@@ -1165,9 +1178,9 @@ defineExpose({
 
 .cancel-button {
   padding: 0.75rem 1.5rem;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
@@ -1179,7 +1192,8 @@ defineExpose({
 }
 
 .cancel-button:hover {
-  background: var(--bg-hover);
+  background: rgba(77, 171, 247, 0.1);
+  border-color: #4dabf7;
 }
 
 .modal-body ul {
@@ -1196,13 +1210,13 @@ defineExpose({
   display: flex;
   gap: 0.75rem;
   padding: 1.5rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   justify-content: flex-end;
 }
 
 .save-button {
   padding: 0.75rem 1.5rem;
-  background: var(--primary-color);
+  background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: white;
   border: none;
   border-radius: 6px;
@@ -1210,9 +1224,21 @@ defineExpose({
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
-.save-button:hover {
-  background: #1976d2;
+.save-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
+}
+
+.save-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 </style>

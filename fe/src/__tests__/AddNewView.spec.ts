@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils' 
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import AddNewView from '@/views/AddNewView.vue'

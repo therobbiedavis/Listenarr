@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Test setup: Polyfill / mock environment pieces that tests expect
 // - Provide a Mock WebSocket implementation so SignalR code can run in jsdom
 
