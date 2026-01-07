@@ -85,6 +85,7 @@ try {
 
 const POLL_INTERVAL_MS = 15_000
 const SESSION_TIMEOUT_MS = 1000 * 60 * 10 // 10 minutes
+const sanitizeHtml = require('sanitize-html')
 
 // Determine Listenarr base URL with several fallbacks:
 // 1) process.env.LISTENARR_URL
@@ -242,8 +243,8 @@ function logSessionEvent(msg) {
 }
 function stripHtml(html) {
   if (!html) return ''
-  // Remove HTML tags
-  return html.replace(/<[^>]*>/g, '').trim()
+  // Sanitize HTML and return plain text (no tags)
+  return sanitizeHtml(html, { allowedTags: [], allowedAttributes: {} }).trim()
 }
 
 function extractYear(dateString) {

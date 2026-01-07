@@ -99,13 +99,12 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useToast } from '@/services/toastService'
 import type { RootFolder } from '@/types'
 
-const props = defineProps<{ root?: RootFolder }>()
+const { root } = defineProps<{ root?: RootFolder }>()
 const emit = defineEmits(['close', 'saved'])
 
 const store = useRootFoldersStore()
 const toast = useToast()
 
-const root = props.root
 const form = ref({ name: root?.name || '', path: root?.path || '', isDefault: !!root?.isDefault })
 
 const showConfirm = ref(false)

@@ -22,7 +22,7 @@
       </div>
 
       <footer>
-        <button @click="downloadTorrent" :disabled="loading || !hasTorrent">
+        <button @click="downloadTorrent" :disabled="loading || !hasStoredTorrent">
           Download Torrent
         </button>
         <button @click="close">Close</button>
@@ -32,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { logger } from '@/utils/logger'
 
@@ -71,9 +71,7 @@ function close() {
   emits('close')
 }
 
-function hasTorrent() {
-  return !!cachedTorrent?.blob
-}
+const hasStoredTorrent = computed(() => !!cachedTorrent?.blob)
 
 function downloadTorrent() {
   if (!cachedTorrent) return

@@ -633,7 +633,7 @@ const handleImageError = (event: Event) => {
 
     // set placeholder and clear lazy attributes
     try {
-      img.src = apiService.getPlaceholderUrl()
+      img.src = getPlaceholderUrl()
     } catch {}
     try {
       img.removeAttribute('data-src')

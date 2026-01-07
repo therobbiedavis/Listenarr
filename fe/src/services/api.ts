@@ -32,6 +32,7 @@ import { sessionTokenManager } from '@/utils/sessionToken'
 import { logger } from '@/utils/logger'
 import { getRegionFromLanguage } from '@/utils/languageMapping'
 import { errorTracking } from '@/services/errorTracking'
+import { getPlaceholderUrl } from '@/utils/placeholder'
 
 // In development, use relative URLs (proxied by Vite to avoid CORS)
 // In production, prefer a configured VITE_API_BASE_URL but fall back to a relative '/api'
@@ -43,15 +44,7 @@ const BACKEND_BASE_URL = import.meta.env.DEV ? '' : API_BASE_URL.replace('/api',
 type ErrorWithStatus = Error & { status?: number; body?: string; retryAfter?: number }
 
 class ApiService {
-  getPlaceholderUrl(): string {
-    try {
-      const base = (import.meta.env.BASE_URL || '/') as string
-      const trimmed = base.endsWith('/') ? base : `${base}/`
-      return `${trimmed}placeholder.svg`
-    } catch {
-      return '/placeholder.svg'
-    }
-  }
+  // Placeholder URL helper moved to '@/utils/placeholder' - import and use that utility instead
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`
@@ -1147,13 +1140,26 @@ class ApiService {
       // to extract an ASIN-like identifier and map to our `/api/images/{id}`
       // endpoint. Fall back to the original URL only if extraction fails.
       try {
-        const lower = imageUrl.toLowerCase()
+        const parsed = new URL(imageUrl)
+        const hostname = (parsed.hostname || '').toLowerCase()
 
-        const isVendor =
-          lower.includes('amazon.') ||
-          lower.includes('audible.') ||
-          lower.includes('m.media-amazon.com') ||
-          lower.includes('images-amazon.com')
+        // Amazon primary domains and subdomains
+        const isAmazonHost =
+          hostname === 'amazon.com' ||
+          hostname === 'www.amazon.com' ||
+          hostname.endsWith('.amazon.com') ||
+          // common image/CDN hosts
+          hostname === 'm.media-amazon.com' ||
+          hostname.endsWith('.m.media-amazon.com') ||
+          hostname === 'images-amazon.com' ||
+          hostname.endsWith('.images-amazon.com')
+
+        const isAudibleHost =
+          hostname === 'audible.com' ||
+          hostname === 'www.audible.com' ||
+          hostname.endsWith('.audible.com')
+
+        const isVendor = isAmazonHost || isAudibleHost
 
         if (isVendor) {
           // Try common ASIN patterns: 10 alphanumeric chars, or 10 digits

@@ -672,9 +672,3 @@ export interface SearchResponse {
   totalCount: number
 }
 
-export interface RootFolder {
-  id: number
-  name: string
-  path: string
-  isDefault: boolean
-}
