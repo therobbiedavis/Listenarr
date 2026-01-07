@@ -121,55 +121,72 @@ namespace Listenarr.Api.Services
                 await ctx.SaveChangesAsync();
             }
 
-            // If the path changed, reassign or enqueue moves for referenced audiobooks
+            // Store values from the existing entity before opening a new context
             var oldPath = existing.Path;
             var newPath = root.Path;
-            existing.Name = root.Name;
-            existing.Path = root.Path;
-            existing.IsDefault = root.IsDefault;
-            existing.UpdatedAt = DateTime.UtcNow;
 
-            await _repo.UpdateAsync(existing);
-
-            if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
+            // Update root folder and audiobooks in the same context to ensure transaction consistency
+            using (var ctx = await _dbFactory.CreateDbContextAsync())
             {
-                using var ctx = await _dbFactory.CreateDbContextAsync();
-                var affected = ctx.Audiobooks.Where(a => a.BasePath != null && (a.BasePath == oldPath || a.BasePath.StartsWith(oldPath + System.IO.Path.DirectorySeparatorChar))).ToList();
-                // Record original and new paths before updating DB so we can enqueue moves if requested
-                var moves = new List<(int audiobookId, string original, string target)>();
+                // Re-load the entity in this context so it's properly tracked
+                var trackedRoot = await ctx.RootFolders.FindAsync(root.Id);
+                if (trackedRoot == null) throw new KeyNotFoundException("Root folder not found");
 
-                foreach (var a in affected)
+                // Apply updates to the tracked entity
+                trackedRoot.Name = root.Name;
+                trackedRoot.Path = root.Path;
+                trackedRoot.IsDefault = root.IsDefault;
+                trackedRoot.UpdatedAt = DateTime.UtcNow;
+
+                if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    var original = a.BasePath!;
-                    string target;
-                    if (original == oldPath) target = newPath;
-                    else if (original.StartsWith(oldPath + System.IO.Path.DirectorySeparatorChar))
+                    // Only include audiobooks that are subdirectories of the root, not the root itself
+                    var affected = ctx.Audiobooks.Where(a => a.BasePath != null && a.BasePath.StartsWith(oldPath + System.IO.Path.DirectorySeparatorChar)).ToList();
+                    // Record original and new paths before updating DB so we can enqueue moves if requested
+                    var moves = new List<(int audiobookId, string original, string target)>();
+
+                    foreach (var a in affected)
                     {
+                        var original = a.BasePath!;
+                        string target;
+                        // Replace the old root prefix with the new root prefix
                         target = newPath + original.Substring(oldPath.Length);
+
+                        moves.Add((a.Id, original, target));
+                        a.BasePath = target;
                     }
-                    else target = newPath; // fallback
 
-                    moves.Add((a.Id, original, target));
-                    a.BasePath = target;
-                }
+                    ctx.Audiobooks.UpdateRange(affected);
+                    
+                    // Save both root folder and audiobook updates in one transaction
+                    await ctx.SaveChangesAsync();
 
-                ctx.Audiobooks.UpdateRange(affected);
-                await ctx.SaveChangesAsync();
-
-                if (moveFiles && _moveQueue != null)
-                {
-                    foreach (var m in moves)
+                    if (moveFiles && _moveQueue != null)
                     {
-                        try
+                        foreach (var m in moves)
                         {
-                            _ = _moveQueue.EnqueueMoveAsync(m.audiobookId, m.target, m.original);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to enqueue move for audiobook {AudiobookId} during root rename", m.audiobookId);
+                            try
+                            {
+                                _ = _moveQueue.EnqueueMoveAsync(m.audiobookId, m.target, m.original);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to enqueue move for audiobook {AudiobookId} during root rename", m.audiobookId);
+                            }
                         }
                     }
                 }
+                else
+                {
+                    // Just update the root folder if path hasn't changed
+                    await ctx.SaveChangesAsync();
+                }
+
+                // Return the tracked entity (or re-load existing with updated values)
+                existing.Name = trackedRoot.Name;
+                existing.Path = trackedRoot.Path;
+                existing.IsDefault = trackedRoot.IsDefault;
+                existing.UpdatedAt = trackedRoot.UpdatedAt;
             }
 
             return existing;

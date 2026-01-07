@@ -86,7 +86,7 @@
                 <button
                   type="button"
                   class="btn-edit-destination"
-                  @click="editingDestination = true"
+                  @click="startEditingDestination"
                   title="Edit destination"
                 >
                   <PhPencil :size="16" />
@@ -230,46 +230,34 @@
             </button>
           </div>
 
-          <!-- Move confirmation modal (in-component) -->
-          <div v-if="showMoveConfirm" class="confirm-overlay" @click="cancelMoveConfirm">
-            <div class="confirm-dialog" @click.stop>
-              <div class="confirm-header">
-                <h3>Move audiobook files?</h3>
-              </div>
-              <div class="confirm-body">
-                <p>You're changing the destination for this audiobook and moving all files from:</p>
-                <pre style="white-space: pre-wrap">{{
-                  pendingMove?.original || '&lt;none&gt;'
-                }}</pre>
-                <p>to:</p>
-                <pre style="white-space: pre-wrap">{{
-                  pendingMove?.combined || '&lt;none&gt;'
-                }}</pre>
-                <div style="margin-top: 8px">
-                  <label
-                    ><input type="checkbox" v-model="modalMoveFiles" />
-                    <strong>Move files</strong> (recommended)</label
-                  >
-                </div>
-                <div style="margin-top: 8px" v-if="modalMoveFiles">
-                  <label
-                    ><input type="checkbox" v-model="modalDeleteEmpty" /> Delete original folder if
-                    empty</label
-                  >
-                </div>
-              </div>
-              <div class="confirm-actions">
-                <button class="btn cancel" @click="cancelMoveConfirm">Cancel</button>
-                <button class="btn" @click="confirmChangeWithoutMoving">
-                  Change without moving
-                </button>
-                <button class="btn confirm" :class="{ danger: true }" @click="confirmMove">
-                  Move
-                </button>
-              </div>
-            </div>
-          </div>
+
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Separate move confirmation modal (sibling overlay) -->
+  <div v-if="showMoveConfirm" class="confirm-overlay separate-modal" @click="cancelMoveConfirm">
+    <div class="confirm-dialog" @click.stop>
+      <div class="confirm-header">
+        <h3>Move audiobook files?</h3>
+      </div>
+      <div class="confirm-body">
+        <p>You're changing the destination for this audiobook and moving all files from:</p>
+        <pre style="white-space: pre-wrap">{{ pendingMove?.original || '<none>' }}</pre>
+        <p>to:</p>
+        <pre style="white-space: pre-wrap">{{ pendingMove?.combined || '<none>' }}</pre>
+        <div class="checkbox-row">
+          <label><input type="checkbox" v-model="modalMoveFiles" /> <strong>Move files</strong> (recommended)</label>
+        </div>
+        <div class="checkbox-row" v-if="modalMoveFiles">
+          <label><input type="checkbox" v-model="modalDeleteEmpty" /> Delete original folder if empty</label>
+        </div>
+      </div>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" @click="cancelMoveConfirm">Cancel</button>
+        <button class="btn btn-secondary" @click="confirmChangeWithoutMoving">Change without moving</button>
+        <button class="btn btn-primary" @click="confirmMove">Move</button>
       </div>
     </div>
   </div>
@@ -326,6 +314,7 @@ const formData = ref<FormData>({
   abridged: false,
   explicit: false,
   basePath: null,
+  relativePath: ''
 })
 
 // Move job tracking (shows queued/processing/completed/failed state)
@@ -483,27 +472,13 @@ async function initializeForm() {
     customRootPath.value = null
   }
 
-  // Helper: derive relative path from full base and configured root
-  function deriveRelativeFromBase(
-    base: string | null | undefined,
-    root: string | null | undefined,
-  ): string {
-    if (!base) return ''
-    if (!root) return base
+  // helper functions have been moved to module scope above so they are callable from template
+  // previewPath() and deriveRelativeFromBase() now live at module scope
 
-    const normBase = base.replace(/\\/g, '/')
-    const normRoot = root.replace(/\\/g, '/')
-    const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
-
-    if (normBase.toLowerCase() === normRoot.toLowerCase()) return ''
-    if (normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())) {
-      const rel = normBase.slice(rootWithSlash.length).replace(/^\/+/, '')
-      const useBackslash = root.includes('\\')
-      return useBackslash ? rel.replace(/\//g, '\\') : rel
-    }
-
-    // Not under root: return full base so users can edit the absolute path
-    return base
+  function startEditingDestination() {
+    // Ensure we have the latest relative path derived before showing the edit controls
+    previewPath()
+    editingDestination.value = true
   }
 
   // If there's an existing basePath that uses the configured root, derive the relative path
@@ -559,6 +534,52 @@ function combinedBasePath(): string | null {
   if (!rel) return r
   const needsSep = !(r.endsWith('/') || r.endsWith('\\'))
   return r + (needsSep ? '/' : '') + rel
+}
+
+// Helper: derive relative path from full base and configured root (moved to module scope so it can be reused)
+function deriveRelativeFromBase(
+  base: string | null | undefined,
+  root: string | null | undefined,
+): string {
+  if (!base) return ''
+  if (!root) return base
+
+  const normBase = base.replace(/\\/g, '/')
+  const normRoot = root.replace(/\\/g, '/')
+  const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
+
+  if (normBase.toLowerCase() === normRoot.toLowerCase()) return ''
+  if (normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())) {
+    const rel = normBase.slice(rootWithSlash.length).replace(/^\/+/, '')
+    const useBackslash = root.includes('\\')
+    return useBackslash ? rel.replace(/\//g, '\\') : rel
+  }
+
+  // Not under root: return full base so users can edit the absolute path
+  return base
+}
+
+function previewPath() {
+  try {
+    const chosenRoot = resolveSelectedRootPath() || rootPath.value
+
+    if (formData.value.basePath && chosenRoot) {
+      formData.value.relativePath = deriveRelativeFromBase(formData.value.basePath, chosenRoot)
+    } else if (formData.value.basePath && !chosenRoot) {
+      formData.value.relativePath = formData.value.basePath || ''
+    } else {
+      formData.value.relativePath = ''
+    }
+  } catch (err) {
+    logger.debug('Preview path unavailable:', err)
+    formData.value.relativePath = ''
+  }
+}
+
+function startEditingDestination() {
+  // Ensure we have the latest relative path derived before showing the edit controls
+  previewPath()
+  editingDestination.value = true
 }
 
 async function handleSave() {
@@ -780,6 +801,18 @@ function close() {
   background: #666;
 }
 
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .info-section {
   display: flex;
   align-items: flex-start;
@@ -800,24 +833,115 @@ function close() {
 
 .info-section p {
   margin: 0;
-  color: #ccc;
-  line-height: 1.5;
+  font-size: 0.95rem;
+  line-height: 1.4;
 }
 
 .info-section strong {
+  color: #5dade2;
+}
+
+/* Confirmation modal (separate modal appearance) */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 1200;
+}
+
+.confirm-dialog {
+  background-color: #1e1e1e;
+  border-radius: 6px;
+  width: 100%;
+  max-width: 560px;
+  padding: 1rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  border: 1px solid #333;
+}
+
+.confirm-header h3 {
+  margin: 0 0 8px 0;
+  color: #fff;
+}
+
+.confirm-body pre {
+  background: #111;
+  padding: 8px;
+  border-radius: 4px;
+  margin: 6px 0;
+  color: #ddd;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.confirm-actions .btn.cancel {
+  background: none;
+  border: 1px solid #444;
+}
+
+.confirm-actions .btn.confirm.danger {
+  background: #c0392b;
   color: white;
+  border: none;
 }
 
-.edit-form {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
+.checkbox-row {
+  margin-top: 1rem;
 }
 
-.form-group {
+.checkbox-row label {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 0.75rem;
+  color: #ddd;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.5rem 0;
+}
+
+.checkbox-row label input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #1a1a1a;
+  border: 2px solid #555;
+  border-radius: 6px;
+  position: relative;
+  transition: all 0.2s ease;
+  vertical-align: sub;
+}
+
+.checkbox-row label input[type='checkbox']:hover {
+  border-color: #007acc;
+}
+
+.checkbox-row label input[type='checkbox']:checked {
+  background-color: #007acc;
+  border-color: #007acc;
+}
+
+.checkbox-row label input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 .form-label {
@@ -924,11 +1048,17 @@ function close() {
 
 .modal-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   margin-top: 1rem;
   padding-top: 1.5rem;
   border-top: 1px solid #3a3a3a;
+  flex-wrap: wrap;
+}
+
+.modal-actions > .btn {
+  flex-shrink: 0;
 }
 
 .btn {
@@ -969,15 +1099,23 @@ function close() {
 }
 
 .move-status {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  margin-right: 1rem;
-  color: #dfe6ff;
+  padding: 0.75rem 1rem;
+  background-color: rgba(52, 152, 219, 0.1);
+  border: 1px solid rgba(52, 152, 219, 0.3);
+  border-radius: 6px;
+  color: #3498db;
+  font-size: 0.85rem;
+  flex: 1;
+  min-width: 200px;
 }
+
 .move-status small {
-  color: #cfd8ff;
+  color: #87ceeb;
+  line-height: 1.3;
 }
 
 .btn i.ph-spin {
@@ -1206,16 +1344,22 @@ function close() {
 /* Read-only destination display */
 .destination-readonly {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
+  gap: 0.75rem;
+  align-items: stretch;
+  padding: 0.5rem;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
 }
 
 .readonly-input {
   flex: 1;
-  background-color: #1a1a1a !important;
-  color: #888 !important;
-  cursor: not-allowed;
-  opacity: 0.7;
+  background-color: transparent !important;
+  color: #ccc !important;
+  cursor: default;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0.6rem 0.75rem;
 }
 
 .btn-edit-destination {
@@ -1229,10 +1373,9 @@ function close() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  min-width: 70px;
-  height: 40px; /* Match input height */
   font-size: 0.9rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .btn-edit-destination:hover {
@@ -1246,11 +1389,6 @@ function close() {
 .btn-edit-destination:active {
   background-color: #0056b3;
   transform: translateY(0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.btn-edit-destination .btn-text {
-  font-weight: 500;
 }
 
 /* Edit mode destination */
@@ -1294,21 +1432,64 @@ function close() {
 .destination-row {
   display: flex;
   gap: 0.75rem;
-  align-items: center;
+  align-items: stretch;
+  flex-wrap: wrap;
 }
 
-.root-label {
-  width: fit-content;
-  max-width: 40%;
-  padding: 0.45rem 0.6rem;
-  color: #ccc;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
-  font-size: 0.9rem;
-  white-space: nowrap;
+.root-select {
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
 }
 
 .relative-input {
-  flex: 1 1 auto;
+  flex: 2;
+  min-width: 200px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 1rem;
+  }
+
+  .modal-container {
+    max-width: 100%;
+    max-height: 90vh;
+  }
+
+  .modal-header {
+    padding: 1rem 1.5rem;
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+  }
+
+  .destination-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .root-select,
+  .relative-input {
+    flex: 1;
+    min-width: auto;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modal-actions > .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .move-status {
+    order: -1;
+    width: 100%;
+  }
 }
 </style>

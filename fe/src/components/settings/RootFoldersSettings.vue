@@ -298,7 +298,6 @@ defineExpose({
   transition: all 0.2s ease;
   display: flex;
   justify-content: space-between;
-  align-items: center;
 }
 
 .folder-card:hover {
