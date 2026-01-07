@@ -771,7 +771,7 @@ namespace Listenarr.Api.Tests
 
             // Test empty/null
             Assert.Equal("", NormalizeMamId(""));
-            Assert.Equal(null, NormalizeMamId(null));
+            Assert.Null(NormalizeMamId(null));
         }
 
         private static string NormalizeMamId(string raw)

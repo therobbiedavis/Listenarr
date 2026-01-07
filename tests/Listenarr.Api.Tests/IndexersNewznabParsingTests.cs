@@ -170,7 +170,7 @@ namespace Listenarr.Api.Tests
         }
 
         [Fact]
-        public async Task SearchIndexers_Appends_ExtendedParameter_For_Torznab_And_Newznab()
+        public void SearchIndexers_Appends_ExtendedParameter_For_Torznab_And_Newznab()
         {
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
