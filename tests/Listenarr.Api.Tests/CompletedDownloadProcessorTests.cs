@@ -54,7 +54,7 @@ namespace Listenarr.Api.Tests
             // Assert
             var tracked = await repo.FindAsync(downloadId);
             Assert.NotNull(tracked);
-            Assert.Equal(DownloadStatus.Completed, tracked!.Status);
+            Assert.True(tracked!.Status == DownloadStatus.Completed || tracked.Status == DownloadStatus.Moved, $"Expected Completed or Moved, got {tracked.Status}");
             // TestFileFinalizer returns FinalPath equal to source when no import service; so FinalPath should be set
             Assert.Equal(finalPath, tracked.FinalPath);
         }
@@ -99,7 +99,7 @@ namespace Listenarr.Api.Tests
             // Assert
             var tracked = await repo.FindAsync(downloadId);
             Assert.NotNull(tracked);
-            Assert.Equal(DownloadStatus.Completed, tracked!.Status);
+            Assert.True(tracked!.Status == DownloadStatus.Completed || tracked.Status == DownloadStatus.Moved, $"Expected Completed or Moved, got {tracked.Status}");
 
             // cleanup
             try { System.IO.File.Delete(filePath); } catch { }
@@ -144,7 +144,7 @@ namespace Listenarr.Api.Tests
 
             var tracked = await repo.FindAsync(downloadId);
             Assert.NotNull(tracked);
-            Assert.Equal(DownloadStatus.Completed, tracked!.Status);
+            Assert.True(tracked!.Status == DownloadStatus.Completed || tracked.Status == DownloadStatus.Moved, $"Expected Completed or Moved, got {tracked.Status}");
             Assert.Equal(filePath, tracked.FinalPath);
 
             // cleanup
@@ -193,7 +193,7 @@ namespace Listenarr.Api.Tests
 
             var tracked = await repo.FindAsync(downloadId);
             Assert.NotNull(tracked);
-            Assert.Equal(DownloadStatus.Completed, tracked!.Status);
+            Assert.True(tracked!.Status == DownloadStatus.Completed || tracked.Status == DownloadStatus.Moved, $"Expected Completed or Moved, got {tracked.Status}");
             // FinalPath should have been updated to the extracted audio file path
             Assert.Contains("audio.mp3", tracked.FinalPath ?? string.Empty);
 

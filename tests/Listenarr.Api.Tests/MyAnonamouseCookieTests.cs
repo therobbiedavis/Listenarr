@@ -34,7 +34,9 @@ namespace Listenarr.Api.Tests
             var indexer = new Indexer { Name = "MyAnonamouse1", Url = "https://www.myanonamouse.net", Implementation = "MyAnonamouse", Type = "Torrent", IsEnabled = true, EnableInteractiveSearch = true, AdditionalSettings = "{ \"mam_id\": \"old_mam\" }" };
             db.Indexers.Add(indexer);
             db.SaveChanges();
-
+            // Ensure initial mam_id present
+            var initial = db.Indexers.First(i => i.Id == indexer.Id);
+            Assert.Contains("old_mam", initial.AdditionalSettings);
             Uri? capturedUri = null;
             var handler = new DelegatingHandlerMock((req, ct) => {
                 capturedUri = req.RequestUri;
@@ -44,39 +46,25 @@ namespace Listenarr.Api.Tests
             });
 
             using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.myanonamouse.net") };
-            var service = new SearchService(
-                httpClient,
-                null,
-                NullLogger<SearchService>.Instance,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                db,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                Enumerable.Empty<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>(),
-                null
-            );
+            var provider = new Listenarr.Api.Services.Search.Providers.MyAnonamouseSearchProvider(NullLogger<Listenarr.Api.Services.Search.Providers.MyAnonamouseSearchProvider>.Instance, httpClient, db);
 
-            var results = await service.SearchIndexersAsync("Test Title", null, request: null);
+            var results = await provider.SearchAsync(indexer, "Test Title", null, null);
 
             // Verify the db indexer was updated with new mam_id
             var updated = db.Indexers.First(i => i.Id == indexer.Id);
             Assert.Contains("new_mam", updated.AdditionalSettings);
+
+            // Verify injected HttpClient received the cookie on subsequent calls when BaseAddress differs
+            var handler2 = new DelegatingHandlerMock((req, ct) => {
+                // Ensure the request includes a Cookie header with the new mam_id
+                Assert.True(req.Headers.Contains("Cookie") && req.Headers.GetValues("Cookie").Any(v => v.Contains("mam_id=new_mam")), "Expected Cookie header with new mam_id");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") });
+            });
+
+            using var httpClient2 = new HttpClient(handler2) { BaseAddress = new Uri("https://another-host.example") };
+            var provider2 = new Listenarr.Api.Services.Search.Providers.MyAnonamouseSearchProvider(NullLogger<Listenarr.Api.Services.Search.Providers.MyAnonamouseSearchProvider>.Instance, httpClient2, db);
+
+            await provider2.SearchAsync(indexer, "Test Title", null, null);
         }
 
         [Fact]
