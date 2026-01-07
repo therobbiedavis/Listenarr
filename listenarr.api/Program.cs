@@ -42,10 +42,51 @@ var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
 var signalRSink = new SignalRLogSink();
+// Prefer explicit environment variable (useful for Docker/runtime overrides)
 var logLevelEnv = Environment.GetEnvironmentVariable("LISTENARR_LOG_LEVEL");
-var minimumLevel = Enum.TryParse<LogEventLevel>(logLevelEnv, ignoreCase: true, out var parsedLevel)
-	? parsedLevel
-	: LogEventLevel.Information;
+
+// Ensure an external config file in 'config/appsettings/appsettings.json' is available and registered.
+// If the file does not exist on first startup, create a default one so non-Docker users have a place to customize.
+var externalConfigRelative = Path.Combine("config", "appsettings", "appsettings.json");
+var externalConfigAbsolute = Path.Combine(builder.Environment.ContentRootPath, externalConfigRelative);
+try
+{
+    var dir = Path.GetDirectoryName(externalConfigAbsolute) ?? string.Empty;
+    if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+    if (!File.Exists(externalConfigAbsolute))
+    {
+        // Minimal, safe default configuration (non-sensitive)
+        var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
+        File.WriteAllText(externalConfigAbsolute, defaultJson);
+        Console.WriteLine($"[Listenarr] Created default configuration at '{externalConfigRelative}'. Edit this file to customize app settings.");
+    }
+}
+catch (Exception ex)
+{
+    // Do not fail startup on inability to write sample config; just log to console and continue
+    Console.WriteLine($"[Listenarr] Warning: failed to create default config '{externalConfigRelative}': {ex.Message}");
+}
+
+// Register the external config file (relative path is resolved against ContentRootPath)
+builder.Configuration.AddJsonFile(externalConfigRelative, optional: true, reloadOnChange: true);
+
+// Allow configuration files to also specify the minimum level (e.g., appsettings.json or appsettings.Development.json)
+var configLevel = builder.Configuration["Serilog:MinimumLevel:Default"] ?? builder.Configuration["Logging:LogLevel:Default"];
+
+LogEventLevel minimumLevel;
+if (!string.IsNullOrWhiteSpace(logLevelEnv) && Enum.TryParse<LogEventLevel>(logLevelEnv, ignoreCase: true, out var parsedFromEnv))
+{
+    minimumLevel = parsedFromEnv;
+}
+else if (!string.IsNullOrWhiteSpace(configLevel) && Enum.TryParse<LogEventLevel>(configLevel, ignoreCase: true, out var parsedFromConfig))
+{
+    minimumLevel = parsedFromConfig;
+}
+else
+{
+    minimumLevel = LogEventLevel.Information;
+}
 
 // Industry-standard defaults:
 // - Application logs at Information (unless overridden)

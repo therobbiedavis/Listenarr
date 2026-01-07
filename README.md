@@ -339,6 +339,17 @@ Configure your search APIs in the Settings page:
 - Priority-based search ordering
 - Connection testing
 
+### Logging Configuration
+
+You can control the application logging level in three ways:
+
+- Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose, Debug, Information, Warning, Error, Fatal (e.g., `LISTENARR_LOG_LEVEL=Debug`).
+- Configuration file: create or edit `appsettings.json` or `appsettings.Development.json` in the `listenarr.api` project (or the `config/appsettings` directory when running the container). Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
+- Runtime args / orchestration: pass environment variables via `docker run -e LISTENARR_LOG_LEVEL=Debug` or `docker-compose` environment section.
+
+Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_LOG_LEVEL` entry; for non-Docker users changing `appsettings.Development.json` before starting the app is the easiest way to set a custom default logging level.
+
+
 ### Download Clients
 
 Supported download clients:

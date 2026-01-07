@@ -95,5 +95,11 @@ Notes:
 - `UseUsProxy`: when true, the named `us` HttpClient is configured to use the proxy host/port and optional credentials (read from `UsProxyUsername`/`UsProxyPassword`).
 - Credentials should be provided securely via environment variables or a secrets store in production. The development sample above leaves them blank to avoid committing secrets.
 
+Auto-created configuration (convenience)
+
+On first startup the application will create a minimal `config/appsettings/appsettings.json` if one does not already exist. This file contains a safe default logging configuration and is intended as a place for administrators to persist settings (logging, proxies, etc.). You can safely edit that file to change settings such as `Serilog:MinimumLevel:Default` or add other configuration sections.
+
+If you prefer to prepare production config ahead of time, copy `config/appsettings/appsettings.Production.json.sample` to `config/appsettings/appsettings.json` and edit values (for example, set `Serilog:MinimumLevel:Default` to `Debug` to enable debug logs).
+
 If you enable proxying, set the values appropriately in `appsettings.Development.json` (for local testing) or in your environment/secret store for production.
 ````
