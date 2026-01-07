@@ -414,7 +414,17 @@ namespace Listenarr.Api.Tests
             }
             catch (Moq.MockException)
             {
-                var movedFiles = Directory.GetFiles(Path.GetTempPath(), "The Sound and the Fury.m4b", SearchOption.AllDirectories);
+                // Try to check if file was moved, but handle permission errors in CI environments (systemd-private directories)
+                var movedFiles = Array.Empty<string>();
+                try
+                {
+                    movedFiles = Directory.GetFiles(Path.GetTempPath(), "The Sound and the Fury.m4b", SearchOption.AllDirectories);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // CI environment may have restricted directories; fall through to check status instead
+                }
+                
                 if (movedFiles.Length > 0)
                 {
                     Assert.True(movedFiles.Length > 0, "File was moved by the queue callback");
