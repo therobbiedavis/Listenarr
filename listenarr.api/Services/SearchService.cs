@@ -87,7 +87,7 @@ namespace Listenarr.Api.Services
             FallbackScraper fallbackScraper,
             SearchResultScorer searchResultScorer,
             AsinSearchHandler asinSearchHandler,
-            IEnumerable<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider> searchProviders,
+            IEnumerable<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>? searchProviders = null,
             Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null)
         {
             _httpClient = httpClient;
@@ -111,7 +111,7 @@ namespace Listenarr.Api.Services
             _asinCandidateCollector = asinCandidateCollector;
             _asinEnricher = asinEnricher;
             _fallbackScraper = fallbackScraper;
-            _searchProviders = searchProviders;
+            _searchProviders = searchProviders ?? Enumerable.Empty<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>();
             _searchResultScorer = searchResultScorer;
             _asinSearchHandler = asinSearchHandler;
             _cache = cache;

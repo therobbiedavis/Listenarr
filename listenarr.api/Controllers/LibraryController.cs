@@ -551,7 +551,7 @@ namespace Listenarr.Api.Controllers
                     source = f.Source,
                     createdAt = f.CreatedAt
                 }).ToList(),
-                wanted = a.Monitored && (a.Files == null || !a.Files.Any())
+                wanted = a.Monitored && (a.Files == null || !a.Files.Any() || !a.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
             });
 
             return Ok(dto);
@@ -620,7 +620,7 @@ namespace Listenarr.Api.Controllers
                     source = f.Source,
                     createdAt = f.CreatedAt
                 }).ToList(),
-                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any())
+                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any() || !updated.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
             };
 
             return Ok(audiobookDto);

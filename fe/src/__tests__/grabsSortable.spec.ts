@@ -89,7 +89,7 @@ describe('ManualSearchModal - grabs sorting', () => {
     vi.spyOn(apiService, 'scoreSearchResults').mockResolvedValue([] as any) 
 
     const wrapper = mount(ManualSearchModal, {
-      props: { isOpen: false, audiobook: { id: '1', title: 'Test', authors: [] } },
+      props: { isOpen: false, audiobook: { id: 1, title: 'Test', authors: [] } },
       global: { stubs },
     })
     await wrapper.setProps({ isOpen: true })
@@ -169,7 +169,7 @@ describe('ManualSearchModal - grabs sorting', () => {
     vi.spyOn(apiService, 'scoreSearchResults').mockResolvedValue([] as any) 
 
     const wrapper = mount(ManualSearchModal, {
-      props: { isOpen: false, audiobook: { id: '1', title: 'Test', authors: [] } },
+      props: { isOpen: false, audiobook: { id: 1, title: 'Test', authors: [] } },
       global: { stubs },
     })
     await wrapper.setProps({ isOpen: true })

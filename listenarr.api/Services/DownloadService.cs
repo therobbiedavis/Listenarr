@@ -702,12 +702,16 @@ namespace Listenarr.Api.Services
 
         private async Task TryPrepareMyAnonamouseTorrentAsync(SearchResult searchResult, string? downloadId = null)
         {
+            _logger.LogInformation("TryPrepareMyAnonamouseTorrentAsync called for '{Title}', IndexerId: {IndexerId}, TorrentUrl: '{TorrentUrl}'", 
+                searchResult?.Title, searchResult?.IndexerId, searchResult?.TorrentUrl);
+            
             // Security: Validate all preconditions before performing sensitive operations
             // This method downloads content using authenticated HTTP clients, so we must
             // ensure the request is legitimate and comes from a trusted, configured source.
             
             if (searchResult?.IndexerId == null)
             {
+                _logger.LogWarning("TryPrepareMyAnonamouseTorrentAsync: No IndexerId for '{Title}' - skipping", searchResult?.Title);
                 // Reject: No database-backed indexer ID provided
                 return;
             }
@@ -2309,12 +2313,66 @@ namespace Listenarr.Api.Services
 
                         if (orphanedDownloads.Any())
                         {
-                            // If this is a SABnzbd client, consult the client's history first
+                            // If this is a SABnzbd or NZBGet client, consult the client's history first
                             // SAFETY: If history fetch fails, skip purging to avoid accidental deletion
                             var toPurge = orphanedDownloads;
                             try
                             {
-                                if (string.Equals(client.Type, "sabnzbd", StringComparison.OrdinalIgnoreCase))
+                                if (string.Equals(client.Type, "nzbget", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // Check NZBGet history to avoid purging downloads that completed and moved to history
+                                    if (_clientGateway != null)
+                                    {
+                                        try
+                                        {
+                                            var historyItems = await _clientGateway.GetRecentHistoryAsync(client, 100);
+                                            
+                                            // Filter orphaned downloads: keep them if we find them in history
+                                            toPurge = orphanedDownloads.Where(d =>
+                                            {
+                                                try
+                                                {
+                                                    // If the DB record stores the NZBID as DownloadClientId, check history
+                                                    if (!string.IsNullOrEmpty(d.DownloadClientId) && 
+                                                        historyItems.Any(h => h.Id.Equals(d.DownloadClientId, StringComparison.OrdinalIgnoreCase)))
+                                                    {
+                                                        try { _metrics.Increment("download.purge.skipped.history.nzbid_match"); } catch { }
+                                                        return false;
+                                                    }
+
+                                                    // Match by title similarity against history name entries
+                                                    if (!string.IsNullOrEmpty(d.Title) && 
+                                                        historyItems.Any(h => !string.IsNullOrEmpty(h.Name) && IsMatchingTitle(d.Title, h.Name)))
+                                                    {
+                                                        try { _metrics.Increment("download.purge.skipped.history.title_match"); } catch { }
+                                                        return false;
+                                                    }
+
+                                                    // No match in history -> eligible to purge
+                                                    return true;
+                                                }
+                                                catch
+                                                {
+                                                    // If anything goes wrong, be conservative and avoid purging this download
+                                                    return false;
+                                                }
+                                            }).ToList();
+                                        }
+                                        catch (Exception hx)
+                                        {
+                                            _logger.LogWarning(hx, "Error while fetching NZBGet history for client {ClientName}, skipping purge for safety", client.Name);
+                                            try { _metrics.Increment("download.purge.skipped.history.fetch_error"); } catch { }
+                                            toPurge = new List<Download>();
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("DownloadClientGateway not available for client {ClientName}, skipping purge for safety", client.Name);
+                                        try { _metrics.Increment("download.purge.skipped.history.gateway_unavailable"); } catch { }
+                                        toPurge = new List<Download>();
+                                    }
+                                }
+                                else if (string.Equals(client.Type, "sabnzbd", StringComparison.OrdinalIgnoreCase))
                                 {
                                     // Build history request
                                     var apiKey = "";

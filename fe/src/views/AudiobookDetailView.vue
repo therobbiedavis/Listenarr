@@ -16,11 +16,8 @@
             <PhBookmark :weight="audiobook.monitored ? 'fill' : 'regular'" />
             {{ audiobook.monitored ? 'Monitored' : 'Monitor' }}
           </button>
-        </div>
 
-        <!-- Desktop: show all actions inline -->
-        <div class="secondary-actions tabs-desktop">
-          <!-- Scan button moved to top nav: enqueues a background scan and shows queued feedback -->
+          <!-- Scan button moved to primary actions for better grouping -->
           <button class="nav-btn" :disabled="scanning || scanQueued" @click="scanFiles">
             <PhSpinner v-if="scanning" class="ph-spin" />
             <PhClock v-else-if="scanQueued" />
@@ -29,55 +26,10 @@
             <span v-else-if="scanQueued">Scan queued</span>
             <span v-else>Scan Folder</span>
           </button>
+        </div>
 
-          <!-- Test Notification Menu (only if webhooks configured) -->
-          <div class="test-menu-container" v-if="isDevelopment && hasWebhooksConfigured">
-            <button
-              class="nav-btn test-menu-btn"
-              @click.stop="showTestMenu = !showTestMenu"
-              :disabled="sendingNotification"
-              title="Test Notifications"
-            >
-              <PhBell />
-              Test
-            </button>
-            <div class="test-dropdown" v-if="showTestMenu" @click.stop>
-              <button
-                class="dropdown-item"
-                @click="
-                  openTestMenu('book-added')
-                  showTestMenu = false
-                "
-                :disabled="sendingNotification"
-              >
-                <PhBookmark />
-                Book Added
-              </button>
-              <button
-                class="dropdown-item"
-                @click="
-                  openTestMenu('book-available')
-                  showTestMenu = false
-                "
-                :disabled="sendingNotification"
-              >
-                <PhCheckCircle />
-                Book Available
-              </button>
-              <button
-                class="dropdown-item"
-                @click="
-                  openTestMenu('book-downloading')
-                  showTestMenu = false
-                "
-                :disabled="sendingNotification"
-              >
-                <PhDownload />
-                Book Downloading
-              </button>
-            </div>
-          </div>
-
+        <!-- Desktop: show all actions inline -->
+        <div class="secondary-actions tabs-desktop">
           <button class="nav-btn" @click="openEditModal">
             <PhPencil />
             Edit
@@ -86,7 +38,7 @@
             <PhTrash />
             Delete
           </button>
-        </div>
+        </div> 
 
         <!-- Mobile: collapse remaining actions into a More dropdown -->
         <div class="more-wrapper tabs-mobile">
@@ -103,7 +55,7 @@
             <button
               class="dropdown-item"
               @click="
-                refresh
+                refresh();
                 showMoreActions = false
               "
             >
@@ -113,7 +65,7 @@
             <button
               class="dropdown-item"
               @click="
-                toggleMonitored
+                toggleMonitored();
                 showMoreActions = false
               "
             >
@@ -124,7 +76,7 @@
               class="dropdown-item"
               :disabled="scanning || scanQueued"
               @click="
-                scanFiles
+                scanFiles();
                 showMoreActions = false
               "
             >
@@ -132,23 +84,12 @@
               <span>Scan Folder</span>
             </button>
 
-            <div v-if="isDevelopment && hasWebhooksConfigured" class="mobile-test-group">
-              <button
-                class="dropdown-item"
-                @click="
-                  showWebhookSelector = true
-                  showMoreActions = false
-                "
-              >
-                <PhBell />
-                <span>Test Notification</span>
-              </button>
-            </div>
+
 
             <button
               class="dropdown-item"
               @click="
-                openEditModal
+                openEditModal();
                 showMoreActions = false
               "
             >
@@ -159,7 +100,7 @@
             <button
               class="dropdown-item delete"
               @click="
-                confirmDelete
+                confirmDelete();
                 showMoreActions = false
               "
             >
@@ -592,32 +533,7 @@
     @saved="handleEditSaved"
   />
 
-  <!-- Webhook Selector Modal -->
-  <Teleport to="body">
-    <div v-if="showWebhookSelector" class="modal-overlay" @click="closeWebhookSelector">
-      <div class="modal-dialog webhook-selector-modal" @click.stop>
-        <div class="modal-header">
-          <h3>Select Webhook to Test</h3>
-          <button class="close-btn" @click="closeWebhookSelector">×</button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-description">Choose which webhook to send the test notification to:</p>
-          <div class="webhook-list">
-            <button
-              v-for="webhook in webhooks"
-              :key="webhook.id"
-              class="webhook-item"
-              @click="selectWebhook(webhook.id)"
-              :disabled="sendingNotification"
-            >
-              <PhBell />
-              <span class="webhook-name">{{ webhook.name }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+
 </template>
 
 <script setup lang="ts">
@@ -698,12 +614,7 @@ const scanQueued = ref(false)
 const scanJobId = ref<string | null>(null)
 const sendingNotification = ref(false)
 const showEditModal = ref(false)
-const showTestMenu = ref(false)
-const showMoreActions = ref(false)
-const showWebhookSelector = ref(false)
-const selectedTrigger = ref<'book-added' | 'book-available' | 'book-downloading' | ''>('')
-const webhooks = ref<Array<{ id: string; name: string; isEnabled: boolean }>>([])
-const selectedWebhookId = ref<string | null>(null)
+const showMoreActions = ref(false) 
 
 // History state
 const historyEntries = ref<History[]>([])
@@ -719,10 +630,7 @@ const mobileTabOptions = computed(() => [
   { value: 'history', label: 'History', icon: PhClockCounterClockwise },
 ])
 
-// Check if any webhooks are configured
-const hasWebhooksConfigured = computed(() => {
-  return webhooks.value.length > 0 && webhooks.value.some((w) => w.isEnabled)
-})
+
 
 const assignedProfileName = computed(() => {
   if (!audiobook.value) return null
@@ -852,13 +760,10 @@ onMounted(() => {
 })
 
 function handleClickOutside() {
-  if (showTestMenu.value) {
-    showTestMenu.value = false
-  }
   if (showMoreActions.value) {
     showMoreActions.value = false
   }
-}
+} 
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
@@ -874,10 +779,7 @@ watch(activeTab, (newTab) => {
   // setTimeout(() => scrollToAnchor(newTab), 120)
 })
 
-// Debug: Watch showTestMenu changes
-watch(showTestMenu, (newVal) => {
-  logger.debug('showTestMenu changed:', newVal)
-})
+
 
 async function loadAudiobook() {
   loading.value = true
@@ -921,26 +823,9 @@ async function loadAudiobook() {
 // After loading audiobook, also fetch quality profiles so we can display the assigned profile
 async function afterLoad() {
   await loadQualityProfilesForDetail()
-  await loadWebhooks()
 }
 
-async function loadWebhooks() {
-  try {
-    const settings = configStore.applicationSettings
-    logger.debug('Loading webhooks, settings:', settings)
-    if (settings?.webhooks) {
-      webhooks.value = settings.webhooks
-        .filter((w) => w.isEnabled)
-        .map((w) => ({ id: w.id, name: w.name, isEnabled: w.isEnabled }))
-      logger.debug('Loaded webhooks:', webhooks.value)
-      logger.debug('hasWebhooksConfigured:', hasWebhooksConfigured.value)
-    } else {
-      logger.debug('No webhooks found in settings')
-    }
-  } catch (err) {
-    logger.error('Failed to load webhooks:', err)
-  }
-}
+
 
 async function loadQualityProfilesForDetail() {
   try {
@@ -1105,81 +990,7 @@ async function handleEditSaved() {
   await loadAudiobook()
 }
 
-function openTestMenu(trigger: 'book-added' | 'book-available' | 'book-downloading') {
-  selectedTrigger.value = trigger
 
-  if (webhooks.value.length === 0) {
-    useToast().error('No webhooks configured', 'Please configure at least one webhook in settings')
-    return
-  }
-
-  if (webhooks.value.length === 1) {
-    // Only one webhook, test it directly
-    const firstWebhook = webhooks.value[0]
-    if (firstWebhook) {
-      testNotification(trigger, firstWebhook.id)
-    }
-  } else {
-    // Multiple webhooks, show selector
-    showWebhookSelector.value = true
-  }
-}
-
-function closeWebhookSelector() {
-  showWebhookSelector.value = false
-  selectedWebhookId.value = null
-  selectedTrigger.value = ''
-}
-
-function selectWebhook(webhookId: string) {
-  const trigger = selectedTrigger.value
-  if (!trigger) return
-
-  testNotification(trigger, webhookId)
-  closeWebhookSelector()
-}
-
-async function testNotification(
-  trigger: 'book-added' | 'book-available' | 'book-downloading',
-  webhookId?: string,
-) {
-  if (!audiobook.value) return
-
-  sendingNotification.value = true
-  try {
-    // Prepare notification data matching the structure the backend expects
-    const notificationData = {
-      title: audiobook.value.title,
-      authors: audiobook.value.authors,
-      asin: audiobook.value.asin,
-      publisher: audiobook.value.publisher,
-      year: audiobook.value.publishYear?.toString(),
-      publishedDate: audiobook.value.publishYear?.toString(),
-      imageUrl: audiobook.value.imageUrl,
-      narrators: audiobook.value.narrators,
-      description: audiobook.value.description,
-    }
-
-    logger.debug('Sending test notification:', { trigger, data: notificationData, webhookId })
-
-    // Call via the apiService which handles authentication and base URL properly
-    await apiService.testNotification(trigger, notificationData, webhookId)
-
-    const webhookName = webhookId
-      ? webhooks.value.find((w) => w.id === webhookId)?.name
-      : 'configured webhook'
-
-    useToast().success(
-      `Test ${trigger} notification sent to ${webhookName}!`,
-      'Notification sent successfully',
-    )
-  } catch (err) {
-    logger.error('Notification test failed:', err)
-    useToast().error('Failed to send test notification', String(err))
-  } finally {
-    sendingNotification.value = false
-  }
-}
 
 function formatRuntime(minutes: number): string {
   const hours = Math.floor(minutes / 60)
@@ -1393,7 +1204,7 @@ function formatDate(dateString?: string): string {
 
   /* small spacing between primary and secondary groups */
   .primary-actions + .secondary-actions {
-    margin-left: 0;
+    margin-left: 12px;
   }
 
   .more-wrapper {

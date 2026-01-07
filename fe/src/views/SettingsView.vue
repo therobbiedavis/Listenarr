@@ -157,6 +157,25 @@
             </template>
             {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
           </button>
+
+          <!-- Test Discord integration (visible when on Discord Bot tab) -->
+          <button
+            v-if="activeTab === 'bot'"
+            @click="testDiscordIntegration"
+            :disabled="testingDiscord || !canTestDiscord"
+            :aria-disabled="!canTestDiscord"
+            :class="{ 'is-disabled': testingDiscord || !canTestDiscord }"
+            class="add-button"
+            :title="canTestDiscord ? 'Test Discord integration' : `Bot status: ${discordBotStatus}. Fill Application ID and Bot Token, and start the bot to enable`"
+          >
+            <template v-if="testingDiscord">
+              <PhSpinner class="ph-spin" />
+            </template>
+            <template v-else>
+              <PhCheck />
+            </template>
+            Test
+          </button>
         </div>
       </div>
     </div>
@@ -186,7 +205,7 @@
       <RootFoldersTab v-if="activeTab === 'rootfolders'" ref="rootFoldersRef" />
 
       <!-- Discord Bot Tab -->
-      <DiscordBotTab v-if="activeTab === 'bot' && settings" :settings="settings" />
+      <DiscordBotTab v-if="activeTab === 'bot' && settings" :settings="settings" @bot-action-completed="checkDiscordBotRunning" />
 
       <NotificationsTab
         v-if="activeTab === 'notifications' && settings"
@@ -321,7 +340,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, onUnmounted, watch, computed, nextTick } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
 import { logger } from '@/utils/logger'
@@ -490,7 +509,7 @@ const toggleShowPassword = () => {
     generalSettingsRef.value &&
     typeof ((generalSettingsRef.value as unknown) as { toggleShowPassword?: () => void }).toggleShowPassword === 'function'
   ) {
-    ;((generalSettingsRef.value as unknown) as { toggleShowPassword?: () => void }).toggleShowPassword()
+    ;((generalSettingsRef.value as unknown) as { toggleShowPassword?: () => void }).toggleShowPassword?.()
   }
 }
 
@@ -916,6 +935,147 @@ const getWebhookIcon = (type: string) => {
   }
   return iconMap[type] || PhBell
 }
+
+// Test Discord integration from the toolbar (validates token / installation)
+const testingDiscord = ref(false)
+// Use explicit status so 'unknown' vs 'running' is clear
+const discordBotStatus = ref<'unknown' | 'checking' | 'running' | 'stopped' | 'error'>('unknown')
+const canTestDiscord = computed(() => {
+  return !!(
+    settings.value?.discordApplicationId &&
+    settings.value?.discordBotToken &&
+    (discordBotStatus.value === 'running' || discordTokenValid.value === true)
+  )
+})
+
+const discordTokenValid = ref<boolean | null>(null)
+
+const checkDiscordBotRunning = async () => {
+  discordBotStatus.value = 'checking'
+  // Reset token validity while we re-check to avoid stale state
+  discordTokenValid.value = null
+  try {
+    const resp = await apiService.getDiscordBotStatus()
+    if (resp && resp.success) {
+      discordBotStatus.value = resp.isRunning ? 'running' : 'stopped'
+    } else {
+      discordBotStatus.value = 'error'
+    }
+    console.debug('checkDiscordBotRunning result:', resp, 'status:', discordBotStatus.value)
+
+    // If we have an app id and token configured, also validate the token and guild membership
+    if (settings.value?.discordApplicationId && settings.value?.discordBotToken) {
+      try {
+        const tokenResp = await apiService.getDiscordStatus()
+        if (tokenResp && tokenResp.success) {
+          // If guild was configured, the API returns installed: true/false. If no guild configured, it
+          // returns botInfo when the token is valid. Treat either as a valid token/installation.
+          const installed = (tokenResp as { installed?: boolean; botInfo?: unknown }).installed
+          const botInfo = (tokenResp as { installed?: boolean; botInfo?: unknown }).botInfo
+          discordTokenValid.value = !!(installed === true || botInfo)
+        } else {
+          discordTokenValid.value = false
+        }
+        console.debug('checkDiscordToken result:', tokenResp, 'valid:', discordTokenValid.value)
+      } catch (err) {
+        discordTokenValid.value = false
+        console.debug('checkDiscordToken error:', err)
+      }
+    }
+  } catch (err) {
+    discordBotStatus.value = 'error'
+    errorTracking.captureException(err as Error, {
+      component: 'SettingsView',
+      operation: 'checkDiscordBotRunning',
+    })
+    console.debug('checkDiscordBotRunning error:', err)
+    // don't surface a toast for polling errors to avoid noise
+  }
+}
+
+// Re-use the existing test handler but ensure preconditions are met
+const testDiscordIntegration = async () => {
+  if (!settings.value) return
+  if (!canTestDiscord.value) {
+    toast.error(
+      'Cannot test',
+      'Ensure Application ID and Bot Token are configured and the Discord bot is running',
+    )
+    return
+  }
+
+  testingDiscord.value = true
+  try {
+    const resp = await apiService.getDiscordStatus()
+    if (resp?.success) {
+      toast.success('Discord test', resp.message || 'Discord integration appears configured')
+    } else {
+      toast.error('Discord test failed', resp?.message || 'Discord test failed')
+    }
+  } catch (err) {
+    errorTracking.captureException(err as Error, {
+      component: 'SettingsView',
+      operation: 'testDiscordIntegration',
+    })
+    const errorMessage = formatApiError(err)
+    toast.error('Test failed', errorMessage)
+  } finally {
+    testingDiscord.value = false
+  }
+}
+
+// When the settings tab changes, check bot status if we're on the bot tab
+watch(activeTab, (tab) => {
+  if (tab === 'bot') {
+    checkDiscordBotRunning()
+  }
+})
+
+// Check once on mount so the button state reflects current bot status
+onMounted(() => {
+  if (activeTab.value === 'bot') {
+    checkDiscordBotRunning()
+  }
+})
+
+// Optionally poll while the bot tab is active to keep the status fresh
+let discordPollTimer: number | undefined
+watch(activeTab, (tab) => {
+  if (tab === 'bot') {
+    // start a 30s poll
+    if (discordPollTimer) window.clearInterval(discordPollTimer)
+    discordPollTimer = window.setInterval(() => {
+      checkDiscordBotRunning()
+    }, 30000)
+  } else {
+    if (discordPollTimer) {
+      window.clearInterval(discordPollTimer)
+      discordPollTimer = undefined
+    }
+  }
+})
+
+// Watch for changes that affect the button state and log for debugging
+watch(
+  [() => settings.value?.discordApplicationId, () => settings.value?.discordBotToken, () => discordBotStatus.value, () => discordTokenValid.value],
+  () => {
+    console.debug('Discord test button state check:', {
+      appId: settings.value?.discordApplicationId,
+      tokenSet: !!settings.value?.discordBotToken,
+      botStatus: discordBotStatus.value,
+      tokenValid: discordTokenValid.value,
+      canTest: canTestDiscord.value,
+    })
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  if (discordPollTimer) {
+    window.clearInterval(discordPollTimer)
+    discordPollTimer = undefined
+  }
+})
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
@@ -1459,6 +1619,15 @@ onMounted(async () => {
   background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
+}
+
+/* Disabled visual state for add buttons */
+.add-button.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .save-button:disabled {

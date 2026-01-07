@@ -307,7 +307,10 @@ namespace Listenarr.Domain.Models
                 Language = NormalizeLanguage(result.Language) ?? (string.Equals(result.DownloadType, "Torrent", System.StringComparison.OrdinalIgnoreCase) ? DetectLanguageFromText(result.Title + " " + (result.Description ?? string.Empty)) : null),
                 ResultUrl = result.ResultUrl,
                 Grabs = result.Grabs,
-                Files = result.Files
+                Files = result.Files,
+                // Copy indexer metadata for MAM server-side downloads
+                IndexerId = result.IndexerId,
+                IndexerImplementation = result.IndexerImplementation
             };
         }
 

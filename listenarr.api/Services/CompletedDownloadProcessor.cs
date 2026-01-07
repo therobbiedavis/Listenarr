@@ -143,6 +143,7 @@ namespace Listenarr.Api.Services
                                     if (tracked != null)
                                     {
                                         tracked.FinalPath = finalFromDirectory;
+                                        tracked.Status = DownloadStatus.Moved;
                                         await _downloadRepository.UpdateAsync(tracked);
                                         _logger.LogInformation("Updated download {DownloadId} FinalPath to directory import result: {FinalPath}", downloadId, finalFromDirectory);
                                     }
@@ -158,7 +159,7 @@ namespace Listenarr.Api.Services
                                             if (local2 != null)
                                             {
                                                 local2.FinalPath = finalFromDirectory;
-                                                local2.Status = DownloadStatus.Completed;
+                                                local2.Status = DownloadStatus.Moved;
                                                 _logger.LogDebug("Synchronized FinalPath into scoped ListenArrDbContext for {DownloadId}", downloadId);
                                             }
                                         }
@@ -199,6 +200,7 @@ namespace Listenarr.Api.Services
                                                     if (tracked != null)
                                                     {
                                                         tracked.FinalPath = finalFromExtracted;
+                                                        tracked.Status = DownloadStatus.Moved;
                                                         await _downloadRepository.UpdateAsync(tracked);
                                                         _logger.LogInformation("Updated download {DownloadId} FinalPath to extracted import result: {FinalPath}", downloadId, finalFromExtracted);
                                                     }
@@ -214,7 +216,7 @@ namespace Listenarr.Api.Services
                                                             if (local2 != null)
                                                             {
                                                                 local2.FinalPath = finalFromExtracted;
-                                                                local2.Status = DownloadStatus.Completed;
+                                                                local2.Status = DownloadStatus.Moved;
                                                                 _logger.LogDebug("Synchronized FinalPath into scoped ListenArrDbContext for {DownloadId}", downloadId);
                                                             }
                                                         }
@@ -276,6 +278,7 @@ namespace Listenarr.Api.Services
                                                 if (tracked != null)
                                                 {
                                                     tracked.FinalPath = finalFromExtracted;
+                                                    tracked.Status = DownloadStatus.Moved;
                                                     await _downloadRepository.UpdateAsync(tracked);
                                                     _logger.LogInformation("Updated download {DownloadId} FinalPath to extracted import result: {FinalPath}", downloadId, finalFromExtracted);
                                                 }
@@ -291,7 +294,7 @@ namespace Listenarr.Api.Services
                                                         if (local2 != null)
                                                         {
                                                             local2.FinalPath = finalFromExtracted;
-                                                            local2.Status = DownloadStatus.Completed;
+                                                            local2.Status = DownloadStatus.Moved;
                                                             _logger.LogDebug("Synchronized FinalPath into scoped ListenArrDbContext for {DownloadId}", downloadId);
                                                         }
                                                     }
@@ -329,6 +332,7 @@ namespace Listenarr.Api.Services
                                         if (tracked != null)
                                         {
                                             tracked.FinalPath = importResult.FinalPath;
+                                            tracked.Status = DownloadStatus.Moved;
                                             await _downloadRepository.UpdateAsync(tracked);
                                             _logger.LogInformation("Updated download {DownloadId} FinalPath to import result: {FinalPath}", downloadId, importResult.FinalPath);
                                         }
@@ -344,7 +348,7 @@ namespace Listenarr.Api.Services
                                                 if (local2 != null)
                                                 {
                                                     local2.FinalPath = importResult.FinalPath;
-                                                    local2.Status = DownloadStatus.Completed;
+                                                    local2.Status = DownloadStatus.Moved;
                                                     _logger.LogDebug("Synchronized FinalPath into scoped ListenArrDbContext for {DownloadId}", downloadId);
                                                 }
                                             }
@@ -438,6 +442,131 @@ namespace Listenarr.Api.Services
                     }
                 }
 
+                // Add history entry and send notifications after successful import
+                try
+                {
+                    var downloadForHistory = await _downloadRepository.FindAsync(downloadId);
+                    if (downloadForHistory != null && downloadForHistory.Status == DownloadStatus.Moved && !string.IsNullOrWhiteSpace(downloadForHistory.FinalPath))
+                    {
+                        var scopeFactoryToUse = (_importService as ImportService)?.ScopeFactory ?? _serviceScopeFactory;
+                        using var historyScope = scopeFactoryToUse.CreateScope();
+                        var historyRepo = historyScope.ServiceProvider.GetService<IHistoryRepository>();
+                        var configService = historyScope.ServiceProvider.GetService<IConfigurationService>();
+                        
+                        if (historyRepo != null)
+                        {
+                            // Determine client name if available
+                            string clientName = "Unknown";
+                            if (configService != null && !string.IsNullOrWhiteSpace(downloadForHistory.DownloadClientId))
+                            {
+                                var clientConfig = await configService.GetDownloadClientConfigurationAsync(downloadForHistory.DownloadClientId);
+                                if (clientConfig != null)
+                                {
+                                    clientName = clientConfig.Name;
+                                }
+                            }
+                            
+                            var historyEntry = new Listenarr.Domain.Models.History
+                            {
+                                AudiobookId = downloadForHistory.AudiobookId,
+                                AudiobookTitle = downloadForHistory.Title,
+                                EventType = "Imported",
+                                Message = $"Automatically imported from {clientName}",
+                                Source = "AutoImport",
+                                Timestamp = DateTime.UtcNow,
+                                NotificationSent = false,
+                                Data = System.Text.Json.JsonSerializer.Serialize(new { 
+                                    DownloadId = downloadForHistory.Id,
+                                    ClientName = clientName,
+                                    FinalPath = downloadForHistory.FinalPath
+                                })
+                            };
+                            await historyRepo.AddAsync(historyEntry);
+                            _logger.LogInformation("Added history entry for automatic import of {DownloadId}", downloadId);
+                            
+                            // Send notification
+                            try
+                            {
+                                var notificationService = historyScope.ServiceProvider.GetService<INotificationService>();
+                                if (notificationService != null && configService != null)
+                                {
+                                    var webhooks = await configService.GetWebhookConfigurationsAsync();
+                                    foreach (var webhook in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Imported")))
+                                    {
+                                        await notificationService.SendNotificationAsync(
+                                            "Imported",
+                                            new {
+                                                AudiobookTitle = downloadForHistory.Title,
+                                                DownloadClient = clientName,
+                                                FilePath = downloadForHistory.FinalPath,
+                                                Timestamp = DateTime.UtcNow
+                                            },
+                                            webhook.Url,
+                                            webhook.Triggers
+                                        );
+                                    }
+                                    
+                                    // Mark notification as sent
+                                    historyEntry.NotificationSent = true;
+                                    await historyRepo.UpdateAsync(historyEntry);
+                                }
+                            }
+                            catch (Exception notifyEx)
+                            {
+                                _logger.LogWarning(notifyEx, "Failed to send import notification for {DownloadId}", downloadId);
+                            }
+                            
+                            // Send toast notification for successful import
+                            try
+                            {
+                                var toastService = historyScope.ServiceProvider.GetService<IToastService>();
+                                if (toastService != null)
+                                {
+                                    // Get the actual audiobook name from the library
+                                    string audiobookName = "your library";
+                                    if (downloadForHistory.AudiobookId.HasValue)
+                                    {
+                                        try
+                                        {
+                                            var audiobookRepo = historyScope.ServiceProvider.GetService<IAudiobookRepository>();
+                                            if (audiobookRepo != null)
+                                            {
+                                                var audiobook = await audiobookRepo.GetByIdAsync(downloadForHistory.AudiobookId.Value);
+                                                if (audiobook != null && !string.IsNullOrEmpty(audiobook.Title))
+                                                {
+                                                    audiobookName = audiobook.Title;
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Failed to fetch audiobook name for notification");
+                                        }
+                                    }
+                                    
+                                    var downloadName = !string.IsNullOrEmpty(downloadForHistory.Title) ? downloadForHistory.Title : "Download";
+                                    var message = $"{downloadName} has been imported into {audiobookName}";
+                                    
+                                    await toastService.PublishToastAsync(
+                                        "success", 
+                                        "Import Complete", 
+                                        message,
+                                        timeoutMs: 5000);
+                                    _logger.LogDebug("Sent toast notification for imported download {DownloadId}", downloadId);
+                                }
+                            }
+                            catch (Exception toastEx)
+                            {
+                                _logger.LogDebug(toastEx, "Failed to send toast notification for {DownloadId}", downloadId);
+                            }
+                        }
+                    }
+                }
+                catch (Exception historyEx)
+                {
+                    _logger.LogWarning(historyEx, "Failed to add history entry or send notifications for {DownloadId}", downloadId);
+                }
+
                 // Cleanup from download client if configured
                 try
                 {
@@ -471,16 +600,29 @@ namespace Listenarr.Api.Services
                             {
                                 bool deleteFiles = clientConfig.RemoveCompletedDownloads == "remove_and_delete";
                                 
-                                // Get the actual client-specific ID (torrent hash for qBittorrent, etc.)
+                                // Get the actual client-specific ID (torrent hash for qBittorrent/Transmission, droneId for NZBGet, etc.)
                                 string clientId = downloadForCleanup.Id;
-                                if (clientConfig.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) && 
+                                
+                                if ((clientConfig.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) ||
+                                     clientConfig.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase)) && 
                                     downloadForCleanup.Metadata != null && downloadForCleanup.Metadata.TryGetValue("TorrentHash", out var hashObj))
                                 {
                                     var torrentHash = hashObj?.ToString();
                                     if (!string.IsNullOrEmpty(torrentHash))
                                     {
                                         clientId = torrentHash;
-                                        _logger.LogDebug("Using torrent hash {Hash} instead of download ID for qBittorrent removal", torrentHash);
+                                        _logger.LogDebug("Using torrent hash {Hash} instead of download ID for {ClientType} removal", torrentHash, clientConfig.Type);
+                                    }
+                                }
+                                else if (clientConfig.Type.Equals("nzbget", StringComparison.OrdinalIgnoreCase) && 
+                                         downloadForCleanup.Metadata != null && downloadForCleanup.Metadata.TryGetValue("TorrentHash", out var droneIdObj))
+                                {
+                                    // For NZBGet, TorrentHash actually contains the droneId (GUID)
+                                    var droneId = droneIdObj?.ToString();
+                                    if (!string.IsNullOrEmpty(droneId))
+                                    {
+                                        clientId = droneId;
+                                        _logger.LogDebug("Using droneId {DroneId} instead of download ID for NZBGet removal", droneId);
                                     }
                                 }
                                 

@@ -191,11 +191,11 @@ npm run dev:web      # Start only frontend web
 
 ## Discord bot (optional)
 
-Listenarr includes a small reference Discord bot (in `tools/discord-bot`) that registers a slash command and forwards requests to the running Listenarr API. The bot is optional — the preferred integration is configuring the Discord settings from the Listenarr UI so the server manages the registration for you. Use the steps below for local development or to run the bot separately.
+Listenarr includes a small reference Discord bot (in `listenarr.api/tools/discord-bot`) that registers a slash command and forwards requests to the running Listenarr API. The bot is optional — the preferred integration is configuring the Discord settings from the Listenarr UI so the server manages the registration for you. Use the steps below for local development or to run the bot separately.
 
 Prerequisites:
 - A running Listenarr instance (see steps above)
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - A Discord application with a bot token and application ID
 
 Quick start (development):

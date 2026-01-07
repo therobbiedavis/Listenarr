@@ -1,21 +1,45 @@
-````markdown
-# OpenAI usage rules (stub)
+# OpenAI Instructions for Listenarr
 
-Purpose: short, actionable guidance for generating code and prompts when using OpenAI models (GPT family).
+## Overview
+Listenarr is a C# .NET 8.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 
-Core rules (follow canonical secure .NET guidance in `.github/AGENTS.md`):
+## Quick Start
+- **Run**: `npm run dev` from repository root
+- **Tech Stack**: .NET 8.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
+- **Database**: `listenarr.api/config/database/listenarr.db`
+- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
 
-- Never hardcode API keys or secrets. Use `IConfiguration`/environment variables/secret stores.
-- Validate all model outputs before treating them as trusted data (especially any generated code, SQL, or shell commands).
-- Apply input validation and output encoding per OWASP guidance when inserting model output into HTML, SQL, or file paths.
-- Log interactions at a high level only (do not log secrets or PII). Use request IDs for traceability.
+## Critical Backend Patterns (.NET 8.0)
+1. **Download Status Lifecycle**: Always set `Status = DownloadStatus.Moved` after import (8 locations in CompletedDownloadProcessor.cs)
+2. **File Existence Validation**: Check `File.Exists(f.Path)` in wanted queries (3 locations)
+3. **Download Client Auth**: Transmission uses 409/session-id retry; qBittorrent uses cookies
+4. **Background Jobs**: Reset stuck jobs on startup in `DownloadProcessingBackgroundService`
+5. **Async/Await**: All I/O operations must be async
+6. **Dependency Injection**: Constructor injection for all services
 
-Provider-specific guidance:
+## Critical Frontend Patterns (Vue 3 + TypeScript)
+1. **Composition API**: Use `<script setup>` with TypeScript
+2. **State Management**: Pinia stores with computed properties (never mutate state)
+3. **Performance**: Use `v-memo` for large lists with reactive dependencies
+4. **Type Safety**: All API responses need TypeScript types in `types/index.ts`
+5. **Download Filtering**: Exclude terminal states ('Moved', 'Completed', 'Failed', 'Cancelled') from activeDownloads
+6. **SignalR**: Handle connection drops with reconnection logic
 
-- Authentication: prefer short-lived API keys or token-based auth; store keys in secure vaults.
-- Rate limits: implement exponential backoff and retry with jitter; surface rate-limit errors to the caller.
-- Model selection: choose appropriate model for task (e.g., code generation -> gpt-4/codecushion or similar); keep a fallback to a smaller model for cost control.
-- System prompts: use system-level instructions for safety constraints and disallowed actions.
-- Response validation: treat the model as untrusted; run static analysis on generated code and compile/test in sandbox before executing.
+## Security (OWASP)
+- No hardcoded secrets (use `IConfiguration` with Azure Key Vault / env vars)
+- Parameterized queries only (EF Core handles automatically)
+- Validate file paths (prevent path traversal with `Path.GetFileName()`)
+- See [AGENTS.md](AGENTS.md) for comprehensive OWASP/CWE guidance
 
-````
+## Common Issues
+- **Downloads not importing**: Check logs for auth errors (401, 409), verify 30s stability window
+- **Multiple databases**: Always run from repo root, not `bin/Debug`
+- **Wanted status wrong**: Verify file existence checks in LibraryController (2x) and ScanBackgroundService
+
+## Development Workflow
+1. Run `npm run dev` from repository root
+2. Backend auto-restarts with `dotnet watch`
+3. Frontend hot-reloads with Vite HMR
+4. Check logs when debugging import/download issues
+
+For detailed architecture and API endpoints, see [copilot-instructions.md](copilot-instructions.md).

@@ -393,7 +393,7 @@ describe('AudiobooksView Grouping', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     // Expect the component to use the route query 'books' despite stored 'series'
-    expect(wrapper.vm.groupBy).toBe('books')
+    expect((wrapper.vm as unknown as { groupBy: string }).groupBy).toBe('books')
   })
 
   it('clears selection when changing grouping mode', async () => {

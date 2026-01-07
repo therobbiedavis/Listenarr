@@ -19,6 +19,7 @@ const fakeBook = {
   title: 'Test Title',
   authors: ['Author One'],
   imageUrl: '',
+  asin: 'B001234567',
 }
 
 describe('AddLibraryModal relative path derivation', () => {

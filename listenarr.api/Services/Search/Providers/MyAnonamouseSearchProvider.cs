@@ -437,6 +437,16 @@ namespace Listenarr.Api.Services.Search.Providers
                         {
                             dlHash = dlElem.ValueKind == JsonValueKind.String ? dlElem.GetString() ?? string.Empty : dlElem.ToString();
                         }
+                        
+                        // Get torrent ID for download URL fallback (note: 'id' already parsed above as variable 'id')
+                        string torrentId = id;
+                        
+                        // Debug logging for first result
+                        if (_mamDebugIndex == 0)
+                        {
+                            _logger.LogInformation("MyAnonamouse first result - Title: '{Title}', Size: '{Size}', Seeders: {Seeders}, DlHash: '{DlHash}', TorrentId: '{TorrentId}'", 
+                                title, sizeStr, seeders, dlHash, torrentId);
+                        }
 
                         // Explicit downloadUrl / infoUrl / fileName fields
                         string? downloadUrlField = null;
@@ -531,14 +541,25 @@ namespace Listenarr.Api.Services.Search.Providers
 
                         // Parse size
                         long size = 0;
-                        if (!string.IsNullOrEmpty(sizeStr) && long.TryParse(sizeStr, out var parsedSize))
+                        // Try parsing sizeStr as human-readable format first (e.g., "3.7 GiB")
+                        if (!string.IsNullOrEmpty(sizeStr))
                         {
-                            size = parsedSize;
-                            _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from size field '{SizeStr}'", title, size, sizeStr);
+                            size = ExtractSizeFromDescription(sizeStr);
+                            if (size > 0)
+                            {
+                                _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes from size field '{SizeStr}'", title, size, sizeStr);
+                            }
+                            // Fallback: try parsing as plain number (bytes)
+                            else if (long.TryParse(sizeStr, out var parsedSize))
+                            {
+                                size = parsedSize;
+                                _logger.LogDebug("Parsed size for MyAnonamouse result '{Title}': {Size} bytes (numeric) from size field '{SizeStr}'", title, size, sizeStr);
+                            }
                         }
-                        else
+                        
+                        // If still no size, try to extract from description
+                        if (size == 0)
                         {
-                            // Try to extract size from description
                             size = ExtractSizeFromDescription(description);
                             if (size > 0)
                             {
@@ -614,10 +635,13 @@ namespace Listenarr.Api.Services.Search.Providers
                         var finalFormat = (formatFromField != null && formatFromField != "MP3") ? formatFromField : formatFromTags;
 
                         var qualityFromTags = DetectQualityFromTags(tags ?? "");
-                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : (!string.IsNullOrEmpty(rawFormatField) ? DetectQualityFromFormat(rawFormatField) : "Unknown");
+                        var qualityFromFormat = !string.IsNullOrEmpty(rawFormatField) ? DetectQualityFromFormat(rawFormatField) : "Unknown";
+                        
+                        // Prefer bitrate from tags over format-based quality
+                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : qualityFromFormat;
 
                         // Fallback quality detection
-                        if (finalQuality == "Unknown")
+                        if (finalQuality == "Unknown" || finalQuality == "Variable")
                         {
                             if (!string.IsNullOrEmpty(description))
                             {
@@ -625,7 +649,7 @@ namespace Listenarr.Api.Services.Search.Providers
                                 if (q != "Unknown") finalQuality = q;
                             }
 
-                            if (finalQuality == "Unknown")
+                            if (finalQuality == "Unknown" || finalQuality == "Variable")
                             {
                                 var q = DetectQualityFromTags(title ?? string.Empty);
                                 if (q != "Unknown") finalQuality = q;
@@ -634,7 +658,15 @@ namespace Listenarr.Api.Services.Search.Providers
 
                         // Build download URL
                         var downloadUrl = "";
-                        if (!string.IsNullOrEmpty(dlHash))
+                        
+                        // First priority: use explicit downloadUrl field if provided
+                        if (!string.IsNullOrEmpty(downloadUrlField))
+                        {
+                            downloadUrl = downloadUrlField;
+                            _logger.LogDebug("Using explicit downloadUrl field for '{Title}': {Url}", title, downloadUrl);
+                        }
+                        // Second priority: build from dlHash
+                        else if (!string.IsNullOrEmpty(dlHash))
                         {
                             var baseUrl = (indexer?.Url ?? "https://www.myanonamouse.net").TrimEnd('/');
                             downloadUrl = $"{baseUrl}/tor/download.php/{dlHash}";
@@ -648,7 +680,34 @@ namespace Listenarr.Api.Services.Search.Providers
                                 catch { }
                                 downloadUrl += $"?mam_id={Uri.EscapeDataString(mamIdLocal)}";
                             }
+                            _logger.LogDebug("Built downloadUrl from dlHash for '{Title}': {Url}", title, downloadUrl);
                         }
+                        // Third priority: build from torrent ID (MAM Direct API pattern)
+                        else if (!string.IsNullOrEmpty(torrentId))
+                        {
+                            var baseUrl = (indexer?.Url ?? "https://www.myanonamouse.net").TrimEnd('/');
+                            var mamIdLocal = MyAnonamouseHelper.TryGetMamId(indexer?.AdditionalSettings);
+                            if (!string.IsNullOrEmpty(mamIdLocal))
+                            {
+                                try
+                                {
+                                    mamIdLocal = Uri.UnescapeDataString(mamIdLocal);
+                                }
+                                catch { }
+                                downloadUrl = $"{baseUrl}/tor/download.php?tid={torrentId}&mam_id={Uri.EscapeDataString(mamIdLocal)}";
+                            }
+                            else
+                            {
+                                downloadUrl = $"{baseUrl}/tor/download.php?tid={torrentId}";
+                            }
+                            _logger.LogDebug("Built downloadUrl from torrent ID for '{Title}': {Url}", title, downloadUrl);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No download URL available for MyAnonamouse result '{Title}' - missing downloadUrl field, dlHash, and torrent ID", title);
+                        }
+                        
+                        _mamDebugIndex++;
 
                         // Language parsing
                         string rawLangCode = string.Empty;
@@ -680,8 +739,8 @@ namespace Listenarr.Api.Services.Search.Providers
                             Album = narrator != null ? $"Narrated by {narrator}" : "Unknown",
                             Category = category ?? "Audiobook",
                             Size = size,
-                            Seeders = seeders,
-                            Leechers = leechers,
+                            Seeders = seeders > 0 ? seeders : null,
+                            Leechers = leechers > 0 ? leechers : null,
                             Source = indexer?.Name ?? "MyAnonamouse",
                             PublishedDate = publishDate?.ToString("o") ?? string.Empty,
                             Quality = finalQuality,
@@ -690,6 +749,7 @@ namespace Listenarr.Api.Services.Search.Providers
                             ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : (indexer?.Url ?? ""),
                             MagnetLink = "",
                             NzbUrl = "",
+                            DownloadType = "Torrent",
                             IndexerId = indexer?.Id,
                             IndexerImplementation = indexer?.Implementation ?? string.Empty,
                             Grabs = grabs,
@@ -706,6 +766,13 @@ namespace Listenarr.Api.Services.Search.Providers
                                 result.Title ??= string.Empty;
                                 if (!result.Title.EndsWith(" [VIP]")) result.Title = result.Title + " [VIP]";
                             }
+                        }
+
+                        // Log critical fields for debugging
+                        if (_mamDebugIndex < 3)
+                        {
+                            _logger.LogInformation("MAM Result #{Index}: Title='{Title}', Size={Size} bytes, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', DownloadType='{DownloadType}'", 
+                                _mamDebugIndex, result.Title, result.Size, result.Seeders, result.TorrentUrl, result.DownloadType);
                         }
 
                         results.Add(result);
@@ -876,7 +943,8 @@ namespace Listenarr.Api.Services.Search.Providers
         {
             if (string.IsNullOrEmpty(description)) return 0;
 
-            var match = Regex.Match(description, @"(\d+(?:\.\d+)?)\s*(GB|MB|KB)", RegexOptions.IgnoreCase);
+            // Support both binary (GiB, MiB, TiB, KiB) and decimal (GB, MB, TB, KB) units
+            var match = Regex.Match(description, @"(\d+(?:\.\d+)?)\s*([KMGT]i?B)", RegexOptions.IgnoreCase);
             if (match.Success)
             {
                 if (double.TryParse(match.Groups[1].Value, out var value))
@@ -884,8 +952,13 @@ namespace Listenarr.Api.Services.Search.Providers
                     var unit = match.Groups[2].Value.ToUpperInvariant();
                     return unit switch
                     {
+                        "TIB" => (long)(value * 1024 * 1024 * 1024 * 1024),
+                        "TB" => (long)(value * 1024 * 1024 * 1024 * 1024),
+                        "GIB" => (long)(value * 1024 * 1024 * 1024),
                         "GB" => (long)(value * 1024 * 1024 * 1024),
+                        "MIB" => (long)(value * 1024 * 1024),
                         "MB" => (long)(value * 1024 * 1024),
+                        "KIB" => (long)(value * 1024),
                         "KB" => (long)(value * 1024),
                         _ => 0
                     };
@@ -929,11 +1002,22 @@ namespace Listenarr.Api.Services.Search.Providers
             if (string.IsNullOrEmpty(format)) return "Unknown";
 
             var upper = format.ToUpperInvariant();
+            
+            // Try to extract bitrate from format string first (e.g., "M4B 64kbps", "MP3 128kbps")
+            var bitrateMatch = Regex.Match(format, @"(\d+)\s*kbps", RegexOptions.IgnoreCase);
+            if (bitrateMatch.Success)
+            {
+                return $"{bitrateMatch.Groups[1].Value} kbps";
+            }
+
+            // Check for lossless formats
             if (upper.Contains("FLAC")) return "Lossless";
-            if (upper.Contains("M4B")) return "Variable";
-            if (upper.Contains("M4A")) return "Variable";
-            if (upper.Contains("AAC")) return "Variable";
-            if (upper.Contains("MP3")) return "Variable";
+            
+            // For variable bitrate formats, try to indicate the format at least
+            if (upper.Contains("M4B")) return "M4B";
+            if (upper.Contains("M4A")) return "M4A";
+            if (upper.Contains("AAC")) return "AAC";
+            if (upper.Contains("MP3")) return "MP3";
 
             return "Unknown";
         }

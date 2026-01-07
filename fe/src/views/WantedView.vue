@@ -61,7 +61,7 @@
           <div
             v-for="item in visibleWanted"
             :key="item.id"
-            v-memo="[item.id, item.monitored, item.filePath]"
+            v-memo="[item.id, item.monitored, item.filePath, hasActiveDownload(item)]"
             class="wanted-item"
           >
             <div class="wanted-poster">
@@ -74,7 +74,12 @@
               />
             </div>
             <div class="wanted-info">
-              <h3>{{ safeText(item.title) }}</h3>
+              <h3>
+                <span v-if="hasActiveDownload(item)" class="download-indicator" title="Downloading">
+                  <PhDownloadSimple :size="20" weight="fill" />
+                </span>
+                {{ safeText(item.title) }}
+              </h3>
               <h4 v-if="item.authors?.length">
                 by {{ item.authors.map((author) => safeText(author)).join(', ') }}
               </h4>
@@ -175,7 +180,7 @@ import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
-import type { Audiobook, SearchResult } from '@/types'
+import type { Audiobook, SearchResult, Download } from '@/types'
 import { safeText } from '@/utils/textUtils'
 import {
   PhHeart,
@@ -189,6 +194,7 @@ import {
   PhQuestion,
   PhXCircle,
   PhSkipForward,
+  PhDownloadSimple,
 } from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -352,7 +358,31 @@ const topPadding = computed(() => {
   return visibleRange.value.start * ROW_HEIGHT
 })
 
+// Map audiobook IDs to active downloads (exclude terminal/completed states)
+const activeDownloadsByAudiobook = computed(() => {
+  const map = new Map<number, Download>()
+  const terminalStates = ['Completed', 'Failed', 'Ready', 'Moved']
+  
+  downloadsStore.downloads.forEach((download) => {
+    if (download.audiobookId && !terminalStates.includes(download.status)) {
+      map.set(download.audiobookId, download)
+    }
+  })
+  return map
+})
+
+function hasActiveDownload(item: Audiobook): boolean {
+  return activeDownloadsByAudiobook.value.has(item.id)
+}
+
+function getActiveDownload(item: Audiobook): Download | undefined {
+  return activeDownloadsByAudiobook.value.get(item.id)
+}
+
 function getStatusClass(item: Audiobook): string {
+  if (hasActiveDownload(item)) {
+    return 'downloading'
+  }
   if (searching.value[item.id]) {
     return 'searching'
   }
@@ -363,6 +393,13 @@ function getStatusClass(item: Audiobook): string {
 }
 
 function getStatusText(item: Audiobook): string {
+  const download = getActiveDownload(item)
+  if (download) {
+    if (download.status === 'Downloading') {
+      return `Downloading (${download.progress.toFixed(0)}%)`
+    }
+    return download.status
+  }
   if (searching.value[item.id]) {
     return 'Searching'
   }
@@ -843,6 +880,25 @@ const markAsSkipped = async (item: Audiobook) => {
   font-size: 1.1rem;
   font-weight: 600;
   line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.download-indicator {
+  color: #51cf66;
+  display: inline-flex;
+  align-items: center;
+  animation: bounce 2s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
 }
 
 .wanted-info h4 {
@@ -930,6 +986,22 @@ const markAsSkipped = async (item: Audiobook) => {
   background-color: rgba(77, 171, 247, 0.15);
   color: #4dabf7;
   border: 1px solid rgba(77, 171, 247, 0.3);
+}
+
+.status-badge.downloading {
+  background-color: rgba(81, 207, 102, 0.15);
+  color: #51cf66;
+  border: 1px solid rgba(81, 207, 102, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
 }
 
 .status-badge.failed {

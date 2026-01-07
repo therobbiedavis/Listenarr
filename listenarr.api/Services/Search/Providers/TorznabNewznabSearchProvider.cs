@@ -554,8 +554,9 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
         if (long.TryParse(sizeStr, out var bytes))
             return bytes;
 
-        // Parse human-readable sizes like "1.5 GB", "500 MB", etc.
-        var match = Regex.Match(sizeStr, @"([\d\.]+)\s*([KMGT]?B)", RegexOptions.IgnoreCase);
+        // Parse human-readable sizes like "1.5 GB", "3.7 GiB", "500 MB", etc.
+        // Support both binary (GiB, MiB, TiB, KiB) and decimal (GB, MB, TB, KB) units
+        var match = Regex.Match(sizeStr, @"([\d\.]+)\s*([KMGT]i?B)", RegexOptions.IgnoreCase);
         if (!match.Success)
             return 0;
 
@@ -565,9 +566,13 @@ public class TorznabNewznabSearchProvider : IIndexerSearchProvider
         var unit = match.Groups[2].Value.ToUpper();
         return unit switch
         {
+            "TIB" => (long)(size * 1024 * 1024 * 1024 * 1024),
             "TB" => (long)(size * 1024 * 1024 * 1024 * 1024),
+            "GIB" => (long)(size * 1024 * 1024 * 1024),
             "GB" => (long)(size * 1024 * 1024 * 1024),
+            "MIB" => (long)(size * 1024 * 1024),
             "MB" => (long)(size * 1024 * 1024),
+            "KIB" => (long)(size * 1024),
             "KB" => (long)(size * 1024),
             "B" => (long)size,
             _ => 0

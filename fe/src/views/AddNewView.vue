@@ -1458,9 +1458,9 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
       searchResult: result as unknown as SearchResult,
       imageUrl: result.imageUrl,
       // prefer explicit metadataSource, but fall back to attached searchResult metadata when present
-      metadataSource: looksLikeAudimeta
+      metadataSource: (looksLikeAudimeta
         ? 'audimeta'
-        : result.metadataSource ?? ((result as Record<string, unknown>)['searchResult'] ? ((result as Record<string, unknown>)['searchResult'] as Record<string, unknown>)['metadataSource'] : undefined),
+        : result.metadataSource ?? ((result as unknown as Record<string, unknown>)['searchResult'] ? ((result as unknown as Record<string, unknown>)['searchResult'] as Record<string, unknown>)['metadataSource'] : undefined)) as string | undefined,
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher)
         ? result.publisher
@@ -1472,14 +1472,14 @@ const handleAdvancedSearchResults = async (results: Array<Partial<SearchResult> 
     if (looksLikeAudimeta) {
       // Keep a copy of the raw audimeta results for client-side paging and reference
       try {
-        if (Array.isArray(results) && results.length && (results[0] as AudimetaSearchResult).asin) {
+        if (Array.isArray(results) && results.length && (results[0] as unknown as AudimetaSearchResult).asin) {
           allAudimetaResults.value = results as unknown as AudimetaSearchResult[]
         }
       } catch {}
       // Populate commonly used Audimeta-like fields (flattened to top-level)
-      const tr = titleResult as Record<string, unknown>
-      const rrRes = result as Record<string, unknown>
-      const rr = r as Record<string, unknown>
+      const tr = titleResult as unknown as Record<string, unknown>
+      const rrRes = result as unknown as Record<string, unknown>
+      const rr = r as unknown as Record<string, unknown>
       tr['subtitle'] = (rrRes['subtitles'] || rrRes['Subtitles'] || rrRes['subtitle'] || rrRes['Subtitle'] || undefined) as string | undefined
       tr['narrator'] = (() => {
         const narr = rrRes['narrators'] ?? rrRes['Narrators'] ?? rrRes['narrator'] ?? rrRes['Narrator']
@@ -1655,7 +1655,7 @@ const performAdvancedSearch = async () => {
 
         const filtered = results.filter((r) => {
           try {
-            const sr = ((r as Partial<SearchResult>)['searchResult'] as Partial<SearchResult> | undefined) ?? (r as Partial<SearchResult>)
+            const sr = ((r as unknown as Record<string, unknown>)['searchResult'] as Partial<SearchResult> | undefined) ?? (r as Partial<SearchResult>)
 
             // If searchResult.series is an array of objects with asin fields, check asin or name
             if (Array.isArray(sr.series) && sr.series.length) {
@@ -2011,7 +2011,7 @@ const getAsin = (book: TitleSearchResult): string | null => {
 }
 
 const getMetadataSourceUrl = (book: TitleSearchResult): string | undefined => {
-  const source = book.metadataSource ?? ((book.searchResult as Record<string, unknown>)['metadataSource'] as string | undefined)
+  const source = book.metadataSource ?? ((book.searchResult as unknown as Record<string, unknown>)['metadataSource'] as string | undefined)
   if (!source) return undefined
 
   // OpenLibrary metadata does not require an ASIN; prefer resultUrl (JSON) then productUrl or OL work URL
@@ -2084,7 +2084,7 @@ const getSourceUrl = (book: TitleSearchResult): string | undefined => {
 
   // If metadata indicates Audimeta (either top-level or attached searchResult), link to Audible product page for ASIN when available
   const asin = getAsin(book)
-  const metaSource = (book.metadataSource ?? ((book.searchResult as Record<string, unknown>)['metadataSource'] as string | undefined) ?? '').toString().toLowerCase()
+  const metaSource = (book.metadataSource ?? ((book.searchResult as unknown as Record<string, unknown>)['metadataSource'] as string | undefined) ?? '').toString().toLowerCase()
   if (metaSource.includes('audimeta') && asin) {
     return buildAudibleProductUrl(asin)
   }
@@ -2495,7 +2495,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
     // Normalize common metadata keys from backend variations so the template
     // consistently finds `subtitle`/`subtitles`, `narrator` and `source`.
     try {
-      const rr = result as Record<string, unknown>
+      const rr = result as unknown as Record<string, unknown>
       // subtitles may be provided as `subtitle`, `Subtitle`, `Subtitles` or `subtitles`
       rr['subtitles'] = rr['subtitles'] ?? rr['subtitle'] ?? rr['Subtitle'] ?? rr['Subtitles'] ?? undefined
       rr['subtitle'] = rr['subtitle'] ?? rr['subtitles'] ?? rr['Subtitle'] ?? rr['Subtitles'] ?? undefined
@@ -2540,7 +2540,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
     }
 
     const authorsFromResult = ((): string[] => {
-      const rrec = result as Record<string, unknown>
+      const rrec = result as unknown as Record<string, unknown>
       const authorStr = typeof rrec['author'] === 'string' && (rrec['author'] as string).trim().length ? (rrec['author'] as string).trim() : undefined
       if (authorStr) return [authorStr]
 
@@ -2561,7 +2561,7 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       }
 
       // If the original searchResult contains authors, use those
-      const sr = (result as Record<string, unknown>)['searchResult'] as Record<string, unknown> | undefined
+      const sr = (result as unknown as Record<string, unknown>)['searchResult'] as Record<string, unknown> | undefined
       const srAuthors = sr ? ((sr['authors'] ?? sr['Authors']) as unknown[] | undefined) : undefined
       if (Array.isArray(srAuthors) && srAuthors.length) {
         return (srAuthors as unknown[])
@@ -2588,16 +2588,16 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
       title: result.title || '',
       author_name: authorsFromResult.length
         ? authorsFromResult
-        : [((result as Record<string, unknown>)['author'] ?? (result as Record<string, unknown>)['Artist'] ?? (result as Record<string, unknown>)['artist'] ?? '') as string],
+        : [((result as unknown as Record<string, unknown>)['author'] ?? (result as unknown as Record<string, unknown>)['Artist'] ?? (result as unknown as Record<string, unknown>)['artist'] ?? '') as string],
       first_publish_year: publishYear,
       cover_i: undefined,
       key: String(result.asin || result.id || ''),
       searchResult: result,
       imageUrl: result.imageUrl,
       // prefer explicit metadataSource, but mark audimeta when detected so UI shows Audimeta-specific badges
-      metadataSource: looksLikeAudimeta
+      metadataSource: (looksLikeAudimeta
         ? 'audimeta'
-        : result.metadataSource ?? ((result as Record<string, unknown>)['searchResult'] ? ((result as Record<string, unknown>)['searchResult'] as Record<string, unknown>)['metadataSource'] : undefined),
+        : result.metadataSource ?? ((result as unknown as Record<string, unknown>)['searchResult'] ? ((result as unknown as Record<string, unknown>)['searchResult'] as Record<string, unknown>)['metadataSource'] : undefined)) as string | undefined,
       // forward publisher into the top-level TitleSearchResult so template's publisher check works
       publisher: Array.isArray(result.publisher)
         ? result.publisher
@@ -2608,9 +2608,9 @@ const handleSimpleSearchResults = async (results: SearchResult[]) => {
 
     if (looksLikeAudimeta) {
       // Populate commonly used Audimeta-like fields (flattened to top-level)
-      const tr = titleResult as Record<string, unknown>
-      const rrRes = result as Record<string, unknown>
-      const rr = result as Record<string, unknown>
+      const tr = titleResult as unknown as Record<string, unknown>
+      const rrRes = result as unknown as Record<string, unknown>
+      const rr = result as unknown as Record<string, unknown>
       tr['subtitle'] = rrRes['subtitles'] ?? rrRes['Subtitles'] ?? rrRes['subtitle'] ?? rrRes['Subtitle'] ?? undefined
       tr['narrator'] = (() => {
         const narr = rrRes['narrators'] ?? rrRes['Narrators'] ?? rrRes['narrator'] ?? rrRes['Narrator']

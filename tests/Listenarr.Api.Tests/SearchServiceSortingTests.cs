@@ -45,7 +45,7 @@ namespace Listenarr.Api.Tests
             var scorer = new SearchResultScorer(Mock.Of<ILogger<SearchResultScorer>>());
             var handler = new Mock<AsinSearchHandler>(Mock.Of<ILogger<AsinSearchHandler>>(), Mock.Of<IConfigurationService>(), audimeta, Mock.Of<IAudnexusService>(), Mock.Of<IAudibleMetadataService>(), Mock.Of<IAmazonMetadataService>(), converters, progress).Object;
 
-            return new SearchService(httpClient, configuration, logger, audibleMetadataService, amazonMetadataService, openLibraryService, amazonSearch, audibleSearch, imageCache, db, hubContext, audimeta, audnexus, converters, merger, progress, pipeline, coordinator, collector, enricher, fallback, scorer, handler);
+            return new SearchService(httpClient, configuration, logger, audibleMetadataService, amazonMetadataService, openLibraryService, amazonSearch, audibleSearch, imageCache, db, hubContext, audimeta, audnexus, converters, merger, progress, pipeline, coordinator, collector, enricher, fallback, scorer, handler, Enumerable.Empty<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>());
         }
 
         [Fact]

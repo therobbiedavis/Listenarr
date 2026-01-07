@@ -272,6 +272,7 @@ interface Props {
 const props = defineProps<Props>()
 const { settings } = toRefs(props)
 const toast = useToast()
+const emit = defineEmits<{ (e: 'bot-action-completed'): void }>()
 
 // Password visibility toggle
 const showPassword = ref(false)
@@ -439,6 +440,8 @@ const checkBotStatus = async () => {
     toast.error('Status check failed', errorMessage)
   } finally {
     checkingBotStatus.value = false
+    // Notify parent that a bot status action completed so it can refresh its status
+    emit('bot-action-completed')
   }
 }
 
@@ -468,6 +471,8 @@ const startBot = async () => {
     toast.error('Start failed', errorMessage)
   } finally {
     startingBot.value = false
+    // Notify parent so it can re-check bot running status
+    emit('bot-action-completed')
   }
 }
 
@@ -493,6 +498,8 @@ const stopBot = async () => {
     toast.error('Stop failed', errorMessage)
   } finally {
     stoppingBot.value = false
+    // Notify parent so it can re-check bot running status
+    emit('bot-action-completed')
   }
 }
 </script>

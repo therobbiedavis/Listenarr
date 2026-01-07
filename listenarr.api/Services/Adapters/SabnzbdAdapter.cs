@@ -203,29 +203,68 @@ namespace Listenarr.Api.Services.Adapters
                     return false;
                 }
 
-                var removeUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
-                if (deleteFiles)
-                    removeUrl += "&del_files=1";
-
                 var http = _httpFactory.CreateClient("DownloadClient");
-                var response = await http.GetAsync(removeUrl, ct);
-                if (!response.IsSuccessStatusCode)
+                bool removedFromQueue = false;
+                bool removedFromHistory = false;
+
+                // Try to remove from queue first (for active downloads)
+                var queueRemoveUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                if (deleteFiles)
+                    queueRemoveUrl += "&del_files=1";
+
+                try
                 {
-                    _logger.LogWarning("Failed to remove from SABnzbd: Status {Status}", response.StatusCode);
-                    return false;
+                    var queueResponse = await http.GetAsync(queueRemoveUrl, ct);
+                    if (queueResponse.IsSuccessStatusCode)
+                    {
+                        var queueContent = await queueResponse.Content.ReadAsStringAsync(ct);
+                        var queueDoc = JsonDocument.Parse(queueContent);
+                        if (queueDoc.RootElement.TryGetProperty("status", out var queueStatus))
+                        {
+                            removedFromQueue = queueStatus.GetBoolean();
+                        }
+                    }
+                }
+                catch (Exception queueEx)
+                {
+                    _logger.LogDebug(queueEx, "Could not remove {DownloadId} from SABnzbd queue (may not be in queue)", id);
                 }
 
-                var content = await response.Content.ReadAsStringAsync(ct);
-                var doc = JsonDocument.Parse(content);
+                // Try to remove from history (for completed downloads)
+                var historyRemoveUrl = $"{baseUrl}?mode=history&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                if (deleteFiles)
+                    historyRemoveUrl += "&del_files=1";
 
-                if (doc.RootElement.TryGetProperty("status", out var status))
+                try
                 {
-                    var statusBool = status.GetBoolean();
-                    _logger.LogInformation("Removed {DownloadId} from SABnzbd: {Success}", LogRedaction.SanitizeText(id), statusBool);
-                    return statusBool;
+                    var historyResponse = await http.GetAsync(historyRemoveUrl, ct);
+                    if (historyResponse.IsSuccessStatusCode)
+                    {
+                        var historyContent = await historyResponse.Content.ReadAsStringAsync(ct);
+                        var historyDoc = JsonDocument.Parse(historyContent);
+                        if (historyDoc.RootElement.TryGetProperty("status", out var historyStatus))
+                        {
+                            removedFromHistory = historyStatus.GetBoolean();
+                        }
+                    }
+                }
+                catch (Exception historyEx)
+                {
+                    _logger.LogDebug(historyEx, "Could not remove {DownloadId} from SABnzbd history (may not be in history)", id);
                 }
 
-                return true;
+                var success = removedFromQueue || removedFromHistory;
+                if (success)
+                {
+                    _logger.LogInformation("Removed {DownloadId} from SABnzbd (queue: {Queue}, history: {History}, deleteFiles: {DeleteFiles})", 
+                        LogRedaction.SanitizeText(id), removedFromQueue, removedFromHistory, deleteFiles);
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to remove {DownloadId} from SABnzbd (not found in queue or history)", LogRedaction.SanitizeText(id));
+                }
+
+                return success;
             }
             catch (Exception ex)
             {

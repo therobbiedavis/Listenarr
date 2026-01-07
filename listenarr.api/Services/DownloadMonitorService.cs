@@ -503,10 +503,10 @@ namespace Listenarr.Api.Services
                            (d.Status == DownloadStatus.Completed && string.IsNullOrEmpty(d.FinalPath)))
                 .ToListAsync(cancellationToken);
 
-            _logger.LogDebug("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
+            _logger.LogInformation("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
             foreach (var dl in activeDownloads)
             {
-                _logger.LogDebug("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}",
+                _logger.LogInformation("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}",
                     dl.Id, dl.Title, dl.Status, dl.DownloadClientId);
             }
 
@@ -515,9 +515,15 @@ namespace Listenarr.Api.Services
             {
                 var clientDownloads = activeDownloads.Where(d => d.DownloadClientId != "DDL").ToList();
 
+                _logger.LogInformation("Client downloads (non-DDL): {Count}", clientDownloads.Count);
                 if (clientDownloads.Any())
                 {
+                    _logger.LogInformation("Calling PollDownloadClientsAsync with {Count} downloads", clientDownloads.Count);
                     await PollDownloadClientsAsync(clientDownloads, configService, dbContext, cancellationToken);
+                }
+                else
+                {
+                    _logger.LogInformation("No client downloads to poll");
                 }
             }
 
@@ -587,18 +593,35 @@ namespace Listenarr.Api.Services
             ListenArrDbContext dbContext,
             CancellationToken cancellationToken)
         {
+            _logger.LogInformation("PollDownloadClientsAsync called with {Count} downloads", downloads.Count);
             // Group downloads by client
             var downloadsByClient = downloads.GroupBy(d => d.DownloadClientId);
 
             foreach (var clientGroup in downloadsByClient)
             {
                 var clientId = clientGroup.Key;
-                if (string.IsNullOrEmpty(clientId)) continue;
+                _logger.LogInformation("Processing client group: ClientId={ClientId}, Count={Count}", clientId, clientGroup.Count());
+                if (string.IsNullOrEmpty(clientId))
+                {
+                    _logger.LogWarning("Skipping client group with empty ClientId");
+                    continue;
+                }
 
                 try
                 {
                     var client = await configService.GetDownloadClientConfigurationAsync(clientId);
-                    if (client == null || !client.IsEnabled) continue;
+                    if (client == null)
+                    {
+                        _logger.LogWarning("Client configuration not found for ClientId={ClientId}", clientId);
+                        continue;
+                    }
+                    if (!client.IsEnabled)
+                    {
+                        _logger.LogInformation("Client {ClientName} is disabled, skipping", client.Name);
+                        continue;
+                    }
+
+                    _logger.LogInformation("Client {ClientName} (Type={Type}) is enabled, routing to poll method", client.Name, client.Type);
 
                     // Poll based on client type
                     switch (client.Type.ToLower())
@@ -916,6 +939,21 @@ namespace Listenarr.Api.Services
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.",
                                         dl.Id, matched.Name, completionPath);
+                                    
+                                    // Update download status to Completed in database so it stops being re-added to candidates
+                                    try
+                                    {
+                                        dl.Status = DownloadStatus.Completed;
+                                        dl.Progress = 100M;
+                                        dbContext.Downloads.Update(dl);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                    }
+                                    catch (Exception ex2)
+                                    {
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                    }
+                                    
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
@@ -993,7 +1031,7 @@ namespace Listenarr.Api.Services
         {
             return Task.Run(async () =>
             {
-                _logger.LogDebug("Polling Transmission client {ClientName}", client.Name);
+                _logger.LogInformation("Polling Transmission client {ClientName} for {Count} downloads", client.Name, downloads.Count);
                 try
                 {
                     var now = DateTime.UtcNow;
@@ -1002,107 +1040,219 @@ namespace Listenarr.Api.Services
                     if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && now < scheduled)
                     {
                         _logger.LogDebug("Skipping Transmission poll for {ClientName}, next scheduled at {Next}", client.Name, scheduled);
+                        _logger.LogInformation("PollTransmission early-return: scheduled skip for client {ClientName} at {Next}", client.Name, scheduled);
                         return;
                     }
 
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
                     using var http = _httpClientFactory.CreateClient("DownloadClient");
 
-                    // Get session id
-                    string sessionId = string.Empty;
-                    try
-                    {
-                        // Request to get session id (session-get)
-                        var dummy = new { method = "session-get", tag = 0 };
-                        var dummyContent = new StringContent(System.Text.Json.JsonSerializer.Serialize(dummy), System.Text.Encoding.UTF8, "application/json");
-                        var dummyResp = await http.PostAsync(baseUrl, dummyContent, cancellationToken);
-                        if (dummyResp.Headers.TryGetValues("X-Transmission-Session-Id", out var sids))
-                        {
-                            sessionId = sids.First();
-                        }
-                    }
-                    catch { }
-
-                    // Request torrent-get for fields we need
+                    // Prepare RPC payload for torrent-get
                     var rpc = new
                     {
                         method = "torrent-get",
                         arguments = new
                         {
-                            fields = new[] { "id", "name", "percentDone", "leftUntilDone", "isFinished", "status", "downloadDir" }
+                            fields = new[] { "id", "hashString", "name", "percentDone", "leftUntilDone", "isFinished", "status", "downloadDir" }
                         },
                         tag = 4
                     };
 
-                    var content = new StringContent(System.Text.Json.JsonSerializer.Serialize(rpc), System.Text.Encoding.UTF8, "application/json");
-                    if (!string.IsNullOrEmpty(sessionId)) content.Headers.Add("X-Transmission-Session-Id", sessionId);
+                    var serializedPayload = System.Text.Json.JsonSerializer.Serialize(rpc);
+                    string? sessionId = null;
 
-                    var resp = await http.PostAsync(baseUrl, content, cancellationToken);
-                    if (!resp.IsSuccessStatusCode) return;
-                    var respText = await resp.Content.ReadAsStringAsync(cancellationToken);
-                    var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(respText);
-                    if (!doc.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != System.Text.Json.JsonValueKind.Array) return;
+                    _logger.LogDebug("PollTransmission RPC request to {BaseUrl}", baseUrl);
 
-                    foreach (var dl in downloads)
+                    // Transmission CSRF protection: first request gets 409 with session-id, retry with that session-id
+                    // This mirrors TransmissionAdapter.InvokeRpcAsync pattern
+                    for (var attempt = 0; attempt < 2; attempt++)
                     {
+                        using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl)
+                        {
+                            Content = new StringContent(serializedPayload, System.Text.Encoding.UTF8, "application/json")
+                        };
+
+                        // Add session-id header if we have one (from previous 409 retry)
+                        if (!string.IsNullOrEmpty(sessionId))
+                        {
+                            request.Headers.Add("X-Transmission-Session-Id", sessionId);
+                            _logger.LogDebug("PollTransmission using X-Transmission-Session-Id: {SessionId}", sessionId);
+                        }
+
+                        // Add Basic auth header if configured
+                        if (!string.IsNullOrWhiteSpace(client.Username))
+                        {
+                            var credentials = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}"));
+                            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+                        }
+
+                        var resp = await http.SendAsync(request, cancellationToken);
+                        var respText = await resp.Content.ReadAsStringAsync(cancellationToken);
+
+                        // Handle 409 Conflict (CSRF session-id flow)
+                        if (resp.StatusCode == System.Net.HttpStatusCode.Conflict && attempt == 0)
+                        {
+                            if (resp.Headers.TryGetValues("X-Transmission-Session-Id", out var values))
+                            {
+                                sessionId = values.FirstOrDefault();
+                                _logger.LogDebug("PollTransmission received 409 Conflict, retrying with session-id: {SessionId}", sessionId);
+                                continue; // Retry with session-id
+                            }
+                        }
+
+                        // Check for success
+                        _logger.LogInformation("PollTransmission HTTP response: {StatusCode}", resp.StatusCode);
+                        if (!resp.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("PollTransmission failed with status {StatusCode}", resp.StatusCode);
+                            _logger.LogInformation("PollTransmission early-return: non-success HTTP status {StatusCode} from {BaseUrl} for client {ClientName}", resp.StatusCode, baseUrl, client.Name);
+                            return;
+                        }
+
+                        // Process successful response
+                        _logger.LogDebug("PollTransmission response text length: {Length}", respText?.Length ?? 0);
+                        if (string.IsNullOrWhiteSpace(respText))
+                        {
+                            _logger.LogInformation("PollTransmission early-return: empty response content for client {ClientName}", client.Name);
+                            return;
+                        }
+
+                        // Parse response and continue with torrent processing
+                        System.Text.Json.JsonElement doc;
                         try
                         {
-                            // Attempt to match by name or download dir
-                            var matching = torrents.EnumerateArray().FirstOrDefault(t =>
-                            {
-                                var name = t.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty;
-                                var dir = t.TryGetProperty("downloadDir", out var d) ? d.GetString() ?? string.Empty : string.Empty;
-                                return string.Equals(name, dl.Title, StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(dl.DownloadPath) && dir.Contains(dl.DownloadPath));
-                            });
-
-                            if (matching.ValueKind == System.Text.Json.JsonValueKind.Undefined) continue;
-
-                            var percent = matching.TryGetProperty("percentDone", out var p) ? p.GetDouble() : 0.0;
-                            var left = matching.TryGetProperty("leftUntilDone", out var l) ? l.GetInt64() : 0L;
-                            var isFinished = matching.TryGetProperty("isFinished", out var f) ? f.GetBoolean() : false;
-
-                            // Update database with real-time progress information
-                            await UpdateDownloadProgressAsync(dl.Id, percent * 100, left, "downloading", dbContext, cancellationToken);
-
-                            var isComplete = percent >= 1.0 || left == 0 || isFinished;
-
-                            if (isComplete)
-                            {
-                                if (!_completionCandidates.ContainsKey(dl.Id))
-                                {
-                                    _completionCandidates[dl.Id] = DateTime.UtcNow;
-                                    _logger.LogInformation("Download {DownloadId} observed complete candidate (Transmission). Waiting for stability window.", dl.Id);
-                                    _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
-                                    continue;
-                                }
-
-                                var firstSeen = _completionCandidates[dl.Id];
-                                if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
-                                {
-                                    // Determine downloadDir
-                                    var downloadDir = matching.TryGetProperty("downloadDir", out var dprop) ? dprop.GetString() ?? string.Empty : string.Empty;
-                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (Transmission). Finalizing.", dl.Id);
-                                    await FinalizeDownloadAsync(dl, downloadDir, client, cancellationToken);
-                                    _completionCandidates.Remove(dl.Id);
-                                }
-                            }
-                            else
-                            {
-                                if (_completionCandidates.ContainsKey(dl.Id))
-                                {
-                                    _completionCandidates.Remove(dl.Id);
-                                    _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
-                                }
-                            }
+                            doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(respText)!;
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "Error processing download {DownloadId} while polling Transmission", dl.Id);
+                            _logger.LogWarning(ex, "PollTransmission failed to parse JSON response for client {ClientName}", client.Name);
+                            _logger.LogInformation("PollTransmission early-return: invalid JSON response from client {ClientName}", client.Name);
+                            return;
                         }
+
+                        if (!doc.TryGetProperty("arguments", out var args))
+                        {
+                            _logger.LogWarning("PollTransmission response missing 'arguments' property");
+                            _logger.LogInformation("PollTransmission early-return: missing 'arguments' in response for client {ClientName}", client.Name);
+                            return;
+                        }
+                        if (!args.TryGetProperty("torrents", out var torrents))
+                        {
+                            _logger.LogWarning("PollTransmission response missing 'torrents' property");
+                            _logger.LogInformation("PollTransmission early-return: missing 'torrents' in 'arguments' for client {ClientName}", client.Name);
+                            return;
+                        }
+                        if (torrents.ValueKind != System.Text.Json.JsonValueKind.Array)
+                        {
+                            _logger.LogWarning("PollTransmission 'torrents' is not an array: {Kind}", torrents.ValueKind);
+                            _logger.LogInformation("PollTransmission early-return: 'torrents' not an array (Kind={Kind}) for client {ClientName}", torrents.ValueKind, client.Name);
+                            return;
+                        }
+                        _logger.LogInformation("PollTransmission found {Count} torrents in response", torrents.GetArrayLength());
+
+                        // Process torrents (continue with existing logic below)
+                        foreach (var dl in downloads)
+                        {
+                            try
+                            {
+                                // Attempt to match by hashString (preferred) or name
+                                var matching = torrents.EnumerateArray().FirstOrDefault(t =>
+                                {
+                                    // First try matching by hash (most reliable)
+                                    if (dl.Metadata != null && dl.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                    {
+                                        var downloadHash = hashObj?.ToString() ?? string.Empty;
+                                        if (!string.IsNullOrEmpty(downloadHash))
+                                        {
+                                            var hash = t.TryGetProperty("hashString", out var h) ? h.GetString() ?? string.Empty : string.Empty;
+                                            if (string.Equals(hash, downloadHash, StringComparison.OrdinalIgnoreCase))
+                                                return true;
+                                        }
+                                    }
+                                    
+                                    // Fallback to name matching
+                                    var name = t.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty;
+                                    var dir = t.TryGetProperty("downloadDir", out var d) ? d.GetString() ?? string.Empty : string.Empty;
+                                    return string.Equals(name, dl.Title, StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(dl.DownloadPath) && dir.Contains(dl.DownloadPath));
+                                });
+
+                                if (matching.ValueKind == System.Text.Json.JsonValueKind.Undefined)
+                                {
+                                    _logger.LogDebug("Could not find matching torrent for download {DownloadId} ({Title}) in Transmission", dl.Id, dl.Title);
+                                    continue;
+                                }
+                                
+                                _logger.LogDebug("Matched download {DownloadId} to Transmission torrent", dl.Id);
+
+                                var percent = matching.TryGetProperty("percentDone", out var p) ? p.GetDouble() : 0.0;
+                                var left = matching.TryGetProperty("leftUntilDone", out var l) ? l.GetInt64() : 0L;
+                                var isFinished = matching.TryGetProperty("isFinished", out var f) ? f.GetBoolean() : false;
+                                var statusCode = matching.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
+
+                                // Map Transmission status code to status string (same as TransmissionAdapter)
+                                var status = statusCode switch
+                                {
+                                    0 => "paused",          // TR_STATUS_STOPPED
+                                    1 => "queued",          // TR_STATUS_CHECK_WAIT
+                                    2 => "downloading",     // TR_STATUS_CHECK
+                                    3 => "queued",          // TR_STATUS_DOWNLOAD_WAIT
+                                    4 => "downloading",     // TR_STATUS_DOWNLOAD
+                                    5 => "queued",          // TR_STATUS_SEED_WAIT
+                                    6 => "seeding",         // TR_STATUS_SEED
+                                    7 => "failed",          // TR_STATUS_ISOLATED
+                                    _ => "unknown"
+                                };
+
+                                // Update database with real-time progress information
+                                await UpdateDownloadProgressAsync(dl.Id, percent * 100, left, status, dbContext, cancellationToken);
+
+                                // Check for completion using same logic as TransmissionAdapter
+                                var isComplete = percent >= 1.0 && (status == "seeding" || status == "queued" || status == "paused");
+                                _logger.LogInformation("PollTransmission download {DownloadId}: percent={Percent}, status={Status}, isComplete={IsComplete}", dl.Id, percent, status, isComplete);
+
+                                if (isComplete)
+                                {
+                                    if (!_completionCandidates.ContainsKey(dl.Id))
+                                    {
+                                        _completionCandidates[dl.Id] = DateTime.UtcNow;
+                                        _logger.LogInformation("Download {DownloadId} observed complete candidate (Transmission). Waiting for stability window.", dl.Id);
+                                        _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
+                                        continue;
+                                    }
+
+                                    var firstSeen = _completionCandidates[dl.Id];
+                                    if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
+                                    {
+                                        // Determine downloadDir
+                                        var downloadDir = matching.TryGetProperty("downloadDir", out var dprop) ? dprop.GetString() ?? string.Empty : string.Empty;
+                                        _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (Transmission). Finalizing.", dl.Id);
+                                        await FinalizeDownloadAsync(dl, downloadDir, client, cancellationToken);
+                                        _completionCandidates.Remove(dl.Id);
+                                    }
+                                }
+                                else
+                                {
+                                    if (_completionCandidates.ContainsKey(dl.Id))
+                                    {
+                                        _completionCandidates.Remove(dl.Id);
+                                        _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Error processing download {DownloadId} while polling Transmission", dl.Id);
+                            }
+                        }
+
+                        // Schedule next poll now that this client's polling completed successfully
+                        ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
+                        return; // Successfully processed
                     }
 
-                    // Schedule next poll now that this client's polling completed successfully
-                    ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
+                    // If we reach here, session-id flow failed after retries
+                    _logger.LogWarning("PollTransmission failed to establish session after retries for client {ClientName}", client.Name);
+
                 }
                 catch (Exception ex)
                 {
@@ -1735,6 +1885,21 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (SABnzbd). Waiting for stability window.", dl.Id);
+                                    
+                                    // Update download status to Completed in database so it stops being re-added to candidates
+                                    try
+                                    {
+                                        dl.Status = DownloadStatus.Completed;
+                                        dl.Progress = 100M;
+                                        dbContext.Downloads.Update(dl);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                    }
+                                    catch (Exception ex2)
+                                    {
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                    }
+                                    
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
@@ -1984,6 +2149,21 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (NZBGet). Waiting for stability window.", dl.Id);
+                                    
+                                    // Update download status to Completed in database so it stops being re-added to candidates
+                                    try
+                                    {
+                                        dl.Status = DownloadStatus.Completed;
+                                        dl.Progress = 100M;
+                                        dbContext.Downloads.Update(dl);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                    }
+                                    catch (Exception ex2)
+                                    {
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                    }
+                                    
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;

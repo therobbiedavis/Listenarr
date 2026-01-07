@@ -251,8 +251,14 @@ namespace Listenarr.Api.Services
 
                         if (orphanedDownloads.Any())
                         {
-                            var toPurge = orphanedDownloads;
-                            // Simplified: skip SABnzbd history checks at queue-service level; leave purge safety to caller
+                            // Don't purge NZBGet downloads - they move to history immediately and need CompletedDownloadProcessor
+                            var toPurge = orphanedDownloads.Where(d => client.Type?.ToLowerInvariant() != "nzbget").ToList();
+                            
+                            if (toPurge.Count < orphanedDownloads.Count)
+                            {
+                                _logger.LogDebug("Skipped purge of {SkippedCount} NZBGet downloads (may be in history)", 
+                                    orphanedDownloads.Count - toPurge.Count);
+                            }
 
                             foreach (var orphanedDownload in toPurge)
                             {

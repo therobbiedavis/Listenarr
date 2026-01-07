@@ -363,10 +363,15 @@ namespace Listenarr.Api.Services.Adapters
                 _ => "unknown"
             };
 
-            if (percentDone >= 100.0 && status is "seeding" or "queued" or "paused")
+            _logger.LogDebug("Before completion check: hash={Hash}, percentDone={PercentDone}, status={Status}", 
+                id, percentDone, status);
+            
+            if (percentDone >= 100.0 && (status == "seeding" || status == "queued" || status == "paused"))
             {
                 status = "completed";
             }
+            
+            _logger.LogDebug("After completion check: hash={Hash}, finalStatus={Status}", id, status);
 
             string? localPath = downloadDir;
             if (!string.IsNullOrEmpty(downloadDir))

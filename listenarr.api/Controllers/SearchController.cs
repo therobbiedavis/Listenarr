@@ -1207,6 +1207,7 @@ namespace Listenarr.Api.Controllers
 
                 // Use intelligent search (Amazon/Audible + metadata enrichment) for Discord bot
                 // This excludes indexer results which are not suitable for bot interactions
+                // The Discord bot now sends proper prefixes (TITLE:, AUTHOR:, AUTHOR_TITLE:)
                 var searchResults = await _searchService.IntelligentSearchAsync(query, region: region, language: null, ct: HttpContext.RequestAborted);
 
                 if (searchResults == null || !searchResults.Any())

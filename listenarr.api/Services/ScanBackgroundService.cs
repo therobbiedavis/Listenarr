@@ -453,7 +453,7 @@ namespace Listenarr.Api.Services
                                         createdAt = f.CreatedAt
                                     }).ToList()
                                     ,
-                                    wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any())
+                                    wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any() || !updated.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
                                 };
 
                                 await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);

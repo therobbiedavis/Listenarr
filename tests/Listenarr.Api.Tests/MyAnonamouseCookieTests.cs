@@ -44,7 +44,33 @@ namespace Listenarr.Api.Tests
             });
 
             using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://www.myanonamouse.net") };
-            var service = new SearchService(httpClient, null, NullLogger<SearchService>.Instance, null, null, null, null, null, null, db, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var service = new SearchService(
+                httpClient,
+                null,
+                NullLogger<SearchService>.Instance,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                db,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Enumerable.Empty<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>(),
+                null
+            );
 
             var results = await service.SearchIndexersAsync("Test Title", null, request: null);
 

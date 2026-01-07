@@ -485,7 +485,7 @@ onMounted(() => {
   }
   try {
     isTouchDevice.value =
-      'ontouchstart' in window || ((navigator as unknown) as { maxTouchPoints?: number }).maxTouchPoints > 0
+      'ontouchstart' in window || (((navigator as unknown) as { maxTouchPoints?: number }).maxTouchPoints ?? 0) > 0
   } catch {
     isTouchDevice.value = false
   }

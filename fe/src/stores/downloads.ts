@@ -12,6 +12,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const isLoading = ref(false)
   let unsubscribeUpdate: (() => void) | null = null
   let unsubscribeList: (() => void) | null = null
+  let unsubscribeQueue: (() => void) | null = null
   let unsubscribeAudiobook: (() => void) | null = null
 
   // Subscribe to SignalR updates
@@ -76,6 +77,51 @@ export const useDownloadsStore = defineStore('downloads', () => {
     // Subscribe to full downloads list
     unsubscribeList = signalRService.onDownloadsList((downloadsList) => {
       downloads.value = downloadsList
+      triggerRef(downloads)
+    })
+
+    // Subscribe to queue updates (replacement list from backend)
+    unsubscribeQueue = signalRService.onQueueUpdate((queueItems) => {
+      // QueueUpdate provides the current queue state
+      // When a download is completed and removed, it won't be in this list
+      // We need to update our downloads to match the queue
+      const currentDownloadIds = new Set(downloads.value.map(d => d.id))
+      const queueIds = new Set(queueItems.map(q => q.id))
+      
+      // Remove downloads that are no longer in the queue
+      downloads.value = downloads.value.filter(d => queueIds.has(d.id))
+      
+      // Update existing and add new items from queue
+      queueItems.forEach((queueItem) => {
+        const existingIndex = downloads.value.findIndex(d => d.id === queueItem.id)
+        
+        // Map QueueItem to Download format
+        const downloadItem: Download = {
+          id: queueItem.id,
+          title: queueItem.title || 'Unknown',
+          artist: queueItem.author || '',
+          album: queueItem.series || '',
+          originalUrl: '',
+          status: queueItem.status as any,
+          progress: queueItem.progress || 0,
+          totalSize: queueItem.size || 0,
+          downloadedSize: queueItem.downloaded || 0,
+          downloadPath: queueItem.remotePath || '',
+          finalPath: queueItem.localPath || '',
+          startedAt: queueItem.addedAt,
+          completedAt: undefined,
+          errorMessage: queueItem.errorMessage,
+          downloadClientId: queueItem.downloadClientId,
+          metadata: {},
+        }
+        
+        if (existingIndex !== -1) {
+          downloads.value[existingIndex] = downloadItem
+        } else {
+          downloads.value.push(downloadItem)
+        }
+      })
+      
       triggerRef(downloads)
     })
 
@@ -176,6 +222,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const cleanup = () => {
     if (unsubscribeUpdate) unsubscribeUpdate()
     if (unsubscribeList) unsubscribeList()
+    if (unsubscribeQueue) unsubscribeQueue()
     if (unsubscribeAudiobook) unsubscribeAudiobook()
   }
 

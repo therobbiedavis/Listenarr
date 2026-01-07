@@ -701,10 +701,10 @@ const testWebhookConfig = async () => {
 // Persist webhooks to backend settings (do not mutate incoming props)
 const persistWebhooks = async () => {
   // Create a shallow copy of settings and assign updated webhooks
-  const current = props.settings ? { ...(props.settings as Record<string, unknown>) } : {}
+  const current = props.settings ? { ...(props.settings as unknown as Record<string, unknown>) } : {}
   try {
     const payload: ApplicationSettings = {
-      ...(current as ApplicationSettings),
+      ...(current as unknown as ApplicationSettings),
       webhooks: webhooks.value,
     }
     // Save to backend using the configuration store
