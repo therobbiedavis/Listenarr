@@ -75,17 +75,17 @@
         </div>
 
         <div class="form-group">
-          <label for="language">Language</label>
+          <label for="language">Region</label>
           <select id="language" v-model="searchParams.language" class="form-input">
-            <option value="">Any Language</option>
-            <option value="english">English</option>
-            <option value="german">Deutsch</option>
-            <option value="french">Français</option>
-            <option value="spanish">Español</option>
-            <option value="italian">Italiano</option>
-            <option value="portuguese">Português</option>
-            <option value="japanese">日本語</option>
-            <option value="chinese">中文</option>
+            <option value="">Any Region</option>
+            <option value="english">United States (US)</option>
+            <option value="german">Germany (DE)</option>
+            <option value="french">France (FR)</option>
+            <option value="spanish">Spain (ES)</option>
+            <option value="italian">Italy (IT)</option>
+            <option value="portuguese">Brazil (BR)</option>
+            <option value="japanese">Japan (JP)</option>
+            <option value="chinese">China (CN)</option>
           </select>
         </div>
 

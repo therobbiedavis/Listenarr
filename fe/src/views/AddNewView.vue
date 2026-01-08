@@ -49,17 +49,17 @@
               />
 
               <select v-model="searchLanguage" class="language-select" aria-label="Search region">
-                <option value="english">English (US)</option>
-                <option value="english-uk">English (UK)</option>
-                <option value="english-ca">English (CA)</option>
-                <option value="english-au">English (AU)</option>
-                <option value="english-in">English (IN)</option>
-                <option value="german">Deutsch (DE)</option>
-                <option value="french">Français (FR)</option>
-                <option value="spanish">Español (ES)</option>
-                <option value="italian">Italiano (IT)</option>
-                <option value="portuguese">Português (BR)</option>
-                <option value="japanese">日本語 (JP)</option>
+                <option value="english">United States (US)</option>
+                <option value="english-uk">United Kingdom (UK)</option>
+                <option value="english-ca">Canada (CA)</option>
+                <option value="english-au">Australia (AU)</option>
+                <option value="english-in">India (IN)</option>
+                <option value="german">Germany (DE)</option>
+                <option value="french">France (FR)</option>
+                <option value="spanish">Spain (ES)</option>
+                <option value="italian">Italy (IT)</option>
+                <option value="portuguese">Brazil (BR)</option>
+                <option value="japanese">Japan (JP)</option>
               </select>
 
               <button
@@ -194,17 +194,17 @@
                     class="form-input"
                   >
                     <option value="">Any Region</option>
-                    <option value="english">English (US)</option>
-                    <option value="english-uk">English (UK)</option>
-                    <option value="english-ca">English (CA)</option>
-                    <option value="english-au">English (AU)</option>
-                    <option value="english-in">English (IN)</option>
-                    <option value="german">Deutsch (DE)</option>
-                    <option value="french">Français (FR)</option>
-                    <option value="spanish">Español (ES)</option>
-                    <option value="italian">Italiano (IT)</option>
-                    <option value="portuguese">Português (BR)</option>
-                    <option value="japanese">日本語 (JP)</option>
+                    <option value="english">United States (US)</option>
+                    <option value="english-uk">United Kingdom (UK)</option>
+                    <option value="english-ca">Canada (CA)</option>
+                    <option value="english-au">Australia (AU)</option>
+                    <option value="english-in">India (IN)</option>
+                    <option value="german">Germany (DE)</option>
+                    <option value="french">France (FR)</option>
+                    <option value="spanish">Spain (ES)</option>
+                    <option value="italian">Italy (IT)</option>
+                    <option value="portuguese">Brazil (BR)</option>
+                    <option value="japanese">Japan (JP)</option>
                   </select>
                 </div>
               </div>

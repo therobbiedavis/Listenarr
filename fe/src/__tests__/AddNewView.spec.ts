@@ -121,6 +121,29 @@ describe('AddNewView pagination', () => {
     expect(img.attributes('src')).toBe('http://img2')
   })
 
+  it('shows region names instead of language names in search selects', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+
+    // Simple search language select should contain United States (US)
+    const simpleSelect = wrapper.find('select.language-select')
+    expect(simpleSelect.exists()).toBe(true)
+    const simpleOptions = simpleSelect.findAll('option').map((o) => o.text())
+    expect(simpleOptions).toContain('United States (US)')
+
+    // Advanced search select should be labeled Region and contain United Kingdom (UK)
+    await wrapper.vm.$nextTick()
+    // Toggle advanced
+    const advToggle = wrapper.find('button.search-btn.advanced-btn')
+    expect(advToggle.exists()).toBe(true)
+    await advToggle.trigger('click')
+
+    const advSelect = wrapper.find('select#adv-language')
+    expect(advSelect.exists()).toBe(true)
+    const advOptions = advSelect.findAll('option').map((o) => o.text())
+    expect(advOptions).toContain('United Kingdom (UK)')
+  })
+
   it('maps runtime from runtimeLengthMin (minutes) to seconds', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
