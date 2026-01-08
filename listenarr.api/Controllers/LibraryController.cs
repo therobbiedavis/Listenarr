@@ -59,6 +59,7 @@ namespace Listenarr.Api.Controllers
         /// <param name="scanQueueService">Optional background scan queue service for asynchronous scans.</param>
         /// <param name="moveQueueService">Optional background move queue service for processing move requests.</param>
         /// <param name="notificationService">Service for sending webhook notifications.</param>
+        /// <param name="rootFolderService">Optional root folder service for managing and enumerating configured root folders used for validating explicit scan paths.</param>
         public LibraryController(
             IAudiobookRepository repo,
             IImageCacheService imageCacheService,
