@@ -140,17 +140,37 @@ private readonly ILogger<RootFolderService>? _logger;
 
                 if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Include audiobooks that are the root itself or subdirectories of the root
-                    var affected = ctx.Audiobooks.Where(a => a.BasePath != null && (a.BasePath == oldPath || a.BasePath.StartsWith(oldPath + System.IO.Path.DirectorySeparatorChar))).ToList();
+                    // Load candidate audiobooks into memory and perform robust, OS-agnostic path comparisons
+                    var all = ctx.Audiobooks.Where(a => a.BasePath != null).ToList();
+
+                    // Normalize oldPath for comparison: unify separators to backslash and lower-case
+                    char backslash = '\\';
+                    char slash = '/';
+                    string NormalizeForCompare(string s) => (s ?? string.Empty).Replace(slash, backslash).Replace('\\', backslash).TrimEnd(backslash).ToLowerInvariant();
+                    var oldNorm = NormalizeForCompare(oldPath);
+
+                    var affected = all.Where(a =>
+                    {
+                        var bp = a.BasePath!;
+                        var bpNorm = NormalizeForCompare(bp);
+                        return bpNorm == oldNorm || bpNorm.StartsWith(oldNorm + backslash);
+                    }).ToList();
+
                     // Record original and new paths before updating DB so we can enqueue moves if requested
                     var moves = new List<(int audiobookId, string original, string target)>();
 
                     foreach (var a in affected)
                     {
                         var original = a.BasePath!;
-                        string target;
-                        // Replace the old root prefix with the new root prefix
-                        target = newPath + original.Substring(oldPath.Length);
+
+                        // Determine which separator the original path uses so we preserve it in the target
+                        char sepToUse = original.Contains(backslash) ? backslash : slash;
+
+                        // Compute suffix after the old root (trim any leading separators)
+                        var suffix = original.Length > oldPath.Length ? original.Substring(oldPath.Length).TrimStart(backslash, slash) : string.Empty;
+
+                        // Build the target by concatenation to preserve Windows-style backslashes expected by tests
+                        string target = string.IsNullOrEmpty(suffix) ? newPath : (newPath + sepToUse + suffix.Replace(backslash, sepToUse).Replace(slash, sepToUse));
 
                         moves.Add((a.Id, original, target));
                         a.BasePath = target;
