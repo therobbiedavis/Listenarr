@@ -438,7 +438,7 @@
                 >
                   <PhCloud />
                   {{
-                    audibleResult.sourceLink.includes('audible.com')
+                    isAudibleHost(audibleResult.sourceLink)
                       ? 'Audible'
                       : `Source: ${audibleResult.source}`
                   }}

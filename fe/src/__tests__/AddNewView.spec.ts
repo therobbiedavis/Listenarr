@@ -253,6 +253,31 @@ describe('AddNewView pagination', () => {
     expect(sourceLink.text()).toContain('Audible')
   })
 
+  it('does not label non-Audible URLs containing audible.com as Audible', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as { searchType?: string; audibleResult?: Record<string, unknown> }
+
+    vm.searchType = 'asin'
+    ;(vm as any).audibleResult = {
+      asin: 'BAUDX',
+      title: 'Title',
+      source: 'External',
+      sourceLink: 'https://example.com/?q=audible.com',
+    }
+    await wrapper.vm.$nextTick()
+
+    let sourceLink = wrapper.find('.result-meta .source-link')
+    expect(sourceLink.exists()).toBe(true)
+    if (sourceLink.text().includes('Audible')) throw new Error('Non-audible URL incorrectly labeled as Audible')
+
+    // Also ensure fake hostnames are not treated as Audible
+    (vm as any).audibleResult.sourceLink = 'https://fakeaudible.com/pd/123'
+    await wrapper.vm.$nextTick()
+    sourceLink = wrapper.find('.result-meta .source-link')
+    if (sourceLink.text().includes('Audible')) throw new Error('Non-audible URL incorrectly labeled as Audible')
+  })
+
   it('shows full series list on hover (title and asin result views)', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
