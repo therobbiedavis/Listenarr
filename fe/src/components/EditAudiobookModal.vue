@@ -240,24 +240,70 @@
   <div v-if="showMoveConfirm" class="confirm-overlay separate-modal" @click="cancelMoveConfirm">
     <div class="confirm-dialog" @click.stop>
       <div class="confirm-header">
-        <h3>Move audiobook files?</h3>
+        <i class="ph ph-folder-open"></i>
+        <h3>Move Audiobook Files</h3>
       </div>
       <div class="confirm-body">
-        <p>You're changing the destination for this audiobook and moving all files from:</p>
-        <pre style="white-space: pre-wrap">{{ pendingMove?.original || '<none>' }}</pre>
-        <p>to:</p>
-        <pre style="white-space: pre-wrap">{{ pendingMove?.combined || '<none>' }}</pre>
-        <div class="checkbox-row">
-          <label><input type="checkbox" v-model="modalMoveFiles" /> <strong>Move files</strong> (recommended)</label>
+        <div class="confirm-description">
+          <p>You're changing the destination folder for this audiobook. This will move all associated files.</p>
         </div>
-        <div class="checkbox-row" v-if="modalMoveFiles">
-          <label><input type="checkbox" v-model="modalDeleteEmpty" /> Delete original folder if empty</label>
+
+        <div class="path-comparison">
+          <div class="path-section">
+            <div class="path-label">
+              <i class="ph ph-arrow-right"></i>
+              <span>From:</span>
+            </div>
+            <div class="path-display">
+              <code>{{ pendingMove?.original || 'No current path' }}</code>
+            </div>
+          </div>
+
+          <div class="path-section">
+            <div class="path-label">
+              <i class="ph ph-arrow-down"></i>
+              <span>To:</span>
+            </div>
+            <div class="path-display">
+              <code>{{ pendingMove?.combined || 'No destination path' }}</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="confirm-options">
+          <div class="checkbox-row">
+            <label>
+              <input type="checkbox" v-model="modalMoveFiles" />
+              <div class="checkbox-content">
+                <span class="checkbox-title">Move files now</span>
+                <small>Copy all audiobook files to the new location (recommended)</small>
+              </div>
+            </label>
+          </div>
+          <div class="checkbox-row" v-if="modalMoveFiles">
+            <label>
+              <input type="checkbox" v-model="modalDeleteEmpty" />
+              <div class="checkbox-content">
+                <span class="checkbox-title">Clean up empty folders</span>
+                <small>Delete the original folder if it becomes empty after moving</small>
+              </div>
+            </label>
+          </div>
         </div>
       </div>
       <div class="confirm-actions">
-        <button class="btn btn-secondary" @click="cancelMoveConfirm">Cancel</button>
-        <button class="btn btn-secondary" @click="confirmChangeWithoutMoving">Change without moving</button>
-        <button class="btn btn-primary" @click="confirmMove">Move</button>
+        <button class="btn btn-secondary" @click="cancelMoveConfirm">
+          <i class="ph ph-x"></i>
+          Cancel
+        </button>
+        <button class="btn btn-secondary" @click="confirmChangeWithoutMoving">
+          <i class="ph ph-database"></i>
+          Update Path Only
+        </button>
+        <button class="btn btn-primary" :disabled="!modalMoveFiles" @click="confirmMove">
+          <i class="ph ph-folder-open"></i>
+          Move Files
+        </button>
       </div>
     </div>
   </div>
@@ -841,116 +887,270 @@ function close() {
   color: #5dade2;
 }
 
-/* Confirmation modal (separate modal appearance) */
-.confirm-overlay {
+/* Move confirmation modal styles */
+.confirm-overlay.separate-modal {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(0, 0, 0, 0.6);
-  z-index: 1200;
+  z-index: 1001;
+  padding: 1rem;
 }
 
 .confirm-dialog {
-  background-color: #1e1e1e;
-  border-radius: 6px;
+  background: #1e1e1e;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  max-width: 600px;
   width: 100%;
-  max-width: 560px;
-  padding: 1rem;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  max-height: 90vh;
+  overflow-y: auto;
   border: 1px solid #333;
 }
 
-.confirm-header h3 {
-  margin: 0 0 8px 0;
-  color: #fff;
-}
-
-.confirm-body pre {
-  background: #111;
-  padding: 8px;
-  border-radius: 4px;
-  margin: 6px 0;
-  color: #ddd;
-}
-
-.confirm-actions {
+.confirm-header {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 12px;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid #333;
+  margin-bottom: 0;
 }
 
-.confirm-actions .btn.cancel {
-  background: none;
-  border: 1px solid #444;
+.confirm-header i {
+  font-size: 1.5rem;
+  color: #007acc;
 }
 
-.confirm-actions .btn.confirm.danger {
-  background: #c0392b;
-  color: white;
+.confirm-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.confirm-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.confirm-description p {
+  margin: 0;
+  color: #cccccc;
+  line-height: 1.5;
+}
+
+.path-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: #252526;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #333;
+}
+
+.path-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.path-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+
+.path-label i {
+  color: #007acc;
+  font-size: 1rem;
+}
+
+.path-display {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #cccccc;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.path-display code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
   border: none;
+  font-family: inherit;
+}
+
+.confirm-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .checkbox-row {
-  margin-top: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: #252526;
+  border-radius: 8px;
+  border: 1px solid #333;
+  transition: all 0.2s ease;
+}
+
+.checkbox-row:hover {
+  background: #2d2d30;
+  border-color: #007acc;
 }
 
 .checkbox-row label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
-  color: #ddd;
   cursor: pointer;
-  user-select: none;
-  padding: 0.5rem 0;
-}
-
-.checkbox-row label input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
+  width: 100%;
   margin: 0;
+}
+
+.checkbox-row input[type="checkbox"] {
+  margin-top: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  accent-color: #007acc;
   cursor: pointer;
-  flex-shrink: 0;
-  -webkit-appearance: none;
-  appearance: none;
-  background-color: #1a1a1a;
-  border: 2px solid #555;
-  border-radius: 6px;
-  position: relative;
-  transition: all 0.2s ease;
-  vertical-align: sub;
 }
 
-.checkbox-row label input[type='checkbox']:hover {
-  border-color: #007acc;
+.checkbox-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
 }
 
-.checkbox-row label input[type='checkbox']:checked {
-  background-color: #007acc;
-  border-color: #007acc;
+.checkbox-title {
+  font-weight: 500;
+  color: #ffffff;
+  font-size: 0.95rem;
 }
 
-.checkbox-row label input[type='checkbox']:checked::after {
-  content: '';
-  position: absolute;
-  left: 5px;
-  top: 2px;
-  width: 4px;
-  height: 8px;
-  border: solid white;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+.checkbox-content small {
+  color: #aaaaaa;
+  font-size: 0.8rem;
+  line-height: 1.3;
 }
 
-.form-label {
+.confirm-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 1.5rem;
+  border-top: 1px solid #333;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.confirm-actions .btn {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: white;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
   font-weight: 500;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  cursor: pointer;
+  min-width: fit-content;
+}
+
+.confirm-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.confirm-actions .btn-secondary {
+  background: #2d2d30;
+  color: #cccccc;
+  border-color: #333;
+}
+
+.confirm-actions .btn-secondary:hover:not(:disabled) {
+  background: #3c3c3c;
+  border-color: #555;
+}
+
+.confirm-actions .btn-primary {
+  background: #007acc;
+  color: #ffffff;
+}
+
+.confirm-actions .btn-primary:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 640px) {
+  .confirm-overlay.separate-modal {
+    padding: 0.5rem;
+  }
+
+  .confirm-dialog {
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .confirm-header {
+    padding: 1rem 1rem 0.75rem;
+  }
+
+  .confirm-header h3 {
+    font-size: 1.1rem;
+  }
+
+  .confirm-body {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .path-comparison {
+    padding: 0.75rem;
+  }
+
+  .path-display {
+    padding: 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .checkbox-row {
+    padding: 0.5rem;
+  }
+
+  .confirm-actions {
+    padding: 0.75rem 1rem 1rem;
+    gap: 0.5rem;
+  }
+
+  .confirm-actions .btn {
+    padding: 0.625rem 1rem;
+    font-size: 0.85rem;
+    flex: 1;
+    justify-content: center;
+  }
 }
 
 .form-label i {

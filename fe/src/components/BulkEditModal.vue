@@ -126,6 +126,72 @@
       </div>
     </div>
   </div>
+
+  <!-- Move confirmation modal (separate overlay) -->
+  <div v-if="showMoveConfirm" class="confirm-overlay separate-modal" @click="cancelMoveConfirm">
+    <div class="confirm-dialog" @click.stop>
+      <div class="confirm-header">
+        <i class="ph ph-folder-open"></i>
+        <h3>Move Audiobook Files</h3>
+      </div>
+      <div class="confirm-body">
+        <div class="confirm-description">
+          <p>
+            You're changing the root folder for <strong>{{ selectedCount }}</strong> audiobook{{
+              selectedCount !== 1 ? 's' : ''
+            }}. This will move all associated files to the new location.
+          </p>
+        </div>
+
+        <div class="path-comparison">
+          <div class="path-section">
+            <div class="path-label">
+              <i class="ph ph-arrow-down"></i>
+              <span>New Root Folder:</span>
+            </div>
+            <div class="path-display">
+              <code>{{ pendingRootPath || 'No destination path' }}</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="confirm-options">
+          <div class="checkbox-row">
+            <label>
+              <input type="checkbox" v-model="modalMoveFiles" />
+              <div class="checkbox-content">
+                <span class="checkbox-title">Move files now</span>
+                <small>Copy all audiobook files to the new root folder (recommended)</small>
+              </div>
+            </label>
+          </div>
+          <div class="checkbox-row" v-if="modalMoveFiles">
+            <label>
+              <input type="checkbox" v-model="modalDeleteEmpty" />
+              <div class="checkbox-content">
+                <span class="checkbox-title">Clean up empty folders</span>
+                <small>Delete the original folders if they become empty after moving</small>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" @click="cancelMoveConfirm">
+          <i class="ph ph-x"></i>
+          Cancel
+        </button>
+        <button class="btn btn-secondary" @click="confirmChangeWithoutMoving">
+          <i class="ph ph-database"></i>
+          Update Path Only
+        </button>
+        <button class="btn btn-primary" :disabled="!modalMoveFiles" @click="confirmMove">
+          <i class="ph ph-folder-open"></i>
+          Move Files
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -166,6 +232,15 @@ const saving = ref(false)
 const defaultOutputPath = ref<string | null>(null)
 const results = ref<Array<{ id: number; success: boolean; errors: string[] }>>([])
 const showResults = ref(false)
+
+// Move confirmation modal state
+const showMoveConfirm = ref(false)
+const pendingRootPath = ref<string | null>(null)
+const modalMoveFiles = ref(true)
+const modalDeleteEmpty = ref(true)
+let moveConfirmResolver:
+  | ((r: { proceed: boolean; moveFiles: boolean; deleteEmptySource: boolean }) => void)
+  | null = null
 
 const formData = ref<FormData>({
   monitored: null,
@@ -231,6 +306,46 @@ function resetForm() {
   }
 }
 
+function askMoveConfirmation(newRootPath: string) {
+  modalMoveFiles.value = true
+  modalDeleteEmpty.value = true
+  pendingRootPath.value = newRootPath
+  showMoveConfirm.value = true
+  return new Promise<{ proceed: boolean; moveFiles: boolean; deleteEmptySource: boolean }>(
+    (resolve) => {
+      moveConfirmResolver = resolve
+    },
+  )
+}
+
+function cancelMoveConfirm() {
+  if (moveConfirmResolver)
+    moveConfirmResolver({ proceed: false, moveFiles: false, deleteEmptySource: false })
+  moveConfirmResolver = null
+  showMoveConfirm.value = false
+  pendingRootPath.value = null
+}
+
+function confirmChangeWithoutMoving() {
+  if (moveConfirmResolver)
+    moveConfirmResolver({ proceed: true, moveFiles: false, deleteEmptySource: false })
+  moveConfirmResolver = null
+  showMoveConfirm.value = false
+  pendingRootPath.value = null
+}
+
+function confirmMove() {
+  if (moveConfirmResolver)
+    moveConfirmResolver({
+      proceed: true,
+      moveFiles: Boolean(modalMoveFiles.value),
+      deleteEmptySource: Boolean(modalDeleteEmpty.value),
+    })
+  moveConfirmResolver = null
+  showMoveConfirm.value = false
+  pendingRootPath.value = null
+}
+
 import { logger } from '@/utils/logger'
 
 async function handleSave() {
@@ -249,20 +364,57 @@ async function handleSave() {
       updates.qualityProfileId = formData.value.qualityProfileId
     }
 
+    // Handle root folder change with move confirmation
+    let userWantsMove = false
+    let userWantsDeleteEmpty = false
+    let newRootPath: string | null = null
+
+    // Store original basePaths before updating if we're changing root folders
+    const originalBasePaths = new Map<number, string>()
+    
     if (formData.value.rootChangeEnabled === true) {
       // Resolve chosen root path: named root, custom path or default
-      let chosen: string | null = null
       if (formData.value.rootId === 0) {
-        chosen = formData.value.rootCustomPath || null
+        newRootPath = formData.value.rootCustomPath || null
       } else if (formData.value.rootId && formData.value.rootId > 0) {
         const found = rootStore.folders.find((f) => f.id === formData.value.rootId)
-        chosen = found?.path ?? null
+        newRootPath = found?.path ?? null
       } else if (formData.value.rootId === null) {
         // Use default path (if available)
-        chosen = defaultOutputPath.value
+        newRootPath = defaultOutputPath.value
       }
 
-      if (chosen !== null) updates.rootFolder = chosen
+      if (newRootPath !== null) {
+        // Fetch all audiobooks BEFORE updating to capture their original basePaths
+        const ids = Array.from(props.selectedIds)
+        for (const id of ids) {
+          try {
+            const audiobook = await apiService.getAudiobook(id)
+            if (audiobook?.basePath) {
+              originalBasePaths.set(id, audiobook.basePath)
+            }
+          } catch (err) {
+            console.error(`Failed to fetch audiobook ${id} before update:`, err)
+          }
+        }
+
+        // Ask user if they want to move files
+        const choice = await askMoveConfirmation(newRootPath)
+        if (!choice || !choice.proceed) {
+          saving.value = false
+          return // User cancelled
+        }
+        userWantsMove = Boolean(choice.moveFiles)
+        userWantsDeleteEmpty = Boolean(choice.deleteEmptySource)
+        updates.rootFolder = newRootPath
+      }
+    }
+
+    // Add move options if root folder is being changed
+    if (formData.value.rootChangeEnabled && newRootPath) {
+      ;(updates as { moveFiles?: boolean; deleteEmptySource?: boolean }).moveFiles = userWantsMove
+      ;(updates as { moveFiles?: boolean; deleteEmptySource?: boolean }).deleteEmptySource =
+        userWantsDeleteEmpty
     }
 
     // Convert Set to Array for API call
@@ -290,12 +442,82 @@ async function handleSave() {
     results.value = resp.results || []
     showResults.value = true
 
+    // If user wants to move files, enqueue move jobs for each audiobook
+    if (userWantsMove && newRootPath) {
+      console.log('[BulkEditModal] Starting move job enqueue process', { 
+        userWantsMove, 
+        newRootPath, 
+        totalIds: ids.length,
+        originalBasePathsSize: originalBasePaths.size 
+      })
+      
+      let moveCount = 0
+      for (const id of ids) {
+        // Only enqueue move for audiobooks that were successfully updated
+        const result = results.value.find((r) => r.id === id)
+        console.log(`[BulkEditModal] Processing audiobook ${id}`, { 
+          hasResult: !!result, 
+          success: result?.success 
+        })
+        
+        if (result && result.success) {
+          try {
+            // Get the ORIGINAL basePath (before update) and the NEW basePath (after update)
+            const originalBasePath = originalBasePaths.get(id)
+            const audiobook = await apiService.getAudiobook(id)
+            const newBasePath = audiobook?.basePath
+            
+            console.log(`[BulkEditModal] Audiobook ${id} paths:`, {
+              originalBasePath,
+              newBasePath,
+              pathsAreDifferent: originalBasePath !== newBasePath
+            })
+            
+            if (originalBasePath && newBasePath && originalBasePath !== newBasePath) {
+              console.log(`[BulkEditModal] Enqueueing move for audiobook ${id}`, {
+                destination: newBasePath,
+                source: originalBasePath,
+                deleteEmpty: userWantsDeleteEmpty
+              })
+              
+              const moveResult = await apiService.moveAudiobook(id, newBasePath, {
+                sourcePath: originalBasePath,
+                moveFiles: true,
+                deleteEmptySource: userWantsDeleteEmpty,
+              })
+              
+              console.log(`[BulkEditModal] Move enqueued for audiobook ${id}:`, moveResult)
+              moveCount++
+            } else {
+              console.warn(`[BulkEditModal] Skipping move for audiobook ${id} - invalid paths or paths are the same`)
+            }
+          } catch (moveErr) {
+            console.error(`Failed to enqueue move for audiobook ${id}:`, moveErr)
+            // Don't fail the entire operation, just log the error
+          }
+        }
+      }
+
+      console.log(`[BulkEditModal] Finished move enqueue process. Queued ${moveCount} moves.`)
+      
+      if (moveCount > 0) {
+        toast.info('Move jobs queued', `Queued ${moveCount} move job(s). Files will be moved in the background.`)
+      } else {
+        console.warn('[BulkEditModal] No move jobs were queued!')
+      }
+    } else {
+      console.log('[BulkEditModal] Skipping move job enqueue', { userWantsMove, newRootPath })
+    }
+
     // Count successes
     const successCount = results.value.filter((r) => r.success).length
     toast.success('Bulk update', `Updated ${successCount} of ${results.value.length} audiobook(s)`)
 
-    // Notify parent and leave modal open so user can review results
+    // Notify parent that changes were saved
     emit('saved')
+    
+    // Close the modal after successful operation
+    close()
   } catch (error) {
     // Enhanced error logging so browser console shows more details
     try {
@@ -628,4 +850,271 @@ function close() {
     transform: rotate(360deg);
   }
 }
+
+/* Move confirmation modal styles */
+.confirm-overlay.separate-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  padding: 1rem;
+}
+
+.confirm-dialog {
+  background: #1e1e1e;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  border: 1px solid #333;
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid #333;
+  margin-bottom: 0;
+}
+
+.confirm-header i {
+  font-size: 1.5rem;
+  color: #007acc;
+}
+
+.confirm-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.confirm-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.confirm-description p {
+  margin: 0;
+  color: #cccccc;
+  line-height: 1.5;
+}
+
+.path-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: #252526;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #333;
+}
+
+.path-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.path-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+
+.path-label i {
+  color: #007acc;
+  font-size: 1rem;
+}
+
+.path-display {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #cccccc;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.path-display code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border: none;
+  font-family: inherit;
+}
+
+.confirm-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: #252526;
+  border-radius: 8px;
+  border: 1px solid #333;
+  transition: all 0.2s ease;
+}
+
+.checkbox-row:hover {
+  background: #2d2d30;
+  border-color: #007acc;
+}
+
+.checkbox-row label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  cursor: pointer;
+  width: 100%;
+  margin: 0;
+}
+
+.checkbox-row input[type='checkbox'] {
+  margin-top: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  accent-color: #007acc;
+  cursor: pointer;
+}
+
+.checkbox-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.checkbox-title {
+  font-weight: 500;
+  color: #ffffff;
+  font-size: 0.95rem;
+}
+
+.checkbox-content small {
+  color: #aaaaaa;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 1.5rem;
+  border-top: 1px solid #333;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.confirm-actions .btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  cursor: pointer;
+  min-width: fit-content;
+}
+
+.confirm-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.confirm-actions .btn-secondary {
+  background: #2d2d30;
+  color: #cccccc;
+  border-color: #333;
+}
+
+.confirm-actions .btn-secondary:hover:not(:disabled) {
+  background: #3c3c3c;
+  border-color: #555;
+}
+
+.confirm-actions .btn-primary {
+  background: #007acc;
+  color: #ffffff;
+}
+
+.confirm-actions .btn-primary:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 640px) {
+  .confirm-overlay.separate-modal {
+    padding: 0.5rem;
+  }
+
+  .confirm-dialog {
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .confirm-header {
+    padding: 1rem 1rem 0.75rem;
+  }
+
+  .confirm-header h3 {
+    font-size: 1.1rem;
+  }
+
+  .confirm-body {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .path-comparison {
+    padding: 0.75rem;
+  }
+
+  .path-display {
+    padding: 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .checkbox-row {
+    padding: 0.5rem;
+  }
+
+  .confirm-actions {
+    padding: 0.75rem 1rem 1rem;
+    gap: 0.5rem;
+  }
+
+  .confirm-actions .btn {
+    padding: 0.625rem 1rem;
+    font-size: 0.85rem;
+    flex: 1;
+    justify-content: center;
+  }
+}
 </style>
+

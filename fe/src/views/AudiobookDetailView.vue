@@ -721,6 +721,8 @@ watch(activeTab, async (newTab) => {
 //   activeTab.value = newTab
 // }
 
+let audiobookUpdateUnsub: (() => void) | null = null
+
 onMounted(async () => {
   await loadAudiobook()
 
@@ -742,6 +744,40 @@ onMounted(async () => {
       setTimeout(() => {
         scanQueued.value = false
       }, 500)
+    }
+  })
+
+  // subscribe to AudiobookUpdate messages and merge detail when this audiobook is updated (e.g., after a move)
+  audiobookUpdateUnsub = signalRService.onAudiobookUpdate(async (updated) => {
+    if (!audiobook.value) return
+    if (!updated || String((updated as any).id) !== String(audiobook.value.id)) return
+
+    // Merge server-provided audiobook fields into local detail object to update instantly without reloading
+    try
+    {
+      const upd = updated as unknown as import('@/types').Audiobook
+      const prev = audiobook.value
+      if (!prev) return
+
+      // Create merged object, preferring server values when provided
+      const merged = { ...prev, ...upd }
+
+      // Replace files array only when server provides non-empty array (prevents accidental clearing)
+      if (upd.files && upd.files.length > 0) {
+        merged.files = upd.files
+      }
+
+      // Preserve basePath if server omitted it or sent empty
+      if ((!('basePath' in upd) || !upd.basePath) && prev.basePath) {
+        merged.basePath = prev.basePath
+      }
+
+      // Apply merged object reactively
+      audiobook.value = merged
+    }
+    catch (e) {
+      // Fallback: if merge fails, try a full reload
+      setTimeout(async () => { try { await loadAudiobook() } catch {} }, 250)
     }
   })
 })
@@ -767,6 +803,9 @@ function handleClickOutside() {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  try {
+    if (audiobookUpdateUnsub) audiobookUpdateUnsub()
+  } catch {}
 })
 
 // When the active tab changes update the hash and scroll

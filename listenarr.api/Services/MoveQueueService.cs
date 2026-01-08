@@ -139,7 +139,15 @@ namespace Listenarr.Api.Services
                 _logger.LogWarning(ex, "Failed to persist move job status change for {JobId}", id);
             }
 
-            _logger.LogInformation("Updated move job {JobId} status to {Status}", id, status);
+            // Log error prominently if status is Failed
+            if (status == "Failed" && !string.IsNullOrWhiteSpace(error))
+            {
+                _logger.LogError("Move job {JobId} FAILED with error: {Error}", id, error);
+            }
+            else
+            {
+                _logger.LogInformation("Updated move job {JobId} status to {Status}", id, status);
+            }
         }
 
         public async Task<Guid?> RequeueMoveAsync(Guid jobId)

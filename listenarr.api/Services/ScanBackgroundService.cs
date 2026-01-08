@@ -422,40 +422,8 @@ namespace Listenarr.Api.Services
                             var updated = await db.Audiobooks.Include(a => a.Files).FirstOrDefaultAsync(a => a.Id == audiobook.Id);
                             if (updated != null)
                             {
-                                // Project to a lightweight DTO to avoid JSON reference cycles when serializing EF tracked entities
-                                var audiobookDto = new
-                                {
-                                    id = updated.Id,
-                                    title = updated.Title,
-                                    authors = updated.Authors,
-                                    description = updated.Description,
-                                    imageUrl = updated.ImageUrl,
-                                    filePath = updated.FilePath,
-                                    fileSize = updated.FileSize,
-                                    basePath = updated.BasePath,
-                                    runtime = updated.Runtime,
-                                    monitored = updated.Monitored,
-                                    quality = updated.Quality,
-                                    series = updated.Series,
-                                    seriesNumber = updated.SeriesNumber,
-                                    tags = updated.Tags,
-                                    files = updated.Files?.Select(f => new
-                                    {
-                                        id = f.Id,
-                                        path = f.Path,
-                                        size = f.Size,
-                                        durationSeconds = f.DurationSeconds,
-                                        format = f.Format,
-                                        bitrate = f.Bitrate,
-                                        sampleRate = f.SampleRate,
-                                        channels = f.Channels,
-                                        source = f.Source,
-                                        createdAt = f.CreatedAt
-                                    }).ToList()
-                                    ,
-                                    wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any() || !updated.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
-                                };
-
+                                // Build an authoritative Audiobook DTO and broadcast it
+                                var audiobookDto = Listenarr.Api.Services.AudiobookDtoFactory.BuildFromEntity(db, updated);
                                 await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);
                                 await _hubContext.Clients.All.SendAsync("ScanJobUpdate", new { jobId = job.Id.ToString(), audiobookId = job.AudiobookId, status = "Completed", found = foundFiles.Count, created = createdFiles, completedAt = DateTime.UtcNow });
                                 _logger.LogInformation("Broadcasted AudiobookUpdate for AudiobookId {AudiobookId} after scan job {JobId}", audiobook.Id, job.Id);

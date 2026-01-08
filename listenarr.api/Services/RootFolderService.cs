@@ -140,8 +140,8 @@ namespace Listenarr.Api.Services
 
                 if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Only include audiobooks that are subdirectories of the root, not the root itself
-                    var affected = ctx.Audiobooks.Where(a => a.BasePath != null && a.BasePath.StartsWith(oldPath + System.IO.Path.DirectorySeparatorChar)).ToList();
+                    // Include audiobooks that are the root itself or subdirectories of the root
+                    var affected = ctx.Audiobooks.Where(a => a.BasePath != null && (a.BasePath == oldPath || a.BasePath.StartsWith(oldPath + System.IO.Path.DirectorySeparatorChar))).ToList();
                     // Record original and new paths before updating DB so we can enqueue moves if requested
                     var moves = new List<(int audiobookId, string original, string target)>();
 
