@@ -14,10 +14,10 @@ namespace Listenarr.Api.Services
     {
         private readonly IRootFolderRepository _repo;
         private readonly IDbContextFactory<ListenArrDbContext> _dbFactory;
-        private readonly ILogger<RootFolderService> _logger;
-        private readonly IMoveQueueService? _moveQueue;
+private readonly ILogger<RootFolderService>? _logger;
+    private readonly IMoveQueueService? _moveQueue;
 
-        public RootFolderService(IRootFolderRepository repo, IDbContextFactory<ListenArrDbContext> dbFactory, ILogger<RootFolderService> logger, IMoveQueueService? moveQueue = null)
+    public RootFolderService(IRootFolderRepository repo, IDbContextFactory<ListenArrDbContext> dbFactory, ILogger<RootFolderService>? logger, IMoveQueueService? moveQueue = null)
         {
             _repo = repo;
             _dbFactory = dbFactory;
@@ -186,7 +186,7 @@ namespace Listenarr.Api.Services
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to enqueue move for audiobook {AudiobookId} during root rename", m.audiobookId);
+                                _logger?.LogWarning(ex, "Failed to enqueue move for audiobook {AudiobookId} during root rename", m.audiobookId);
                             }
                         }
                     }
