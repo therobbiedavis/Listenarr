@@ -269,13 +269,17 @@ describe('AddNewView pagination', () => {
 
     let sourceLink = wrapper.find('.result-meta .source-link')
     expect(sourceLink.exists()).toBe(true)
-    if (sourceLink.text().includes('Audible')) throw new Error('Non-audible URL incorrectly labeled as Audible')
+    if (sourceLink.text().includes('Audible')) {
+      throw new Error('Non-audible URL incorrectly labeled as Audible')
+    }
 
     // Also ensure fake hostnames are not treated as Audible
     (vm as any).audibleResult.sourceLink = 'https://fakeaudible.com/pd/123'
     await wrapper.vm.$nextTick()
     sourceLink = wrapper.find('.result-meta .source-link')
-    if (sourceLink.text().includes('Audible')) throw new Error('Non-audible URL incorrectly labeled as Audible')
+    if (sourceLink.text().includes('Audible')) {
+      throw new Error('Non-audible URL incorrectly labeled as Audible')
+    }
   })
 
   it('shows full series list on hover (title and asin result views)', async () => {
