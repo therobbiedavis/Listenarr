@@ -611,10 +611,27 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 // Antiforgery (CSRF) protection for SPA: expect token in X-XSRF-TOKEN header
+// The cookie SecurePolicy defaults to SameAsRequest so TLS-terminating reverse proxies can control
+// whether the cookie is marked secure by forwarding the original scheme (X-Forwarded-Proto).
+// Override via configuration: Antiforgery:Cookie:SecurePolicy = None|SameAsRequest|Always
+var antiforgeryCookiePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+var cfgPolicy = builder.Configuration["Antiforgery:Cookie:SecurePolicy"];
+if (!string.IsNullOrWhiteSpace(cfgPolicy) && Enum.TryParse<Microsoft.AspNetCore.Http.CookieSecurePolicy>(cfgPolicy, true, out var parsedPolicy))
+{
+    antiforgeryCookiePolicy = parsedPolicy;
+}
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-XSRF-TOKEN";
+    options.Cookie.SecurePolicy = antiforgeryCookiePolicy;
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
 });
+
+// Log guidance on startup when running in production so self-hosters know requirements
+if (builder.Environment.IsProduction())
+{
+    Log.Logger.Information("Antiforgery cookie SecurePolicy set to {Policy}. Ensure the app runs behind HTTPS or forwards X-Forwarded-Proto from a TLS-terminating proxy.", antiforgeryCookiePolicy);
+}
 
 // During local development we often run the frontend on a different port via Vite
 // and use plain HTTP. Ensure antiforgery cookie can be set in that scenario by

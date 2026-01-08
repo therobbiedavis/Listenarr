@@ -721,7 +721,7 @@
                 >
                   <PhCloud />
                   {{
-                    getSourceUrl(book)?.includes('audible.com')
+                    isAudibleHost(getSourceUrl(book))
                       ? 'Audible'
                       : book.searchResult?.source || book.metadataSource || 'OpenLibrary'
                   }}
@@ -2110,6 +2110,21 @@ const getSourceUrl = (book: TitleSearchResult): string | undefined => {
   }
 
   return undefined
+}
+
+// Safely check whether a URL points to Audible or a subdomain of Audible. Avoids substring checks that can be
+// bypassed by crafted URLs containing 'audible.com' elsewhere (e.g., query parameters or malicious hostnames).
+const isAudibleHost = (url?: string): boolean => {
+  if (!url) return false
+  try {
+    // Use a base origin so relative URLs can be parsed too
+    const parsed = new URL(url, window.location.origin)
+    const host = parsed.hostname.toLowerCase()
+    return host === 'audible.com' || host.endsWith('.audible.com')
+  } catch (e) {
+    // If parsing fails, treat as not audible
+    return false
+  }
 }
 
 // Extract ISBN candidates from an OpenLibrary-derived TitleSearchResult

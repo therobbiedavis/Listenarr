@@ -829,20 +829,34 @@ namespace Listenarr.Api.Controllers
                     // If ImageUrl points to our cached library folder, extract the filename and delete it
                     try
                     {
-                        var match = System.Text.RegularExpressions.Regex.Match(audiobook.ImageUrl, "/config/cache/images/library/(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                        if (match.Success && match.Groups.Count > 1)
+                        // Safely extract identifier from an internal library image URL
+                        const string __marker = "/config/cache/images/library/";
+                        var __url = audiobook.ImageUrl ?? string.Empty;
+                        var __idx = __url.IndexOf(__marker, StringComparison.OrdinalIgnoreCase);
+                        if (__idx >= 0)
                         {
-                            var filename = match.Groups[1].Value;
+                            var filename = __url.Substring(__idx + __marker.Length);
+                            // Ensure we only take the file name portion (prevent embedded paths)
+                            filename = System.IO.Path.GetFileName(filename);
                             var identifier = System.IO.Path.GetFileNameWithoutExtension(filename);
-                            var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
-                            if (!string.IsNullOrEmpty(imagePath))
+
+                            // Validate identifier to a conservative whitelist (alnum, dash, underscore, dot)
+                            if (!string.IsNullOrEmpty(identifier) && System.Text.RegularExpressions.Regex.IsMatch(identifier, "^[A-Za-z0-9_\\-\\.]{1,128}$"))
                             {
-                                var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
-                                if (System.IO.File.Exists(fullPath))
+                                var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
+                                if (!string.IsNullOrEmpty(imagePath))
                                 {
-                                    System.IO.File.Delete(fullPath);
-                                    _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                    if (System.IO.File.Exists(fullPath))
+                                    {
+                                        System.IO.File.Delete(fullPath);
+                                        _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                    }
                                 }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Image identifier from ImageUrl for audiobook id {Id} is invalid: {Identifier}", audiobook.Id, identifier);
                             }
                         }
                     }
@@ -917,21 +931,33 @@ namespace Listenarr.Api.Controllers
                                 {
                                     try
                                     {
-                                        var match = System.Text.RegularExpressions.Regex.Match(audiobook.ImageUrl, "/config/cache/images/library/(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                        if (match.Success && match.Groups.Count > 1)
+                                        // Safely extract identifier from an internal library image URL
+                                        const string __marker = "/config/cache/images/library/";
+                                        var __url = audiobook.ImageUrl ?? string.Empty;
+                                        var __idx = __url.IndexOf(__marker, StringComparison.OrdinalIgnoreCase);
+                                        if (__idx >= 0)
                                         {
-                                            var filename = match.Groups[1].Value;
+                                            var filename = __url.Substring(__idx + __marker.Length);
+                                            filename = System.IO.Path.GetFileName(filename);
                                             var identifier = System.IO.Path.GetFileNameWithoutExtension(filename);
-                                            var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
-                                            if (!string.IsNullOrEmpty(imagePath))
+
+                                            if (!string.IsNullOrEmpty(identifier) && System.Text.RegularExpressions.Regex.IsMatch(identifier, "^[A-Za-z0-9_\\-\\.]{1,128}$"))
                                             {
-                                                var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
-                                                if (System.IO.File.Exists(fullPath))
+                                                var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
+                                                if (!string.IsNullOrEmpty(imagePath))
                                                 {
-                                                    System.IO.File.Delete(fullPath);
-                                                    deletedImagesCount++;
-                                                    _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                                    if (System.IO.File.Exists(fullPath))
+                                                    {
+                                                        System.IO.File.Delete(fullPath);
+                                                        deletedImagesCount++;
+                                                        _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                                    }
                                                 }
+                                            }
+                                            else
+                                            {
+                                                _logger.LogWarning("Image identifier from ImageUrl for audiobook id {Id} is invalid: {Identifier}", audiobook.Id, identifier);
                                             }
                                         }
                                     }
