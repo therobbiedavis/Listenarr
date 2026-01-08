@@ -2256,6 +2256,7 @@ namespace Listenarr.Api.Controllers
             {
                 // Prefer qBittorrent, then Transmission
                 var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("deluge", StringComparison.OrdinalIgnoreCase))
                           ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
 
                 if (client != null)

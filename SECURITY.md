@@ -82,7 +82,7 @@ We take the security of Listenarr seriously. If you believe you have found a sec
 ### Known Security Considerations
 
 1. **Download Client Integration**
-   - Listenarr connects to external download clients (qBittorrent, Transmission, SABnzbd, NZBGet)
+   - Listenarr connects to external download clients (qBittorrent, Deluge, Transmission, SABnzbd, NZBGet)
    - Ensure download clients are secured and not publicly exposed
    - Use HTTPS when possible for download client connections
 

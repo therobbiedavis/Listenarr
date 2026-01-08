@@ -303,6 +303,7 @@ import {
 } from '@phosphor-icons/vue'
 import {
   getRemotePathMappings,
+  getDownloadClientConfiguration,
   createRemotePathMapping,
   updateRemotePathMapping,
   deleteRemotePathMapping,
@@ -434,8 +435,15 @@ const testClient = async (client: DownloadClientConfiguration) => {
   }
 }
 
-const editClientConfig = (client: DownloadClientConfiguration) => {
-  editingClient.value = client
+const editClientConfig = async (client: DownloadClientConfiguration) => {
+  try {
+    // Fetch the freshest configuration from the API (preserves sensitive fields like username/password)
+    const full = await getDownloadClientConfiguration(client.id)
+    editingClient.value = full || client
+  } catch (error) {
+    // Fallback to the provided client if the API call fails
+    editingClient.value = client
+  }
   showClientForm.value = true
 }
 

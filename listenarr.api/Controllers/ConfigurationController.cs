@@ -155,6 +155,9 @@ namespace Listenarr.Api.Controllers
                 }
 
                 // Redact client-local DownloadPath before returning
+                // Include Username and Password when fetching a single configuration so the UI
+                // can populate the edit form with saved credentials (password is returned
+                // only for this endpoint; it is NOT included in the list endpoint).
                 var response = new
                 {
                     config.Id,
@@ -163,6 +166,7 @@ namespace Listenarr.Api.Controllers
                     config.Host,
                     config.Port,
                     config.Username,
+                    config.Password, // include password for edit flow
                     // Do not include DownloadPath
                     config.UseSSL,
                     config.IsEnabled,

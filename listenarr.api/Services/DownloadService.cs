@@ -514,7 +514,7 @@ namespace Listenarr.Api.Services
                 if (downloadClientId == null)
                 {
                     var clientType = isTorrent ? "torrent" : "NZB";
-                    var neededClients = isTorrent ? "qBittorrent or Transmission" : "SABnzbd or NZBGet";
+                    var neededClients = isTorrent ? "qBittorrent, Deluge, or Transmission" : "SABnzbd or NZBGet";
                     throw new Exception($"No suitable download client found for {clientType}. Please configure and enable a {clientType} client ({neededClients}) in Settings.");
                 }
 
@@ -1205,8 +1205,9 @@ namespace Listenarr.Api.Services
 
             if (isTorrent)
             {
-                // Prefer qBittorrent, then Transmission
+                // Prefer qBittorrent, then Deluge, then Transmission
                 var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("deluge", StringComparison.OrdinalIgnoreCase))
                           ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
 
                 if (client != null)
@@ -1215,7 +1216,7 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
-                    _logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
+                    _logger.LogWarning("No torrent client (qBittorrent, Deluge, or Transmission) found among enabled clients");
                 }
 
                 return client?.Id;

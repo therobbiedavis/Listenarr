@@ -213,6 +213,11 @@ defineExpose({
 </script>
 
 <style scoped>
+.root-folders-settings {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -265,9 +270,21 @@ defineExpose({
 }
 
 .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   padding: 4rem 2rem;
   color: #868e96;
+  min-height: 400px;
+}
+
+.empty-state > svg:nth-child(1) {
+  font-size: 3rem;
+  color: #4dabf7;
+  margin-bottom: 1rem;
+  opacity: 0.8;
 }
 
 .empty-state h4 {

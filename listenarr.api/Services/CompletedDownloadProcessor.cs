@@ -604,7 +604,8 @@ namespace Listenarr.Api.Services
                                 string clientId = downloadForCleanup.Id;
                                 
                                 if ((clientConfig.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                                     clientConfig.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase)) && 
+                                     clientConfig.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase) ||
+                                     clientConfig.Type.Equals("deluge", StringComparison.OrdinalIgnoreCase)) && 
                                     downloadForCleanup.Metadata != null && downloadForCleanup.Metadata.TryGetValue("TorrentHash", out var hashObj))
                                 {
                                     var torrentHash = hashObj?.ToString();

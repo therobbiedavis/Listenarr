@@ -7,7 +7,7 @@
           {{ formData.type.toUpperCase() }}
         </h2>
         <button class="close-btn" @click="closeModal">
-          <i class="ph ph-x"></i>
+          <PhX size="20" />
         </button>
       </div>
 
@@ -42,6 +42,7 @@
               <label for="type">Type *</label>
               <select id="type" v-model="formData.type" required @change="onTypeChange">
                 <option value="qbittorrent">qBittorrent</option>
+                <option value="deluge">Deluge</option>
                 <option value="transmission">Transmission</option>
                 <option value="sabnzbd">SABnzbd</option>
                 <option value="nzbget">NZBGet</option>
@@ -129,13 +130,25 @@
 
               <div class="form-group">
                 <label for="password">Password</label>
-                <input
-                  id="password"
-                  v-model="formData.password"
-                  type="password"
-                  placeholder="********"
-                  :required="formData.type === 'nzbget'"
-                />
+                <div class="input-with-button">
+                  <input
+                    id="password"
+                    v-model="formData.password"
+                    :type="showPassword ? 'text' : 'password'"
+                    placeholder="********"
+                    :required="formData.type === 'nzbget'"
+                  />
+                  <button
+                    type="button"
+                    class="icon-button password-toggle"
+                    @click="showPassword = !showPassword"
+                    :aria-pressed="showPassword"
+                    :title="showPassword ? 'Hide password' : 'Show password'"
+                  >
+                    <PhEye v-if="!showPassword" size="16" />
+                    <PhEyeSlash v-else size="16" />
+                  </button>
+                </div>
                 <small v-if="formData.type === 'nzbget'"
                   >Use the NZBGet RPC password (default: nzbget).</small
                 >
@@ -238,6 +251,22 @@
                 </span>
               </label>
             </div>
+
+            <div class="form-section" v-if="formData.type === 'deluge'">
+              <h3>Deluge Options</h3>
+
+              <div class="form-group">
+                <label for="initialStateDeluge">Initial State</label>
+                <select id="initialStateDeluge" v-model="formData.initialState">
+                  <option value="default">Default</option>
+                  <option value="start">Start</option>
+                  <option value="pause">Pause</option>
+                </select>
+                <small>Set initial state for Deluge when adding torrents (Start/Pause).</small>
+              </div>
+
+
+            </div>
           </div>
 
           <div class="form-section" v-if="formData.type === 'qbittorrent'">
@@ -314,15 +343,16 @@
 
       <div class="modal-footer">
         <button type="button" class="btn btn-danger" @click="handleDelete" v-if="editingClient">
-          <i class="ph ph-trash"></i>
+          <PhTrash size="16" />
           Delete
         </button>
         <button type="button" class="btn btn-secondary" @click="closeModal">
-          <i class="ph ph-x"></i>
+          <PhX size="16" />
           Cancel
         </button>
         <button type="button" class="btn btn-info" @click="testConnection" :disabled="testing">
-          <i :class="testing ? 'ph ph-spinner ph-spin' : 'ph ph-gear'"></i>
+          <PhSpinner v-if="testing" size="16" class="ph-spin" />
+          <PhGear v-else size="16" />
           {{ testing ? 'Testing...' : 'Test' }}
         </button>
         <button type="button" class="btn btn-primary" @click="handleSubmit" :disabled="saving">
@@ -342,6 +372,7 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { getRemotePathMappings, testDownloadClient } from '@/services/api'
 import { logger } from '@/utils/logger'
 import type { RemotePathMapping } from '@/types'
+import { PhEye, PhEyeSlash, PhX, PhTrash, PhGear, PhSpinner } from '@phosphor-icons/vue'
 
 interface Props {
   visible: boolean
@@ -361,10 +392,11 @@ const toast = useToast()
 
 const saving = ref(false)
 const testing = ref(false)
+const showPassword = ref(false)
 
 const defaultFormData = {
   name: '',
-  type: 'qbittorrent' as 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget',
+  type: 'qbittorrent' as 'qbittorrent' | 'deluge' | 'transmission' | 'sabnzbd' | 'nzbget',
   host: '',
   port: 8080,
   username: '',
@@ -394,9 +426,10 @@ const remotePathMappings = ref<RemotePathMapping[]>([])
 
 const loadRemotePathMappings = async () => {
   try {
-    remotePathMappings.value = await getRemotePathMappings()
-  } catch (e) {
-    logger.debug('Failed to load remote path mappings', e)
+    const mappings = await getRemotePathMappings()
+    remotePathMappings.value = mappings || []
+  } catch (err) {
+    logger.error('Failed to load remote path mappings:', err)
     remotePathMappings.value = []
   }
 }
@@ -416,6 +449,7 @@ const requiresApiKey = computed(() => {
 const getHostPlaceholder = () => {
   const placeholders: Record<string, string> = {
     qbittorrent: 'qbittorrent.tld.com',
+    deluge: 'deluge.tld.com',
     transmission: 'transmission.tld.com',
     sabnzbd: 'sabnzbd.tld.com',
     nzbget: 'nzbget.tld.com',
@@ -426,6 +460,7 @@ const getHostPlaceholder = () => {
 const getPortPlaceholder = () => {
   const ports: Record<string, number> = {
     qbittorrent: 8080,
+    deluge: 8112,
     transmission: 9091,
     sabnzbd: 8080,
     nzbget: 6789,
@@ -444,6 +479,7 @@ const onTypeChange = () => {
   // Update default port when type changes
   const defaultPorts: Record<string, number> = {
     qbittorrent: 8080,
+    deluge: 8112,
     transmission: 9091,
     sabnzbd: 8080,
     nzbget: 6789,
@@ -492,8 +528,10 @@ watch(
       }
       // Load available mappings when editing a client so the dropdown can show options
       void loadRemotePathMappings()
+      showPassword.value = false
     } else {
       formData.value = { ...defaultFormData }
+      showPassword.value = false
     }
   },
   { immediate: true },
@@ -567,6 +605,7 @@ const handleSubmit = async () => {
         ...(formData.value.remotePathMappingIds && formData.value.remotePathMappingIds.length > 0
           ? { remotePathMappingIds: formData.value.remotePathMappingIds }
           : {}),
+
       },
     }
 
@@ -708,19 +747,36 @@ const handleDelete = () => {
   transition: all 0.2s;
 }
 
-.form-group input:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: #007acc;
-  box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
-}
+  .input-with-button {
+    position: relative;
+  }
 
-.form-group small {
-  display: block;
-  margin-top: 0.5rem;
-  color: #999;
-  font-size: 0.85rem;
-}
+  .input-with-button input {
+    padding-right: 3rem;
+  }
+
+  .password-toggle {
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    border-radius: 3px;
+    transition: color 0.2s;
+  }
+
+  .password-toggle:hover {
+    color: #fff;
+  }
 
 .checkbox-group {
   margin-bottom: 1rem;

@@ -84,6 +84,22 @@ namespace Listenarr.Api.Extensions
                 .AddPolicyHandler(circuitBreakerPolicy)
                 .AddPolicyHandler(retryPolicy);
 
+            // Deluge Web JSON-RPC endpoint
+            services.AddHttpClient("deluge")
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                {
+                    AutomaticDecompression = DecompressionMethods.All,
+                    // Deluge Web may use cookie-based sessions; enable cookies
+                    UseCookies = true
+                })
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(circuitBreakerPolicy)
+                .AddPolicyHandler(retryPolicy);
+
             services.AddHttpClient("sabnzbd")
                 .ConfigureHttpClient(client =>
                 {
@@ -259,6 +275,7 @@ namespace Listenarr.Api.Extensions
             // Register available adapter implementations. Keep adapters scoped because they may depend on scoped services.
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.QbittorrentAdapter>();
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.TransmissionAdapter>();
+            services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.DelugeAdapter>();
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.SabnzbdAdapter>();
             services.AddScoped<IDownloadClientAdapter, Listenarr.Api.Services.Adapters.NzbgetAdapter>();
 

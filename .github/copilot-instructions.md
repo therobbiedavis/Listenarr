@@ -55,7 +55,7 @@ The Listenarr logo combines headphones and a book to represent audiobook listeni
 
 ## Key Features Implemented
 - 🔍 **Multi-API Search**: Search across multiple torrent/NZB APIs simultaneously
-- 📥 **Download Management**: Support for qBittorrent, Transmission, SABnzbd, NZBGet
+- 📥 **Download Management**: Support for qBittorrent, Deluge, Transmission, SABnzbd, NZBGet
 - 🎵 **Metadata Integration**: Audible metadata via AudibleMetadataService and Audnexus API
 - 🖼️ **Image Caching**: Automatic image caching with cleanup service
 - 📁 **File Browser**: FolderBrowser component for path selection

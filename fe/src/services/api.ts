@@ -1728,6 +1728,15 @@ export const getRemotePathMappingsByClient = (downloadClientId: string) =>
 export const createRemotePathMapping = (
   mapping: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'>,
 ) => apiService.createRemotePathMapping(mapping)
+
+// Download client convenience exports
+export const getDownloadClientConfigurations = () => apiService.getDownloadClientConfigurations()
+export const getDownloadClientConfiguration = (id: string) => apiService.getDownloadClientConfiguration(id)
+export const saveDownloadClientConfiguration = (config: DownloadClientConfiguration) =>
+  apiService.saveDownloadClientConfiguration(config)
+export const deleteDownloadClientConfiguration = (id: string) => apiService.deleteDownloadClientConfiguration(id)
+export const testDownloadClient = (config: DownloadClientConfiguration) =>
+  apiService.testDownloadClient(config)
 export const updateRemotePathMapping = (id: number, mapping: Partial<RemotePathMapping>) =>
   apiService.updateRemotePathMapping(id, mapping)
 export const deleteRemotePathMapping = (id: number) => apiService.deleteRemotePathMapping(id)
@@ -1753,8 +1762,6 @@ export const scoreSearchResults = (profileId: number, searchResults: SearchResul
   apiService.scoreSearchResults(profileId, searchResults)
 
 // Download client helpers
-export const testDownloadClient = (config: DownloadClientConfiguration) =>
-  apiService.testDownloadClient(config)
 
 // Audimeta helpers
 export const searchAudimeta = (

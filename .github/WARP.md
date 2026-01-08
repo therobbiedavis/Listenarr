@@ -6,7 +6,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Listenarr is an automated audiobook collection management system built as a full-stack application with a C# .NET 8 backend API and Vue.js 3 frontend. The project follows a monorepo structure with integrated build processes.
 
-**Core Purpose**: Search multiple APIs for audiobook torrents/NZBs, manage downloads via popular clients (qBittorrent, Transmission, SABnzbd, NZBGet), and process files with rich metadata integration.
+**Core Purpose**: Search multiple APIs for audiobook torrents/NZBs, manage downloads via popular clients (qBittorrent, Deluge, Transmission, SABnzbd, NZBGet), and process files with rich metadata integration.
 
 ## Development Commands
 

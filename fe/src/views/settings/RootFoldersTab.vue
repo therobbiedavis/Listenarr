@@ -26,6 +26,9 @@ defineExpose({
 <style scoped>
 .tab-content {
   animation: fadeIn 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 @keyframes fadeIn {
@@ -43,5 +46,8 @@ defineExpose({
   background-color: transparent;
   border: none;
   padding: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 </style>
