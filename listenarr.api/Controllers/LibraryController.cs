@@ -49,10 +49,7 @@ namespace Listenarr.Api.Controllers
         private readonly IMoveQueueService? _moveQueueService;
         private readonly IFileNamingService _fileNamingService;
         private readonly NotificationService? _notificationService;
-
-        /// <summary>
-        /// Initializes a new <see cref="LibraryController"/> with required services.
-        /// </summary>
+            private readonly IRootFolderService? _rootFolderService;
         /// <param name="repo">Repository for audiobook persistence and queries.</param>
         /// <param name="imageCacheService">Service for caching and moving cover images.</param>
         /// <param name="logger">Logger instance for diagnostic messages.</param>
@@ -71,7 +68,8 @@ namespace Listenarr.Api.Controllers
             IFileNamingService fileNamingService,
             IScanQueueService? scanQueueService = null,
             IMoveQueueService? moveQueueService = null,
-            NotificationService? notificationService = null)
+            NotificationService? notificationService = null,
+            IRootFolderService? rootFolderService = null)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
@@ -82,6 +80,7 @@ namespace Listenarr.Api.Controllers
             _scanQueueService = scanQueueService;
             _moveQueueService = moveQueueService;
             _notificationService = notificationService;
+            _rootFolderService = rootFolderService;
         }
 
         public class ScanRequest
@@ -1294,24 +1293,82 @@ namespace Listenarr.Api.Controllers
                 using var scope = _scopeFactory.CreateScope();
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                 var settings = await configService.GetApplicationSettingsAsync();
+
                 // If audiobook has a BasePath configured, always scan that path for safety
                 // Do not fall back to the global output path when a BasePath is present.
                 if (!string.IsNullOrEmpty(audiobook.BasePath))
                 {
-                    scanRoot = audiobook.BasePath;
+                    scanRoot = Path.GetFullPath(audiobook.BasePath);
                     _logger.LogDebug("Audiobook has BasePath; using it as scan root: {ScanRoot}", scanRoot);
+                }
+                else if (!string.IsNullOrEmpty(request?.Path))
+                {
+                    // Validate requested path is absolute and contained within a configured root folder or the global output path
+                    string requestedFull;
+                    try
+                    {
+                        requestedFull = Path.GetFullPath(request.Path!);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Invalid requested scan path provided: {Path}", request.Path);
+                        return BadRequest(new { message = "Invalid scan path", path = request.Path });
+                    }
+
+                    // Build whitelist of allowed root paths
+                    var allowedRoots = new List<string>();
+                    if (_rootFolderService != null)
+                    {
+                        var roots = await _rootFolderService.GetAllAsync();
+                        foreach (var r in roots)
+                        {
+                            try { allowedRoots.Add(Path.GetFullPath(r.Path)); } catch { }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(settings?.OutputPath))
+                    {
+                        try { allowedRoots.Add(Path.GetFullPath(settings.OutputPath)); } catch { }
+                    }
+
+                    if (allowedRoots.Count == 0)
+                    {
+                        _logger.LogWarning("Scan request path provided but no root folders are configured; rejecting request.");
+                        return BadRequest(new { message = "No root folders configured; cannot accept explicit scan path" });
+                    }
+
+                    // Check that requestedFull is equal to or under one of the allowed roots
+                    var allowed = allowedRoots.Any(ar => string.Equals(requestedFull, ar, StringComparison.OrdinalIgnoreCase)
+                        || requestedFull.StartsWith(ar.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        || requestedFull.StartsWith(ar.TrimEnd(Path.AltDirectorySeparatorChar) + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+
+                    if (!allowed)
+                    {
+                        _logger.LogWarning("Requested scan path {Path} is not inside configured root folders", request.Path);
+                        return BadRequest(new { message = "Requested scan path is not within configured root folders", path = request.Path });
+                    }
+
+                    scanRoot = requestedFull;
                 }
                 else
                 {
-                    // No BasePath yet - allow explicit request path, otherwise fall back to configured output path
-                    scanRoot = request?.Path ?? settings.OutputPath;
+                    // No BasePath and no explicit path - fall back to configured output path
+                    scanRoot = !string.IsNullOrEmpty(settings?.OutputPath) ? Path.GetFullPath(settings.OutputPath) : null;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read application settings for scan; falling back to request path or basePath");
-                // If BasePath exists prefer it, otherwise use request path (settings not available here)
-                scanRoot = !string.IsNullOrEmpty(audiobook.BasePath) ? audiobook.BasePath : request?.Path;
+                _logger.LogWarning(ex, "Failed to read application settings for scan; cannot validate request path without configured roots");
+                // If BasePath exists prefer it; otherwise, we cannot determine a safe scan root
+                if (!string.IsNullOrEmpty(audiobook.BasePath))
+                {
+                    scanRoot = Path.GetFullPath(audiobook.BasePath);
+                }
+                else
+                {
+                    _logger.LogWarning("Configuration unavailable and audiobook has no BasePath; rejecting scan request for audiobook {AudiobookId}", id);
+                    return StatusCode(500, new { message = "Failed to determine a safe scan path" });
+                }
             }
 
             if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
