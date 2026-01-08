@@ -158,6 +158,21 @@ namespace Listenarr.Api.Services
 
                     ctx.Audiobooks.UpdateRange(affected);
                     
+                    // Diagnostics: log affected audiobooks and prepared moves to help debugging in CI
+                    try
+                    {
+                        _logger?.LogInformation("Root rename from {OldPath} to {NewPath}: {Count} audiobooks affected", oldPath, newPath, affected.Count);
+                        foreach (var m in moves)
+                        {
+                            _logger?.LogInformation("Root rename move prep: AudiobookId={AudiobookId} Original={Original} Target={Target}", m.audiobookId, m.original, m.target);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Never fail the operation due to logging
+                        _logger?.LogDebug(ex, "Failed to emit diagnostics for root rename");
+                    }
+
                     // Save both root folder and audiobook updates in one transaction
                     await ctx.SaveChangesAsync();
 

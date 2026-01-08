@@ -74,8 +74,15 @@ namespace Listenarr.Api.Tests
             // Verify audiobooks' basepaths updated (use a fresh context)
             using (var verifyDb = new ListenArrDbContext(options))
             {
-                Assert.Equal("D:\\newroot\\Author\\Title", verifyDb.Audiobooks.First(a => a.Title == "A1").BasePath);
-                Assert.Equal("D:\\newroot", verifyDb.Audiobooks.First(a => a.Title == "A2").BasePath);
+                var a1 = verifyDb.Audiobooks.First(a => a.Title == "A1").BasePath;
+                var a2 = verifyDb.Audiobooks.First(a => a.Title == "A2").BasePath;
+                if (a1 != "D:\\newroot\\Author\\Title" || a2 != "D:\\newroot")
+                {
+                    var dump = string.Join("; ", verifyDb.Audiobooks.Select(a => $"{a.Title} => {a.BasePath}"));
+                    Assert.True(false, $"Unexpected audiobook base paths after root update. Dump: {dump}");
+                }
+                Assert.Equal("D:\\newroot\\Author\\Title", a1);
+                Assert.Equal("D:\\newroot", a2);
             }
         }
 
@@ -108,8 +115,15 @@ namespace Listenarr.Api.Tests
             // Verify DB changed (use fresh context)
             using (var verifyDb = new ListenArrDbContext(options))
             {
-                Assert.Equal("D:\\newroot\\Author\\Title", verifyDb.Audiobooks.First(a => a.Title == "A1").BasePath);
-                Assert.Equal("D:\\newroot", verifyDb.Audiobooks.First(a => a.Title == "A2").BasePath);
+                var a1 = verifyDb.Audiobooks.First(a => a.Title == "A1").BasePath;
+                var a2 = verifyDb.Audiobooks.First(a => a.Title == "A2").BasePath;
+                if (a1 != "D:\\newroot\\Author\\Title" || a2 != "D:\\newroot")
+                {
+                    var dump = string.Join("; ", verifyDb.Audiobooks.Select(a => $"{a.Title} => {a.BasePath}"));
+                    Assert.True(false, $"Unexpected audiobook base paths after root update (with move). Dump: {dump}");
+                }
+                Assert.Equal("D:\\newroot\\Author\\Title", a1);
+                Assert.Equal("D:\\newroot", a2);
             }
 
             // Ensure moves enqueued for both audiobooks
