@@ -1,7 +1,7 @@
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
@@ -32,7 +32,7 @@ const notificationState = ref<NotificationState>({
   visible: false,
   message: '',
   type: 'info',
-  autoClose: 3000
+  autoClose: 3000,
 })
 
 export function useNotification() {
@@ -40,14 +40,14 @@ export function useNotification() {
     message: string,
     type: NotificationType = 'info',
     title?: string,
-    autoClose: number = 3000
+    autoClose: number = 3000,
   ) => {
     notificationState.value = {
       visible: true,
       message,
       title,
       type,
-      autoClose
+      autoClose,
     }
   }
 
@@ -78,6 +78,6 @@ export function useNotification() {
     error,
     warning,
     info,
-    close
+    close,
   }
 }

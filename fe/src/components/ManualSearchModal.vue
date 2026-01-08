@@ -33,7 +33,7 @@
                   @keyup.enter="search"
                   :disabled="searching"
                 />
-                <button 
+                <button
                   class="search-btn"
                   @click="search"
                   :disabled="searching || !searchQuery.trim()"
@@ -48,16 +48,12 @@
                 </button>
               </div>
             </div>
-            
+
             <div class="results-controls">
               <div class="results-count">
                 {{ displayResults.length }} result{{ displayResults.length !== 1 ? 's' : '' }} found
               </div>
-              <button 
-                v-if="!searching" 
-                class="btn btn-secondary btn-sm"
-                @click="search"
-              >
+              <button v-if="!searching" class="btn btn-secondary btn-sm" @click="search">
                 <PhArrowClockwise />
                 Refresh
               </button>
@@ -104,14 +100,29 @@
                       <component :is="getSortIcon('Size')" class="sort-icon" />
                     </span>
                   </th>
-                  <th class="col-peers sortable" @click="setSort('Seeders')">
+                  <th v-if="anyHasPeers" class="col-peers sortable" @click="setSort('Seeders')">
                     <span class="header-content">
                       Peers
                       <component :is="getSortIcon('Seeders')" class="sort-icon" />
                     </span>
                   </th>
-                  <th class="col-language">Languages</th>
-                  <th class="col-quality sortable" @click="setSort('Quality')">
+                  <th class="col-grabs sortable" @click="setSort('Grabs')">
+                    <span class="header-content">
+                      Grabs
+                      <component :is="getSortIcon('Grabs')" class="sort-icon" />
+                    </span>
+                  </th>
+                  <th
+                    v-if="anyHasLanguage"
+                    class="col-language sortable"
+                    @click="setSort('Language')"
+                  >
+                    <span class="header-content">
+                      Languages
+                      <component :is="getSortIcon('Language')" class="sort-icon" />
+                    </span>
+                  </th>
+                  <th v-if="anyHasQuality" class="col-quality sortable" @click="setSort('Quality')">
                     <span class="header-content">
                       Quality
                       <component :is="getSortIcon('Quality')" class="sort-icon" />
@@ -127,11 +138,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr 
-                  v-for="result in displayResults" 
-                  :key="result.id"
-                  class="result-row"
-                >
+                <tr v-for="result in displayResults" :key="result.id" class="result-row">
                   <td class="col-source">
                     <span :class="['source-badge', getSourceType(result)]">
                       {{ getSourceType(result) }}
@@ -159,33 +166,55 @@
                     <span class="indexer-name">{{ result.source }}</span>
                   </td>
                   <td class="col-size">{{ formatSize(result.size) }}</td>
-                  <td class="col-peers">
-                    <div class="peers-cell">
-                      <span class="seeders" :class="{ 'good': result.seeders > 10, 'medium': result.seeders > 0 && result.seeders <= 10 }">
+                  <td v-if="anyHasPeers" class="col-peers">
+                    <div
+                      class="peers-cell"
+                      v-if="result.seeders !== undefined && result.seeders !== null"
+                    >
+                      <span
+                        class="seeders"
+                        :class="{
+                          good: (result.seeders ?? 0) > 10,
+                          medium: (result.seeders ?? 0) > 0 && (result.seeders ?? 0) <= 10,
+                        }"
+                      >
                         <PhArrowUp /> {{ result.seeders }}
                       </span>
-                      <span class="leechers">
+                      <span
+                        class="leechers"
+                        v-if="result.leechers !== undefined && result.leechers !== null"
+                      >
                         <PhArrowDown /> {{ result.leechers }}
                       </span>
                     </div>
                   </td>
-                  <td class="col-language">
-                    <span v-if="result.language" class="language-badge">
-                      {{ result.language }}
-                    </span>
-                    <span v-else class="language-badge unknown">Unknown</span>
+                  <td class="col-grabs">
+                    <span v-if="result.grabs !== undefined" class="grabs"
+                      >✚ {{ result.grabs }}</span
+                    >
+                    <span v-else class="grabs unknown">-</span>
                   </td>
-                  <td class="col-quality">
+                  <td v-if="anyHasLanguage" class="col-language">
+                    <span v-if="normalizeLanguage(result.language)" class="language-badge">
+                      {{ normalizeLanguage(result.language) }}
+                    </span>
+                  </td>
+                  <td v-if="anyHasQuality" class="col-quality">
                     <span v-if="result.quality" class="quality-badge">
                       {{ result.quality }}
+                      <template v-if="shouldShowFormatFallback(result)">
+                        <small class="format-fallback"> · {{ result.format }}</small>
+                      </template>
                     </span>
-                    <span v-else class="quality-badge unknown">-</span>
+                    <span v-else-if="result.format" class="quality-badge format-only">
+                      {{ result.format }}
+                    </span>
                   </td>
                   <td class="col-score">
                     <div v-if="getResultScore(result.id)" class="score-cell">
                       <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
                         <template #default>
-                          <span 
+                          <span
                             v-if="getResultScore(result.id)?.isRejected"
                             class="score-badge rejected"
                             :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
@@ -193,8 +222,8 @@
                             <PhXCircle />
                             Rejected
                           </span>
-                          <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
-                            {{ getResultScore(result.id)?.totalScore }}
+                          <span v-else :class="['score-badge', getVisibleScoreClass(result.id)]">
+                            {{ getVisibleScoreValue(result.id) ?? '-' }}
                           </span>
                         </template>
                       </ScorePopover>
@@ -202,7 +231,7 @@
                     <span v-else class="score-badge loading">-</span>
                   </td>
                   <td class="col-actions">
-                    <button 
+                    <button
                       class="btn-icon btn-download"
                       @click="downloadResult(result)"
                       :disabled="downloading[result.id]"
@@ -228,11 +257,29 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { PhMagnifyingGlass, PhX, PhSpinner, PhArrowClockwise, PhArrowUp, PhArrowDown, PhXCircle, PhDownloadSimple, PhArrowsDownUp } from '@phosphor-icons/vue'
+import {
+  PhMagnifyingGlass,
+  PhX,
+  PhSpinner,
+  PhArrowClockwise,
+  PhArrowUp,
+  PhArrowDown,
+  PhXCircle,
+  PhDownloadSimple,
+  PhArrowsDownUp,
+} from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
-import type { Audiobook, SearchResult, QualityScore, QualityProfile, SearchSortBy, SearchSortDirection } from '@/types'
-import { getScoreBreakdownTooltip } from '@/composables/useScore'
+import { logger } from '@/utils/logger'
+import type {
+  Audiobook,
+  SearchResult,
+  QualityScore,
+  QualityProfile,
+  SearchSortBy,
+  SearchSortDirection,
+} from '@/types'
+import { getScoreBreakdownTooltip, computeNormalizedSmart } from '@/composables/useScore'
 import ScorePopover from '@/components/ScorePopover.vue'
 import { safeText } from '@/utils/textUtils'
 
@@ -258,13 +305,16 @@ const sortBy = ref<SearchSortBy | 'Score'>('Score')
 const sortDirection = ref<SearchSortDirection>('Descending')
 const searchQuery = ref('')
 
-watch(() => props.isOpen, (isOpen) => {
-  if (isOpen && props.audiobook) {
-    // Initialize search query with default query and auto-search
-    searchQuery.value = buildSearchQuery()
-    search()
-  }
-})
+watch(
+  () => props.isOpen,
+  (isOpen) => {
+    if (isOpen && props.audiobook) {
+      // Initialize search query with default query and auto-search
+      searchQuery.value = buildSearchQuery()
+      search()
+    }
+  },
+)
 
 const displayResults = computed(() => {
   // When sorting by Score, return a sorted copy derived from `results` so
@@ -282,18 +332,50 @@ const displayResults = computed(() => {
     const rejectedB = Boolean(qb?.isRejected)
     if (rejectedA !== rejectedB) return rejectedA ? 1 : -1
 
-    const hasA = typeof qa?.totalScore === 'number'
-    const hasB = typeof qb?.totalScore === 'number'
+    // Use the visible score (what the UI shows) for sorting so order matches display
+    const scoreA = getVisibleScoreValue(a.id)
+    const scoreB = getVisibleScoreValue(b.id)
+
+    const hasA = typeof scoreA === 'number'
+    const hasB = typeof scoreB === 'number'
     if (hasA !== hasB) return hasA ? -1 : 1
     if (!hasA && !hasB) return 0
 
-    const scoreA = qa!.totalScore
-    const scoreB = qb!.totalScore
     if (scoreA === scoreB) return 0
-    return asc ? (scoreA - scoreB) : (scoreB - scoreA)
+    // scoreA and scoreB are guaranteed to be numbers here (checked above), coerce to number for TS
+    const sA = scoreA as number
+    const sB = scoreB as number
+    return asc ? sA - sB : sB - sA
   })
   return copy
 })
+
+const anyHasPeers = computed(() =>
+  displayResults.value.some((r) => r.seeders !== undefined && r.seeders !== null),
+)
+const anyHasLanguage = computed(() =>
+  displayResults.value.some((r) => !!normalizeLanguage(r.language)),
+)
+
+// Normalize language values from DTOs/indexers: treat explicit 'unknown' strings as absent
+const normalizeLanguage = (value?: string | null): string | undefined => {
+  if (!value) return undefined
+  const v = value.toString().trim()
+  if (v.length === 0) return undefined
+  if (v.toLowerCase() === 'unknown') return undefined
+  return v
+}
+const anyHasQuality = computed(() => displayResults.value.some((r) => !!r.quality || !!r.format))
+
+function shouldShowFormatFallback(result: SearchResult): boolean {
+  if (!result) return false
+  const fmt = (result.format || '').toString().toLowerCase().trim()
+  const qual = (result.quality || '').toString().toLowerCase().trim()
+  if (!fmt) return false
+  if (!qual) return true
+  // Only show fallback when format token isn't already included in quality
+  return !qual.includes(fmt)
+}
 
 function setSort(column: SearchSortBy | 'Score') {
   if (sortBy.value === column) {
@@ -304,7 +386,7 @@ function setSort(column: SearchSortBy | 'Score') {
     sortBy.value = column as SearchSortBy
     sortDirection.value = 'Descending'
   }
-  
+
   // For Score sorting, sort frontend results, otherwise re-search with backend sorting
   if (column === 'Score') {
     // Frontend sorting for Score column
@@ -349,7 +431,7 @@ function sortFrontendResults() {
     const scoreB = qb!.totalScore
 
     if (scoreA === scoreB) return 0
-    return ascending ? (scoreA - scoreB) : (scoreB - scoreA)
+    return ascending ? scoreA - scoreB : scoreB - scoreA
   })
 }
 
@@ -365,26 +447,118 @@ async function search() {
     // Get count of enabled indexers first
     const enabledIndexers = await apiService.getEnabledIndexers()
     totalIndexers.value = enabledIndexers.length
-    
+
     // Build search query from title and author (fallback if no manual query)
     const query = searchQuery.value.trim() || buildSearchQuery()
-    
+
     // Search each indexer individually to show progress
     const allResults: SearchResult[] = []
     const searchPromises = enabledIndexers.map(async (indexer) => {
       try {
-        const indexerResults = await apiService.searchByApi(indexer.id.toString(), query)
-        allResults.push(...indexerResults)
+        // Map MyAnonamouse indexer options (if present on the indexer) to searchByApi opts so backend can apply them
+        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+        let opts: any = undefined
+        if (indexer.implementation === 'MyAnonamouse') {
+          try {
+            const settings = indexer.additionalSettings
+              ? JSON.parse(indexer.additionalSettings)
+              : {}
+            const mam = settings.mam_options ?? settings
+            opts = {
+              mamFilter: mam?.filter || undefined,
+              mamSearchInDescription:
+                mam?.searchInDescription !== undefined ? mam?.searchInDescription : undefined,
+              mamSearchInSeries:
+                mam?.searchInSeries !== undefined ? mam?.searchInSeries : undefined,
+              mamSearchInFilenames:
+                mam?.searchInFilenames !== undefined ? mam?.searchInFilenames : undefined,
+              mamLanguage: mam?.language || undefined,
+              mamFreeleechWedge: mam?.freeleechWedge || undefined,
+              mamEnrichResults: mam?.enrichResults !== undefined ? mam?.enrichResults : undefined,
+              mamEnrichTopResults:
+                mam?.enrichTopResults !== undefined ? mam?.enrichTopResults : undefined,
+            }
+          } catch (e) {
+            logger.warn('Failed to parse MyAnonamouse options from indexer.additionalSettings', e)
+          }
+        }
+
+        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+        const indexerResultsRaw: any[] = await apiService.searchByApi(
+          indexer.id.toString(),
+          query,
+          undefined,
+          opts,
+        )
+
+        // Normalize Prowlarr-like IndexerResultDto into local SearchResult shape for the UI
+        let normalized: SearchResult[] = []
+        if (
+          Array.isArray(indexerResultsRaw) &&
+          indexerResultsRaw.length > 0 &&
+          (indexerResultsRaw[0] as Record<string, unknown>).guid !== undefined
+        ) {
+          normalized = (indexerResultsRaw as Record<string, unknown>[]).map((dto) => ({
+            id: String(dto.guid ?? dto.infoUrl ?? dto.fileName ?? Math.random()),
+            title: String(dto.title ?? ''),
+            size: typeof dto.size === 'string' ? Number(dto.size) || 0 : Number(dto.size ?? 0),
+            seeders: typeof dto.seeders === 'string' ? Number(dto.seeders) || 0 : typeof dto.seeders === 'number' ? dto.seeders : undefined,
+            leechers: typeof dto.leechers === 'string' ? Number(dto.leechers) || 0 : typeof dto.leechers === 'number' ? dto.leechers : undefined,
+            grabs: typeof dto.grabs === 'string' ? Number(dto.grabs) || 0 : typeof dto.grabs === 'number' ? dto.grabs : 0,
+            files: typeof dto.files === 'string' ? Number(dto.files) || 0 : typeof dto.files === 'number' ? dto.files : 0,
+            magnetLink: '',
+            torrentUrl: String(dto.downloadUrl ?? ''),
+            nzbUrl: '',
+            downloadType: String(dto.protocol ?? ''),
+            quality: undefined,
+            indexerId: String(dto.indexerId ?? indexer.id),
+            indexerImplementation: String(dto.indexer ?? indexer.name),
+            resultUrl: String(dto.infoUrl ?? dto.guid ?? ''),
+            description: undefined,
+            publisher: undefined,
+            subtitle: undefined,
+            publishYear: undefined,
+            language: normalizeLanguage(String(dto.language ?? dto.lang_code ?? dto.languageCode ?? '')),
+            runtime: undefined,
+            narrator: undefined,
+            imageUrl: undefined,
+            asin: undefined,
+            series: undefined,
+            seriesNumber: undefined,
+            productUrl: undefined,
+            isEnriched: false,
+            metadataSource: undefined,
+            subtitles: undefined,
+            artist: '',
+            album: '',
+            category: '',
+            source: String(dto.indexer ?? indexer.name),
+            sourceLink: String(dto.infoUrl ?? dto.guid ?? ''),
+            publishedDate: String(dto.publishDate ?? dto.added ?? dto.publish_date ?? ''),
+            // Use filetype when available (MP3/M4B/etc), fallback to protocol (torrent/nzb)
+            format: String(dto.filetype ?? dto.protocol ?? ''),
+            score: 0,
+          }))
+        } else {
+          // Already in SearchResult shape
+          normalized = indexerResultsRaw as SearchResult[]
+        }
+
+        // Normalize any 'unknown' language tokens to undefined so Usenet/DDL results don't show 'Unknown' in UI
+        normalized.forEach((r) => {
+          r.language = normalizeLanguage(r.language as string | undefined)
+        })
+        allResults.push(...normalized)
         searchedIndexers.value++
       } catch (error) {
-        console.warn(`Failed to search indexer ${indexer.name}:`, error)
+        logger.warn(`Failed to search indexer ${indexer.name}:`, error)
         searchedIndexers.value++ // Still count as completed even if failed
       }
     })
-    
+
     // Wait for all searches to complete
     await Promise.all(searchPromises)
-    
+
     // Apply backend sorting if needed (for non-Score columns)
     if (sortBy.value !== 'Score') {
       const backendSortBy = sortBy.value as SearchSortBy
@@ -392,50 +566,56 @@ async function search() {
       allResults.sort((a, b) => {
         switch (backendSortBy) {
           case 'Seeders':
-            return sortDirection.value === 'Ascending' 
-              ? a.seeders - b.seeders 
-              : b.seeders - a.seeders
+            return sortDirection.value === 'Ascending'
+              ? (a.seeders ?? 0) - (b.seeders ?? 0)
+              : (b.seeders ?? 0) - (a.seeders ?? 0)
+          case 'Grabs':
+            return sortDirection.value === 'Ascending'
+              ? (a.grabs ?? 0) - (b.grabs ?? 0)
+              : (b.grabs ?? 0) - (a.grabs ?? 0)
           case 'Size':
-            return sortDirection.value === 'Ascending' 
-              ? a.size - b.size 
-              : b.size - a.size
+            return sortDirection.value === 'Ascending' ? a.size - b.size : b.size - a.size
           case 'PublishedDate':
-            return sortDirection.value === 'Ascending' 
+            return sortDirection.value === 'Ascending'
               ? new Date(a.publishedDate).getTime() - new Date(b.publishedDate).getTime()
               : new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
           case 'Title':
-            return sortDirection.value === 'Ascending' 
-              ? a.title.localeCompare(b.title) 
+            return sortDirection.value === 'Ascending'
+              ? a.title.localeCompare(b.title)
               : b.title.localeCompare(a.title)
           case 'Source':
-            return sortDirection.value === 'Ascending' 
-              ? a.source.localeCompare(b.source) 
+            return sortDirection.value === 'Ascending'
+              ? a.source.localeCompare(b.source)
               : b.source.localeCompare(a.source)
+          case 'Language':
+            // Normalize undefined/unknown languages to empty string for comparison
+            return sortDirection.value === 'Ascending'
+              ? (a.language ?? '').localeCompare(b.language ?? '')
+              : (b.language ?? '').localeCompare(a.language ?? '')
           case 'Quality':
-            return sortDirection.value === 'Ascending' 
-              ? a.quality.localeCompare(b.quality) 
-              : b.quality.localeCompare(a.quality)
+            return sortDirection.value === 'Ascending'
+              ? (a.quality ?? '').localeCompare(b.quality ?? '')
+              : (b.quality ?? '').localeCompare(a.quality ?? '')
           default:
             return 0
         }
       })
     }
-    
+
     // Deduplicate results by id (multiple indexers can return the same release)
     const seen = new Map<string, SearchResult>()
     for (const r of allResults) {
       if (!seen.has(r.id)) seen.set(r.id, r)
     }
     results.value = Array.from(seen.values())
-    
+
     // Load quality profile and score results (always needed for Score column or display)
     await loadQualityProfileAndScore()
-    
+
     // If sorting by Score, apply frontend sorting
     if (sortBy.value === 'Score') {
       sortFrontendResults()
     }
-    
   } catch (err) {
     console.error('Manual search failed:', err)
   } finally {
@@ -447,78 +627,70 @@ async function loadQualityProfileAndScore() {
   try {
     // Get the audiobook's quality profile or default
     if (props.audiobook?.qualityProfileId) {
-      qualityProfile.value = await apiService.getQualityProfileById(props.audiobook.qualityProfileId)
+      qualityProfile.value = await apiService.getQualityProfileById(
+        props.audiobook.qualityProfileId,
+      )
     } else {
       qualityProfile.value = await apiService.getDefaultQualityProfile()
     }
-    
+
     // Score the search results
     if (qualityProfile.value?.id && results.value.length > 0) {
-      const scores = await apiService.scoreSearchResults(
-        qualityProfile.value.id,
-        results.value
-      )
-      
+      const scores = await apiService.scoreSearchResults(qualityProfile.value.id, results.value)
+
       // Map scores by search result ID
       qualityScores.value.clear()
-      scores.forEach(score => {
+      scores.forEach((score) => {
         qualityScores.value.set(score.searchResult.id, score)
       })
     }
   } catch (error) {
-    console.warn('Failed to load quality profile or score results:', error)
+    logger.warn('Failed to load quality profile or score results:', error)
   }
 }
 
 function buildSearchQuery(): string {
   if (!props.audiobook) return ''
-  
+
   const parts: string[] = []
-  
+
   if (props.audiobook.title) {
     parts.push(props.audiobook.title)
   }
-  
+
   if (props.audiobook.authors && props.audiobook.authors.length > 0 && props.audiobook.authors[0]) {
     parts.push(props.audiobook.authors[0])
   }
-  
+
   return parts.join(' ')
 }
 
 async function downloadResult(result: SearchResult) {
   downloading.value[result.id] = true
   const toast = useToast()
-  
+
   try {
     // Check if this is a DDL
     const isDDL = getSourceType(result) === 'ddl'
     const audiobookId = props.audiobook?.id
-    
+
     if (isDDL) {
       // For DDL, start download in background and add to activity
-      console.log('Starting DDL download:', result.title)
-      console.log('Download type:', result.downloadType)
-      console.log('Download URL:', result.torrentUrl)
-      console.log('Audiobook ID:', audiobookId)
-      
-      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
-      console.log('DDL download started:', response)
-      
+      await apiService.sendToDownloadClient(result, undefined, audiobookId)
+
       // Add to activity/downloads view (will be tracked there)
       // Show success message
       emit('downloaded', result)
-      
+
       // Show feedback briefly
       setTimeout(() => {
         delete downloading.value[result.id]
       }, 1000)
     } else {
       // For torrents/NZB, send to download client (also pass audiobookId for future processing)
-      const response = await apiService.sendToDownloadClient(result, undefined, audiobookId)
-      console.log('Download started:', response)
+      await apiService.sendToDownloadClient(result, undefined, audiobookId)
       emit('downloaded', result)
-      
+
       // Show success feedback briefly, then remove
       setTimeout(() => {
         delete downloading.value[result.id]
@@ -527,13 +699,14 @@ async function downloadResult(result: SearchResult) {
   } catch (err) {
     console.error('Download failed:', err)
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-    
+
     // Show error in alert with more context
     let userMessage = `Download failed: ${errorMessage}`
     if (errorMessage.includes('Output path not configured')) {
-      userMessage = 'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
+      userMessage =
+        'Download path not configured. Please go to Settings and configure the Output Path before downloading.'
     }
-    
+
     // Show error as a non-blocking toast instead of a modal alert
     toast.error('Download failed', userMessage)
     delete downloading.value[result.id]
@@ -549,7 +722,7 @@ function getSourceType(result: SearchResult): string {
   if (result.downloadType) {
     return result.downloadType.toLowerCase()
   }
-  
+
   // Fallback to legacy detection logic
   // Check for torrent indicators
   if (result.magnetLink || result.torrentUrl) {
@@ -572,7 +745,7 @@ function formatAge(date: Date | string): string {
   const published = new Date(date)
   const diffMs = now.getTime() - published.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-  
+
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return '1 day'
   if (diffDays < 30) return `${diffDays} days`
@@ -586,28 +759,82 @@ function formatAge(date: Date | string): string {
 
 function formatSize(bytes: number): string {
   if (!bytes || bytes === 0) return '-'
-  
+
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
   let unitIndex = 0
-  
+
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024
     unitIndex++
   }
-  
+
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
 
 function getResultScore(resultId: string): QualityScore | undefined {
-  return qualityScores.value.get(resultId)
+  // Support both runtime shapes (ref<Map>) and test runner proxied Map (unwrapped)
+  const qsRef = qualityScores as unknown as
+    | { value?: Map<string, QualityScore> }
+    | Map<string, QualityScore>
+  if ('value' in qsRef && qsRef.value && typeof qsRef.value.get === 'function') {
+    return qsRef.value.get(resultId)
+  }
+  if (typeof (qsRef as Map<string, QualityScore>).get === 'function') {
+    return (qsRef as Map<string, QualityScore>).get(resultId)
+  }
+  return undefined
+}
+
+// Visible score value for the UI: prefer smartScore when available
+function getVisibleScoreValue(resultId: string): number | undefined {
+  const q = getResultScore(resultId)
+  if (!q) return undefined
+
+  // Prefer breakdown-based normalized total when available
+  if (q.smartScoreBreakdown && Object.keys(q.smartScoreBreakdown).length > 0) {
+    return computeNormalizedSmart(q.smartScoreBreakdown).total
+  }
+
+  // Fallback to smartScore numeric normalization
+  if (typeof q.smartScore === 'number' && !isNaN(q.smartScore)) {
+    // smartScore may be provided as fraction (0..1) or percentage (0..100). Normalize to 0..100.
+    let ss = q.smartScore
+    if (ss <= 1) ss = ss * 100
+    return Math.round(Math.min(100, ss))
+  }
+
+  if (typeof q.totalScore === 'number') return q.totalScore
+  return undefined
+}
+
+function getVisibleScoreClass(resultId: string): string {
+  const val = getVisibleScoreValue(resultId) ?? 0
+  return getScoreClass(val)
 }
 
 // Return the best available external link for a search result
 function getResultLink(result: SearchResult): string | undefined {
   if (!result) return undefined
   const r = result as unknown as Record<string, unknown>
-  if (typeof r.resultUrl === 'string') return r.resultUrl
+  const src = getSourceType(result)
+
+  if (src === 'nzb' || src === 'usenet') {
+    // For Usenet results prefer the ID URL if it is a URL (some indexers populate guid as an informational link),
+    // otherwise fall back to the indexer/details page (resultUrl / sourceLink / productUrl) before the NZB download.
+    if (typeof r.id === 'string' && /^(https?:)?\/\//.test(r.id)) return r.id as string
+    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+      return r.resultUrl as string
+    if (result.productUrl) return result.productUrl
+    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0)
+      return r.sourceLink as string
+    if (result.nzbUrl) return result.nzbUrl
+    return undefined
+  }
+
+  // Torrent / DDL fallback behavior
+  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+    return r.resultUrl as string
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
@@ -616,9 +843,10 @@ function getResultLink(result: SearchResult): string | undefined {
 }
 
 function getScoreClass(score: number): string {
-  if (score >= 80) return 'excellent'
-  if (score >= 60) return 'good'
-  if (score >= 40) return 'fair'
+  const s = score
+  if (s >= 80) return 'excellent'
+  if (s >= 60) return 'good'
+  if (s >= 40) return 'fair'
   return 'poor'
 }
 
@@ -642,7 +870,7 @@ function getScoreClass(score: number): string {
 
 .modal-container {
   background-color: #1e1e1e;
-  border-radius: 8px;
+  border-radius: 6px;
   width: 100%;
   max-height: 90vh;
   display: flex;
@@ -673,7 +901,7 @@ function getScoreClass(score: number): string {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   font-size: 1.5rem;
   display: flex;
@@ -762,7 +990,9 @@ function getScoreClass(score: number): string {
   border-radius: 6px;
   color: white;
   font-size: 1rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   height: 40px;
   box-sizing: border-box;
 }
@@ -823,7 +1053,7 @@ function getScoreClass(score: number): string {
 .btn {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;
@@ -871,7 +1101,7 @@ function getScoreClass(score: number): string {
 .results-table-wrapper {
   overflow-x: auto;
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .results-table {
@@ -936,8 +1166,17 @@ function getScoreClass(score: number): string {
   transition: background-color 0.2s;
 }
 
-.results-table tbody tr:hover {
-  background-color: #2a2a2a;
+/* Remove row background change on hover — underline title text instead */
+.title-text {
+  color: white;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.title-text:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background-color: unset;
 }
 
 .results-table td {
@@ -974,6 +1213,18 @@ function getScoreClass(score: number): string {
   width: 100px;
 }
 
+.col-grabs {
+  width: 80px;
+}
+
+.grabs {
+  margin-left: 8px;
+  color: var(--muted);
+}
+.grabs.unknown {
+  color: #7f8c8d;
+}
+
 .col-quality {
   width: 120px;
 }
@@ -984,32 +1235,18 @@ function getScoreClass(score: number): string {
 }
 
 .source-badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.source-badge.nzb {
-  background-color: #3498db;
-  color: white;
-}
-
-.source-badge.torrent {
-  background-color: #2ecc71;
-  color: white;
-}
-
-.source-badge.ddl {
-  background-color: #9b59b6;
-  color: white;
-}
-
-.source-badge.usenet {
-  background-color: #3498db;
-  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #adb5bd;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .title-cell {
@@ -1063,7 +1300,7 @@ function getScoreClass(score: number): string {
   display: inline-block;
   padding: 0.25rem 0.5rem;
   background-color: #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.8rem;
   color: #ccc;
 }
@@ -1079,7 +1316,7 @@ function getScoreClass(score: number): string {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   white-space: nowrap;
@@ -1124,7 +1361,7 @@ function getScoreClass(score: number): string {
 
 .language-badge.unknown,
 .quality-badge.unknown {
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.8rem;
   color: #ddd;
 }
@@ -1140,7 +1377,7 @@ function getScoreClass(score: number): string {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -1167,11 +1404,11 @@ function getScoreClass(score: number): string {
   .modal-container {
     max-width: 95%;
   }
-  
+
   .results-table {
     font-size: 0.8rem;
   }
-  
+
   .col-title {
     min-width: 200px;
   }
@@ -1194,7 +1431,7 @@ function getScoreClass(score: number): string {
     width: 95%;
     max-width: 500px;
     max-height: 80vh;
-    border-radius: 12px;
+    border-radius: 6px;
   }
 
   .modal-header {
@@ -1219,7 +1456,7 @@ function getScoreClass(score: number): string {
     max-width: 400px;
     z-index: 1001;
     background-color: #1e1e1e;
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 0.75rem;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     border: 1px solid #3a3a3a;
@@ -1276,7 +1513,7 @@ function getScoreClass(score: number): string {
   /* Table responsiveness on mobile */
   .results-table-wrapper {
     margin: 0 -1rem;
-    border-radius: 0;
+    border-radius: 6px;
     border-left: none;
     border-right: none;
   }

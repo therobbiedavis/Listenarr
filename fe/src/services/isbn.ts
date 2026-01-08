@@ -1,4 +1,5 @@
 // ISBN Service using Open Library API
+import { logger } from '@/utils/logger'
 
 interface OpenLibraryAuthor {
   name: string
@@ -15,6 +16,10 @@ interface OpenLibrarySubject {
 interface OpenLibraryAuthorRef {
   key?: string
 }
+
+import { useConfigurationStore } from '@/stores/configuration'
+import { createAmazonSearchUrl } from '@/utils/marketDomains'
+import { errorTracking } from '@/services/errorTracking'
 
 export interface ISBNBook {
   isbn: string
@@ -43,17 +48,17 @@ class ISBNService {
    */
   validateISBN(isbn: string): boolean {
     const cleaned = isbn.replace(/[-\s]/g, '')
-    
+
     // ISBN-10: 10 digits, last can be X
     if (/^\d{9}[\dX]$/i.test(cleaned)) {
       return this.validateISBN10(cleaned)
     }
-    
+
     // ISBN-13: 13 digits
     if (/^\d{13}$/.test(cleaned)) {
       return this.validateISBN13(cleaned)
     }
-    
+
     return false
   }
 
@@ -62,7 +67,7 @@ class ISBNService {
    */
   private validateISBN10(isbn: string): boolean {
     if (isbn.length !== 10) return false
-    
+
     let sum = 0
     for (let i = 0; i < 9; i++) {
       const char = isbn[i]
@@ -71,10 +76,10 @@ class ISBNService {
     }
     const lastChar = isbn[9]
     if (!lastChar) return false
-    
+
     const checksum = lastChar.toUpperCase() === 'X' ? 10 : parseInt(lastChar, 10)
     if (isNaN(checksum)) return false
-    
+
     sum += checksum
     return sum % 11 === 0
   }
@@ -84,7 +89,7 @@ class ISBNService {
    */
   private validateISBN13(isbn: string): boolean {
     if (isbn.length !== 13) return false
-    
+
     let sum = 0
     for (let i = 0; i < 12; i++) {
       const char = isbn[i]
@@ -94,7 +99,7 @@ class ISBNService {
     }
     const lastChar = isbn[12]
     if (!lastChar || !/\d/.test(lastChar)) return false
-    
+
     const checksum = parseInt(lastChar, 10)
     return (10 - (sum % 10)) % 10 === checksum
   }
@@ -104,11 +109,13 @@ class ISBNService {
    */
   detectISBN(input: string): boolean {
     const cleaned = input.replace(/[-\s]/g, '')
-    return /^\d{10}$/.test(cleaned) || 
-           /^\d{9}[\dX]$/i.test(cleaned) || 
-           /^\d{13}$/.test(cleaned) ||
-           /^978\d{10}$/.test(cleaned) ||
-           /^979\d{10}$/.test(cleaned)
+    return (
+      /^\d{10}$/.test(cleaned) ||
+      /^\d{9}[\dX]$/i.test(cleaned) ||
+      /^\d{13}$/.test(cleaned) ||
+      /^978\d{10}$/.test(cleaned) ||
+      /^979\d{10}$/.test(cleaned)
+    )
   }
 
   /**
@@ -123,12 +130,12 @@ class ISBNService {
    */
   async searchByISBN(isbn: string): Promise<ISBNSearchResult> {
     const cleanedISBN = this.cleanISBN(isbn)
-    
+
     if (!this.validateISBN(cleanedISBN)) {
       return {
         book: null,
         found: false,
-        error: 'Invalid ISBN format'
+        error: 'Invalid ISBN format',
       }
     }
 
@@ -136,14 +143,14 @@ class ISBNService {
       // Try the Books API first
       const bookUrl = `${this.baseUrl}/api/books?bibkeys=ISBN:${cleanedISBN}&format=json&jscmd=data`
       const bookResponse = await fetch(bookUrl)
-      
+
       if (!bookResponse.ok) {
         throw new Error(`HTTP error! status: ${bookResponse.status}`)
       }
-      
+
       const bookData = await bookResponse.json()
       const bookKey = `ISBN:${cleanedISBN}`
-      
+
       if (bookData[bookKey]) {
         const book = bookData[bookKey]
         const result: ISBNBook = {
@@ -156,32 +163,32 @@ class ISBNService {
           subjects: book.subjects?.map((subject: OpenLibrarySubject) => subject.name) || [],
           cover_url: book.cover?.large || book.cover?.medium || book.cover?.small,
           description: book.excerpts?.[0]?.text,
-          amazon_search_url: this.createAmazonSearchUrl(book.title, book.authors?.[0]?.name)
+          amazon_search_url: this.createAmazonSearchUrl(book.title, book.authors?.[0]?.name),
         }
-        
+
         return {
           book: result,
-          found: true
+          found: true,
         }
       }
-      
+
       // If not found in Books API, try the ISBN API
       const isbnUrl = `${this.baseUrl}/isbn/${cleanedISBN}.json`
       const isbnResponse = await fetch(isbnUrl)
-      
+
       if (!isbnResponse.ok) {
         return {
           book: null,
           found: false,
-          error: 'Book not found'
+          error: 'Book not found',
         }
       }
-      
+
       const isbnData = await isbnResponse.json()
-      
+
       // Get author details
       const authors = await this.getAuthors(isbnData.authors || [])
-      
+
       const result: ISBNBook = {
         isbn: cleanedISBN,
         title: isbnData.title || 'Unknown Title',
@@ -190,21 +197,26 @@ class ISBNService {
         publishers: isbnData.publishers || [],
         number_of_pages: isbnData.number_of_pages,
         subjects: isbnData.subjects || [],
-        cover_url: isbnData.covers?.[0] ? `https://covers.openlibrary.org/b/id/${isbnData.covers[0]}-L.jpg` : undefined,
-        amazon_search_url: this.createAmazonSearchUrl(isbnData.title, authors[0])
+        cover_url: isbnData.covers?.[0]
+          ? `https://covers.openlibrary.org/b/id/${isbnData.covers[0]}-L.jpg`
+          : undefined,
+        amazon_search_url: this.createAmazonSearchUrl(isbnData.title, authors[0]),
       }
-      
+
       return {
         book: result,
-        found: true
+        found: true,
       }
-      
     } catch (error) {
-      console.error('ISBN search failed:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ISBNService',
+        operation: 'search',
+        metadata: { isbn },
+      })
       return {
         book: null,
         found: false,
-        error: error instanceof Error ? error.message : 'Search failed'
+        error: error instanceof Error ? error.message : 'Search failed',
       }
     }
   }
@@ -214,8 +226,9 @@ class ISBNService {
    */
   private async getAuthors(authorRefs: OpenLibraryAuthorRef[]): Promise<string[]> {
     const authors: string[] = []
-    
-    for (const authorRef of authorRefs.slice(0, 3)) { // Limit to first 3 authors
+
+    for (const authorRef of authorRefs.slice(0, 3)) {
+      // Limit to first 3 authors
       try {
         if (typeof authorRef === 'string') {
           // If it's just a string, use it directly
@@ -232,10 +245,10 @@ class ISBNService {
           }
         }
       } catch (error) {
-        console.warn('Failed to fetch author:', error)
+        logger.warn('Failed to fetch author:', error)
       }
     }
-    
+
     return authors
   }
 
@@ -243,20 +256,9 @@ class ISBNService {
    * Create Amazon search URL for finding the audiobook
    */
   private createAmazonSearchUrl(title: string, author?: string): string {
-    const baseUrl = 'https://www.amazon.com/s'
-    const params = new URLSearchParams()
-    
-    let searchTerm = title
-    if (author) {
-      searchTerm += ` ${author}`
-    }
-    searchTerm += ' audiobook'
-    
-    params.set('k', searchTerm)
-    params.set('i', 'audible')
-    params.set('ref', 'sr_nr_i_0')
-    
-    return `${baseUrl}?${params.toString()}`
+    const configStore = useConfigurationStore()
+    const region = (configStore.applicationSettings as unknown as { region?: string })?.region
+    return createAmazonSearchUrl(title, author, region)
   }
 
   /**

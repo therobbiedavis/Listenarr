@@ -20,7 +20,7 @@ Listenarr is an automated audiobook collection management system built as a full
 # Start both API and Web servers (recommended)
 npm run dev
 
-# Start only backend API (runs on http://localhost:5146)
+# Start only backend API (runs on http://localhost:5000)
 npm run dev:api
 
 # Start only frontend web (runs on http://localhost:5173)  
@@ -147,6 +147,48 @@ This produces a single deployment artifact containing both backend and frontend.
 
 ## Key Design Patterns
 
+### Critical Backend Patterns (Recent Fixes)
+
+#### Download Status Lifecycle
+- **ALWAYS set `Status = DownloadStatus.Moved`** after successful import (8 locations in CompletedDownloadProcessor.cs)
+- Create history entries and notifications **BEFORE** cleanup operations
+- For Transmission: Extract torrent hash using `torrentInfo.HashString` (not `download.ExternalId`)
+- Status flow: Queued → Downloading → Completed → Moved (terminal state)
+
+#### File Existence Validation
+- **Check physical disk files**, not just database records
+- Pattern: `a.Monitored && (a.Files == null || !a.Files.Any() || !a.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))`
+- Apply in 3 locations: LibraryController.GetAllAudiobooks, LibraryController.GetAudiobook, ScanBackgroundService.BroadcastLibraryUpdate
+- Prevents false positives where DB records exist but files were deleted
+
+#### Download Client Authentication
+- **Transmission**: 409/session-id retry pattern for CSRF protection (PollTransmissionAsync, TransmissionAdapter)
+- **qBittorrent**: Cookie-based session authentication
+- **SABnzbd/NZBGet**: API key authentication
+
+#### Background Jobs Processing
+- `DownloadProcessingBackgroundService`: Implements `ResetStuckJobsAsync()` on startup
+- Jobs can get stuck in "Processing" state if service crashes mid-operation
+- Reset stuck jobs automatically on startup to prevent queue blockage
+- Use 30-second stability window in `DownloadMonitorService` to prevent premature imports
+
+### Critical Frontend Patterns
+
+#### Pinia Store Best Practices
+- **downloads.ts**: Filter terminal states ('Moved', 'Completed', 'Failed', 'Cancelled') from activeDownloads
+- Use `queueItem.title` for title, NOT `contentPath` (property doesn't exist)
+- Always use computed properties for derived state, never mutate store state directly
+
+#### Performance Optimization
+- Use `v-memo` directive for large lists (e.g., WantedView audiobook cards)
+- Include all reactive dependencies: `v-memo="[audiobook, activeDownloads[audiobook.id]]"`
+- Show download indicators with pulse/bounce animations using CSS keyframes
+
+#### Type Safety
+- All API responses must have TypeScript types in `types/index.ts`
+- Download status: 'Queued' | 'Downloading' | 'Completed' | 'Paused' | 'Failed' | 'Cancelled' | 'Moved'
+- Never reference non-existent properties (causes TS2339 errors)
+
 ### Configuration Management
 - JSON-based configuration stored in `config/` directory
 - `ConfigurationService` manages API endpoints, download clients, application settings
@@ -201,9 +243,9 @@ This produces a single deployment artifact containing both backend and frontend.
 - Docker contexts and paths are case-sensitive
 
 ### Port Configuration
-- Backend API: `http://localhost:5146` (development)
+- Backend API: `http://localhost:5000` (development)
 - Frontend Web: `http://localhost:5173` (development)  
-- Production: `http://localhost:5000` (single container serves both)
+- Production: `http://localhost:5000` (single container serves both) 
 - macOS users: Port 5000 conflicts with Airplay, use `--urls` parameter to override
 
 ### Database Location
@@ -219,3 +261,31 @@ This produces a single deployment artifact containing both backend and frontend.
 - GitHub Actions for automated builds and deployment
 - Multi-platform Docker images (AMD64/ARM64)
 - Automated version bumping with branch protection persistence
+
+## Common Troubleshooting Scenarios
+
+### Downloads Not Importing
+1. Check logs in `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
+2. Look for authentication errors (401, 409, Unauthorized)
+3. Verify DownloadMonitorService is running and detecting candidates
+4. Check stability window logs (30-second delay before import)
+5. Ensure files exist on disk and are accessible
+
+### Multiple Database Files
+- Running from `bin/Debug` creates a second, empty database
+- **Always run from repository root** (`npm run dev`)
+- Canonical DB location: `listenarr.api/config/database/listenarr.db`
+
+### Hot Reload Not Working
+- Backend: Stop and restart `dotnet run` if changes aren't reflected
+- Frontend: Vite HMR should work automatically; if not, restart `npm run dev`
+- Sometimes file locks prevent hot reload; full restart resolves this
+
+### Wanted Status Showing Incorrect Files
+- Verify file existence checks are applied in 3 locations (LibraryController x2, ScanBackgroundService)
+- Check that files actually exist on disk, not just in database
+
+### Build Errors
+- Ensure running .NET 8.0 SDK and Node.js 20.x or later
+- Clear node_modules and run `npm install` in `fe/` directory
+- Clean solution: `dotnet clean` then `dotnet build`

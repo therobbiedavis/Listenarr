@@ -25,6 +25,7 @@ using System.Runtime.InteropServices;
 using Listenarr.Api.Hubs;
 using Listenarr.Domain.Models;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Listenarr.Api.Services
 {
@@ -39,7 +40,7 @@ namespace Listenarr.Api.Services
         private readonly ILogger<DownloadMonitorService> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IAppMetricsService _metrics;
-        private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
+        private TimeSpan _pollingInterval = TimeSpan.FromSeconds(30); // default; overridden by ApplicationSettings.PollingIntervalSeconds
         private readonly Dictionary<string, Download> _lastDownloadStates = new();
         // Tracks downloads that appear complete and the time they were first observed complete
         private readonly Dictionary<string, DateTime> _completionCandidates = new();
@@ -47,6 +48,13 @@ namespace Listenarr.Api.Services
         // Track missing-source retry attempts and scheduled retries to avoid duplicate scheduling
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _missingSourceRetryAttempts = new();
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _missingSourceRetryScheduled = new();
+
+        // Per-client polling controls to avoid overloading download clients
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _nextClientPoll = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _clientFailureCounts = new();
+
+        // Simple memory cache for per-torrent properties fetched from qBittorrent
+        private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _memoryCache;
 
         // Backward-compatible constructor to avoid breaking existing tests that instantiate
         // DownloadMonitorService without providing an IDbContextFactory. This resolves the
@@ -57,18 +65,30 @@ namespace Listenarr.Api.Services
             ILogger<DownloadMonitorService> logger,
             IHttpClientFactory httpClientFactory,
             IAppMetricsService? appMetrics = null)
-            : this(
-                  serviceScopeFactory,
-                  // Resolve IDbContextFactory from a temporary scope so tests and older registrations work.
-                  // Use GetService instead of GetRequiredService and provide a fallback factory when only a
-                  // ListenArrDbContext singleton is registered (helps unit tests that register a single
-                  // ListenArrDbContext instance instead of an IDbContextFactory).
-                  CreateFallbackDbFactoryIfNeeded(serviceScopeFactory),
-                  hubContext,
-                  logger,
-                  httpClientFactory,
-                  appMetrics)
         {
+            // Backward-compatible resolution of IMemoryCache for older tests/registrations
+            Microsoft.Extensions.Caching.Memory.IMemoryCache? memCache = null;
+            try
+            {
+                using var scope = serviceScopeFactory.CreateScope();
+                memCache = scope.ServiceProvider.GetService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+            }
+            catch { }
+
+            if (memCache == null)
+            {
+                memCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+            }
+
+            // Delegate to primary ctor
+            var dbFactory = CreateFallbackDbFactoryIfNeeded(serviceScopeFactory);
+            _serviceScopeFactory = serviceScopeFactory;
+            _dbFactory = dbFactory;
+            _hubContext = hubContext;
+            _logger = logger;
+            _httpClientFactory = httpClientFactory;
+            _memoryCache = memCache;
+            _metrics = appMetrics ?? new NoopAppMetricsService();
         }
 
         public DownloadMonitorService(
@@ -77,6 +97,7 @@ namespace Listenarr.Api.Services
             IHubContext<DownloadHub> hubContext,
             ILogger<DownloadMonitorService> logger,
             IHttpClientFactory httpClientFactory,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache memoryCache,
             IAppMetricsService? appMetrics = null)
         {
             _serviceScopeFactory = serviceScopeFactory;
@@ -84,6 +105,7 @@ namespace Listenarr.Api.Services
             _hubContext = hubContext;
             _logger = logger;
             _httpClientFactory = httpClientFactory;
+            _memoryCache = memoryCache;
             _metrics = appMetrics ?? new NoopAppMetricsService();
         }
 
@@ -209,13 +231,77 @@ namespace Listenarr.Api.Services
             var invalid = Path.GetInvalidFileNameChars();
             var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray());
             // Replace sequences of non-alphanumeric characters with single space
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "[^A-Za-z0-9 _-]+", " ");
-            // Collapse whitespace and trim
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "\\s+", " ").Trim();
-            // If nothing left, fallback
-            if (string.IsNullOrWhiteSpace(cleaned)) return "unknown";
-            return cleaned;
+            var normalized = System.Text.RegularExpressions.Regex.Replace(cleaned, "[^A-Za-z0-9]+", " ");
+            normalized = normalized.Trim();
+            return normalized.Length == 0 ? "unknown" : normalized;
         }
+
+        // Cache entry for qbittorrent per-torrent properties (used sparingly, only when needed)
+        private sealed class QbittorrentPropertiesCacheEntry
+        {
+            public string SavePath { get; set; } = string.Empty;
+        }
+
+        // Schedule next poll for a client after a successful interaction
+        private void ScheduleNextClientPollOnSuccess(string clientId, int activeDownloadsForClient)
+        {
+            try
+            {
+                // Prefer client-specific setting if provided (PollingIntervalSeconds >= 15)
+                int interval = (int)_pollingInterval.TotalSeconds;
+                try
+                {
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                    var client = db.DownloadClientConfigurations.FirstOrDefault(c => c.Id == clientId);
+                    if (client != null && client.Settings != null && client.Settings.TryGetValue("PollingIntervalSeconds", out var v) && int.TryParse(v?.ToString() ?? string.Empty, out var custom) && custom >= 15)
+                    {
+                        interval = custom;
+                    }
+                }
+                catch { }
+
+                // If no active downloads for client, back off to a longer interval
+                if (activeDownloadsForClient == 0)
+                {
+                    interval = Math.Max(interval * 4, 120);
+                }
+
+                // Add small jitter to avoid synchronized polls: +/- 5s
+                var jitter = (int)(new Random().NextDouble() * 10 - 5);
+                var next = DateTime.UtcNow.AddSeconds(Math.Max(15, interval + jitter));
+                _nextClientPoll.AddOrUpdate(clientId, next, (_, __) => next);
+
+                // Reset failure count
+                _clientFailureCounts.TryRemove(clientId, out _);
+
+                _logger.LogDebug("Scheduled next poll for client {ClientId} at {Next} (interval {Interval}s)", clientId, next, interval);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to schedule next client poll for {ClientId}", clientId);
+            }
+        }
+
+        // Schedule next poll for a client after a failure using exponential backoff
+        private void ScheduleNextClientPollOnFailure(string clientId)
+        {
+            try
+            {
+                var count = _clientFailureCounts.AddOrUpdate(clientId, 1, (_, old) => old + 1);
+                // base backoff 30s, exponential, cap at 15min
+                var backoff = Math.Min(900, 30 * Math.Pow(2, count - 1));
+                var jitter = (int)(new Random().NextDouble() * 5);
+                var next = DateTime.UtcNow.AddSeconds(backoff + jitter);
+                _nextClientPoll.AddOrUpdate(clientId, next, (_, __) => next);
+                _logger.LogWarning("Scheduled next poll for client {ClientId} after failure in {Seconds}s (attempt {Attempt})", clientId, backoff, count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to schedule next client poll on failure for {ClientId}", clientId);
+            }
+        }
+
 
         /// <summary>
         /// Attempt to move a directory with retries and exponential backoff. Emits diagnostics (file listing and ACLs)
@@ -355,6 +441,32 @@ namespace Listenarr.Api.Services
             // Wait a bit before starting to ensure the app is fully initialized
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
+            // Attempt to read configured polling interval from ApplicationSettings (fallback to current default)
+            try
+            {
+                using var initScope = _serviceScopeFactory.CreateScope();
+                var cfg = initScope.ServiceProvider.GetService<IConfigurationService>();
+                ApplicationSettings appSettings;
+                if (cfg != null)
+                {
+                    appSettings = await cfg.GetApplicationSettingsAsync() ?? new ApplicationSettings();
+                }
+                else
+                {
+                    appSettings = new ApplicationSettings();
+                }
+
+                if (appSettings.PollingIntervalSeconds > 0)
+                {
+                    _pollingInterval = TimeSpan.FromSeconds(appSettings.PollingIntervalSeconds);
+                }
+                _logger.LogInformation("DownloadMonitorService polling interval set to {Interval}s", _pollingInterval.TotalSeconds);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to read polling interval from settings, using default {Default}s", _pollingInterval.TotalSeconds);
+            }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -380,16 +492,21 @@ namespace Listenarr.Api.Services
             var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
 
             // Get all active downloads from database
+            // Include:
+            // - Queued, Downloading, Paused, Processing (actively being monitored)
+            // - Completed without FinalPath (completed in client but not yet imported)
             var activeDownloads = await dbContext.Downloads
                 .Where(d => d.Status == DownloadStatus.Queued ||
                            d.Status == DownloadStatus.Downloading ||
-                           d.Status == DownloadStatus.Processing)
+                           d.Status == DownloadStatus.Paused ||
+                           d.Status == DownloadStatus.Processing ||
+                           (d.Status == DownloadStatus.Completed && string.IsNullOrEmpty(d.FinalPath)))
                 .ToListAsync(cancellationToken);
 
-            _logger.LogDebug("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
+            _logger.LogInformation("DownloadMonitorService found {Count} active downloads", activeDownloads.Count);
             foreach (var dl in activeDownloads)
             {
-                _logger.LogDebug("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}",
+                _logger.LogInformation("Active download: {Id} - {Title} - Status: {Status} - Client: {ClientId}",
                     dl.Id, dl.Title, dl.Status, dl.DownloadClientId);
             }
 
@@ -398,9 +515,15 @@ namespace Listenarr.Api.Services
             {
                 var clientDownloads = activeDownloads.Where(d => d.DownloadClientId != "DDL").ToList();
 
+                _logger.LogInformation("Client downloads (non-DDL): {Count}", clientDownloads.Count);
                 if (clientDownloads.Any())
                 {
+                    _logger.LogInformation("Calling PollDownloadClientsAsync with {Count} downloads", clientDownloads.Count);
                     await PollDownloadClientsAsync(clientDownloads, configService, dbContext, cancellationToken);
+                }
+                else
+                {
+                    _logger.LogInformation("No client downloads to poll");
                 }
             }
 
@@ -455,6 +578,7 @@ namespace Listenarr.Api.Services
                     metadata = metadata
                 };
 
+                _logger.LogInformation("Broadcasting candidate DownloadUpdate for {DownloadId}; isCandidate={IsCandidate}", dl.Id, isCandidate);
                 await _hubContext.Clients.All.SendAsync("DownloadUpdate", new[] { payload }, cancellationToken);
             }
             catch (Exception ex)
@@ -469,18 +593,35 @@ namespace Listenarr.Api.Services
             ListenArrDbContext dbContext,
             CancellationToken cancellationToken)
         {
+            _logger.LogInformation("PollDownloadClientsAsync called with {Count} downloads", downloads.Count);
             // Group downloads by client
             var downloadsByClient = downloads.GroupBy(d => d.DownloadClientId);
 
             foreach (var clientGroup in downloadsByClient)
             {
                 var clientId = clientGroup.Key;
-                if (string.IsNullOrEmpty(clientId)) continue;
+                _logger.LogInformation("Processing client group: ClientId={ClientId}, Count={Count}", clientId, clientGroup.Count());
+                if (string.IsNullOrEmpty(clientId))
+                {
+                    _logger.LogWarning("Skipping client group with empty ClientId");
+                    continue;
+                }
 
                 try
                 {
                     var client = await configService.GetDownloadClientConfigurationAsync(clientId);
-                    if (client == null || !client.IsEnabled) continue;
+                    if (client == null)
+                    {
+                        _logger.LogWarning("Client configuration not found for ClientId={ClientId}", clientId);
+                        continue;
+                    }
+                    if (!client.IsEnabled)
+                    {
+                        _logger.LogInformation("Client {ClientName} is disabled, skipping", client.Name);
+                        continue;
+                    }
+
+                    _logger.LogInformation("Client {ClientName} (Type={Type}) is enabled, routing to poll method", client.Name, client.Type);
 
                     // Poll based on client type
                     switch (client.Type.ToLower())
@@ -517,10 +658,19 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Polling qBittorrent client {ClientName}", client.Name);
                 try
                 {
+                    var now = DateTime.UtcNow;
+
+                    // Respect per-client poll schedules to avoid overloading qbittorrent
+                    if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && now < scheduled)
+                    {
+                        _logger.LogDebug("Skipping qBittorrent poll for {ClientName}, next scheduled at {Next}", client.Name, scheduled);
+                        return;
+                    }
+
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
 
                     using var http = _httpClientFactory.CreateClient("DownloadClient");
-                    _logger.LogInformation("Created HttpClient from factory for SABnzbd polling. BaseAddress={BaseAddress}", http.BaseAddress);
+                    _logger.LogInformation("Created HttpClient from factory for qbittorrent polling. BaseAddress={BaseAddress}", http.BaseAddress);
 
                     // Login
                     using var loginData = new FormUrlEncodedContent(new[]
@@ -532,23 +682,102 @@ namespace Listenarr.Api.Services
                     if (!loginResp.IsSuccessStatusCode)
                     {
                         _logger.LogWarning("qBittorrent login failed for client {ClientName}", client.Name);
+                        // Schedule a retry with backoff
+                        ScheduleNextClientPollOnFailure(client.Id);
                         return;
                     }
 
-                    var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info", cancellationToken);
-                    if (!torrentsResp.IsSuccessStatusCode)
+                    // Request all necessary fields from torrents/info to avoid additional API calls per torrent
+                    // This single call replaces the need for individual /properties calls per download
+                    var fields = "hash,name,save_path,content_path,progress,amount_left,state,size,category,completion_on,seeding_time";
+
+                        // Prefer querying only the hashes we are tracking (if available) to avoid fetching all torrents
+                    var trackedHashes = downloads
+                        .Select(d => d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var h) ? h?.ToString() : null)
+                        .Where(h => !string.IsNullOrEmpty(h))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    // If we have tracked hashes, chunk them into batches to avoid very large queries and to allow
+                    // slight delays between requests to prevent overwhelming qBittorrent.
+                    List<Dictionary<string, System.Text.Json.JsonElement>> allTorrents = new();
+
+                    if (trackedHashes.Any())
                     {
-                        _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);
-                        return;
+                        const int batchSize = 100; // safe default batch size
+                        _logger.LogDebug("Querying qBittorrent for specific hashes (total={Count}), using batches of {BatchSize}", trackedHashes.Count, batchSize);
+
+                        var batches = Enumerable.Range(0, (trackedHashes.Count + batchSize - 1) / batchSize)
+                            .Select(i => trackedHashes.Skip(i * batchSize).Take(batchSize).ToList())
+                            .ToList();
+
+                        foreach (var batch in batches)
+                        {
+                            var hashesParam = Uri.EscapeDataString(string.Join("|", batch));
+                            var query = $"?hashes={hashesParam}&fields={Uri.EscapeDataString(fields)}";
+
+                            var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
+                            if (!torrentsResp.IsSuccessStatusCode)
+                            {
+                                _logger.LogWarning("Failed to fetch torrent batch from qBittorrent for {ClientName} (batch size={Size})", client.Name, batch.Count);
+                                // Respect remote failure - stop processing further batches and let failure handling back off
+                                ScheduleNextClientPollOnFailure(client.Id);
+                                return;
+                            }
+
+                            var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
+                            var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
+                            if (torrents != null)
+                            {
+                                allTorrents.AddRange(torrents);
+                            }
+
+                            // Small delay between batches to avoid hammering the client
+                            await Task.Delay(150, cancellationToken);
+                        }
+                    }
+                    else if (client.Settings != null && client.Settings.TryGetValue("category", out var catObj) && !string.IsNullOrEmpty(catObj?.ToString()))
+                    {
+                        var cat = Uri.EscapeDataString(catObj!.ToString()!);
+                        var query = $"?category={cat}&fields={Uri.EscapeDataString(fields)}";
+                        _logger.LogDebug("Querying qBittorrent by category: {Category}", cat);
+
+                        var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
+                        if (!torrentsResp.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);
+                            ScheduleNextClientPollOnFailure(client.Id);
+                            return;
+                        }
+
+                        var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
+                        var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
+                        if (torrents == null) return;
+
+                        allTorrents.AddRange(torrents);
+                    }
+                    else
+                    {
+                        // Default: fetch a limited set of recent torrents
+                        var query = $"?fields={Uri.EscapeDataString(fields)}";
+                        var torrentsResp = await http.GetAsync($"{baseUrl}/api/v2/torrents/info{query}", cancellationToken);
+                        if (!torrentsResp.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("Failed to fetch torrents from qBittorrent for {ClientName}", client.Name);
+                            ScheduleNextClientPollOnFailure(client.Id);
+                            return;
+                        }
+
+                        var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
+                        var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
+                        if (torrents == null) return;
+
+                        allTorrents.AddRange(torrents);
                     }
 
-                    var json = await torrentsResp.Content.ReadAsStringAsync(cancellationToken);
-                    var torrents = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, System.Text.Json.JsonElement>>>(json);
-                    if (torrents == null) return;
-
-                    // Build comprehensive lookup with all torrent info we need
-                    var torrentLookup = new List<(string Hash, string Name, string SavePath, string ContentPath, double Progress, long AmountLeft, string State, long Size, string Category)>();
-                    foreach (var t in torrents)
+                    // Build comprehensive lookup with all torrent info we need from single API call
+                    var torrentLookup = new List<(string Hash, string Name, string SavePath, string ContentPath, double Progress, long AmountLeft, string State, long Size, string Category, long? SeedingTime)>();
+                    foreach (var t in allTorrents)
                     {
                         var hash = t.ContainsKey("hash") ? t["hash"].GetString() ?? "" : "";
                         var name = t.ContainsKey("name") ? t["name"].GetString() ?? "" : "";
@@ -559,12 +788,24 @@ namespace Listenarr.Api.Services
                         var state = t.ContainsKey("state") ? t["state"].GetString() ?? "" : "";
                         var size = t.ContainsKey("size") ? t["size"].GetInt64() : 0L;
                         var category = t.ContainsKey("category") ? t["category"].GetString() ?? "" : "";
-                        torrentLookup.Add((hash, name, savePath, contentPath, progress, amountLeft, state, size, category));
+                        var seedingTime = t.ContainsKey("seeding_time") ? t["seeding_time"].GetInt64() : (long?)null;
+                        torrentLookup.Add((hash, name, savePath, contentPath, progress, amountLeft, state, size, category, seedingTime));
                     }
 
+
                     _logger.LogDebug("Found {TorrentCount} torrents in qBittorrent for client {ClientName}", torrentLookup.Count, client.Name);
+                    
+                    // Log all torrents for diagnostics
+                    foreach (var t in torrentLookup.Take(10))
+                    {
+                        _logger.LogDebug("qBittorrent torrent: Name={Name}, Hash={Hash}, Progress={Progress:P2}, State={State}, Size={Size}", 
+                            t.Name, t.Hash, t.Progress, t.State, t.Size);
+                    }
 
                     // For each DB download associated with this client, try to find matching torrent
+                    _logger.LogInformation("Checking {DownloadCount} downloads against qBittorrent torrents for client {ClientName}", 
+                        downloads.Count, client.Name);
+                    
                     foreach (var dl in downloads)
                     {
                         try
@@ -572,7 +813,7 @@ namespace Listenarr.Api.Services
                             _logger.LogDebug("Looking for qBittorrent match for download {DownloadId}: {Title}", dl.Id, dl.Title);
 
                             // Try hash-based matching first (most reliable for qBittorrent)
-                            var matched = (Hash: "", Name: "", SavePath: "", ContentPath: "", Progress: 0.0, AmountLeft: 0L, State: "", Size: 0L, Category: "");
+                            var matched = (Hash: "", Name: "", SavePath: "", ContentPath: "", Progress: 0.0, AmountLeft: 0L, State: "", Size: 0L, Category: "", SeedingTime: (long?)null);
 
                             // Check if we have a stored torrent hash for this download
                             if (dl.Metadata != null && dl.Metadata.TryGetValue("TorrentHash", out var hashObj))
@@ -627,8 +868,8 @@ namespace Listenarr.Api.Services
                             _logger.LogDebug("Found matching qBittorrent torrent for {DownloadId}: {TorrentName} (Hash: {Hash}, State: {State}, Progress: {Progress:P2}, SavePath: {SavePath}, ContentPath: {ContentPath})",
                                 dl.Id, matched.Name, matched.Hash, matched.State, matched.Progress, matched.SavePath, matched.ContentPath);
 
-                            // Persist client's save/content path to the download as a fallback so FinalizeDownloadAsync
-                            // can locate files even if later client state is noisy or the torrent is removed.
+                            // Persist client's save/content path to the download (using data from main torrents/info call)
+                            // This avoids making individual /properties API calls per download which can overwhelm qBittorrent
                             try
                             {
                                 var dbDownload = await dbContext.Downloads.FindAsync(new object[] { dl.Id }, cancellationToken);
@@ -642,6 +883,7 @@ namespace Listenarr.Api.Services
                                     }
 
                                     if (dbDownload.Metadata == null) dbDownload.Metadata = new Dictionary<string, object>();
+                                    
                                     // Record content path in metadata as it's often the most accurate file path
                                     if (!string.IsNullOrEmpty(matched.ContentPath))
                                     {
@@ -649,11 +891,19 @@ namespace Listenarr.Api.Services
                                         changed = true;
                                     }
 
+                                    // Store seeding_time if available (from main torrents/info call, not additional API call)
+                                    if (matched.SeedingTime.HasValue)
+                                    {
+                                        dbDownload.Metadata["SeedingTimeSeconds"] = matched.SeedingTime.Value;
+                                        changed = true;
+                                    }
+
                                     if (changed)
                                     {
                                         dbContext.Downloads.Update(dbDownload);
                                         await dbContext.SaveChangesAsync(cancellationToken);
-                                        _logger.LogDebug("Persisted client paths for download {DownloadId}: DownloadPath={DownloadPath}, ClientContentPath={ClientContentPath}", dl.Id, dbDownload.DownloadPath, matched.ContentPath);
+                                        _logger.LogDebug("Persisted client paths for download {DownloadId}: DownloadPath={DownloadPath}, ClientContentPath={ClientContentPath}", 
+                                            dl.Id, dbDownload.DownloadPath, matched.ContentPath);
                                     }
                                 }
                             }
@@ -665,15 +915,11 @@ namespace Listenarr.Api.Services
                             // Update database with real-time progress information
                             await UpdateDownloadProgressAsync(dl.Id, matched.Progress * 100, matched.AmountLeft, matched.State, dbContext, cancellationToken);
 
-                            // Correct completion detection for qBittorrent
-                            // A torrent is complete when:
-                            // 1. Progress >= 100% (1.0) AND
-                            // 2. In an uploading/seeding state OR amount left is 0
-                            var isComplete = (matched.Progress >= 1.0 &&
-                                            (matched.State == "uploading" || matched.State == "stalledUP" ||
-                                             matched.State == "checkingUP" || matched.State == "forcedUP" ||
-                                             matched.State == "stoppedUP" || matched.State == "queuedUP")) ||
-                                            matched.AmountLeft == 0;
+                            // Lenient completion detection for qBittorrent (similar to Sonarr)
+                            // A torrent is complete when progress >= 100% OR amount left is 0
+                            // The stability window below ensures we don't immediately import a torrent
+                            // that just hit 100% - we wait for the configured delay period
+                            var isComplete = matched.Progress >= 1.0 || matched.AmountLeft == 0;
 
                             _logger.LogDebug("Completion check for {DownloadId}: IsComplete={IsComplete}, Progress={Progress:P2}, AmountLeft={AmountLeft}, State={State}",
                                 dl.Id, isComplete, matched.Progress, matched.AmountLeft, matched.State);
@@ -693,6 +939,21 @@ namespace Listenarr.Api.Services
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (qBittorrent). Torrent: {TorrentName}, Path: {Path}. Waiting for stability window.",
                                         dl.Id, matched.Name, completionPath);
+                                    
+                                    // Update download status to Completed in database so it stops being re-added to candidates
+                                    try
+                                    {
+                                        dl.Status = DownloadStatus.Completed;
+                                        dl.Progress = 100M;
+                                        dbContext.Downloads.Update(dl);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                    }
+                                    catch (Exception ex2)
+                                    {
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                    }
+                                    
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
@@ -750,10 +1011,14 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning(ex, "Error processing download {DownloadId} while polling qBittorrent", dl.Id);
                         }
                     }
+
+                    // Schedule next poll now that this client's polling completed successfully
+                    ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error polling qBittorrent client {ClientName}", client.Name);
+                    ScheduleNextClientPollOnFailure(client.Id);
                 }
             }, cancellationToken);
         }
@@ -766,108 +1031,233 @@ namespace Listenarr.Api.Services
         {
             return Task.Run(async () =>
             {
-                _logger.LogDebug("Polling Transmission client {ClientName}", client.Name);
+                _logger.LogInformation("Polling Transmission client {ClientName} for {Count} downloads", client.Name, downloads.Count);
                 try
                 {
+                    var now = DateTime.UtcNow;
+
+                    // Respect per-client poll schedules to avoid overloading Transmission
+                    if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && now < scheduled)
+                    {
+                        _logger.LogDebug("Skipping Transmission poll for {ClientName}, next scheduled at {Next}", client.Name, scheduled);
+                        _logger.LogInformation("PollTransmission early-return: scheduled skip for client {ClientName} at {Next}", client.Name, scheduled);
+                        return;
+                    }
+
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/transmission/rpc";
                     using var http = _httpClientFactory.CreateClient("DownloadClient");
 
-                    // Get session id
-                    string sessionId = string.Empty;
-                    try
-                    {
-                        // Request to get session id (session-get)
-                        var dummy = new { method = "session-get", tag = 0 };
-                        var dummyContent = new StringContent(System.Text.Json.JsonSerializer.Serialize(dummy), System.Text.Encoding.UTF8, "application/json");
-                        var dummyResp = await http.PostAsync(baseUrl, dummyContent, cancellationToken);
-                        if (dummyResp.Headers.TryGetValues("X-Transmission-Session-Id", out var sids))
-                        {
-                            sessionId = sids.First();
-                        }
-                    }
-                    catch { }
-
-                    // Request torrent-get for fields we need
+                    // Prepare RPC payload for torrent-get
                     var rpc = new
                     {
                         method = "torrent-get",
                         arguments = new
                         {
-                            fields = new[] { "id", "name", "percentDone", "leftUntilDone", "isFinished", "status", "downloadDir" }
+                            fields = new[] { "id", "hashString", "name", "percentDone", "leftUntilDone", "isFinished", "status", "downloadDir" }
                         },
                         tag = 4
                     };
 
-                    var content = new StringContent(System.Text.Json.JsonSerializer.Serialize(rpc), System.Text.Encoding.UTF8, "application/json");
-                    if (!string.IsNullOrEmpty(sessionId)) content.Headers.Add("X-Transmission-Session-Id", sessionId);
+                    var serializedPayload = System.Text.Json.JsonSerializer.Serialize(rpc);
+                    string? sessionId = null;
 
-                    var resp = await http.PostAsync(baseUrl, content, cancellationToken);
-                    if (!resp.IsSuccessStatusCode) return;
-                    var respText = await resp.Content.ReadAsStringAsync(cancellationToken);
-                    var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(respText);
-                    if (!doc.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != System.Text.Json.JsonValueKind.Array) return;
+                    _logger.LogDebug("PollTransmission RPC request to {BaseUrl}", baseUrl);
 
-                    foreach (var dl in downloads)
+                    // Transmission CSRF protection: first request gets 409 with session-id, retry with that session-id
+                    // This mirrors TransmissionAdapter.InvokeRpcAsync pattern
+                    for (var attempt = 0; attempt < 2; attempt++)
                     {
+                        using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl)
+                        {
+                            Content = new StringContent(serializedPayload, System.Text.Encoding.UTF8, "application/json")
+                        };
+
+                        // Add session-id header if we have one (from previous 409 retry)
+                        if (!string.IsNullOrEmpty(sessionId))
+                        {
+                            request.Headers.Add("X-Transmission-Session-Id", sessionId);
+                            _logger.LogDebug("PollTransmission using X-Transmission-Session-Id: {SessionId}", sessionId);
+                        }
+
+                        // Add Basic auth header if configured
+                        if (!string.IsNullOrWhiteSpace(client.Username))
+                        {
+                            var credentials = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{client.Username}:{client.Password}"));
+                            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+                        }
+
+                        var resp = await http.SendAsync(request, cancellationToken);
+                        var respText = await resp.Content.ReadAsStringAsync(cancellationToken);
+
+                        // Handle 409 Conflict (CSRF session-id flow)
+                        if (resp.StatusCode == System.Net.HttpStatusCode.Conflict && attempt == 0)
+                        {
+                            if (resp.Headers.TryGetValues("X-Transmission-Session-Id", out var values))
+                            {
+                                sessionId = values.FirstOrDefault();
+                                _logger.LogDebug("PollTransmission received 409 Conflict, retrying with session-id: {SessionId}", sessionId);
+                                continue; // Retry with session-id
+                            }
+                        }
+
+                        // Check for success
+                        _logger.LogInformation("PollTransmission HTTP response: {StatusCode}", resp.StatusCode);
+                        if (!resp.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning("PollTransmission failed with status {StatusCode}", resp.StatusCode);
+                            _logger.LogInformation("PollTransmission early-return: non-success HTTP status {StatusCode} from {BaseUrl} for client {ClientName}", resp.StatusCode, baseUrl, client.Name);
+                            return;
+                        }
+
+                        // Process successful response
+                        _logger.LogDebug("PollTransmission response text length: {Length}", respText?.Length ?? 0);
+                        if (string.IsNullOrWhiteSpace(respText))
+                        {
+                            _logger.LogInformation("PollTransmission early-return: empty response content for client {ClientName}", client.Name);
+                            return;
+                        }
+
+                        // Parse response and continue with torrent processing
+                        System.Text.Json.JsonElement doc;
                         try
                         {
-                            // Attempt to match by name or download dir
-                            var matching = torrents.EnumerateArray().FirstOrDefault(t =>
-                            {
-                                var name = t.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty;
-                                var dir = t.TryGetProperty("downloadDir", out var d) ? d.GetString() ?? string.Empty : string.Empty;
-                                return string.Equals(name, dl.Title, StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(dl.DownloadPath) && dir.Contains(dl.DownloadPath));
-                            });
-
-                            if (matching.ValueKind == System.Text.Json.JsonValueKind.Undefined) continue;
-
-                            var percent = matching.TryGetProperty("percentDone", out var p) ? p.GetDouble() : 0.0;
-                            var left = matching.TryGetProperty("leftUntilDone", out var l) ? l.GetInt64() : 0L;
-                            var isFinished = matching.TryGetProperty("isFinished", out var f) ? f.GetBoolean() : false;
-
-                            // Update database with real-time progress information
-                            await UpdateDownloadProgressAsync(dl.Id, percent * 100, left, "downloading", dbContext, cancellationToken);
-
-                            var isComplete = percent >= 1.0 || left == 0 || isFinished;
-
-                            if (isComplete)
-                            {
-                                if (!_completionCandidates.ContainsKey(dl.Id))
-                                {
-                                    _completionCandidates[dl.Id] = DateTime.UtcNow;
-                                    _logger.LogInformation("Download {DownloadId} observed complete candidate (Transmission). Waiting for stability window.", dl.Id);
-                                    _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
-                                    continue;
-                                }
-
-                                var firstSeen = _completionCandidates[dl.Id];
-                                if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
-                                {
-                                    // Determine downloadDir
-                                    var downloadDir = matching.TryGetProperty("downloadDir", out var dprop) ? dprop.GetString() ?? string.Empty : string.Empty;
-                                    _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (Transmission). Finalizing.", dl.Id);
-                                    await FinalizeDownloadAsync(dl, downloadDir, client, cancellationToken);
-                                    _completionCandidates.Remove(dl.Id);
-                                }
-                            }
-                            else
-                            {
-                                if (_completionCandidates.ContainsKey(dl.Id))
-                                {
-                                    _completionCandidates.Remove(dl.Id);
-                                    _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
-                                }
-                            }
+                            doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(respText)!;
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "Error processing download {DownloadId} while polling Transmission", dl.Id);
+                            _logger.LogWarning(ex, "PollTransmission failed to parse JSON response for client {ClientName}", client.Name);
+                            _logger.LogInformation("PollTransmission early-return: invalid JSON response from client {ClientName}", client.Name);
+                            return;
                         }
+
+                        if (!doc.TryGetProperty("arguments", out var args))
+                        {
+                            _logger.LogWarning("PollTransmission response missing 'arguments' property");
+                            _logger.LogInformation("PollTransmission early-return: missing 'arguments' in response for client {ClientName}", client.Name);
+                            return;
+                        }
+                        if (!args.TryGetProperty("torrents", out var torrents))
+                        {
+                            _logger.LogWarning("PollTransmission response missing 'torrents' property");
+                            _logger.LogInformation("PollTransmission early-return: missing 'torrents' in 'arguments' for client {ClientName}", client.Name);
+                            return;
+                        }
+                        if (torrents.ValueKind != System.Text.Json.JsonValueKind.Array)
+                        {
+                            _logger.LogWarning("PollTransmission 'torrents' is not an array: {Kind}", torrents.ValueKind);
+                            _logger.LogInformation("PollTransmission early-return: 'torrents' not an array (Kind={Kind}) for client {ClientName}", torrents.ValueKind, client.Name);
+                            return;
+                        }
+                        _logger.LogInformation("PollTransmission found {Count} torrents in response", torrents.GetArrayLength());
+
+                        // Process torrents (continue with existing logic below)
+                        foreach (var dl in downloads)
+                        {
+                            try
+                            {
+                                // Attempt to match by hashString (preferred) or name
+                                var matching = torrents.EnumerateArray().FirstOrDefault(t =>
+                                {
+                                    // First try matching by hash (most reliable)
+                                    if (dl.Metadata != null && dl.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                    {
+                                        var downloadHash = hashObj?.ToString() ?? string.Empty;
+                                        if (!string.IsNullOrEmpty(downloadHash))
+                                        {
+                                            var hash = t.TryGetProperty("hashString", out var h) ? h.GetString() ?? string.Empty : string.Empty;
+                                            if (string.Equals(hash, downloadHash, StringComparison.OrdinalIgnoreCase))
+                                                return true;
+                                        }
+                                    }
+                                    
+                                    // Fallback to name matching
+                                    var name = t.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty;
+                                    var dir = t.TryGetProperty("downloadDir", out var d) ? d.GetString() ?? string.Empty : string.Empty;
+                                    return string.Equals(name, dl.Title, StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(dl.DownloadPath) && dir.Contains(dl.DownloadPath));
+                                });
+
+                                if (matching.ValueKind == System.Text.Json.JsonValueKind.Undefined)
+                                {
+                                    _logger.LogDebug("Could not find matching torrent for download {DownloadId} ({Title}) in Transmission", dl.Id, dl.Title);
+                                    continue;
+                                }
+                                
+                                _logger.LogDebug("Matched download {DownloadId} to Transmission torrent", dl.Id);
+
+                                var percent = matching.TryGetProperty("percentDone", out var p) ? p.GetDouble() : 0.0;
+                                var left = matching.TryGetProperty("leftUntilDone", out var l) ? l.GetInt64() : 0L;
+                                var isFinished = matching.TryGetProperty("isFinished", out var f) ? f.GetBoolean() : false;
+                                var statusCode = matching.TryGetProperty("status", out var statusProp) ? statusProp.GetInt32() : 0;
+
+                                // Map Transmission status code to status string (same as TransmissionAdapter)
+                                var status = statusCode switch
+                                {
+                                    0 => "paused",          // TR_STATUS_STOPPED
+                                    1 => "queued",          // TR_STATUS_CHECK_WAIT
+                                    2 => "downloading",     // TR_STATUS_CHECK
+                                    3 => "queued",          // TR_STATUS_DOWNLOAD_WAIT
+                                    4 => "downloading",     // TR_STATUS_DOWNLOAD
+                                    5 => "queued",          // TR_STATUS_SEED_WAIT
+                                    6 => "seeding",         // TR_STATUS_SEED
+                                    7 => "failed",          // TR_STATUS_ISOLATED
+                                    _ => "unknown"
+                                };
+
+                                // Update database with real-time progress information
+                                await UpdateDownloadProgressAsync(dl.Id, percent * 100, left, status, dbContext, cancellationToken);
+
+                                // Check for completion using same logic as TransmissionAdapter
+                                var isComplete = percent >= 1.0 && (status == "seeding" || status == "queued" || status == "paused");
+                                _logger.LogInformation("PollTransmission download {DownloadId}: percent={Percent}, status={Status}, isComplete={IsComplete}", dl.Id, percent, status, isComplete);
+
+                                if (isComplete)
+                                {
+                                    if (!_completionCandidates.ContainsKey(dl.Id))
+                                    {
+                                        _completionCandidates[dl.Id] = DateTime.UtcNow;
+                                        _logger.LogInformation("Download {DownloadId} observed complete candidate (Transmission). Waiting for stability window.", dl.Id);
+                                        _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
+                                        continue;
+                                    }
+
+                                    var firstSeen = _completionCandidates[dl.Id];
+                                    if (DateTime.UtcNow - firstSeen >= _completionStableWindow)
+                                    {
+                                        // Determine downloadDir
+                                        var downloadDir = matching.TryGetProperty("downloadDir", out var dprop) ? dprop.GetString() ?? string.Empty : string.Empty;
+                                        _logger.LogInformation("Download {DownloadId} confirmed complete after stability window (Transmission). Finalizing.", dl.Id);
+                                        await FinalizeDownloadAsync(dl, downloadDir, client, cancellationToken);
+                                        _completionCandidates.Remove(dl.Id);
+                                    }
+                                }
+                                else
+                                {
+                                    if (_completionCandidates.ContainsKey(dl.Id))
+                                    {
+                                        _completionCandidates.Remove(dl.Id);
+                                        _ = BroadcastCandidateUpdateAsync(dl, false, cancellationToken);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Error processing download {DownloadId} while polling Transmission", dl.Id);
+                            }
+                        }
+
+                        // Schedule next poll now that this client's polling completed successfully
+                        ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
+                        return; // Successfully processed
                     }
+
+                    // If we reach here, session-id flow failed after retries
+                    _logger.LogWarning("PollTransmission failed to establish session after retries for client {ClientName}", client.Name);
+
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error polling Transmission client {ClientName}", client.Name);
+                    ScheduleNextClientPollOnFailure(client.Id);
                 }
             }, cancellationToken);
         }
@@ -920,390 +1310,42 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Application settings: OutputPath='{OutputPath}', EnableMetadataProcessing={EnableMetadata}, CompletedFileAction={Action}",
                     settings.OutputPath, settings.EnableMetadataProcessing, settings.CompletedFileAction);
 
-                // Determine localPath (apply remote path mapping if needed)
-                string localPath = clientPath;
-                _logger.LogDebug("Original client path: {ClientPath}", clientPath);
-
-                if (!string.IsNullOrEmpty(clientPath))
+                // V2 Pattern: Use ImportItemResolutionService to get accurate path from download client
+                var importResolver = scope.ServiceProvider.GetService<IImportItemResolutionService>();
+                if (importResolver == null)
                 {
-                    try
-                    {
-                        var pathMapper = scope.ServiceProvider.GetService<IRemotePathMappingService>();
-                        if (pathMapper != null)
-                        {
-                            var mappedPath = await pathMapper.TranslatePathAsync(client.Id, clientPath);
-                            if (!string.Equals(mappedPath, clientPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                localPath = mappedPath;
-                                _logger.LogInformation("Applied path mapping for client {ClientId}: {RemotePath} -> {LocalPath}",
-                                    client.Id, clientPath, localPath);
-                            }
-                            else
-                            {
-                                _logger.LogDebug("No path mapping applied for client {ClientId} and path {ClientPath}", client.Id, clientPath);
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogDebug("No path mapping service available");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error during path mapping for client {ClientId} and path {ClientPath}", client.Id, clientPath);
-                    }
+                    _logger.LogError("ImportItemResolutionService not available for download {DownloadId}", download.Id);
+                    return;
                 }
 
-                _logger.LogInformation("Searching for files in local path: {LocalPath}", localPath);
-
-                string sourceFile = string.Empty;
-                List<string> foundFiles = new();
-
-                // Enhanced file discovery logic
-                if (!string.IsNullOrEmpty(localPath))
+                // Build a preliminary QueueItem from what we know
+                var preliminaryItem = new QueueItem
                 {
-                    // Check if the path itself is a file
-                    if (File.Exists(localPath) && settings.AllowedFileExtensions.Any(ext => localPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        sourceFile = localPath;
-                        foundFiles.Add(localPath);
-                        _logger.LogInformation("Client path is directly a valid file: {FilePath}", localPath);
-                    }
-                    // Check if it's a directory
-                    else if (Directory.Exists(localPath))
-                    {
-                        _logger.LogDebug("Scanning directory for audio files: {Directory}", localPath);
+                    Id = download.Id,
+                    Title = download.Title ?? "Unknown",
+                    Status = "completed",
+                    ContentPath = clientPath,
+                    DownloadClientId = client.Id
+                };
 
-                        try
-                        {
-                            // Find all audio files in the directory and subdirectories
-                            foundFiles = Directory.GetFiles(localPath, "*.*", SearchOption.AllDirectories)
-                                .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                .ToList();
-
-                            _logger.LogInformation("Found {FileCount} audio files in directory {Directory}", foundFiles.Count, localPath);
-                            try { _metrics.Increment("finalize.files.found_in_dir", foundFiles.Count); } catch { }
-                            foreach (var file in foundFiles.Take(5)) // Log first 5 files for debugging
-                            {
-                                var fileInfo = new FileInfo(file);
-                                _logger.LogDebug("Found file: {FileName} ({Size:N0} bytes)", Path.GetFileName(file), fileInfo.Length);
-                            }
-
-                            if (foundFiles.Any())
-                            {
-                                // Smart file selection logic
-                                var titleWords = download.Title?.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries) ?? new string[0];
-
-                                // Try to find file with most title words in the filename
-                                var bestMatch = foundFiles
-                                    .Select(f => new
-                                    {
-                                        Path = f,
-                                        FileName = Path.GetFileNameWithoutExtension(f),
-                                        Size = new FileInfo(f).Length,
-                                        MatchScore = titleWords.Count(word =>
-                                            Path.GetFileNameWithoutExtension(f).Contains(word, StringComparison.OrdinalIgnoreCase))
-                                    })
-                                    .OrderByDescending(x => x.MatchScore)
-                                    .ThenByDescending(x => x.Size) // Prefer larger files as tie-breaker
-                                    .FirstOrDefault();
-
-                                if (bestMatch != null)
-                                {
-                                    // If there is more than one audio file in the directory we treat this
-                                    // as a multi-file release (audiobook with multiple tracks). In that
-                                    // case enqueue the directory itself so downstream processing will
-                                    // delegate to ImportService.ImportFilesFromDirectoryAsync which
-                                    // imports all files in the folder. If just a single audio file
-                                    // exists, keep the current behavior and select the file.
-                                    if (foundFiles.Count > 1)
-                                    {
-                                        sourceFile = localPath; // queue the directory for multi-file import
-                                        _logger.LogInformation("Detected multi-file download (contains {Count} audio files) - enqueuing directory for import: {Directory}", foundFiles.Count, localPath);
-                                    }
-                                    else
-                                    {
-                                        sourceFile = bestMatch.Path;
-                                        _logger.LogInformation("Selected best matching file: {FileName} (match score: {Score}, size: {Size:N0} bytes)",
-                                            Path.GetFileName(sourceFile), bestMatch.MatchScore, bestMatch.Size);
-                                        try { _metrics.Increment("finalize.file.selected_from_dir"); } catch { }
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error scanning directory for files: {Directory}", localPath);
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Local path does not exist or is not accessible: {LocalPath}", localPath);
-
-                        // Heuristic attempts to handle common SABnzbd/staging variations
-                        // Some clients (and SABnzbd history entries) append numeric suffixes
-                        // like '.1' to folder names or file names. Try stripping trailing
-                        // numeric suffix and/or searching the parent directory for a
-                        // similarly named folder that contains valid audio files.
-                        try
-                        {
-                            // Normalize: remove any trailing slash for manipulation
-                            var trimmed = localPath.TrimEnd('/', '\\');
-
-                            // 1) Strip trailing numeric suffixes like '.1', '.2' etc
-                            var noNumericSuffix = System.Text.RegularExpressions.Regex.Replace(trimmed, @"\.\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                            if (!string.Equals(noNumericSuffix, trimmed, StringComparison.OrdinalIgnoreCase))
-                            {
-                                // If this candidate exists, treat it as the local path
-                                if (File.Exists(noNumericSuffix) && settings.AllowedFileExtensions.Any(ext => noNumericSuffix.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    sourceFile = noNumericSuffix;
-                                    foundFiles.Add(sourceFile);
-                                    _logger.LogInformation("Found file by stripping numeric suffix: {File}", sourceFile);
-                                    try { _metrics.Increment("finalize.heuristic.strip_suffix"); } catch { }
-                                }
-                                else if (Directory.Exists(noNumericSuffix))
-                                {
-                                    var tmpFiles = Directory.GetFiles(noNumericSuffix, "*.*", SearchOption.AllDirectories)
-                                        .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                        .ToList();
-
-                                    if (tmpFiles.Any())
-                                    {
-                                        foundFiles = tmpFiles;
-                                        sourceFile = tmpFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                        _logger.LogInformation("Found files by stripping numeric suffix in directory: {Directory}. Selected: {File}", noNumericSuffix, sourceFile);
-                                        try { _metrics.Increment("finalize.heuristic.strip_suffix"); } catch { }
-                                    }
-                                }
-                            }
-
-                            // 2) If still not found, search parent directory for near matches
-                            if (string.IsNullOrEmpty(sourceFile))
-                            {
-                                var parent = Path.GetDirectoryName(trimmed);
-                                if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
-                                {
-                                    var baseName = Path.GetFileName(trimmed);
-                                    // Remove a trailing numeric suffix for matching purposes
-                                    var baseNoSuffix = System.Text.RegularExpressions.Regex.Replace(baseName, @"\.\d+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-                                    var candidateDirs = Directory.GetDirectories(parent)
-                                        .Where(d => Path.GetFileName(d).IndexOf(baseNoSuffix, StringComparison.OrdinalIgnoreCase) >= 0)
-                                        .ToList();
-
-                                    foreach (var cand in candidateDirs)
-                                    {
-                                        try
-                                        {
-                                            var candFiles = Directory.GetFiles(cand, "*.*", SearchOption.AllDirectories)
-                                                .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                                .ToList();
-
-                                            if (candFiles.Any())
-                                            {
-                                                sourceFile = candFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                                foundFiles = candFiles;
-                                                _logger.LogInformation("Found file by searching parent directory: {Candidate} -> {File}", cand, sourceFile);
-                                                try { _metrics.Increment("finalize.heuristic.parent_search_found"); } catch { }
-                                                break;
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            _logger.LogWarning(ex, "Error scanning candidate directory {Directory}", cand);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Heuristic search for alternate local path variants failed: {LocalPath}", localPath);
-                        }
-                    }
+                // Resolve the accurate import path via the download client adapter
+                QueueItem resolvedItem;
+                try
+                {
+                    resolvedItem = await importResolver.ResolveImportItemAsync(
+                        download,
+                        preliminaryItem,
+                        previousAttempt: null,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to resolve import item for download {DownloadId}, using fallback path", download.Id);
+                    resolvedItem = preliminaryItem;
                 }
 
-                // Fallback 1: Try download record paths
-                if (string.IsNullOrEmpty(sourceFile))
-                {
-                    _logger.LogDebug("No file found in client path, trying fallback paths from download record");
-
-                    var fallbackPaths = new[] { download.FinalPath, download.DownloadPath }.Where(p => !string.IsNullOrEmpty(p));
-
-                    foreach (var fallbackPath in fallbackPaths)
-                    {
-                        _logger.LogDebug("Checking fallback path: {Path}", fallbackPath);
-
-                        if (File.Exists(fallbackPath!))
-                        {
-                            sourceFile = fallbackPath!;
-                            _logger.LogInformation("Found file using fallback path: {FilePath}", sourceFile);
-                            break;
-                        }
-                        else if (Directory.Exists(fallbackPath!))
-                        {
-                            _logger.LogDebug("Fallback path is a directory, scanning: {Directory}", fallbackPath);
-
-                            try
-                            {
-                                var dirFiles = Directory.GetFiles(fallbackPath!, "*.*", SearchOption.AllDirectories)
-                                    .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .ToList();
-
-                                if (dirFiles.Any())
-                                {
-                                    sourceFile = dirFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                    _logger.LogInformation("Found file in fallback directory: {FilePath}", sourceFile);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error scanning fallback directory: {Directory}", fallbackPath);
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Fallback path does not exist: {Path}", fallbackPath);
-                        }
-                    }
-                }
-
-                // Fallback 2: Try common Docker volume paths if still not found
-                if (string.IsNullOrEmpty(sourceFile) && !string.IsNullOrEmpty(clientPath))
-                {
-                    _logger.LogDebug("Trying Docker volume path variations for: {ClientPath}", clientPath);
-
-                    var dockerPaths = new List<string>();
-
-                    // Common Docker path variations
-                    var variations = new List<string> { clientPath };
-
-                    // Common Docker path variations
-                    try
-                    {
-                        // Replace container /data path with /host/data if present
-                        variations.Add(clientPath.Replace("/data", "/host/data"));
-
-                        // Only attempt to replace client.DownloadPath if it is non-empty.
-                        // String.Replace throws when oldValue is empty, and some clients
-                        // may not set DownloadPath, so guard against that case.
-                        if (!string.IsNullOrEmpty(client.DownloadPath))
-                        {
-                            variations.Add(clientPath.Replace(client.DownloadPath, "/host" + client.DownloadPath));
-                        }
-
-                        variations.Add(Path.Combine("/host", clientPath.TrimStart('/')));
-                        variations.Add(Path.Combine("/data", clientPath.TrimStart('/')));
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Error building docker path variations for {ClientPath}", clientPath);
-                    }
-
-                    var pathVariations = variations.Distinct().ToArray();
-
-                    foreach (var variation in pathVariations.Distinct())
-                    {
-                        _logger.LogDebug("Trying Docker path variation: {Path}", variation);
-
-                        if (Directory.Exists(variation))
-                        {
-                            try
-                            {
-                                var dockerFiles = Directory.GetFiles(variation, "*.*", SearchOption.AllDirectories)
-                                    .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .ToList();
-
-                                if (dockerFiles.Any())
-                                {
-                                    var titleWords = download.Title?.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries) ?? new string[0];
-
-                                    var bestDockerMatch = dockerFiles
-                                        .Select(f => new
-                                        {
-                                            Path = f,
-                                            Size = new FileInfo(f).Length,
-                                            MatchScore = titleWords.Count(word =>
-                                                Path.GetFileNameWithoutExtension(f).Contains(word, StringComparison.OrdinalIgnoreCase))
-                                        })
-                                        .OrderByDescending(x => x.MatchScore)
-                                        .ThenByDescending(x => x.Size)
-                                        .First();
-
-                                    sourceFile = bestDockerMatch.Path;
-                                    _logger.LogInformation("Found file using Docker path variation: {FilePath} (match score: {Score})",
-                                        sourceFile, bestDockerMatch.MatchScore);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error scanning Docker path variation: {Path}", variation);
-                            }
-                        }
-                    }
-                }
-
-                // Fallback 3: Try to find files in client's base download directory
-                if (string.IsNullOrEmpty(sourceFile) && !string.IsNullOrEmpty(client.DownloadPath))
-                {
-                    _logger.LogDebug("Trying client base download directory: {DownloadPath}", client.DownloadPath);
-
-                    var searchPaths = new[] { client.DownloadPath };
-
-                    // Apply path mapping to client download path
-                    try
-                    {
-                        var pathMapper = scope.ServiceProvider.GetService<IRemotePathMappingService>();
-                        if (pathMapper != null)
-                        {
-                            var mappedClientPath = await pathMapper.TranslatePathAsync(client.Id, client.DownloadPath);
-                            if (!string.Equals(mappedClientPath, client.DownloadPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                searchPaths = new[] { client.DownloadPath, mappedClientPath };
-                                _logger.LogDebug("Added mapped client path to search: {MappedPath}", mappedClientPath);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error applying path mapping to client download path");
-                    }
-
-                    foreach (var searchPath in searchPaths)
-                    {
-                        if (Directory.Exists(searchPath))
-                        {
-                            _logger.LogDebug("Searching in client directory: {SearchPath}", searchPath);
-
-                            try
-                            {
-                                var clientFiles = Directory.GetFiles(searchPath, "*.*", SearchOption.AllDirectories)
-                                    .Where(f => settings.AllowedFileExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-                                    .Where(f => !string.IsNullOrEmpty(download.Title) &&
-                                               Path.GetFileName(f).Contains(download.Title.Split(' ')[0], StringComparison.OrdinalIgnoreCase))
-                                    .ToList();
-
-                                if (clientFiles.Any())
-                                {
-                                    sourceFile = clientFiles.OrderByDescending(f => new FileInfo(f).Length).First();
-                                    _logger.LogInformation("Found file in client directory search: {FilePath}", sourceFile);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error searching client directory: {SearchPath}", searchPath);
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Client search path does not exist: {SearchPath}", searchPath);
-                        }
-                    }
-                }
+                var sourceFile = resolvedItem.ContentPath ?? string.Empty;
+                _logger.LogInformation("Resolved import path for download {DownloadId}: {SourcePath}", download.Id, sourceFile);
 
                 // If the source is empty OR neither a file nor a directory exists at the path,
                 // treat it as a missing source. We need to consider directories valid here because
@@ -1359,8 +1401,8 @@ namespace Listenarr.Api.Services
 
                     if (attempts >= maxRetries)
                     {
-                        _logger.LogError("Unable to locate source file for download {DownloadId} after {Attempts} attempts. Searched paths: ClientPath={ClientPath}, LocalPath={LocalPath}, FinalPath={FinalPath}, DownloadPath={DownloadPath}",
-                            download.Id, attempts, clientPath, localPath, download.FinalPath, download.DownloadPath);
+                        _logger.LogError("Unable to locate source file for download {DownloadId} after {Attempts} attempts. Resolved path: {SourcePath}, FinalPath={FinalPath}, DownloadPath={DownloadPath}",
+                            download.Id, attempts, sourceFile, download.FinalPath, download.DownloadPath);
                         try { _metrics.Increment("finalize.failed.file_not_found"); } catch { }
                         try { _metrics.Increment("finalize.retry.exhausted"); } catch { }
                         // Reset retry tracking if we have exhausted attempts
@@ -1384,7 +1426,7 @@ namespace Listenarr.Api.Services
                     // Compute exponential backoff delay
                     var currentAttempt = _missingSourceRetryAttempts[download.Id];
                     var delaySeconds = initialDelay * (int)Math.Pow(2, Math.Max(0, currentAttempt - 1));
-                    _logger.LogInformation("Source not found for download {DownloadId}. Scheduling retry #{Attempt} in {Delay}s (paths: {LocalPath})", download.Id, currentAttempt, delaySeconds, localPath);
+                    _logger.LogInformation("Source not found for download {DownloadId}. Scheduling retry #{Attempt} in {Delay}s (resolved path: {SourcePath})", download.Id, currentAttempt, delaySeconds, sourceFile);
 
                     try { _metrics.Increment("finalize.retry.scheduled"); } catch { }
 
@@ -1561,10 +1603,10 @@ namespace Listenarr.Api.Services
                     var dbDownload = await db.Downloads.FindAsync(download.Id, cancellationToken);
                     if (dbDownload != null)
                     {
-                        // Ensure DownloadPath contains the client save path (already mapped to localPath earlier)
-                        if (!string.IsNullOrEmpty(localPath) && dbDownload.DownloadPath != localPath)
+                        // Ensure DownloadPath contains the resolved source path
+                        if (!string.IsNullOrEmpty(sourceFile) && dbDownload.DownloadPath != sourceFile)
                         {
-                            dbDownload.DownloadPath = localPath;
+                            dbDownload.DownloadPath = sourceFile;
                         }
 
                         // Mark the download as Processing (observed complete by client,
@@ -1626,6 +1668,15 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Polling SABnzbd client {ClientName}", client.Name);
                 try
                 {
+                    var now = DateTime.UtcNow;
+
+                    // Respect per-client poll schedules to avoid overloading SABnzbd
+                    if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && now < scheduled)
+                    {
+                        _logger.LogDebug("Skipping SABnzbd poll for {ClientName}, next scheduled at {Next}", client.Name, scheduled);
+                        return;
+                    }
+
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
 
                     using var http = _httpClientFactory.CreateClient("DownloadClient");
@@ -1834,6 +1885,21 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (SABnzbd). Waiting for stability window.", dl.Id);
+                                    
+                                    // Update download status to Completed in database so it stops being re-added to candidates
+                                    try
+                                    {
+                                        dl.Status = DownloadStatus.Completed;
+                                        dl.Progress = 100M;
+                                        dbContext.Downloads.Update(dl);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                    }
+                                    catch (Exception ex2)
+                                    {
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                    }
+                                    
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
@@ -1866,10 +1932,14 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning(ex, "Error processing download {DownloadId} while polling SABnzbd", dl.Id);
                         }
                     }
+
+                    // Schedule next poll now that this client's polling completed successfully
+                    ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error polling SABnzbd client {ClientName}", client.Name);
+                    ScheduleNextClientPollOnFailure(client.Id);
                 }
             }, cancellationToken);
         }
@@ -1885,6 +1955,15 @@ namespace Listenarr.Api.Services
                 _logger.LogDebug("Polling NZBGet client {ClientName}", client.Name);
                 try
                 {
+                    var now = DateTime.UtcNow;
+
+                    // Respect per-client poll schedules to avoid overloading NZBGet
+                    if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && now < scheduled)
+                    {
+                        _logger.LogDebug("Skipping NZBGet poll for {ClientName}, next scheduled at {Next}", client.Name, scheduled);
+                        return;
+                    }
+
                     var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/jsonrpc";
 
                     using var http = new HttpClient();
@@ -2070,6 +2149,21 @@ namespace Listenarr.Api.Services
                                 {
                                     _completionCandidates[dl.Id] = DateTime.UtcNow;
                                     _logger.LogInformation("Download {DownloadId} observed as complete candidate (NZBGet). Waiting for stability window.", dl.Id);
+                                    
+                                    // Update download status to Completed in database so it stops being re-added to candidates
+                                    try
+                                    {
+                                        dl.Status = DownloadStatus.Completed;
+                                        dl.Progress = 100M;
+                                        dbContext.Downloads.Update(dl);
+                                        await dbContext.SaveChangesAsync(cancellationToken);
+                                        _logger.LogDebug("Updated download {DownloadId} status to Completed in database", dl.Id);
+                                    }
+                                    catch (Exception ex2)
+                                    {
+                                        _logger.LogWarning(ex2, "Failed to update download {DownloadId} status to Completed", dl.Id);
+                                    }
+                                    
                                     // Broadcast candidate so UI can surface it immediately
                                     _ = BroadcastCandidateUpdateAsync(dl, true, cancellationToken);
                                     continue;
@@ -2100,10 +2194,14 @@ namespace Listenarr.Api.Services
                             _logger.LogWarning(ex, "Error processing download {DownloadId} while polling NZBGet", dl.Id);
                         }
                     }
+
+                    // Schedule next poll now that this client's polling completed successfully
+                    ScheduleNextClientPollOnSuccess(client.Id, downloads.Count);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error polling NZBGet client {ClientName}", client.Name);
+                    ScheduleNextClientPollOnFailure(client.Id);
                 }
             }, cancellationToken);
         }
@@ -2284,10 +2382,20 @@ namespace Listenarr.Api.Services
                     metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
                 }).ToList();
 
-                await _hubContext.Clients.All.SendAsync(
-                    "DownloadUpdate",
-                    sanitized,
-                    cancellationToken);
+                _logger.LogInformation("Broadcasting DownloadUpdate with {Count} items; sample ids: {Ids}", sanitized.Count, sanitized.Select(s => s.id).Take(5).ToArray());
+
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync(
+                        "DownloadUpdate",
+                        sanitized,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    // Log a friendly warning so operator can see broadcast failures
+                    _logger.LogWarning(ex, "Failed to send DownloadUpdate to SignalR clients (Count={Count}, SampleIds={Ids})", sanitized.Count, sanitized.Select(s => s.id).Take(5).ToArray());
+                }
             }
 
             // Also send full list periodically (every 10 polls)
@@ -2314,10 +2422,19 @@ namespace Listenarr.Api.Services
                     metadata = (d.Metadata ?? new Dictionary<string, object>()).Where(kvp => !string.Equals(kvp.Key, "ClientContentPath", StringComparison.OrdinalIgnoreCase)).ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
                 }).ToList();
 
-                await _hubContext.Clients.All.SendAsync(
-                    "DownloadsList",
-                    sanitizedList,
-                    cancellationToken);
+                _logger.LogInformation("Broadcasting DownloadsList with {Count} items; sample ids: {Ids}", sanitizedList.Count, sanitizedList.Select(s => s.id).Take(5).ToArray());
+
+                try
+                {
+                    await _hubContext.Clients.All.SendAsync(
+                        "DownloadsList",
+                        sanitizedList,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send DownloadsList to SignalR clients (Count={Count}, SampleIds={Ids})", sanitizedList.Count, sanitizedList.Select(s => s.id).Take(5).ToArray());
+                }
             }
         }
 

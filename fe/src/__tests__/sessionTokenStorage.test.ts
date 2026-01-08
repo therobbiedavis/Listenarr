@@ -4,16 +4,22 @@ import { sessionTokenManager } from '@/utils/sessionToken'
 describe('sessionTokenManager storage propagation', () => {
   beforeEach(() => {
     // Ensure clean localStorage before each test
-    try { localStorage.removeItem('listenarr_session_token') } catch {}
+    try {
+      localStorage.removeItem('listenarr_session_token')
+    } catch {}
   })
 
   afterEach(() => {
-    try { localStorage.removeItem('listenarr_session_token') } catch {}
+    try {
+      localStorage.removeItem('listenarr_session_token')
+    } catch {}
   })
 
   it('notifies subscribers when storage is changed (cross-tab)', () => {
     const events: Array<string | null> = []
-    const unsub = sessionTokenManager.onTokenChange((token) => { events.push(token) })
+    const unsub = sessionTokenManager.onTokenChange((token) => {
+      events.push(token)
+    })
 
     // Simulate another tab writing to localStorage by dispatching a StorageEvent
     const token = 'abc123'

@@ -16,7 +16,7 @@
 
 <script setup lang="ts">
 const importFromFolder = () => {
-  console.log('Import from folder')
+  // TODO: Implement folder import functionality
 }
 </script>
 
@@ -38,7 +38,7 @@ const importFromFolder = () => {
 
 .import-card {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 2rem;
   text-align: center;
   cursor: pointer;

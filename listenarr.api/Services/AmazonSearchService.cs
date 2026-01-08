@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using System.Net;
 using HtmlAgilityPack;
 using System.Text.Json;
+using System.Buffers.Binary;
 
 namespace Listenarr.Api.Services
 {
@@ -26,9 +27,9 @@ namespace Listenarr.Api.Services
 
     public interface IAmazonSearchService
     {
-        Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null);
+        Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null, CancellationToken ct = default);
         // Scrape the product detail page for an ASIN (product title/author/image) as a fallback
-        Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin);
+        Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, CancellationToken ct = default);
     }
 
     public class AmazonSearchService : IAmazonSearchService
@@ -115,7 +116,7 @@ namespace Listenarr.Api.Services
             _amazonAsinService = amazonAsinService;
         }
 
-        public async Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null)
+        public async Task<List<AmazonSearchResult>> SearchAudiobooksAsync(string title, string? author = null, CancellationToken ct = default)
         {
             var results = new List<AmazonSearchResult>();
 
@@ -133,11 +134,13 @@ namespace Listenarr.Api.Services
                 // variations which frequently return unrelated Audible results for ISBNs.
                 var digitsOnlyCheck = Regex.Replace(searchQuery ?? string.Empty, "\\D", "");
                 List<string> searchVariations;
+                bool isIsbnSearch = false;
                 if (!string.IsNullOrEmpty(digitsOnlyCheck) && (digitsOnlyCheck.Length == 10 || digitsOnlyCheck.Length == 13))
                 {
                     // For ISBN searches, only use the cleaned digits (no extra suffixes)
-                    _logger.LogInformation("ISBN-only search detected for {Query}; restricting variations to ISBN mode", searchQuery);
+                    _logger.LogInformation("ISBN-only search detected for {Query}; will search ONLY Amazon Books stripbooks (not Audible)", searchQuery);
                     searchVariations = new List<string> { digitsOnlyCheck };
+                    isIsbnSearch = true;
                 }
                 else
                 {
@@ -152,7 +155,7 @@ namespace Listenarr.Api.Services
 
                 foreach (var query in searchVariations)
                 {
-                    var searchResults = await SearchAmazonAsync(query);
+                    var searchResults = await SearchAmazonAsync(query, ct, isIsbnSearch);
                     results.AddRange(searchResults);
 
                     // Stop if we found a larger set of results (increase from 10 to 50)
@@ -177,7 +180,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<List<AmazonSearchResult>> SearchAmazonAsync(string query)
+        private async Task<List<AmazonSearchResult>> SearchAmazonAsync(string query, CancellationToken ct = default, bool isIsbnSearch = false)
         {
             var results = new List<AmazonSearchResult>();
             var seenAsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -189,22 +192,64 @@ namespace Listenarr.Api.Services
             {
                 // If the query looks like an ISBN (digits only, length 10 or 13), search the books index
                 // using the ISBN filter (p_66) to get exact ISBN matches. Otherwise search Audible index.
+                // Additionally: callers may pass a full Amazon "stripbooks" URL. Detect that and
+                // extract the ISBN (p_66) so we use the intended Books search rather than
+                // re-encoding the whole URL into a k= parameter which yields wrong results.
+                // IMPORTANT: For ISBN searches, we ONLY scrape the Books/stripbooks page, NOT Audible.
                 var digitsOnly = Regex.Replace(query ?? string.Empty, "\\D", "");
                 string searchUrl;
+
+                // Attempt to detect an Amazon stripbooks URL passed as the query and extract p_66 ISBN
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(query) && Uri.IsWellFormedUriString(query, UriKind.Absolute))
+                    {
+                        var incomingUri = new Uri(query);
+                        if (incomingUri.Host.IndexOf("amazon.", StringComparison.OrdinalIgnoreCase) >= 0 && incomingUri.AbsolutePath.StartsWith("/s", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var qs = System.Web.HttpUtility.ParseQueryString(incomingUri.Query);
+                            var rh = qs.Get("rh");
+                            if (!string.IsNullOrEmpty(rh))
+                            {
+                                // rh may be encoded; try to pull p_66:ISBN pattern
+                                var rhDecoded = WebUtility.UrlDecode(rh);
+                                var m = Regex.Match(rhDecoded ?? string.Empty, "p_66[:%3A]*(\\d{10,13})");
+                                if (m.Success && m.Groups.Count > 1)
+                                {
+                                    digitsOnly = m.Groups[1].Value;
+                                }
+                            }
+
+                            // If we successfully extracted an ISBN, prefer the stripbooks path
+                            if (!string.IsNullOrEmpty(digitsOnly) && (digitsOnly.Length == 10 || digitsOnly.Length == 13))
+                            {
+                                _logger.LogDebug("Detected incoming Amazon stripbooks URL; extracted ISBN {Isbn}", digitsOnly);
+                                searchUrl = $"https://www.amazon.com/s?i=stripbooks&rh=p_66%3A{Uri.EscapeDataString(digitsOnly)}&s=relevancerank&Adv-Srch-Books-Submit.x=20&Adv-Srch-Books-Submit.y=6&unfiltered=1";
+                                goto BuildComplete;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to parse incoming query as URL for special handling: {Query}", query);
+                }
+
                 if (!string.IsNullOrEmpty(digitsOnly) && (digitsOnly.Length == 10 || digitsOnly.Length == 13))
                 {
-                    // Exact-ISBN search in Books (stripbooks) using p_66 filter
-                    searchUrl = $"https://www.amazon.com/s?i=stripbooks&rh=p_66%3A{Uri.EscapeDataString(digitsOnly)}";
+                    // Exact-ISBN search in Books (stripbooks) using p_66 filter with all required parameters
+                    searchUrl = $"https://www.amazon.com/s?i=stripbooks&rh=p_66%3A{Uri.EscapeDataString(digitsOnly)}&s=relevancerank&Adv-Srch-Books-Submit.x=20&Adv-Srch-Books-Submit.y=6&unfiltered=1";
                 }
                 else
                 {
                     // Search specifically in Audible store for general queries
                     searchUrl = $"https://www.amazon.com/s?k={Uri.EscapeDataString(query ?? string.Empty)}&i=audible&ref=sr_nr_n_1";
                 }
+            BuildComplete: ;
 
                 _logger.LogInformation("Searching Amazon: {SearchUrl}", searchUrl);
 
-                var html = await GetHtmlAsync(searchUrl);
+                var html = await GetHtmlAsync(searchUrl, ct);
                 if (string.IsNullOrEmpty(html))
                 {
                     return results;
@@ -221,6 +266,12 @@ namespace Listenarr.Api.Services
                 {
                     _logger.LogWarning("Amazon bot detection triggered");
                     return results;
+                }
+                
+                // For ISBN searches, we ONLY scrape the stripbooks page results - no second-pass searches
+                if (isIsbnSearch)
+                {
+                    _logger.LogInformation("ISBN search mode: extracting ASINs from Books/stripbooks results only (skipping Audible search)");
                 }
 
                 // Find search result items using modern Amazon selectors
@@ -246,52 +297,35 @@ namespace Listenarr.Api.Services
                 {
                     foreach (var node in resultNodes.Take(200)) // Increase scan to first 200 nodes to capture more candidates
                     {
+                        ct.ThrowIfCancellationRequested();
                         if (results.Count >= EarlyAsinCap) break; // early cap
-                        var result = ExtractSearchResult(node);
+                        var result = await ExtractSearchResult(node, ct);
                         if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
                         {
-                            // If this query is an ISBN, require product-page verification that the ISBN is present
+                            // For ISBN queries, accept ASINs from stripbooks results without strict verification.
+                            // Audiobooks don't list print ISBNs on their pages, so verification would reject valid results.
+                            // Let the metadata enrichment and scoring determine relevance.
                             if (!string.IsNullOrEmpty(digitsOnly) && (digitsOnly.Length == 10 || digitsOnly.Length == 13))
                             {
-                                try
+                                // Optionally fetch a nicer title if we only had a placeholder
+                                if (IsPlaceholderTitle(result.Title) && productPageFetches < 100)
                                 {
-                                    var verify = await _amazonAsinService.VerifyAsinContainsIsbnAsync(result.Asin!, digitsOnly);
-                                    if (verify.Success && verify.MatchesIsbn)
+                                    try
                                     {
-                                        // Optionally fetch a nicer title if we only had a placeholder
-                                        if (IsPlaceholderTitle(result.Title) && productPageFetches < 100)
+                                        var fetched = await FetchProductTitleAsync(result.Asin, ct);
+                                        if (!IsPlaceholderTitle(fetched))
                                         {
-                                            try
-                                            {
-                                                var fetched = await FetchProductTitleAsync(result.Asin);
-                                                if (!IsPlaceholderTitle(fetched))
-                                                {
-                                                    result.Title = fetched;
-                                                    productPageFetches++;
-                                                }
-                                            }
-                                            catch (Exception pex)
-                                            {
-                                                _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
-                                            }
+                                            result.Title = fetched;
+                                            productPageFetches++;
                                         }
-                                        results.Add(result);
-                                        _logger.LogInformation("Amazon candidate (ISBN): {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
                                     }
-                                    else
+                                    catch (Exception pex)
                                     {
-                                        // Record why the candidate was rejected for diagnostics
-                                        var reason = verify.Success ? "product-page-missing-isbn" : $"verify-failed:{verify.Error}";
-                                        filteredOut.Add((result.Asin ?? "<unknown>", result.Title, reason));
-                                        _logger.LogInformation("Filtered out Amazon candidate (ISBN) {Asin} Title={Title} Reason={Reason}", result.Asin, result.Title, reason);
-                                        _logger.LogDebug("Rejecting ASIN {Asin} for ISBN query {Isbn}: {Reason}", result.Asin, digitsOnly, reason);
+                                        _logger.LogDebug(pex, "Product page title fetch failed for {Asin}", result.Asin);
                                     }
                                 }
-                                catch (Exception ex)
-                                {
-                                    filteredOut.Add((result.Asin ?? "<unknown>", result.Title, "verify-exception"));
-                                    _logger.LogDebug(ex, "Exception verifying ASIN {Asin} for ISBN {Isbn}", result.Asin, digitsOnly);
-                                }
+                                results.Add(result);
+                                _logger.LogInformation("Amazon candidate (ISBN): {Asin} Title={Title} Author={Author} Image={ImageUrl}", result.Asin, result.Title, result.Author, result.ImageUrl);
                             }
                             else
                             {
@@ -303,7 +337,7 @@ namespace Listenarr.Api.Services
                                     {
                                         try
                                         {
-                                            var fetched = await FetchProductTitleAsync(result.Asin);
+                                            var fetched = await FetchProductTitleAsync(result.Asin, ct);
                                             if (!IsPlaceholderTitle(fetched))
                                             {
                                                 result.Title = fetched;
@@ -325,7 +359,7 @@ namespace Listenarr.Api.Services
                                     {
                                         try
                                         {
-                                            var fetchedAuthor = await FetchProductAuthorAsync(result.Asin);
+                                            var fetchedAuthor = await FetchProductAuthorAsync(result.Asin, ct);
                                             if (!string.IsNullOrWhiteSpace(fetchedAuthor))
                                             {
                                                 result.Author = fetchedAuthor;
@@ -360,6 +394,7 @@ namespace Listenarr.Api.Services
                     {
                         foreach (var link in asinLinks.Take(200))
                         {
+                            ct.ThrowIfCancellationRequested();
                             if (results.Count >= EarlyAsinCap) break;
                             var result = ExtractFromLink(link);
                             if (result != null && !string.IsNullOrEmpty(result.Asin) && seenAsins.Add(result.Asin))
@@ -368,7 +403,7 @@ namespace Listenarr.Api.Services
                                 {
                                     try
                                     {
-                                        var fetched = await FetchProductTitleAsync(result.Asin);
+                                        var fetched = await FetchProductTitleAsync(result.Asin, ct);
                                         if (!IsPlaceholderTitle(fetched))
                                         {
                                             result.Title = fetched;
@@ -405,6 +440,7 @@ namespace Listenarr.Api.Services
                         var asinMatches = AsinRegex.Matches(html);
                         foreach (Match m in asinMatches)
                         {
+                            ct.ThrowIfCancellationRequested();
                             if (results.Count >= EarlyAsinCap) break;
                             if (!m.Success) continue;
                             var asin = m.Groups[1].Value;
@@ -416,7 +452,7 @@ namespace Listenarr.Api.Services
                             {
                                 try
                                 {
-                                    var fetched = await FetchProductTitleAsync(asin);
+                                    var fetched = await FetchProductTitleAsync(asin, ct);
                                     if (!IsPlaceholderTitle(fetched))
                                     {
                                         titleGuess = fetched!;
@@ -469,7 +505,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private AmazonSearchResult? ExtractSearchResult(HtmlNode node)
+        private async Task<AmazonSearchResult?> ExtractSearchResult(HtmlNode node, CancellationToken ct = default)
         {
             try
             {
@@ -631,6 +667,24 @@ namespace Listenarr.Api.Services
                         if (chosen == null) chosen = norm; // fallback
                     }
                     imageUrl = chosen;
+
+                    // Validate candidate image early: discard 1x1 or non-square images to avoid placeholders
+                    if (!string.IsNullOrWhiteSpace(imageUrl))
+                    {
+                        try
+                        {
+                            var isSquare = await IsImageSquareAsync(imageUrl, ct);
+                            if (!isSquare)
+                            {
+                                _logger.LogInformation("Discarding non-square or placeholder image for candidate ASIN {Asin}: {ImageUrl}", asin, imageUrl);
+                                imageUrl = null;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Image validation failed for candidate image {Url}", imageUrl);
+                        }
+                    }
                 }
 
                 // Extract price
@@ -665,7 +719,101 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> GetHtmlAsync(string url)
+        private async Task<bool> IsImageSquareAsync(string imageUrl, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl)) return false;
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+                using var resp = await _httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (!resp.IsSuccessStatusCode) return false;
+
+                using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                var buffer = new byte[64 * 1024];
+                var read = 0;
+                while (read < buffer.Length)
+                {
+                    var r = await stream.ReadAsync(buffer, read, buffer.Length - read, ct);
+                    if (r == 0) break;
+                    read += r;
+                }
+                var content = new byte[read];
+                Array.Copy(buffer, content, read);
+                var dims = TryGetImageDimensions(content);
+                if (dims == null) return false;
+                var (w, h) = dims.Value;
+                if (w <= 1 || h <= 1) return false;
+                return w == h;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "IsImageSquareAsync failed for URL {Url}", imageUrl);
+                return false;
+            }
+        }
+
+        private static (int width, int height)? TryGetImageDimensions(byte[] data)
+        {
+            if (data == null || data.Length < 10) return null;
+
+            // PNG
+            if (data.Length >= 24 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47)
+            {
+                try
+                {
+                    var width = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(16, 4));
+                    var height = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(20, 4));
+                    return (width, height);
+                }
+                catch { return null; }
+            }
+
+            // GIF
+            if (data.Length >= 10 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F')
+            {
+                try
+                {
+                    var width = BitConverter.ToUInt16(data, 6);
+                    var height = BitConverter.ToUInt16(data, 8);
+                    return ((int)width, (int)height);
+                }
+                catch { return null; }
+            }
+
+            // JPEG
+            if (data.Length >= 2 && data[0] == 0xFF && data[1] == 0xD8)
+            {
+                int offset = 2;
+                while (offset + 9 < data.Length)
+                {
+                    if (data[offset] != 0xFF) break;
+                    var marker = data[offset + 1];
+                    if (marker == 0xC0 || marker == 0xC2)
+                    {
+                        try
+                        {
+                            var length = (data[offset + 2] << 8) + data[offset + 3];
+                            if (offset + 5 + 4 >= data.Length) return null;
+                            var height = (data[offset + 5] << 8) + data[offset + 6];
+                            var width = (data[offset + 7] << 8) + data[offset + 8];
+                            return (width, height);
+                        }
+                        catch { return null; }
+                    }
+                    else
+                    {
+                        if (offset + 4 >= data.Length) break;
+                        var segLen = (data[offset + 2] << 8) + data[offset + 3];
+                        if (segLen < 2) break;
+                        offset += 2 + segLen;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private async Task<string?> GetHtmlAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -680,8 +828,8 @@ namespace Listenarr.Api.Services
                 request.Headers.Add("Connection", "keep-alive");
                 request.Headers.Add("Upgrade-Insecure-Requests", "1");
 
-                var response = await _httpClient.SendAsync(request);
-                var body = await response.Content.ReadAsStringAsync();
+                var response = await _httpClient.SendAsync(request, ct);
+                var body = await response.Content.ReadAsStringAsync(ct);
 
                 // If the response is not successful or looks like a bot/challenge page, try Playwright fallback
                 if (!response.IsSuccessStatusCode ||
@@ -741,12 +889,12 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> FetchProductTitleAsync(string asin)
+        private async Task<string?> FetchProductTitleAsync(string asin, CancellationToken ct = default)
         {
             try
             {
                 var url = $"https://www.amazon.com/dp/{asin}";
-                var html = await GetHtmlAsync(url);
+            var html = await GetHtmlAsync(url, ct);
                 if (string.IsNullOrEmpty(html)) return null;
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
@@ -764,10 +912,27 @@ namespace Listenarr.Api.Services
                     var pageTitle = doc.DocumentNode.SelectSingleNode("//title")?.InnerText;
                     if (!string.IsNullOrWhiteSpace(pageTitle))
                     {
-                        // Amazon often appends: : A Novel, Audible Audiobook – Unabridged
-                        // Remove trailing marketing phrases after a delimiter
-                        var cleaned = pageTitle.Split('|', '-', '–').FirstOrDefault();
-                        if (!string.IsNullOrWhiteSpace(cleaned)) title = cleaned.Trim();
+                        // Amazon title format: "Amazon.com: Product Title: Optional Subtitle | Category"
+                        // Prefer the second segment (product title) over "Amazon.com" prefix
+                        var segments = pageTitle.Split('|', '\u2013' /* en dash */, '\u2014' /* em dash */);
+                        if (segments.Length > 1)
+                        {
+                            // Take second-to-last or second segment to get product name
+                            var candidate = segments.Length > 2 ? segments[segments.Length - 2].Trim() : segments[0].Trim();
+                            if (!string.IsNullOrWhiteSpace(candidate) && !candidate.Equals("Amazon.com", StringComparison.OrdinalIgnoreCase))
+                            {
+                                title = candidate.Replace("Amazon.com:", "").Trim();
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: clean the single segment
+                            var cleaned = segments[0].Trim();
+                            if (!string.IsNullOrWhiteSpace(cleaned) && !cleaned.Equals("Amazon.com", StringComparison.OrdinalIgnoreCase))
+                            {
+                                title = cleaned.Replace("Amazon.com:", "").Trim();
+                            }
+                        }
                     }
                 }
                 // Filter placeholders / generic phrases
@@ -789,12 +954,12 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<string?> FetchProductAuthorAsync(string asin)
+        private async Task<string?> FetchProductAuthorAsync(string asin, CancellationToken ct = default)
         {
             try
             {
                 var url = $"https://www.amazon.com/dp/{asin}";
-                var html = await GetHtmlAsync(url);
+            var html = await GetHtmlAsync(url, ct);
                 if (string.IsNullOrEmpty(html)) return null;
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
@@ -843,12 +1008,12 @@ namespace Listenarr.Api.Services
         }
 
         // Public wrapper to allow callers to scrape product detail pages (uses Playwright fallback when needed)
-        public async Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin)
+        public async Task<AmazonSearchResult?> ScrapeProductPageAsync(string asin, CancellationToken ct = default)
         {
             try
             {
-                var title = await FetchProductTitleAsync(asin);
-                var author = await FetchProductAuthorAsync(asin);
+            var title = await FetchProductTitleAsync(asin, ct);
+            var author = await FetchProductAuthorAsync(asin, ct);
 
                 // Single HTML fetch and structured parsing for image + product details
                 string? image = null;
@@ -862,7 +1027,7 @@ namespace Listenarr.Api.Services
                 string? language = null;
 
                 var url = $"https://www.amazon.com/dp/{asin}";
-                var html = await GetHtmlAsync(url);
+                var html = await GetHtmlAsync(url, ct);
                 if (!string.IsNullOrWhiteSpace(html))
                 {
                     var doc = new HtmlDocument();

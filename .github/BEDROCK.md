@@ -1,17 +1,39 @@
-````markdown
-# Amazon Bedrock usage rules (stub)
+# Amazon Bedrock Instructions for Listenarr
 
-Purpose: guidance for using Amazon Bedrock and managed foundation models.
+## Overview
+Listenarr is a C# .NET 8.0 audiobook management system with Vue.js 3 frontend. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 
-Core rules (see `.github/AGENTS.md`):
+## Quick Start
+- **Run**: `npm run dev` from repository root
+- **Tech**: .NET 8.0, Vue 3, TypeScript, Pinia, EF Core, SQLite, SignalR
+- **Database**: `listenarr.api/config/database/listenarr.db`
+- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
 
-- Do not commit AWS credentials. Use IAM roles and temporary credentials.
-- Treat model outputs as untrusted; validate before use.
+## Critical Patterns
 
-Provider specifics:
+### Backend (.NET 8.0)
+1. **Download Status**: Always set `Status = DownloadStatus.Moved` after import
+2. **File Checks**: Verify `File.Exists(f.Path)` for wanted status (3 locations)
+3. **Authentication**: Transmission (409/session-id retry), qBittorrent (cookies)
+4. **Jobs**: Reset stuck jobs on startup (`ResetStuckJobsAsync`)
+5. **Async**: All I/O operations must be async
+6. **DI**: Constructor injection for all services
 
-- Authentication: use IAM roles (EC2/ECS/Lambda) or temporary STS credentials; avoid embedding keys.
-- Resource & cost: watch usage and cost; implement safeguards for runaway usage.
-- Data handling & compliance: ensure you follow AWS data protection and regional compliance rules.
+### Frontend (Vue 3 + TypeScript)
+1. **Components**: Use `<script setup>` with TypeScript
+2. **State**: Pinia stores, never mutate directly
+3. **Performance**: Use `v-memo` for large lists
+4. **Types**: TypeScript types for all API responses
+5. **Downloads**: Filter terminal states from active downloads
 
-````
+## Security
+- No hardcoded secrets (use IAM roles, `IConfiguration`)
+- Parameterized queries only (EF Core)
+- Validate file paths (prevent traversal)
+- See [AGENTS.md](AGENTS.md) for OWASP/CWE guidance
+
+## Common Issues
+- **Downloads not importing**: Check logs for auth errors, 30s stability window
+- **Multiple databases**: Run from repo root, not `bin/Debug`
+
+For detailed architecture, see [copilot-instructions.md](copilot-instructions.md).

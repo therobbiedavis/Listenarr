@@ -3,12 +3,13 @@ import * as signalR from '@microsoft/signalr'
 import type { LogEntry } from '@/types'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
+import { logger } from '@/utils/logger'
 
 /**
  * Composable for real-time system logs via SignalR
  * Automatically connects on component mount and disconnects on unmount
  * This ensures the connection only exists when the component is active
- * 
+ *
  * @param maxLogs - Maximum number of logs to keep in memory
  * @param autoConnect - Whether to automatically connect on mount (default: true)
  */
@@ -26,37 +27,43 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
     try {
       // Get authentication token
       let accessToken = sessionTokenManager.getToken()
-      
+
       // If no session token, try to get API key (for non-authenticated mode)
       if (!accessToken) {
         try {
           const sc = await getStartupConfigCached(2000)
           const apiKey = sc?.apiKey
-          const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
-          const authEnabled = typeof rawAuth === 'boolean'
-            ? rawAuth
-            : (typeof rawAuth === 'string' ? (rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true') : false)
+          const rawAuth =
+            sc?.authenticationRequired ??
+            (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
+          const authEnabled =
+            typeof rawAuth === 'boolean'
+              ? rawAuth
+              : typeof rawAuth === 'string'
+                ? rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true'
+                : false
 
           if (apiKey && !authEnabled) {
             accessToken = apiKey
           }
         } catch (e) {
-          console.debug('[LogHub] Failed to get API key', e)
+          logger.debug('[LogHub] Failed to get API key', e)
         }
       }
 
       // Get API base URL - SignalR needs direct backend connection in dev
       const apiBaseUrl = import.meta.env.DEV
-        ? 'http://localhost:5000'  // In dev, SignalR connects directly to backend (bypasses Vite proxy)
-        : (import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || '')
+        ? 'http://localhost:5000' // In dev, SignalR connects directly to backend (bypasses Vite proxy)
+        : import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || ''
       const hubUrl = `${apiBaseUrl}/hubs/logs`
 
       // Create SignalR connection
       connection.value = new signalR.HubConnectionBuilder()
         .withUrl(hubUrl, {
-          transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents,
+          transport:
+            signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents,
           skipNegotiation: false,
-          accessTokenFactory: () => accessToken || ''
+          accessTokenFactory: () => accessToken || '',
         })
         .withAutomaticReconnect([0, 2000, 5000, 10000, 30000]) // Retry delays in ms
         .configureLogging(signalR.LogLevel.Information)
@@ -67,7 +74,7 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
         console.log('[LogHub] Received log:', logEntry)
         // Add new log to the beginning of the array
         logs.value.unshift(logEntry)
-        
+
         // Keep only the most recent logs
         if (logs.value.length > maxLogs) {
           logs.value = logs.value.slice(0, maxLogs)
@@ -122,11 +129,11 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
       // Use the same base URL logic as the SignalR connection
       const apiBaseUrl = import.meta.env.DEV
         ? 'http://localhost:5000'
-        : (import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || '')
-      
+        : import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || ''
+
       const response = await fetch(`${apiBaseUrl}/api/system/logs?limit=100`)
       if (response.ok) {
-        const initialLogs = await response.json() as LogEntry[]
+        const initialLogs = (await response.json()) as LogEntry[]
         // Sort by timestamp descending (newest first)
         logs.value = initialLogs.sort((a, b) => {
           const dateA = new Date(a.timestamp).getTime()
@@ -161,6 +168,6 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
     isConnecting,
     connect,
     disconnect,
-    clearLogs
+    clearLogs,
   }
 }

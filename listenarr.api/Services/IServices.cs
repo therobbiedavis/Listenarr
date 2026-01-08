@@ -28,8 +28,11 @@ namespace Listenarr.Api.Services
         /// <param name="containmentMode">Containment mode: Strict|Relaxed|Off</param>
         /// <param name="requireAuthorAndPublisher">Whether both author and publisher are required</param>
         /// <param name="fuzzyThreshold">Similarity threshold used for fuzzy matching (0.0 - 1.0)</param>
+        /// <param name="region">Region code to prefer when querying metadata providers (default: us)</param>
+        /// <param name="language">Optional language code to filter metadata results (e.g. en, de)</param>
+        /// <param name="ct">Cancellation token to cancel the intelligent search operation.</param>
         /// <returns>Search results enriched with metadata from Amazon and Audible</returns>
-        Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7);
+        Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 50, int returnLimit = 50, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.7, string region = "us", string? language = null, CancellationToken ct = default);
 
         /// <summary>
         /// Searches a specific API/indexer by ID
@@ -39,6 +42,10 @@ namespace Listenarr.Api.Services
         /// <param name="category">Optional category filter</param>
         /// <returns>Search results from the specified API</returns>
         Task<List<SearchResult>> SearchByApiAsync(string apiId, string query, string? category = null);
+        /// <summary>
+        /// Search a specific indexer and return raw indexer search results (IndexerSearchResult) for indexer-specific consumers.
+        /// </summary>
+        Task<List<Listenarr.Domain.Models.IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null);
 
         /// <summary>
         /// Tests connectivity and authentication for a specific API
@@ -55,14 +62,39 @@ namespace Listenarr.Api.Services
         /// <param name="sortBy">Sort results by seeders, peers, size, or age</param>
         /// <param name="sortDirection">Sort direction (ascending or descending)</param>
         /// <param name="isAutomaticSearch">Whether this is an automatic search</param>
+        /// <param name="request">Optional request object to pass indexer-specific parameters</param>
         /// <returns>List of search results from indexers only</returns>
-        Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
+        Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null);
 
         /// <summary>
         /// Gets all enabled metadata sources (Amazon, Audible, etc.)
         /// </summary>
         /// <returns>List of enabled metadata source configurations</returns>
         Task<List<ApiConfiguration>> GetEnabledMetadataSourcesAsync();
+    }
+
+    /// <summary>
+    /// Provides audiobook metadata lookup across configured providers (Audimeta, Audnexus, Audible, etc.).
+    /// </summary>
+    public interface IAudiobookMetadataService
+    {
+        /// <summary>
+        /// Gets audiobook metadata from configured providers in priority order.
+        /// </summary>
+        /// <param name="asin">Amazon/Audible ASIN.</param>
+        /// <param name="region">Region code (default: us).</param>
+        /// <param name="cache">Whether provider caching should be used.</param>
+        /// <returns>Metadata payload (provider-specific shape) or null when unavailable.</returns>
+        Task<object?> GetMetadataAsync(string asin, string region = "us", bool cache = true);
+
+        /// <summary>
+        /// Gets audiobook metadata directly from Audimeta.
+        /// </summary>
+        /// <param name="asin">Amazon/Audible ASIN.</param>
+        /// <param name="region">Region code (default: us).</param>
+        /// <param name="cache">Whether provider caching should be used.</param>
+        /// <returns>Audimeta metadata or null when unavailable.</returns>
+        Task<AudimetaBookResponse?> GetAudimetaMetadataAsync(string asin, string region = "us", bool cache = true);
     }
 
     /// <summary>
@@ -131,8 +163,9 @@ namespace Listenarr.Api.Services
         /// </summary>
         /// <param name="downloadId">The download ID to remove</param>
         /// <param name="downloadClientId">Optional specific client ID</param>
+        /// <param name="force">If true, removes from database even if client removal fails</param>
         /// <returns>True if removed successfully, false otherwise</returns>
-        Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null);
+        Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false);
 
         /// <summary>
         /// Processes a completed download (moves files, updates database, triggers notifications)
@@ -169,6 +202,18 @@ namespace Listenarr.Api.Services
         /// <param name="client">The download client configuration to test</param>
         /// <returns>Tuple containing success flag, message, and optionally the client configuration</returns>
         Task<(bool Success, string Message, DownloadClientConfiguration? Client)> TestDownloadClientAsync(DownloadClientConfiguration client);
+
+        /// <summary>
+        /// Retrieve cached torrent bytes and filename for a given download id if available
+        /// </summary>
+        /// <param name="downloadId">The download ID to look up</param>
+        Task<(byte[]? Bytes, string? FileName)> GetCachedTorrentAsync(string downloadId);
+
+        /// <summary>
+        /// Retrieve cached announce URLs for a given download id if available
+        /// </summary>
+        /// <param name="downloadId">The download ID to look up</param>
+        Task<System.Collections.Generic.List<string>?> GetCachedAnnouncesAsync(string downloadId);
     }
 
     /// <summary>
@@ -430,6 +475,12 @@ namespace Listenarr.Api.Services
         /// </summary>
         /// <param name="config">The startup configuration to save</param>
         Task SaveStartupConfigAsync(StartupConfig config);
+
+        /// <summary>
+        /// Gets all webhook configurations
+        /// </summary>
+        /// <returns>List of webhook configurations</returns>
+        Task<List<WebhookConfiguration>> GetWebhookConfigurationsAsync();
     }
 
     /// <summary>
@@ -456,6 +507,15 @@ namespace Listenarr.Api.Services
         /// <param name="title">Notification title</param>
         /// <param name="message">Notification message</param>
         Task SendSystemNotificationAsync(string title, string message);
+
+        /// <summary>
+        /// Sends a notification to a specific webhook
+        /// </summary>
+        /// <param name="trigger">The event trigger name</param>
+        /// <param name="data">The notification data payload</param>
+        /// <param name="webhookUrl">The webhook URL to send to</param>
+        /// <param name="enabledTriggers">List of enabled triggers for this webhook</param>
+        Task SendNotificationAsync(string trigger, object data, string webhookUrl, List<string> enabledTriggers);
     }
 
     /// <summary>
@@ -514,8 +574,9 @@ namespace Listenarr.Api.Services
         /// Searches Audible for audiobooks
         /// </summary>
         /// <param name="query">Search query</param>
+        /// <param name="ct">Cancellation token to cancel the Audible search request.</param>
         /// <returns>List of Audible search results</returns>
-        Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query);
+        Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, CancellationToken ct = default);
     }
 
     /// <summary>

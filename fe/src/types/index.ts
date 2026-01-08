@@ -1,22 +1,31 @@
-export interface SearchResult {
+export interface BaseSearchResult {
   id: string
   title: string
   artist: string
   album: string
   category: string
+  source: string
+  sourceLink?: string
+  publishedDate: string
+  format: string
+  score?: number
+}
+
+export interface IndexerSearchResult extends BaseSearchResult {
   size: number
-  seeders: number
-  leechers: number
+  seeders?: number
+  leechers?: number
   magnetLink: string
   torrentUrl: string
   nzbUrl: string
-  source: string
   downloadType: string // "Torrent", "Usenet", or "DDL"
-  publishedDate: string
-  quality: string
-  format: string
-  // Extended audiobook metadata (optional)
+  quality?: string
+  resultUrl?: string // Canonical indexer page for the result
+}
+
+export interface MetadataSearchResult extends BaseSearchResult {
   description?: string
+  subtitle?: string
   publisher?: string
   language?: string
   runtime?: number
@@ -25,11 +34,58 @@ export interface SearchResult {
   asin?: string
   series?: string
   seriesNumber?: string
+  seriesList?: string[]
   productUrl?: string // Direct link to Amazon/Audible product page
-  resultUrl?: string // Canonical indexer page for the result (e.g., archive.org details, myanonamouse item page)
   isEnriched?: boolean
-  score?: number
-  metadataSource?: string // Which metadata API enriched this result (e.g., "Audimeta", "Audnexus")
+  metadataSource?: string // Which metadata API enriched this result
+  // Audimeta-style fields (when backend returns Audimeta-shaped JSON)
+  authors?: AudimetaAuthor[]
+  narrators?: AudimetaNarrator[]
+  lengthMinutes?: number
+  link?: string
+  releaseDate?: string
+  publishDate?: string
+}
+
+// Legacy SearchResult interface - kept for backwards compatibility
+// Combines both indexer and metadata properties
+export interface SearchResult extends BaseSearchResult {
+  // Indexer-specific properties
+  size: number
+  seeders?: number
+  leechers?: number
+  grabs?: number
+  files?: number
+  magnetLink: string
+  torrentUrl: string
+  nzbUrl: string
+  downloadType: string // "Torrent", "Usenet", or "DDL"
+  quality?: string
+  resultUrl?: string // Canonical indexer page for the result
+
+  // Metadata-specific properties
+  description?: string
+  subtitle?: string
+  publisher?: string
+  language?: string
+  runtime?: number
+  narrator?: string
+  imageUrl?: string
+  asin?: string
+  isbn?: string
+  series?: string
+  seriesNumber?: string
+  seriesList?: string[]
+  productUrl?: string // Direct link to Amazon/Audible product page
+  isEnriched?: boolean
+  metadataSource?: string // Which metadata API enriched this result
+  // Audimeta-style fields
+  authors?: AudimetaAuthor[]
+  narrators?: AudimetaNarrator[]
+  lengthMinutes?: number
+  link?: string
+  releaseDate?: string
+  publishDate?: string
 }
 
 export interface Download {
@@ -38,7 +94,7 @@ export interface Download {
   artist: string
   album: string
   originalUrl: string
-  status: 'Queued' | 'Downloading' | 'Paused' | 'Completed' | 'Failed' | 'Processing' | 'Ready'
+  status: 'Queued' | 'Downloading' | 'Paused' | 'Completed' | 'Failed' | 'Processing' | 'Ready' | 'Moved'
   progress: number
   totalSize: number
   downloadedSize: number
@@ -107,6 +163,7 @@ export interface DownloadClientConfiguration {
   downloadPath: string
   useSSL: boolean
   isEnabled: boolean
+  removeCompletedDownloads?: string // "none", "remove", "remove_and_delete"
   // Client-specific settings. Use `DownloadClientSettings` for typed access
   settings: DownloadClientSettings
 }
@@ -138,6 +195,15 @@ export interface RemotePathMapping {
   updatedAt: string
 }
 
+export interface RootFolder {
+  id: number
+  name: string
+  path: string
+  isDefault: boolean
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface TranslatePathRequest {
   downloadClientId: string
   remotePath: string
@@ -157,12 +223,12 @@ export interface ApplicationSettings {
   enableCoverArtDownload: boolean
   audnexusApiUrl: string
   maxConcurrentDownloads: number
-    pollingIntervalSeconds?: number
-    // How many seconds a download must be observed as complete by the client before finalization begins
-    downloadCompletionStabilitySeconds?: number
-    // Retry/backoff settings used by the server when a finalized download's source file is not yet present
-    missingSourceRetryInitialDelaySeconds?: number
-    missingSourceMaxRetries?: number
+  pollingIntervalSeconds?: number
+  // How many seconds a download must be observed as complete by the client before finalization begins
+  downloadCompletionStabilitySeconds?: number
+  // Retry/backoff settings used by the server when a finalized download's source file is not yet present
+  missingSourceRetryInitialDelaySeconds?: number
+  missingSourceMaxRetries?: number
   enableNotifications: boolean
   allowedFileExtensions: string[]
   // Action to perform for completed downloads: 'Move' or 'Copy'
@@ -193,7 +259,7 @@ export interface ApplicationSettings {
     triggers: string[]
     isEnabled: boolean
   }>
-  
+
   // Discord bot integration settings (optional)
   discordBotEnabled?: boolean
   discordApplicationId?: string
@@ -208,20 +274,20 @@ export interface ApplicationSettings {
   // Optional bot appearance customization
   discordBotUsername?: string
   discordBotAvatar?: string
-  
-    // Search behavior settings
-    // Toggle whether to include Amazon/Audible provider searches when performing intelligent search
-    enableAmazonSearch?: boolean
-    enableAudibleSearch?: boolean
-    // Enable OpenLibrary augmentation/search
-    enableOpenLibrarySearch?: boolean
-    // Limits and scoring thresholds used during search
-    // Maximum number of candidate ASINs to consider (candidateLimit)
-    searchCandidateCap?: number
-    // Maximum number of results to return to the UI (returnLimit)
-    searchResultCap?: number
-    // Fuzzy matching threshold used when comparing titles/authors (0.0 - 1.0)
-    searchFuzzyThreshold?: number
+
+  // Search behavior settings
+  // Toggle whether to include Amazon/Audible provider searches when performing intelligent search
+  enableAmazonSearch?: boolean
+  enableAudibleSearch?: boolean
+  // Enable OpenLibrary augmentation/search
+  enableOpenLibrarySearch?: boolean
+  // Limits and scoring thresholds used during search
+  // Maximum number of candidate ASINs to consider (candidateLimit)
+  searchCandidateCap?: number
+  // Maximum number of results to return to the UI (returnLimit)
+  searchResultCap?: number
+  // Fuzzy matching threshold used when comparing titles/authors (0.0 - 1.0)
+  searchFuzzyThreshold?: number
 }
 
 export interface StartupConfig {
@@ -249,14 +315,17 @@ export interface AudibleBookMetadata {
   subtitle?: string
   authors: string[]
   publishYear?: string
+  publishedDate?: string
   series?: string
   seriesNumber?: string
+  seriesList?: string[]
   description?: string
   genres?: string[]
   tags?: string[]
   narrators?: string[]
   isbn?: string
   asin: string
+  searchResult?: SearchResult
   publisher?: string
   language?: string
   runtime?: number
@@ -265,7 +334,9 @@ export interface AudibleBookMetadata {
   explicit?: boolean
   abridged?: boolean
   source?: string
+  sourceLink?: string
   openLibraryId?: string
+  metadataSource?: string
   // Optional local mapping to a quality profile ID when viewing in the UI
   qualityProfileId?: number
 }
@@ -312,6 +383,8 @@ export interface Audiobook {
   }[]
   quality?: string
   qualityProfileId?: number
+  // Optional list of author ASINs (populated by backend when available)
+  authorAsins?: string[]
 }
 
 export interface History {
@@ -447,6 +520,7 @@ export interface QualityProfile {
   mustContain?: string[] // Must be present
   preferredLanguages?: string[] // e.g., ["English", "Spanish"]
   minimumSeeders?: number
+  minimumScore?: number // Minimum score threshold for automatic downloads (Sonarr's MinFormatScore)
   isDefault?: boolean
   preferNewerReleases?: boolean
   maximumAge?: number // days (0 = no limit)
@@ -466,9 +540,20 @@ export interface QualityScore {
   scoreBreakdown: Record<string, number>
   rejectionReasons: string[]
   isRejected: boolean
+  // Optional Prowlarr-style composite smart score and breakdown
+  smartScore?: number
+  smartScoreBreakdown?: Record<string, number>
 }
 
-export type SearchSortBy = 'Seeders' | 'Size' | 'PublishedDate' | 'Title' | 'Source' | 'Quality'
+export type SearchSortBy =
+  | 'Seeders'
+  | 'Size'
+  | 'PublishedDate'
+  | 'Title'
+  | 'Source'
+  | 'Language'
+  | 'Quality'
+  | 'Grabs'
 
 export type SearchSortDirection = 'Ascending' | 'Descending'
 
@@ -571,4 +656,19 @@ export interface AudimetaSearchResult {
   imageUrl?: string
   lengthMinutes?: number
   language?: string
+  series?: AudimetaSeries[]
+  publisher?: string
+  narrators?: AudimetaNarrator[]
+  releaseDate?: string
+  link?: string
 }
+
+/**
+ * Response wrapper for search operations that can contain different types of results
+ */
+export interface SearchResponse {
+  indexerResults: IndexerSearchResult[]
+  metadataResults: MetadataSearchResult[]
+  totalCount: number
+}
+

@@ -1,3 +1,5 @@
+# Cline AI Instructions for Listenarr
+
 As a security-aware developer, generate secure .NET code using ASP.NET Core that inherently prevents top security weaknesses.
 Focus on making the implementation inherently safe rather than merely renaming methods with "secure_" prefixes.
 Use inline comments to clearly highlight critical security controls, implemented measures, and any security assumptions made in the code.
@@ -6,28 +8,79 @@ Adhere strictly to best practices from OWASP, with particular consideration for 
 
 ---
 
-### Memory Safety Considerations for .NET
-.NET is a memory-managed language with automatic garbage collection. This inherently mitigates many common memory safety issues like buffer overflows, use-after-free, and double-free vulnerabilities that are prevalent in unmanaged languages. Focus on proper disposal of unmanaged resources (e.g., IDisposable pattern) and efficient memory usage to prevent performance issues rather than low-level memory corruption.
+## Listenarr Project Overview
 
-### CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')
-**Summary:** SQL Injection occurs when untrusted input is incorporated directly into SQL queries, allowing attackers to manipulate database commands.
-**Mitigation Rule:** Always use parameterized queries or secure Object-Relational Mappers (ORMs) like Entity Framework Core for all database interactions. Never concatenate user input directly into SQL strings.
+Listenarr is a C# .NET 8.0 Web API backend with Vue.js 3 frontend for automated audiobook downloading and processing via torrent/NZB clients.
 
-### CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
-**Summary:** XSS vulnerabilities arise when untrusted data is displayed in a web page without proper encoding, enabling attackers to inject malicious scripts.
-**Mitigation Rule:** Automatically HTML-encode all user-supplied data before rendering it in HTML using `System.Web.HttpUtility.HtmlEncode` or leverage ASP.NET Core's Razor Pages/MVC, which provide automatic encoding by default. Implement a strict Content Security Policy (CSP) to restrict allowed content sources.
+### Technology Stack
+- **Backend**: ASP.NET Core (.NET 8), Entity Framework Core, SQLite
+- **Frontend**: Vue 3, TypeScript, Pinia, Vite, SignalR
+- **Architecture**: Clean architecture (Domain, Application, Infrastructure layers)
+
+### Quick Start
+- **Run**: `npm run dev` from repository root
+- **Database**: `listenarr.api/config/database/listenarr.db`
+- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
+- **Backend**: http://localhost:5000
+- **Frontend**: http://localhost:5173
+
+---
+
+## Critical Backend Patterns (.NET 8.0)
+
+1. **Download Status Lifecycle**: Always set `Status = DownloadStatus.Moved` after successful import (8 locations in CompletedDownloadProcessor.cs)
+2. **File Existence Validation**: Check `File.Exists(f.Path)` in wanted queries (3 locations: LibraryController x2, ScanBackgroundService)
+3. **Download Client Auth**: Transmission uses 409/session-id retry pattern; qBittorrent uses cookie sessions
+4. **Background Jobs**: Reset stuck jobs on startup in `DownloadProcessingBackgroundService.ResetStuckJobsAsync()`
+5. **Async/Await**: All I/O operations must be async
+6. **Dependency Injection**: Constructor injection for all services
+7. **Logging**: Use structured logging: `_logger.LogInformation("Processing {Id}", id)`
+
+---
+
+## Critical Frontend Patterns (Vue 3 + TypeScript)
+
+1. **Composition API**: Use `<script setup>` with TypeScript for all components
+2. **State Management**: Pinia stores with computed properties (never mutate state directly)
+3. **Performance**: Use `v-memo` for large lists with all reactive dependencies
+4. **Type Safety**: All API responses need TypeScript types in `types/index.ts`
+5. **Download Filtering**: Exclude terminal states ('Moved', 'Completed', 'Failed', 'Cancelled') from activeDownloads
+6. **SignalR**: Handle connection drops gracefully with reconnection logic
+
+---
+
+## Common Issues & Solutions
+
+- **Downloads not importing**: Check logs for auth errors (401, 409), verify 30-second stability window
+- **Multiple databases**: Always run from repo root, not `bin/Debug`
+- **Wanted status incorrect**: Verify file existence checks in 3 locations
+- **Hot reload fails**: Restart services with `npm run dev`
+
+---
+
+## Security (OWASP)
+
+### CWE-89: SQL Injection
+Always use parameterized queries or Entity Framework Core for all database interactions. Never concatenate user input directly into SQL strings.
+
+### CWE-79: Cross-site Scripting (XSS)
+Automatically HTML-encode all user-supplied data before rendering using ASP.NET Core's Razor automatic encoding or `HtmlEncoder.Default.Encode`.
 
 ### CWE-502: Deserialization of Untrusted Data
-**Summary:** Insecure deserialization can lead to remote code execution when an application deserializes untrusted, malicious data.
-**Mitigation Rule:** Avoid deserializing untrusted data, especially using general-purpose formatters like `BinaryFormatter`. If deserialization is unavoidable, use secure, constrained deserializers (e.g., `System.Text.Json` with appropriate `JsonSerializerOptions` to prevent polymorphic deserialization) and validate incoming data thoroughly before deserialization.
+Avoid deserializing untrusted data. Use secure deserializers like `System.Text.Json` with appropriate `JsonSerializerOptions`.
 
-### CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')
-**Summary:** Path traversal allows attackers to access arbitrary files and directories on a server by manipulating file paths.
-**Mitigation Rule:** Always use `Path.Combine` when constructing file paths and rigorously validate all user-supplied path segments to ensure they remain within an intended directory, explicitly checking for `..` or directory separator characters (`/`, `\`). Utilize `VirtualFileProvider` or similar abstractions where appropriate.
+### CWE-22: Path Traversal
+Always use `Path.Combine` and `Path.GetFileName()` when constructing file paths. Validate paths remain within intended directories.
 
 ### CWE-287: Improper Authentication
-**Summary:** Improper authentication vulnerabilities occur when an application fails to correctly verify the identity of a user, leading to unauthorized access.
-**Mitigation Rule:** Implement authentication using robust, well-established frameworks like ASP.NET Core Identity. Ensure strong password policies, multi-factor authentication (MFA) capabilities, secure password hashing (e.g., PBKDF2 with sufficient iterations via `Microsoft.AspNetCore.Identity.PasswordHasher`), and secure session management with appropriate timeouts and invalidation.
+Implement authentication using ASP.NET Core Identity. Ensure strong password policies, MFA capabilities, and secure session management.
+
+### CWE-522: Hardcoded Secrets
+Never hardcode secrets. Use `IConfiguration` with Azure Key Vault, environment variables, or `dotnet user-secrets` for development.
+
+---
+
+For comprehensive details, see [copilot-instructions.md](copilot-instructions.md) and [AGENTS.md](AGENTS.md).
 
 ### CWE-276: Incorrect Default Permissions (Broken Access Control)
 **Summary:** Broken access control allows users to perform actions for which they are not authorized, often due to improper permission checks.

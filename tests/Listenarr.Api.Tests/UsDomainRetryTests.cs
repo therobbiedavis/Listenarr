@@ -98,6 +98,7 @@ namespace Listenarr.Api.Tests
         public Task<bool> DeleteDownloadClientConfigurationAsync(string id) => Task.FromResult(true);
 
         public Task<ApplicationSettings> GetApplicationSettingsAsync() => Task.FromResult(new ApplicationSettings());
+        public Task<List<WebhookConfiguration>> GetWebhookConfigurationsAsync() => Task.FromResult(new List<WebhookConfiguration>());
         public Task SaveApplicationSettingsAsync(ApplicationSettings settings) => Task.CompletedTask;
 
         public Task<StartupConfig> GetStartupConfigAsync() => Task.FromResult(new StartupConfig());

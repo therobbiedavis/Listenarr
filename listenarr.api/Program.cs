@@ -1,7 +1,7 @@
 ﻿/*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
@@ -17,6 +17,9 @@
  */
 
 using Listenarr.Api.Services;
+using Listenarr.Api.Services.Search;
+using Listenarr.Api.Services.Search.Filters;
+using Listenarr.Api.Services.Search.Strategies;
 using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Listenarr.Api.Middleware;
@@ -39,9 +42,54 @@ var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 // Configure Serilog for structured logging, file rotation and SignalR broadcasting
 var logFilePath = Path.Combine(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
 var signalRSink = new SignalRLogSink();
+// Prefer explicit environment variable (useful for Docker/runtime overrides)
+var logLevelEnv = Environment.GetEnvironmentVariable("LISTENARR_LOG_LEVEL");
+
+// Ensure an external config file in 'config/appsettings/appsettings.json' is available and registered.
+// If the file does not exist on first startup, create a default one so non-Docker users have a place to customize.
+var externalConfigRelative = Path.Combine("config", "appsettings", "appsettings.json");
+var externalConfigAbsolute = Path.Combine(builder.Environment.ContentRootPath, externalConfigRelative);
+try
+{
+    var dir = Path.GetDirectoryName(externalConfigAbsolute) ?? string.Empty;
+    if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+    if (!File.Exists(externalConfigAbsolute))
+    {
+        // Minimal, safe default configuration (non-sensitive)
+        var defaultJson = "{\n  \"Serilog\": {\n    \"MinimumLevel\": {\n      \"Default\": \"Information\",\n      \"Override\": {\n        \"Microsoft\": \"Warning\",\n        \"System\": \"Warning\"\n      }\n    }\n  }\n}";
+        File.WriteAllText(externalConfigAbsolute, defaultJson);
+        Console.WriteLine($"[Listenarr] Created default configuration at '{externalConfigRelative}'. Edit this file to customize app settings.");
+    }
+}
+catch (Exception ex)
+{
+    // Do not fail startup on inability to write sample config; just log to console and continue
+    Console.WriteLine($"[Listenarr] Warning: failed to create default config '{externalConfigRelative}': {ex.Message}");
+}
+
+// Register the external config file (relative path is resolved against ContentRootPath)
+builder.Configuration.AddJsonFile(externalConfigRelative, optional: true, reloadOnChange: true);
+
+// Allow configuration files to also specify the minimum level (e.g., appsettings.json or appsettings.Development.json)
+var configLevel = builder.Configuration["Serilog:MinimumLevel:Default"] ?? builder.Configuration["Logging:LogLevel:Default"];
+
+LogEventLevel minimumLevel;
+if (!string.IsNullOrWhiteSpace(logLevelEnv) && Enum.TryParse<LogEventLevel>(logLevelEnv, ignoreCase: true, out var parsedFromEnv))
+{
+    minimumLevel = parsedFromEnv;
+}
+else if (!string.IsNullOrWhiteSpace(configLevel) && Enum.TryParse<LogEventLevel>(configLevel, ignoreCase: true, out var parsedFromConfig))
+{
+    minimumLevel = parsedFromConfig;
+}
+else
+{
+    minimumLevel = LogEventLevel.Information;
+}
 
 // Industry-standard defaults:
-// - Application logs at Information
+// - Application logs at Information (unless overridden)
 // - Third-party and framework logs (Microsoft/System) at Warning
 // - EF Core DB command logging elevated to Warning by default (can be lowered to Debug for troubleshooting)
 Log.Logger = new Serilog.LoggerConfiguration()
@@ -50,7 +98,7 @@ Log.Logger = new Serilog.LoggerConfiguration()
     .Enrich.WithProperty("Machine", Environment.MachineName)
     .Enrich.WithProperty("ProcessId", Environment.ProcessId)
     .Enrich.WithProperty("Application", "Listenarr.Api")
-    .MinimumLevel.Information()
+    .MinimumLevel.Is(minimumLevel)
     // Framework and system noise should be at Warning by default
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
@@ -104,6 +152,15 @@ builder.Services.AddSignalR()
         options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
 
+// RootFolder repository + service
+builder.Services.AddScoped<Listenarr.Api.Repositories.IRootFolderRepository, Listenarr.Api.Repositories.EfRootFolderRepository>();
+builder.Services.AddScoped<Listenarr.Api.Services.IRootFolderService, Listenarr.Api.Services.RootFolderService>();
+// Migrator for legacy single-outputPath -> RootFolder migration
+builder.Services.AddScoped<Listenarr.Api.Services.ILegacyOutputPathMigrator, Listenarr.Api.Services.LegacyOutputPathMigrator>();
+
+// History repository for tracking events
+builder.Services.AddScoped<Listenarr.Infrastructure.Repositories.IHistoryRepository, Listenarr.Infrastructure.Repositories.HistoryRepository>();
+
 // Add in-memory cache for metadata prefetch / reuse
 builder.Services.AddMemoryCache();
 
@@ -114,6 +171,9 @@ builder.Services.AddHttpClient<IAudibleMetadataService, AudibleMetadataService>(
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
 
+// Add Amazon metadata service (delegates to AudibleMetadataService for shared logic)
+builder.Services.AddScoped<IAmazonMetadataService, AmazonMetadataService>();
+
 // Add HTTP client for Audimeta service
 builder.Services.AddHttpClient<AudimetaService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
@@ -122,11 +182,49 @@ builder.Services.AddHttpClient<AudimetaService>()
     });
 
 // Add HTTP client for Audnexus service
-builder.Services.AddHttpClient<AudnexusService>()
+builder.Services.AddHttpClient<IAudnexusService, AudnexusService>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All
     });
+
+// Metadata routing across providers
+builder.Services.AddScoped<IAudiobookMetadataService, AudiobookMetadataService>();
+
+// Add metadata converters helper
+builder.Services.AddScoped<MetadataConverters>();
+builder.Services.AddScoped<MetadataMerger>();
+builder.Services.AddScoped<SearchProgressReporter>();
+
+// Add search result filters
+builder.Services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
+builder.Services.AddScoped<ISearchResultFilter, AudiobookOnlyFilter>();
+builder.Services.AddScoped<ISearchResultFilter, PromotionalTitleFilter>();
+builder.Services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
+builder.Services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
+builder.Services.AddScoped<SearchResultFilterPipeline>();
+
+// Add metadata fetching strategies
+builder.Services.AddScoped<IMetadataStrategy, AudimetaStrategy>();
+builder.Services.AddScoped<IMetadataStrategy, AudnexusStrategy>();
+builder.Services.AddScoped<MetadataStrategyCoordinator>();
+
+// Add ASIN candidate collector
+builder.Services.AddScoped<AsinCandidateCollector>();
+
+// Add ASIN enricher
+builder.Services.AddScoped<AsinEnricher>();
+
+// Add fallback scraper
+builder.Services.AddScoped<FallbackScraper>();
+
+// Add search result scorer
+builder.Services.AddScoped<SearchResultScorer>();
+
+// Add ASIN search handler
+builder.Services.AddScoped<AsinSearchHandler>();
+
+// Audible integration removed: AudibleApiService registration omitted
 
 // Add default HTTP client for other services
 builder.Services.AddHttpClient();
@@ -259,6 +357,9 @@ builder.Services.AddHttpClient("nzbget")
         .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
 // Adapter factory resolution is provided by `IDownloadClientAdapterFactory`.
+
+// Register import item resolution service for V2 path resolution
+builder.Services.AddScoped<Listenarr.Api.Services.IImportItemResolutionService, Listenarr.Api.Services.ImportItemResolutionService>();
 
 // Add named HttpClient for direct downloads (DDL)
 builder.Services.AddHttpClient("DirectDownload")
@@ -510,21 +611,42 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 // Antiforgery (CSRF) protection for SPA: expect token in X-XSRF-TOKEN header
+// The cookie SecurePolicy defaults to SameAsRequest so TLS-terminating reverse proxies can control
+// whether the cookie is marked secure by forwarding the original scheme (X-Forwarded-Proto).
+// Override via configuration: Antiforgery:Cookie:SecurePolicy = None|SameAsRequest|Always
+var antiforgeryCookiePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+var cfgPolicy = builder.Configuration["Antiforgery:Cookie:SecurePolicy"];
+if (!string.IsNullOrWhiteSpace(cfgPolicy) && Enum.TryParse<Microsoft.AspNetCore.Http.CookieSecurePolicy>(cfgPolicy, true, out var parsedPolicy))
+{
+    antiforgeryCookiePolicy = parsedPolicy;
+}
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-XSRF-TOKEN";
+    options.Cookie.SecurePolicy = antiforgeryCookiePolicy;
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
 });
+
+// Log guidance on startup when running in production so self-hosters know requirements
+if (builder.Environment.IsProduction())
+{
+    Log.Logger.Information("Antiforgery cookie SecurePolicy set to {Policy}. Ensure the app runs behind HTTPS or forwards X-Forwarded-Proto from a TLS-terminating proxy.", antiforgeryCookiePolicy);
+}
 
 // During local development we often run the frontend on a different port via Vite
 // and use plain HTTP. Ensure antiforgery cookie can be set in that scenario by
 // relaxing the SecurePolicy and SameSite settings when running in Development.
+// NOTE: CodeQL flags SecurePolicy.None as a security issue, but this is acceptable
+// in Development environment where HTTPS is not available. Production uses SameAsRequest
+// (configured above) which properly enforces Secure flag when behind HTTPS reverse proxy.
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddAntiforgery(options =>
     {
         options.HeaderName = "X-XSRF-TOKEN";
         // Allow the antiforgery cookie to be sent over plain HTTP during local dev
-        options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+        // This is safe because Development environment is not exposed to external traffic
+        options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None; // lgtm[cs/cookie-secure-policy-none]
         // During local development the frontend often runs on a different origin
         // (Vite dev server). Use SameSite=Lax so the browser will accept the
         // cookie for same-site requests to the Vite dev server while avoiding
@@ -605,7 +727,17 @@ using (var scope = app.Services.CreateScope())
         SqlitePragmaInitializer.ApplyPragmas(context);
         logger.LogInformation("SQLite pragmas applied successfully");
 
-        // NOTE: Automatic schema ALTERs were intentionally removed from startup.
+            // Migrate legacy single-root configuration (ApplicationSettings.outputPath) into the new RootFolder table
+            try
+            {
+                using var migrScope = app.Services.CreateScope();
+                var migrator = migrScope.ServiceProvider.GetRequiredService<Listenarr.Api.Services.ILegacyOutputPathMigrator>();
+                migrator.MigrateAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Legacy output path migration failed");
+            }
         // Schema changes should be applied by EF migrations. See Migration:
         // Migrations/20251125103000_AddDownloadFinalizationSettingsToApplicationSettings.cs
     }
@@ -839,51 +971,74 @@ try
                 logger.LogDebug(ex, "Platform-specific Playwright install script attempt failed");
             }
 
-            // Fallback: try npx playwright install (requires Node.js available on PATH)
+            // Fallback: try the configured Playwright installer (which will itself handle npx presence checks)
             try
             {
-                // Install only Chromium to reduce download size and time. Give a much larger
-                // timeout (10 minutes) because browser artifacts are large and may take time
-                // on slow networks. Use the IProcessRunner when available so output is
-                // captured and timeouts are enforced consistently.
-                logger.LogInformation("Falling back to running 'npx playwright install chromium' to provision browsers (requires Node.js)");
-                var psi = new System.Diagnostics.ProcessStartInfo
+                logger.LogInformation("Attempting Playwright npx fallback via IPlaywrightInstaller (if available)");
+                var installer = scope.ServiceProvider.GetService<Listenarr.Api.Services.IPlaywrightInstaller>();
+                if (installer != null)
                 {
-                    FileName = "npx",
-                    Arguments = "playwright install chromium",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
-                if (processRunner != null)
-                {
-                    var result = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                    logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(result.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                    if (result.TimedOut)
+                    var result = await installer.InstallOnceAsync(cts.Token).ConfigureAwait(false);
+                    logger.LogDebug("Playwright installer output: {Out}\n{Err}", LogRedaction.RedactText(result.Out, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(result.Err, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    if (result.Success)
                     {
-                        logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
-                    }
-                    else if (result.ExitCode == 0)
-                    {
-                        logger.LogInformation("'npx playwright install chromium' completed successfully");
+                        logger.LogInformation("Playwright installer completed successfully");
                         return true;
                     }
                     else
                     {
-                        logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", result.ExitCode);
+                        logger.LogInformation("Playwright installer did not provision browsers: {Err}", result.Err);
                     }
                 }
                 else
                 {
-                    logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
+                    // Fallback: prior behavior was to attempt 'npx' directly; avoid doing that unless we can resolve the executable.
+                    var resolved = Listenarr.Api.Services.ProcessHelpers.FindExecutableOnPath("npx");
+                    if (string.IsNullOrEmpty(resolved))
+                    {
+                        logger.LogInformation("npx not found on PATH; skipping 'npx playwright install chromium' fallback.");
+                    }
+                    else
+                    {
+                        var psi = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = resolved,
+                            Arguments = "playwright install chromium",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+
+                        var processRunner = scope.ServiceProvider.GetService<Listenarr.Api.Services.IProcessRunner>();
+                        if (processRunner != null)
+                        {
+                            var pr = await processRunner.RunAsync(psi, timeoutMs: (int)TimeSpan.FromMinutes(10).TotalMilliseconds, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                            logger.LogDebug("Playwright npx output: {Out}\n{Err}", LogRedaction.RedactText(pr.Stdout, LogRedaction.GetSensitiveValuesFromEnvironment()), LogRedaction.RedactText(pr.Stderr, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                            if (pr.TimedOut)
+                            {
+                                logger.LogWarning("'npx playwright install chromium' timed out after {Timeout} seconds", TimeSpan.FromMinutes(10).TotalSeconds);
+                            }
+                            else if (pr.ExitCode == 0)
+                            {
+                                logger.LogInformation("'npx playwright install chromium' completed successfully");
+                                return true;
+                            }
+                            else
+                            {
+                                logger.LogWarning("'npx playwright install chromium' did not complete successfully. ExitCode={ExitCode}", pr.ExitCode);
+                            }
+                        }
+                        else
+                        {
+                            logger.LogWarning("IProcessRunner is not available; skipping 'npx playwright install chromium' fallback.");
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
-                logger.LogDebug(ex, "'npx playwright install chromium' attempt failed or npx not available");
+                logger.LogDebug(ex, "Playwright npx fallback attempt failed");
             }
 
             // As a last resort, ask the PlaywrightPageFetcher to ensure browsers are initialized.
@@ -961,6 +1116,40 @@ app.UseForwardedHeaders();
 
 // Serve frontend static files from wwwroot (index.html + assets)
 // DefaultFiles enables serving index.html when requesting '/'
+// Map `/placeholder.svg` to the frontend `fe/public/placeholder.svg` so the API
+// serves the exact same placeholder image used by the frontend without
+// modifying any frontend files.
+var frontendPlaceholderPath = Path.Combine(app.Environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
+app.MapGet("/placeholder.svg", async context =>
+{
+    try
+    {
+        if (File.Exists(frontendPlaceholderPath))
+        {
+            context.Response.ContentType = "image/svg+xml";
+            context.Response.Headers["Cache-Control"] = "public, max-age=300";
+            await context.Response.SendFileAsync(frontendPlaceholderPath);
+            return;
+        }
+
+        // Fallback to backend wwwroot placeholder if the frontend file is not present
+        var fallback = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "placeholder.svg");
+        if (File.Exists(fallback))
+        {
+            context.Response.ContentType = "image/svg+xml";
+            context.Response.Headers["Cache-Control"] = "public, max-age=300";
+            await context.Response.SendFileAsync(fallback);
+            return;
+        }
+
+        context.Response.StatusCode = 404;
+    }
+    catch
+    {
+        context.Response.StatusCode = 500;
+    }
+});
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 

@@ -6,7 +6,7 @@
         {{ isEdit ? 'Edit' : 'Add' }} Path Mapping
       </h4>
     </div>
-    
+
     <form @submit.prevent="handleSubmit">
       <div v-if="error" class="error-banner">
         <i class="ph ph-warning-circle"></i>
@@ -96,7 +96,7 @@ const emit = defineEmits<Emits>()
 const formData = ref({
   name: '',
   remotePath: '',
-  localPath: ''
+  localPath: '',
 })
 
 const loading = ref(false)
@@ -105,8 +105,7 @@ const error = ref<string | null>(null)
 const isEdit = computed(() => !!props.mapping)
 
 const isValid = computed(() => {
-  return formData.value.remotePath.trim().length > 0 &&
-         formData.value.localPath.trim().length > 0
+  return formData.value.remotePath.trim().length > 0 && formData.value.localPath.trim().length > 0
 })
 
 // Load existing mapping data when in edit mode
@@ -123,7 +122,7 @@ watch(
       formData.value.localPath = ''
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 const handleSubmit = () => {
@@ -137,7 +136,7 @@ const handleSubmit = () => {
       downloadClientId: props.downloadClientId,
       name: formData.value.name.trim() || undefined,
       remotePath: formData.value.remotePath.trim(),
-      localPath: formData.value.localPath.trim()
+      localPath: formData.value.localPath.trim(),
     })
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to save mapping'
@@ -155,7 +154,7 @@ const handleCancel = () => {
 .remote-path-mapping-form {
   background-color: #222;
   padding: 1.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid #444;
 }
 
@@ -188,7 +187,7 @@ const handleCancel = () => {
   margin-bottom: 1rem;
   background-color: rgba(220, 53, 69, 0.1);
   border: 1px solid rgba(220, 53, 69, 0.3);
-  border-radius: 4px;
+  border-radius: 6px;
   color: #ff6b7a;
 }
 
@@ -241,7 +240,7 @@ label.required::after {
   padding: 0.75rem;
   font-size: 0.95rem;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   background-color: #1a1a1a;
   color: #fff;
   transition: all 0.2s;
@@ -278,7 +277,7 @@ label.required::after {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
@@ -322,8 +321,12 @@ label.required::after {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 768px) {

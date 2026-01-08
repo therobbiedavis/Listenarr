@@ -56,8 +56,12 @@ class SessionTokenManager {
   onTokenChange(cb: (token: string | null) => void): () => void {
     this.subscribers.add(cb)
     // Call immediately with current value so subscribers have initial state
-    try { cb(this.token) } catch {}
-    return () => { this.subscribers.delete(cb) }
+    try {
+      cb(this.token)
+    } catch {}
+    return () => {
+      this.subscribers.delete(cb)
+    }
   }
 
   private handleStorageEvent = (ev: StorageEvent) => {
@@ -74,7 +78,9 @@ class SessionTokenManager {
       }
 
       for (const cb of Array.from(this.subscribers)) {
-        try { cb(this.token) } catch {}
+        try {
+          cb(this.token)
+        } catch {}
       }
     } catch {}
   }

@@ -23,9 +23,15 @@ using Listenarr.Api.Hubs;
 using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using HtmlAgilityPack;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Listenarr.Api.Services.Search;
+using Listenarr.Api.Services.Search.Filters;
+using Listenarr.Api.Services.Search.Strategies;
+using Microsoft.Extensions.Caching.Memory;
+using Listenarr.Api.Extensions;
 
 namespace Listenarr.Api.Services
 {
@@ -35,6 +41,7 @@ namespace Listenarr.Api.Services
         private readonly IConfigurationService _configurationService;
         private readonly ILogger<SearchService> _logger;
         private readonly IAudibleMetadataService _audibleMetadataService;
+        private readonly IAmazonMetadataService _amazonMetadataService;
         private readonly IOpenLibraryService _openLibraryService;
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly IAmazonSearchService _amazonSearchService;
@@ -43,12 +50,25 @@ namespace Listenarr.Api.Services
         private readonly ListenArrDbContext _dbContext;
         private readonly AudimetaService _audimetaService;
         private readonly AudnexusService _audnexusService;
+        private readonly MetadataConverters _metadataConverters;
+        private readonly MetadataMerger _metadataMerger;
+        private readonly SearchProgressReporter _searchProgressReporter;
+        private readonly SearchResultFilterPipeline _filterPipeline;
+        private readonly MetadataStrategyCoordinator _metadataStrategyCoordinator;
+        private readonly AsinCandidateCollector _asinCandidateCollector;
+        private readonly AsinEnricher _asinEnricher;
+        private readonly FallbackScraper _fallbackScraper;
+        private readonly SearchResultScorer _searchResultScorer;
+        private readonly AsinSearchHandler _asinSearchHandler;
+        private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _cache;
+        private readonly IEnumerable<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider> _searchProviders;
 
         public SearchService(
             HttpClient httpClient,
             IConfigurationService configurationService,
             ILogger<SearchService> logger,
             IAudibleMetadataService audibleMetadataService,
+            IAmazonMetadataService amazonMetadataService,
             IOpenLibraryService openLibraryService,
             IAmazonSearchService amazonSearchService,
             IAudibleSearchService audibleSearchService,
@@ -56,12 +76,25 @@ namespace Listenarr.Api.Services
             ListenArrDbContext dbContext,
             IHubContext<DownloadHub> hubContext,
             AudimetaService audimetaService,
-            AudnexusService audnexusService)
+            AudnexusService audnexusService,
+            MetadataConverters metadataConverters,
+            MetadataMerger metadataMerger,
+            SearchProgressReporter searchProgressReporter,
+            SearchResultFilterPipeline filterPipeline,
+            MetadataStrategyCoordinator metadataStrategyCoordinator,
+            AsinCandidateCollector asinCandidateCollector,
+            AsinEnricher asinEnricher,
+            FallbackScraper fallbackScraper,
+            SearchResultScorer searchResultScorer,
+            AsinSearchHandler asinSearchHandler,
+            IEnumerable<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>? searchProviders = null,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
             _logger = logger;
             _audibleMetadataService = audibleMetadataService;
+            _amazonMetadataService = amazonMetadataService;
             _openLibraryService = openLibraryService;
             _amazonSearchService = amazonSearchService;
             _audibleSearchService = audibleSearchService;
@@ -70,22 +103,18 @@ namespace Listenarr.Api.Services
             _hubContext = hubContext;
             _audimetaService = audimetaService;
             _audnexusService = audnexusService;
-        }
-
-        private async Task BroadcastSearchProgressAsync(string message, string? asin = null)
-        {
-            try
-            {
-                if (_hubContext != null)
-                {
-                    // Structured payload: include a type so clients can distinguish interactive vs automatic
-                    await _hubContext.Clients.All.SendAsync("SearchProgress", new { message, asin, type = "interactive" });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to broadcast SearchProgress: {Message}", ex.Message);
-            }
+            _metadataConverters = metadataConverters;
+            _metadataMerger = metadataMerger;
+            _searchProgressReporter = searchProgressReporter;
+            _filterPipeline = filterPipeline;
+            _metadataStrategyCoordinator = metadataStrategyCoordinator;
+            _asinCandidateCollector = asinCandidateCollector;
+            _asinEnricher = asinEnricher;
+            _fallbackScraper = fallbackScraper;
+            _searchProviders = searchProviders ?? Enumerable.Empty<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider>();
+            _searchResultScorer = searchResultScorer;
+            _asinSearchHandler = asinSearchHandler;
+            _cache = cache;
         }
 
         public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
@@ -101,7 +130,7 @@ namespace Listenarr.Api.Services
                 var automaticIndexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
                 if (automaticIndexerResults.Any())
                 {
-                    results.AddRange(automaticIndexerResults);
+                    results.AddRange(automaticIndexerResults.Select((IndexerSearchResult r) => SearchResultConverters.ToSearchResult(r)));
                     _logger.LogInformation("Found {Count} indexer results for automatic search query: {Query}", automaticIndexerResults.Count, query);
                 }
                 else
@@ -115,7 +144,7 @@ namespace Listenarr.Api.Services
             var intelligentResults = await IntelligentSearchAsync(query);
             if (intelligentResults.Any())
             {
-                results.AddRange(intelligentResults);
+                results.AddRange(intelligentResults.Select((MetadataSearchResult r) => SearchResultConverters.ToSearchResult(r)));
                 _logger.LogInformation("Found {Count} valid Amazon/Audible results using intelligent search for query: {Query}", intelligentResults.Count, query);
             }
             else
@@ -127,55 +156,99 @@ namespace Listenarr.Api.Services
                 {
                     var appSettings = await _configurationService.GetApplicationSettingsAsync();
 
-                    var fallback = new List<SearchResult>();
+                    var fallback = new ConcurrentBag<MetadataSearchResult>();
+
+                    // Parallelize Amazon and Audible searches
+                    var fallbackTasks = new List<Task>();
 
                     if (appSettings == null || appSettings.EnableAmazonSearch)
                     {
-                        var amazonResults = await _amazonSearchService.SearchAudiobooksAsync(query);
-                        foreach (var a in amazonResults.Take(12))
+                        fallbackTasks.Add(Task.Run(async () =>
                         {
-                            var r = ConvertAmazonSearchToResult(a);
-                            r.IsEnriched = false;
-                            fallback.Add(r);
-                        }
+                            var amazonResults = await _amazonSearchService.SearchAudiobooksAsync(query);
+                            var validResults = amazonResults.Take(12)
+                                .Where(a => !string.IsNullOrWhiteSpace(a.Author) && !string.IsNullOrWhiteSpace(a.Title))
+                                .Select(a =>
+                                {
+                                    var r = _metadataConverters.ConvertAmazonSearchToMetadataResult(a);
+                                    return r;
+                                });
+                            
+                            foreach (var r in validResults)
+                            {
+                                fallback.Add(r);
+                            }
+                        }));
                     }
 
                     if (appSettings == null || appSettings.EnableAudibleSearch)
                     {
-                        var audibleResults = await _audibleSearchService.SearchAudiobooksAsync(query);
-                        foreach (var a in audibleResults.Take(12))
+                        fallbackTasks.Add(Task.Run(async () =>
                         {
-                            var r = ConvertAudibleSearchToResult(a);
-                            r.IsEnriched = false;
-                            fallback.Add(r);
-                        }
+                            var audibleResults = await _audibleSearchService.SearchAudiobooksAsync(query);
+                            var validResults = audibleResults.Take(12)
+                                .Where(a => !string.IsNullOrWhiteSpace(a.Author) && !string.IsNullOrWhiteSpace(a.Title))
+                                .Select(a =>
+                                {
+                                    var r = ConvertAudibleSearchToResult(a);
+                                    r.IsEnriched = false;
+                                    var meta = SearchResultConverters.ToMetadata(r);
+                                    return meta;
+                                });
+                            
+                            foreach (var r in validResults)
+                            {
+                                fallback.Add(r);
+                            }
+                        }));
                     }
 
-                    _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
-                    return ApplySorting(fallback, sortBy, sortDirection);
+                    await Task.WhenAll(fallbackTasks);
+
+                    var fallbackList = fallback.ToList();
+                    _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallbackList.Count, query);
+                    results.AddRange(fallbackList.Select(r => SearchResultConverters.ToSearchResult(r)));
+                    return ApplySorting(results, sortBy, sortDirection);
                 }
                 catch (Exception exFallback)
                 {
                     _logger.LogWarning(exFallback, "Failed to consult application settings during fallback; performing provider calls conservatively");
 
-                    // Conservative fallback: call both providers if settings couldn't be loaded
-                    var amazonResults = await _amazonSearchService.SearchAudiobooksAsync(query);
-                    var audibleResults = await _audibleSearchService.SearchAudiobooksAsync(query);
-                    var fallback = new List<SearchResult>();
+                    // Conservative fallback: call both providers in parallel if settings couldn't be loaded
+                    var amazonTask = _amazonSearchService.SearchAudiobooksAsync(query);
+                    var audibleTask = _audibleSearchService.SearchAudiobooksAsync(query);
+                    await Task.WhenAll(amazonTask, audibleTask);
+                    
+                    var amazonResults = await amazonTask;
+                    var audibleResults = await audibleTask;
+                    var fallback = new List<MetadataSearchResult>();
                     foreach (var a in amazonResults.Take(12))
                     {
-                        var r = ConvertAmazonSearchToResult(a);
+                        // Skip results with missing critical information
+                        if (string.IsNullOrWhiteSpace(a.Author) || string.IsNullOrWhiteSpace(a.Title))
+                        {
+                            _logger.LogDebug("Skipping Amazon fallback result with missing author/title: {Title}, {Author}", a.Title, a.Author);
+                            continue;
+                        }
+                        var r = _metadataConverters.ConvertAmazonSearchToMetadataResult(a);
                         r.IsEnriched = false;
                         fallback.Add(r);
                     }
                     foreach (var a in audibleResults.Take(12))
                     {
+                        // Skip results with missing critical information
+                        if (string.IsNullOrWhiteSpace(a.Author) || string.IsNullOrWhiteSpace(a.Title))
+                        {
+                            _logger.LogDebug("Skipping Audible fallback result with missing author/title: {Title}, {Author}", a.Title, a.Author);
+                            continue;
+                        }
                         var r = ConvertAudibleSearchToResult(a);
                         r.IsEnriched = false;
-                        fallback.Add(r);
+                        fallback.Add(SearchResultConverters.ToMetadata(r));
                     }
                     _logger.LogInformation("Returning {Count} raw-conversion fallback results for query: {Query}", fallback.Count, query);
-                    return ApplySorting(fallback, sortBy, sortDirection);
+                    results.AddRange(fallback.Select(r => SearchResultConverters.ToSearchResult(r)));
+                    return ApplySorting(results, sortBy, sortDirection);
                 }
             }
 
@@ -183,28 +256,11 @@ namespace Listenarr.Api.Services
             var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
             if (indexerResults.Any())
             {
-                results.AddRange(indexerResults);
+                results.AddRange(indexerResults.Select(r => SearchResultConverters.ToSearchResult(r)));
                 _logger.LogInformation("Added {Count} indexer results (including DDL downloads) for query: {Query}", indexerResults.Count, query);
             }
 
-            // Apply sorting first so trimming (if configured) keeps the most relevant/desired items
-            var sorted = ApplySorting(results, sortBy, sortDirection);
-
-            try
-            {
-                var appSettings = await _configurationService.GetApplicationSettingsAsync();
-                if (appSettings != null && appSettings.SearchResultCap > 0 && sorted.Count > appSettings.SearchResultCap)
-                {
-                    _logger.LogInformation("Trimming total combined search results from {Before} to SearchResultCap={Cap}", sorted.Count, appSettings.SearchResultCap);
-                    sorted = sorted.Take(appSettings.SearchResultCap).ToList();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to load application settings when enforcing total SearchResultCap; returning full result set");
-            }
-
-            return sorted;
+            return ApplySorting(results, sortBy, sortDirection);
         }
 
         private List<SearchResult> ApplySorting(List<SearchResult> results, SearchSortBy sortBy, SearchSortDirection sortDirection)
@@ -212,15 +268,25 @@ namespace Listenarr.Api.Services
             if (!results.Any())
                 return results;
 
-            IOrderedEnumerable<SearchResult> orderedResults;
+            IEnumerable<SearchResult> orderedResults;
 
             // Primary sort
             switch (sortBy)
             {
                 case SearchSortBy.Seeders:
+                    // Enhanced seeders sort: consider Prowlarr-inspired composite scoring
+                    var seedScored = results.Select(r =>
+                    {
+                        Indexer? idx = null;
+                        if (r.IndexerId.HasValue)
+                            idx = _dbContext.Indexers.FirstOrDefault(i => i.Id == r.IndexerId.Value);
+                        var score = CalculateProwlarrStyleScore(r, idx);
+                        return new { Result = r, Score = score };
+                    }).ToList();
+
                     orderedResults = sortDirection == SearchSortDirection.Descending
-                        ? results.OrderByDescending(r => r.Seeders)
-                        : results.OrderBy(r => r.Seeders);
+                        ? seedScored.OrderByDescending(x => x.Score).Select(x => x.Result)
+                        : seedScored.OrderBy(x => x.Score).Select(x => x.Result);
                     break;
 
                 case SearchSortBy.Size:
@@ -247,15 +313,43 @@ namespace Listenarr.Api.Services
                         : results.OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase);
                     break;
 
+                case SearchSortBy.Language:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Language ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                        : results.OrderBy(r => r.Language ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+                    break;
+
                 case SearchSortBy.Quality:
                     orderedResults = sortDirection == SearchSortDirection.Descending
                         ? results.OrderByDescending(r => GetQualityScore(r.Quality))
                         : results.OrderBy(r => GetQualityScore(r.Quality));
                     break;
 
+                case SearchSortBy.Smart:
+                    // Prowlarr-style mult-tier scoring
+                    var scored = results.Select(r =>
+                    {
+                        Indexer? idx = null;
+                        if (r.IndexerId.HasValue)
+                            idx = _dbContext.Indexers.FirstOrDefault(i => i.Id == r.IndexerId.Value);
+                        var score = CalculateProwlarrStyleScore(r, idx);
+                        return new { Result = r, Score = score };
+                    }).ToList();
+
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? scored.OrderByDescending(x => x.Score).Select(x => x.Result)
+                        : scored.OrderBy(x => x.Score).Select(x => x.Result);
+                    break;
+
+                case SearchSortBy.Grabs:
+                    orderedResults = sortDirection == SearchSortDirection.Descending
+                        ? results.OrderByDescending(r => r.Grabs)
+                        : results.OrderBy(r => r.Grabs);
+                    break;
+
                 default:
                     // Default to seeders descending
-                    orderedResults = results.OrderByDescending(r => r.Seeders);
+                    orderedResults = results.OrderByDescending(r => r.Seeders ?? 0);
                     break;
             }
 
@@ -325,9 +419,87 @@ namespace Listenarr.Api.Services
             return 0;
         }
 
-        public async Task<List<SearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        // Prowlarr-style composite scoring helpers adapted for Listenarr
+        internal double CalculateProwlarrStyleScore(SearchResult result, Indexer? indexer = null)
         {
-            var results = new List<SearchResult>();
+            var composite = Scoring.CompositeScorer.CalculateProwlarrStyleScore(result, indexer, _logger);
+            return composite.Total;
+        }
+
+        private double CalculateSeedScore(SearchResult result)
+        {
+            var downloadType = (result.DownloadType ?? string.Empty).ToLower();
+
+            if (downloadType.Contains("usenet") || downloadType.Contains("ddl") || !string.IsNullOrEmpty(result.NzbUrl))
+            {
+                var grabs = result.Grabs;
+                if (grabs > 0)
+                {
+                    return Math.Min(100.0, 20.0 + (Math.Log10(grabs) * 20.0));
+                }
+                return 0.0;
+            }
+
+            // Torrent
+            var seeders = result.Seeders ?? 0;
+            if (seeders <= 0) return 0.0;
+
+            var seederScore = Math.Min(100.0, 20.0 + (Math.Log10(seeders) * 20.0));
+            var leechers = result.Leechers ?? 0;
+            if (leechers > 0)
+            {
+                var ratio = (double)seeders / Math.Max(1, leechers);
+                if (ratio > 2.0) seederScore += 10.0;
+                else if (ratio > 1.0) seederScore += 5.0;
+            }
+
+            return Math.Min(100.0, seederScore);
+        }
+
+        private double CalculateAgeScore(DateTime publishedDate)
+        {
+            if (publishedDate == DateTime.MinValue) return 50.0;
+            var age = DateTime.UtcNow - publishedDate;
+            if (age.TotalDays < 1) return 100.0;
+            if (age.TotalDays < 7) return 90.0;
+            if (age.TotalDays < 30) return 75.0;
+            if (age.TotalDays < 90) return 60.0;
+            if (age.TotalDays < 365) return 40.0;
+            return 20.0;
+        }
+
+        private double CalculateSizeScore(long sizeBytes)
+        {
+            if (sizeBytes <= 0) return 50.0;
+            var sizeMB = sizeBytes / (1024.0 * 1024.0);
+            if (sizeMB >= 100 && sizeMB <= 800) return 100.0;
+            if (sizeMB >= 50 && sizeMB < 100) return 80.0;
+            if (sizeMB > 800 && sizeMB <= 1500) return 80.0;
+            if (sizeMB >= 10 && sizeMB < 50) return 50.0;
+            if (sizeMB > 1500 && sizeMB <= 3000) return 50.0;
+            if (sizeMB < 10) return 20.0;
+            if (sizeMB > 3000) return 30.0;
+            return 50.0;
+        }
+
+        private double GetFormatScore(string? format)
+        {
+            if (string.IsNullOrEmpty(format)) return 50.0;
+            var fmt = format.ToLower();
+            if (fmt.Contains("m4b")) return 100.0;
+            if (fmt.Contains("flac")) return 95.0;
+            if (fmt.Contains("opus")) return 90.0;
+            if (fmt.Contains("m4a") || fmt.Contains("aac")) return 85.0;
+            if (fmt.Contains("mp3")) return 75.0;
+            if (fmt.Contains("ogg") || fmt.Contains("vorbis")) return 70.0;
+            if (fmt.Contains("wma")) return 40.0;
+            if (fmt.Contains("ra") || fmt.Contains("realaudio")) return 30.0;
+            return 50.0;
+        }
+
+        public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, Listenarr.Api.Models.SearchRequest? request = null)
+        {
+            var results = new List<IndexerSearchResult>();
             var indexers = await _dbContext.Indexers
                 .Where(i => i.IsEnabled && (isAutomaticSearch ? i.EnableAutomaticSearch : i.EnableInteractiveSearch))
                 .OrderBy(i => i.Priority)
@@ -348,14 +520,26 @@ namespace Listenarr.Api.Services
                 try
                 {
                     _logger.LogInformation("Searching indexer {Name} ({Type}) for query: {Query}", indexer.Name, indexer.Type, query);
-                    var indexerResults = await SearchIndexerAsync(indexer, query, category);
+                    // Apply indexer-level MyAnonamouse options if not provided explicitly on the request
+                    var perIndexerRequest = request;
+                    if (perIndexerRequest?.MyAnonamouse == null)
+                    {
+                        var mam = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
+                        if (mam != null)
+                        {
+                            perIndexerRequest ??= new Listenarr.Api.Models.SearchRequest();
+                            perIndexerRequest.MyAnonamouse = mam;
+                        }
+                    }
+
+                    var indexerResults = await SearchIndexerAsync(indexer, query, category, perIndexerRequest);
                     _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
                     return indexerResults;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error searching indexer {Name} for query: {Query}", indexer.Name, query);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
             }).ToList();
 
@@ -369,33 +553,473 @@ namespace Listenarr.Api.Services
 
             _logger.LogInformation("Total {Count} results from all indexers for query: {Query}", results.Count, query);
 
-            // Sort by seeders (descending) then by date
-            return results.OrderByDescending(r => r.Seeders).ThenByDescending(r => r.PublishedDate).ToList();
+            // Sort by seeders (descending) then by date - treat missing/null seeders as 0 so usenet results sort consistently
+            return results.OrderByDescending(r => r.Seeders ?? 0).ThenByDescending(r => r.PublishedDate).ToList();
         }
 
-        public async Task<List<SearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2)
+        public async Task<List<MetadataSearchResult>> IntelligentSearchAsync(string query, int candidateLimit = 200, int returnLimit = 100, string containmentMode = "Relaxed", bool requireAuthorAndPublisher = false, double fuzzyThreshold = 0.2, string region = "us", string? language = null, CancellationToken ct = default)
         {
-            var results = new List<SearchResult>();
+            var results = new List<MetadataSearchResult>();
 
             try
             {
                 _logger.LogInformation("Starting intelligent search for: {Query}", query);
 
-                // Step 1: Parallel search Amazon & Audible
-                _logger.LogInformation("Searching for: {Query}", query);
-                await BroadcastSearchProgressAsync($"Searching for {query}", null);
+                // Parse search prefixes (AUTHOR:, TITLE:, ISBN:, ASIN:) anywhere in the query
+                string? searchType = null;
+                string actualQuery = query;
+
+                var prefixes = new[] { "AUTHOR:", "TITLE:", "ISBN:", "ASIN:" };
+                var foundRanges = new List<(int Start, int End)>();
+                var parsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                int pos = 0;
+                while (pos < query.Length)
+                {
+                    int foundAt = -1;
+                    string? foundPrefix = null;
+                    for (int pi = 0; pi < prefixes.Length; pi++)
+                    {
+                        var prefix = prefixes[pi];
+                        var idx = query.IndexOf(prefix, pos, StringComparison.OrdinalIgnoreCase);
+                        if (idx >= 0 && (foundAt == -1 || idx < foundAt))
+                        {
+                            foundAt = idx;
+                            foundPrefix = prefix;
+                        }
+                    }
+                    if (foundAt == -1 || foundPrefix == null) break;
+
+                    int valueStart = foundAt + foundPrefix.Length;
+                    int nextAt = -1;
+                    for (int pi = 0; pi < prefixes.Length; pi++)
+                    {
+                        var np = query.IndexOf(prefixes[pi], valueStart, StringComparison.OrdinalIgnoreCase);
+                        if (np >= 0 && (nextAt == -1 || np < nextAt)) nextAt = np;
+                    }
+                    int valueEnd = nextAt == -1 ? query.Length : nextAt;
+
+                    var value = query.Substring(valueStart, valueEnd - valueStart).Trim();
+                    if (!string.IsNullOrEmpty(value)) parsed[foundPrefix] = value;
+                    foundRanges.Add((foundAt, valueEnd));
+                    pos = valueEnd;
+                }
+
+                if (parsed.TryGetValue("ASIN:", out var asinVal)) asinVal = asinVal?.Trim();
+                if (parsed.TryGetValue("ISBN:", out var isbnVal)) isbnVal = isbnVal?.Trim();
+                if (parsed.TryGetValue("AUTHOR:", out var authorVal)) authorVal = authorVal?.Trim();
+                if (parsed.TryGetValue("TITLE:", out var titleVal)) titleVal = titleVal?.Trim();
+
+                string? parsedAsin = parsed.ContainsKey("ASIN:") ? parsed["ASIN:"] : null;
+                string? parsedIsbn = parsed.ContainsKey("ISBN:") ? parsed["ISBN:"] : null;
+                string? parsedAuthor = parsed.ContainsKey("AUTHOR:") ? parsed["AUTHOR:"] : null;
+                string? parsedTitle = parsed.ContainsKey("TITLE:") ? parsed["TITLE:"] : null;
+
+                try { _logger.LogInformation("Parsed prefixes: ASIN={Asin}, ISBN={Isbn}, AUTHOR={Author}, TITLE={Title}", parsedAsin, parsedIsbn, parsedAuthor, parsedTitle); } catch {}
+
+                // Determine search type (priority: ASIN > ISBN > AUTHOR+TITLE > AUTHOR > TITLE)
+                if (!string.IsNullOrEmpty(parsedAsin)) searchType = "ASIN";
+                else if (!string.IsNullOrEmpty(parsedIsbn)) searchType = "ISBN";
+                else if (!string.IsNullOrEmpty(parsedAuthor) && !string.IsNullOrEmpty(parsedTitle)) searchType = "AUTHOR_TITLE";
+                else if (!string.IsNullOrEmpty(parsedAuthor)) searchType = "AUTHOR";
+                else if (!string.IsNullOrEmpty(parsedTitle)) searchType = "TITLE";
+                else searchType = null;
+
+                try { _logger.LogInformation("[DBG] Determined searchType='{SearchType}'", searchType); } catch {}
+
+                // Build a fallback actualQuery by removing the recognized prefix ranges
+                if (foundRanges.Any())
+                {
+                    foundRanges.Sort((a, b) => a.Start.CompareTo(b.Start));
+                    var sb = new System.Text.StringBuilder();
+                    int idx = 0;
+                    foreach (var r in foundRanges)
+                    {
+                        if (r.Start > idx) sb.Append(query.Substring(idx, r.Start - idx));
+                        idx = r.End;
+                    }
+                    if (idx < query.Length) sb.Append(query.Substring(idx));
+                    // collapse multiple spaces
+                    var collapsed = sb.ToString();
+                    while (collapsed.Contains("  ")) collapsed = collapsed.Replace("  ", " ");
+                    actualQuery = collapsed.Trim();
+                }
+
+                // Try Audimeta-first for various search types. If Audimeta returns results,
+                // convert them to SearchResult and return immediately to avoid scraping.
+                try
+                {
+                    // ASIN case is handled separately above via ASIN handler
+
+                    // ISBN
+                    if (searchType == "ISBN" && !string.IsNullOrWhiteSpace(parsedIsbn))
+                    {
+                        var amRes = await _audimetaService.SearchByIsbnAsync(parsedIsbn, 1, 50, region, language);
+                        if (amRes?.Results != null && amRes.Results.Any())
+                        {
+                            var converted = new List<SearchResult>();
+                            var amFiltered = amRes.Results.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) amFiltered = amFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in amFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate,
+                                    Isbn = book.Asin // fallback (audimeta search by isbn may not populate)
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
+                        }
+                    }
+
+                    // AUTHOR-only
+                    if (searchType == "AUTHOR" && !string.IsNullOrWhiteSpace(parsedAuthor))
+                    {
+                        // Aggregate multiple pages from Audimeta until we reach candidateLimit
+                        var aggregated = new List<AudimetaSearchResult>();
+                        int page = 1;
+                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // For Audimeta author listings, do not artificially cap aggregation
+                        // by the Amazon candidateLimit. Instead, fetch pages until a
+                        // page returns fewer than pageSize results (natural end).
+                        int maxPages = int.MaxValue;
+                        for (; page <= maxPages; page++)
+                        {
+                            try
+                            {
+                                var pageRes = await _audimetaService.SearchByAuthorAsync(parsedAuthor, page, pageSize, region, language);
+                                var pageCount = pageRes?.Results?.Count ?? 0;
+                                aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudimetaSearchResult>());
+                                _logger.LogInformation("Audimeta author page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'", page, pageCount, aggregated.Count, parsedAuthor);
+                                if (pageRes?.Results == null || pageCount == 0)
+                                {
+                                    _logger.LogInformation("Stopping aggregation: page {Page} returned no results for author '{Author}'", page, parsedAuthor);
+                                    break;
+                                }
+                                if (pageCount < pageSize)
+                                {
+                                    _logger.LogInformation("Stopping aggregation: page {Page} result count {PageCount} < pageSize {PageSize}", page, pageCount, pageSize);
+                                    break; // last page
+                                }
+                                // Do not stop aggregating based on candidateLimit for audimeta
+                            }
+                            catch (Exception exPage)
+                            {
+                                _logger.LogDebug(exPage, "Failed fetching audimeta author page {Page} for author {Author}", page, parsedAuthor);
+                                break;
+                            }
+                        }
+
+                        _logger.LogInformation("Finished aggregating author pages for '{Author}': total aggregated={AggregatedCount}, candidateLimit={CandidateLimit}, pageSize={PageSize}, maxPages={MaxPages}", parsedAuthor, aggregated.Count, candidateLimit, pageSize, maxPages);
+                        if (aggregated.Any())
+                        {
+                            // Deduplicate results based on ASIN to prevent repeated books across pages
+                            var deduplicated = aggregated
+                                .Where(b => !string.IsNullOrWhiteSpace(b.Asin))
+                                .GroupBy(b => b.Asin, StringComparer.OrdinalIgnoreCase)
+                                .Select(g => g.First())
+                                .ToList();
+                            
+                            _logger.LogInformation("Deduplicated author results for '{Author}': {OriginalCount} -> {DeduplicatedCount}", parsedAuthor, aggregated.Count, deduplicated.Count);
+                            
+                            var converted = new List<SearchResult>();
+                            var authorFiltered = deduplicated.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in authorFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
+                        }
+                    }
+
+                    // AUTHOR + TITLE: prefer author endpoint then filter by title/isbn to ensure consistent Audimeta enrichment
+                    if (searchType == "AUTHOR_TITLE" && !string.IsNullOrWhiteSpace(parsedAuthor))
+                    {
+                        try { _logger.LogInformation("Entering AUTHOR_TITLE branch: author='{Author}', title='{Title}', isbn='{Isbn}'", parsedAuthor, parsedTitle, parsedIsbn); } catch {}
+                        // Aggregate author pages up to candidateLimit to enrich matching
+                        var aggregated = new List<AudimetaSearchResult>();
+                        int page = 1;
+                        int pageSize = Math.Min(50, Math.Max(10, candidateLimit));
+                        // For Audimeta author/title combined flows, allow full aggregation
+                        // across available pages; we will narrow/return a bounded set later.
+                        int maxPages = int.MaxValue;
+                        for (; page <= maxPages; page++)
+                        {
+                            try
+                            {
+                                var pageRes = await _audimetaService.SearchByAuthorAsync(parsedAuthor, page, pageSize, region, language);
+                                var pageCount = pageRes?.Results?.Count ?? 0;
+                                aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudimetaSearchResult>());
+                                _logger.LogInformation("Audimeta AUTHOR_TITLE: page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'", page, pageCount, aggregated.Count, parsedAuthor);
+                                if (pageRes?.Results == null || pageCount == 0)
+                                {
+                                    _logger.LogInformation("Audimeta AUTHOR_TITLE: stopping aggregation — page {Page} returned no results", page);
+                                    break;
+                                }
+                                if (pageCount < pageSize)
+                                {
+                                    _logger.LogInformation("Audimeta AUTHOR_TITLE: stopping aggregation — page {Page} count {PageCount} < pageSize {PageSize}", page, pageCount, pageSize);
+                                    break;
+                                }
+                            }
+                            catch (Exception exPage)
+                            {
+                                _logger.LogDebug(exPage, "Failed fetching audimeta author page {Page} for author {Author}", page, parsedAuthor);
+                                break;
+                            }
+                        }
+                        _logger.LogInformation("Audimeta AUTHOR_TITLE: finished aggregating pages for '{Author}': aggregated={AggregatedCount}, pageSize={PageSize}, maxPages={MaxPages}", parsedAuthor, aggregated.Count, pageSize, maxPages);
+                            if (aggregated?.Any() == true)
+                        {
+                            // Deduplicate results based on ASIN to prevent repeated books across pages
+                            var deduplicated = aggregated
+                                .Where(b => !string.IsNullOrWhiteSpace(b.Asin))
+                                .GroupBy(b => b.Asin, StringComparer.OrdinalIgnoreCase)
+                                .Select(g => g.First())
+                                .ToList();
+                            
+                            _logger.LogInformation("Deduplicated AUTHOR_TITLE results for '{Author}': {OriginalCount} -> {DeduplicatedCount}", parsedAuthor, aggregated.Count, deduplicated.Count);
+                            
+                            var converted = new List<SearchResult>();
+                            try { _logger.LogInformation("Audimeta author lookup returned {Count} aggregated results for author '{Author}'", deduplicated.Count, parsedAuthor); } catch {}
+
+                            // Use the lightweight author/books results to perform title filtering
+                            // and avoid fetching detailed metadata for every ASIN. Only fetch
+                            // detailed metadata when an ISBN lookup is explicitly required or
+                            // when we need to enrich a small set of final matches.
+                            var authorFiltered = deduplicated.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) authorFiltered = authorFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+
+                            // Title-based filtering can be done directly against the author results
+                            if (!string.IsNullOrWhiteSpace(parsedTitle))
+                            {
+                                var t = parsedTitle.Trim();
+                                authorFiltered = authorFiltered.Where(b =>
+                                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0)
+                                );
+                            }
+
+                            // If an ISBN was provided we must match against detailed metadata;
+                            // instead of fetching metadata for every ASIN, scan a limited set
+                            // of candidates and only fetch metadata until we find ISBN matches.
+                            var detailedMetaByAsin = new Dictionary<string, AudimetaBookResponse>(StringComparer.OrdinalIgnoreCase);
+                            if (!string.IsNullOrWhiteSpace(parsedIsbn))
+                            {
+                                var isbn = parsedIsbn.Trim();
+                                // Limit how many author results to scan for ISBNs to avoid huge loads
+                                var isbnScanLimit = Math.Min(200, Math.Max(50, candidateLimit));
+                                var scanCandidates = aggregated.Where(r => !string.IsNullOrWhiteSpace(r.Asin)).Take(isbnScanLimit).ToList();
+                                try { _logger.LogInformation("Scanning up to {Limit} author candidates for ISBN {Isbn}", scanCandidates.Count, isbn); } catch {}
+                                foreach (var c in scanCandidates)
+                                {
+                                    if (string.IsNullOrWhiteSpace(c.Asin)) continue;
+                                    try
+                                    {
+                                        var meta = await _audimetaService.GetBookMetadataAsync(c.Asin, region, true, language);
+                                        if (meta == null) continue;
+                                        detailedMetaByAsin[c.Asin] = meta;
+                                        if (!string.IsNullOrWhiteSpace(meta.Isbn) && string.Equals(meta.Isbn.Trim(), isbn, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            // Narrow authorFiltered to only matching ASINs
+                                            authorFiltered = authorFiltered.Where(r => !string.IsNullOrWhiteSpace(r.Asin) && string.Equals(r.Asin, c.Asin, StringComparison.OrdinalIgnoreCase));
+                                            break; // stop scanning once we found the ISBN match
+                                        }
+                                    }
+                                    catch (Exception exMeta)
+                                    {
+                                        _logger.LogDebug(exMeta, "Failed fetching audimeta metadata for ASIN {Asin} while scanning for ISBN", c.Asin);
+                                    }
+                                }
+                            }
+
+                            try { _logger.LogInformation("[DBG] authorFiltered count after language/title/isbn filtering: {Count}", authorFiltered.Count()); } catch {}
+
+                            // Convert filtered lightweight results; if we collected detailed
+                            // metadata for some ASINs (e.g., ISBN scan), prefer that for enrichment.
+                            foreach (var book in authorFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                AudimetaBookResponse? bookResp = null;
+                                if (detailedMetaByAsin.TryGetValue(book.Asin, out var found)) bookResp = found;
+                                if (bookResp == null)
+                                {
+                                    bookResp = new AudimetaBookResponse
+                                    {
+                                        Asin = book.Asin,
+                                        Title = book.Title,
+                                        Subtitle = book.Subtitle,
+                                        Authors = book.Authors,
+                                        ImageUrl = book.ImageUrl,
+                                        Language = book.Language,
+                                        BookFormat = book.BookFormat,
+                                        Genres = book.Genres,
+                                        Series = book.Series,
+                                        Publisher = book.Publisher,
+                                        Narrators = book.Narrators,
+                                        ReleaseDate = book.ReleaseDate,
+                                        Isbn = null
+                                    };
+                                }
+                                try
+                                {
+                                    var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                    var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                    sr.IsEnriched = true;
+                                    sr.MetadataSource = "Audimeta";
+                                    converted.Add(sr);
+                                }
+                                catch (Exception exMetaConv)
+                                {
+                                    _logger.LogDebug(exMetaConv, "Failed converting audimeta data for ASIN {Asin}", book.Asin);
+                                }
+                            }
+
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
+                        }
+                    }
+
+                    // TITLE-only
+                    if (searchType == "TITLE" && !string.IsNullOrWhiteSpace(parsedTitle))
+                    {
+                        var titleRes = await _audimetaService.SearchByTitleAsync(parsedTitle, 1, 50, region, language);
+                        if (titleRes?.Results != null && titleRes.Results.Any())
+                        {
+                            var converted = new List<SearchResult>();
+                            var titleFiltered = titleRes.Results.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) titleFiltered = titleFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in titleFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
+                        }
+                    }
+
+                    // General/simple query - try audimeta search endpoint first
+                    if (string.IsNullOrWhiteSpace(searchType) && !string.IsNullOrWhiteSpace(actualQuery))
+                    {
+                        var simpleRes = await _audimetaService.SearchBooksAsync(actualQuery, 1, 50, region, language);
+                        if (simpleRes?.Results != null && simpleRes.Results.Any())
+                        {
+                            var converted = new List<SearchResult>();
+                            var simpleFiltered = simpleRes.Results.AsEnumerable();
+                            if (!string.IsNullOrWhiteSpace(language)) simpleFiltered = simpleFiltered.Where(b => !string.IsNullOrWhiteSpace(b.Language) && string.Equals(b.Language, language, StringComparison.OrdinalIgnoreCase));
+                            foreach (var book in simpleFiltered)
+                            {
+                                if (string.IsNullOrWhiteSpace(book.Asin)) continue;
+                                var bookResp = new AudimetaBookResponse
+                                {
+                                    Asin = book.Asin,
+                                    Title = book.Title,
+                                    Subtitle = book.Subtitle,
+                                    Authors = book.Authors,
+                                    ImageUrl = book.ImageUrl,
+                                    Language = book.Language,
+                                    BookFormat = book.BookFormat,
+                                    Genres = book.Genres,
+                                    Series = book.Series,
+                                    Publisher = book.Publisher,
+                                    Narrators = book.Narrators,
+                                    ReleaseDate = book.ReleaseDate
+                                };
+                                var meta = _metadataConverters.ConvertAudimetaToMetadata(bookResp, book.Asin ?? string.Empty, "Audimeta");
+                                var sr = await _metadataConverters.ConvertMetadataToSearchResultAsync(meta, book.Asin ?? string.Empty);
+                                sr.IsEnriched = true;
+                                sr.MetadataSource = "Audimeta";
+                                converted.Add(sr);
+                            }
+                            if (converted.Any()) return SearchResultConverters.ToMetadataList(converted);
+                        }
+                    }
+                }
+                catch (Exception exAudimetaFirst)
+                {
+                    _logger.LogWarning(exAudimetaFirst, "Audimeta-first attempt failed; falling back to provider searches for query: {Query}", query);
+                }
+
+                // Flags controlling provider calls (enabled by default) - declare at outer scope
+                var skipAmazon = false;
+                var skipAudible = false;
+                var skipOpenLibrary = false;
+
+                // Handle ASIN queries immediately with metadata-first approach
+                if (searchType == "ASIN" && !string.IsNullOrEmpty(actualQuery))
+                {
+                    var asin = actualQuery.Trim();
+                    var asinMetadataSources = await GetEnabledMetadataSourcesAsync();
+                    var asinSearchResults = await _asinSearchHandler.SearchByAsinAsync(asin, asinMetadataSources);
+                    return asinSearchResults.Select(r => SearchResultConverters.ToMetadata(r)).ToList();
+                }
+
+                // Regular search flow for non-ASIN queries (ISBN, AUTHOR, TITLE, or normal text)
+                _logger.LogInformation("Searching for: {Query}", actualQuery);
+                await _searchProgressReporter.BroadcastAsync($"Searching for {actualQuery}", null);
 
                 // Detect if the query is an ISBN (digits only after cleaning). If so, skip Audible
-                var digitsOnly = new string((query ?? string.Empty).Where(char.IsDigit).ToArray());
-                var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13;
+                var digitsOnly = new string((actualQuery ?? string.Empty).Where(char.IsDigit).ToArray());
+                var isIsbnQuery = digitsOnly.Length == 10 || digitsOnly.Length == 13 || searchType == "ISBN";
 
                 List<AmazonSearchResult> amazonResults = new();
                 List<AudibleSearchResult> audibleResults = new();
-
-                // Flags controlling provider calls (enabled by default)
-                var skipAmazon = false; // set true to disable Amazon calls
-                var skipAudible = false; // set true to disable Audible calls
-                var skipOpenLibrary = false; // set true to disable OpenLibrary augmentation
 
                 // Apply application-level search settings (if configured)
                 try
@@ -428,19 +1052,51 @@ namespace Listenarr.Api.Services
                     _logger.LogDebug(exAppSettings, "Failed to load application search settings, falling back to defaults");
                 }
 
-                // Always attempt Audible; Amazon is conditional on skipAmazon
-                if (!string.IsNullOrEmpty(query))
+                // Initialize ASIN candidate list
+                var asinCandidates = new List<string>();
+
+                // Otherwise search Amazon/Audible first to find results, then enrich with metadata sources
+                if (!string.IsNullOrEmpty(actualQuery))
                 {
+                    var searchTasks = new List<Task>();
                     Task<List<AmazonSearchResult>>? amazonTask = null;
-                    if (!skipAmazon)
+                    Task<List<AudibleSearchResult>>? audibleTask = null;
+                    
+                    // All search types should search Amazon/Audible first
+                    // The prefix just helps parse the query, but we still need to find the book
+                    if (searchType == "ISBN")
                     {
-                        amazonTask = _amazonSearchService.SearchAudiobooksAsync(query!);
+                        // For ISBN, prefer Amazon (Audible doesn't support ISBN well)
+                        if (!skipAmazon)
+                        {
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!, null, ct);
+                            searchTasks.Add(amazonTask);
+                        }
+                        if (!skipAudible)
+                        {
+                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!, ct);
+                            searchTasks.Add(audibleTask);
+                        }
+                    }
+                    else
+                    {
+                        // For AUTHOR, TITLE, or normal search - search both in parallel
+                        if (!skipAmazon)
+                        {
+                            amazonTask = _amazonSearchService.SearchAudiobooksAsync(actualQuery!, null, ct);
+                            searchTasks.Add(amazonTask);
+                        }
+                        if (!skipAudible)
+                        {
+                            audibleTask = _audibleSearchService.SearchAudiobooksAsync(actualQuery!, ct);
+                            searchTasks.Add(audibleTask);
+                        }
                     }
 
-                    Task<List<AudibleSearchResult>>? audibleTask = null;
-                    if (!skipAudible)
+                    // Execute all search tasks in parallel
+                    if (searchTasks.Any())
                     {
-                        audibleTask = _audibleSearchService.SearchAudiobooksAsync(query!);
+                        await Task.WhenAll(searchTasks);
                     }
 
                     if (amazonTask != null)
@@ -453,325 +1109,19 @@ namespace Listenarr.Api.Services
                         audibleResults = await audibleTask;
                     }
                 }
-                _logger.LogInformation("Collected {AmazonCount} Amazon raw results and {AudibleCount} Audible raw results", amazonResults.Count, audibleResults.Count);
 
-                // Step 2: Build a unified ASIN candidate set (Amazon priority, then Audible)
-                // Also create a lookup map for fallback titles and full search result objects
-                var asinCandidates = new List<string>();
-                var asinToRawResult = new Dictionary<string, (string? Title, string? Author, string? ImageUrl)>(StringComparer.OrdinalIgnoreCase);
-                var asinToAudibleResult = new Dictionary<string, AudibleSearchResult>(StringComparer.OrdinalIgnoreCase);
-                var asinToSource = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var asinToOpenLibrary = new Dictionary<string, OpenLibraryBook>(StringComparer.OrdinalIgnoreCase);
-                // OpenLibrary-derived SearchResult placeholders (converted directly from OL docs)
-                var openLibraryDerivedResults = new List<SearchResult>();
+                // Step 2: Collect ASIN candidates from all sources
+                var candidateCollection = await _asinCandidateCollector.CollectCandidatesAsync(
+                    amazonResults, audibleResults, query, skipOpenLibrary);
 
-                // Per-provider candidate caps (limit how many candidates we take from each source)
-                // These are per-provider caps; we intentionally do NOT cap the unified candidate set.
-                int amazonProviderCap = 50; // max ASINs to take from Amazon results
-                int audibleProviderCap = 50; // max ASINs to take from Audible results
+                asinCandidates = candidateCollection.AsinCandidates;
+                var asinToRawResult = candidateCollection.AsinToRawResult;
+                var asinToAudibleResult = candidateCollection.AsinToAudibleResult;
+                var asinToSource = candidateCollection.AsinToSource;
+                var asinToOpenLibrary = candidateCollection.AsinToOpenLibrary;
+                var openLibraryDerivedResults = candidateCollection.OpenLibraryDerivedResults;
 
-                // Populate ASIN candidates from Amazon results with detailed logging
-                foreach (var a in amazonResults.Take(amazonProviderCap))
-                {
-                    if (string.IsNullOrEmpty(a.Asin))
-                    {
-                        _logger.LogInformation("Amazon search result missing ASIN. Title='{Title}', Author='{Author}'", a.Title, a.Author);
-                        continue;
-                    }
-
-                    if (!IsValidAsin(a.Asin!))
-                    {
-                        _logger.LogInformation("Amazon search result had invalid ASIN '{Asin}'. Title='{Title}', Author='{Author}'", a.Asin, a.Title, a.Author);
-                        continue;
-                    }
-
-                    // Filter obvious non-audiobook product results early
-                    if (IsProductLikeTitle(a.Title) || IsSellerArtist(a.Author))
-                    {
-                        _logger.LogInformation("Skipping Amazon ASIN {Asin} because title/author looks like a product or seller: Title='{Title}', Author='{Author}'", a.Asin, a.Title, a.Author);
-                        continue;
-                    }
-
-                    asinCandidates.Add(a.Asin!);
-                    asinToRawResult[a.Asin!] = (a.Title, a.Author, a.ImageUrl);
-                    asinToSource[a.Asin!] = "Amazon";
-                    _logger.LogInformation("Added Amazon ASIN candidate {Asin} Title='{Title}' Author='{Author}' ImageUrl='{ImageUrl}'", a.Asin, a.Title, a.Author, a.ImageUrl);
-                }
-
-                foreach (var a in audibleResults.Where(a => !string.IsNullOrEmpty(a.Asin) && IsValidAsin(a.Asin!)).Take(audibleProviderCap))
-                {
-                    // Filter obvious non-audiobook results even from Audible (defensive)
-                    if (IsProductLikeTitle(a.Title) || IsSellerArtist(a.Author))
-                    {
-                        _logger.LogInformation("Skipping Audible ASIN {Asin} because title/author looks like a product or seller: Title='{Title}', Author='{Author}'", a.Asin, a.Title, a.Author);
-                        continue;
-                    }
-
-                    if (asinToRawResult.TryAdd(a.Asin!, (a.Title, a.Author, a.ImageUrl)))
-                    {
-                        asinCandidates.Add(a.Asin!);
-                        asinToAudibleResult[a.Asin!] = a;  // Store full Audible search result
-                        asinToSource[a.Asin!] = "Audible";
-                    }
-                }
-
-                // Augment ASIN candidates with OpenLibrary suggestions (run after Amazon/Audible but before trimming)
-                if (!skipOpenLibrary)
-                {
-                    try
-                    {
-                        if (!string.IsNullOrEmpty(query))
-                        {
-                            var books = await _openLibraryService.SearchBooksAsync(query, null, 5);
-                            foreach (var book in books.Docs.Take(3))
-                            {
-                                if (!string.IsNullOrEmpty(book.Title) && !string.Equals(book.Title, query, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    _logger.LogInformation("OpenLibrary suggested title: {Title}", book.Title);
-
-                                    // Convert OpenLibrary work/edition into minimal AudibleBookMetadata and SearchResult
-                                    try
-                                    {
-                                        string? coverUrl = null;
-                                        if (book.CoverId.HasValue && book.CoverId.Value > 0)
-                                        {
-                                            coverUrl = $"https://covers.openlibrary.org/b/id/{book.CoverId}-L.jpg";
-                                        }
-
-                                        var metadata = new AudibleBookMetadata
-                                        {
-                                            Asin = null,
-                                            Source = "OpenLibrary",
-                                            Title = book.Title,
-                                            Authors = book.AuthorName != null ? book.AuthorName.Where(a => !string.IsNullOrWhiteSpace(a)).ToList() : null,
-                                            Publisher = (book.Publisher != null && book.Publisher.Count > 1) ? "Multiple" : (book.Publisher != null && book.Publisher.Any() ? book.Publisher.FirstOrDefault() : null),
-                                            PublishYear = book.FirstPublishYear?.ToString(),
-                                            Description = null,
-                                            ImageUrl = coverUrl
-                                        };
-
-                                        var searchResult = await ConvertMetadataToSearchResultAsync(metadata, string.Empty);
-                                        searchResult.IsEnriched = true;
-                                        searchResult.MetadataSource = "OpenLibrary";
-
-                                        // If OpenLibrary provides a canonical key (work or edition), expose it as product/result URLs
-                                        try
-                                        {
-                                            if (!string.IsNullOrWhiteSpace(book.Key))
-                                            {
-                                                // Prefer work page/JSON when key is a /works/... value
-                                                if (book.Key.StartsWith("/works", StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    searchResult.ProductUrl = $"https://openlibrary.org{book.Key}"; // human-facing page
-                                                    // also expose a .json metadata link if desired via ResultUrl
-                                                    searchResult.ResultUrl = $"https://openlibrary.org{book.Key}.json";
-                                                }
-                                                else if (book.Key.StartsWith("/books", StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    searchResult.ProductUrl = $"https://openlibrary.org{book.Key}";
-                                                    searchResult.ResultUrl = $"https://openlibrary.org{book.Key}.json";
-                                                }
-                                                else
-                                                {
-                                                    // If key is a plain OLID like 'OL82548W', build book/work URLs conservatively
-                                                    if (Regex.IsMatch(book.Key, "^OL\\w+W$", RegexOptions.IgnoreCase))
-                                                    {
-                                                        searchResult.ProductUrl = $"https://openlibrary.org/works/{book.Key}";
-                                                        searchResult.ResultUrl = $"https://openlibrary.org/works/{book.Key}.json";
-                                                    }
-                                                    else if (Regex.IsMatch(book.Key, "^OL\\w+M$", RegexOptions.IgnoreCase))
-                                                    {
-                                                        searchResult.ProductUrl = $"https://openlibrary.org/books/{book.Key}";
-                                                        searchResult.ResultUrl = $"https://openlibrary.org/books/{book.Key}.json";
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        catch (Exception exUrl)
-                                        {
-                                            _logger.LogDebug(exUrl, "Failed to build OpenLibrary URL for book key {Key}", book.Key);
-                                        }
-
-                                        // If OpenLibrary provided a canonical key (e.g. '/works/OL82548W' or 'OL82548W'),
-                                        // populate SearchResult.Id with the OLID so callers can treat it like an identifier
-                                        try
-                                        {
-                                            if (!string.IsNullOrWhiteSpace(book.Key))
-                                            {
-                                                var raw = book.Key.Trim();
-                                                // If the key is a path like '/works/OL82548W', take the last segment
-                                                if (raw.StartsWith("/"))
-                                                {
-                                                    var parts = raw.Trim('/').Split('/');
-                                                    raw = parts.Length > 0 ? parts.Last() : raw;
-                                                }
-
-                                                // Ensure we have a sensible token and assign it
-                                                if (!string.IsNullOrWhiteSpace(raw))
-                                                {
-                                                    searchResult.Id = raw;
-                                                }
-                                            }
-                                        }
-                                        catch (Exception exId)
-                                        {
-                                            _logger.LogDebug(exId, "Failed to extract OpenLibrary ID for book key {Key}", book.Key);
-                                        }
-
-                                        openLibraryDerivedResults.Add(searchResult);
-                                        _logger.LogInformation("Added OpenLibrary-derived candidate: {Title}", book.Title);
-                                    }
-                                    catch (Exception exBook)
-                                    {
-                                        _logger.LogWarning(exBook, "Failed to convert OpenLibrary book {Title} to search result", book.Title);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "OpenLibrary augmentation failed, continuing without alternate titles");
-                    }
-                }
-
-                // Server-side: enrich OpenLibrary-derived candidates by fetching their canonical .json
-                // Populate Description and ImageUrl where available to avoid client-side on-click fetches
-                if (openLibraryDerivedResults != null && openLibraryDerivedResults.Any())
-                {
-                    _logger.LogInformation("Enriching {Count} OpenLibrary-derived candidate(s) with canonical JSON", openLibraryDerivedResults.Count);
-                    foreach (var olr in openLibraryDerivedResults)
-                    {
-                        try
-                        {
-                            // Prefer ResultUrl if provided (expected to be the .json endpoint)
-                            var jsonUrl = olr.ResultUrl;
-                            if (string.IsNullOrWhiteSpace(jsonUrl) && !string.IsNullOrWhiteSpace(olr.ProductUrl))
-                            {
-                                // If only a human-facing page exists, try to derive the .json endpoint conservatively
-                                if (olr.ProductUrl.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                                    jsonUrl = olr.ProductUrl;
-                                else
-                                    jsonUrl = olr.ProductUrl.TrimEnd('/') + ".json";
-                            }
-
-                            if (string.IsNullOrWhiteSpace(jsonUrl))
-                                continue;
-
-                            var resp = await _httpClient.GetAsync(jsonUrl);
-                            if (!resp.IsSuccessStatusCode)
-                            {
-                                _logger.LogDebug("OpenLibrary JSON fetch returned {Status} for {Url}", resp.StatusCode, jsonUrl);
-                                continue;
-                            }
-
-                            var json = await resp.Content.ReadAsStringAsync();
-                            using var doc = JsonDocument.Parse(json);
-                            var root = doc.RootElement;
-
-                            // Description can be a string or an object with a 'value' property
-                            try
-                            {
-                                if (root.TryGetProperty("description", out var descProp))
-                                {
-                                    if (descProp.ValueKind == JsonValueKind.String)
-                                    {
-                                        olr.Description = descProp.GetString();
-                                    }
-                                    else if (descProp.ValueKind == JsonValueKind.Object && descProp.TryGetProperty("value", out var v))
-                                    {
-                                        olr.Description = v.GetString();
-                                    }
-                                }
-                            }
-                            catch (Exception exDesc)
-                            {
-                                _logger.LogDebug(exDesc, "Failed to parse OpenLibrary description for {Url}", jsonUrl);
-                            }
-
-                            // Covers: works/edition JSON commonly expose an array 'covers' of ints
-                            try
-                            {
-                                // Collect possible cover ids/urls
-                                List<int> coverIds = new List<int>();
-                                string? coverLargeUrl = null;
-                                string? coverMediumUrl = null;
-
-                                if (root.TryGetProperty("covers", out var coversProp) && coversProp.ValueKind == JsonValueKind.Array && coversProp.GetArrayLength() > 0)
-                                {
-                                    foreach (var cp in coversProp.EnumerateArray())
-                                    {
-                                        if (cp.ValueKind == JsonValueKind.Number && cp.TryGetInt32(out var cid))
-                                        {
-                                            coverIds.Add(cid);
-                                        }
-                                    }
-                                }
-                                else if (root.TryGetProperty("cover", out var coverObj) && coverObj.ValueKind == JsonValueKind.Object)
-                                {
-                                    if (coverObj.TryGetProperty("large", out var largeProp) && largeProp.ValueKind == JsonValueKind.String)
-                                    {
-                                        coverLargeUrl = largeProp.GetString();
-                                    }
-                                    if (coverObj.TryGetProperty("medium", out var medProp) && medProp.ValueKind == JsonValueKind.String)
-                                    {
-                                        coverMediumUrl = medProp.GetString();
-                                    }
-                                }
-
-                                // If we have explicit cover ids, attempt to pick the best by measuring aspect ratio
-                                if (coverIds.Any())
-                                {
-                                    try
-                                    {
-                                        var best = await PickBestCoverUrlAsync(coverIds);
-                                        if (!string.IsNullOrWhiteSpace(best))
-                                        {
-                                            olr.ImageUrl = best;
-                                        }
-                                        else
-                                        {
-                                            // fallback to first cover id
-                                            olr.ImageUrl = $"https://covers.openlibrary.org/b/id/{coverIds.First()}-L.jpg";
-                                        }
-                                    }
-                                    catch (Exception exPick)
-                                    {
-                                        _logger.LogDebug(exPick, "Failed to pick best OpenLibrary cover by measurement for {Url}", jsonUrl);
-                                        olr.ImageUrl = $"https://covers.openlibrary.org/b/id/{coverIds.First()}-L.jpg";
-                                    }
-                                }
-                                else if (!string.IsNullOrWhiteSpace(coverLargeUrl))
-                                {
-                                    olr.ImageUrl = coverLargeUrl;
-                                }
-                                else if (!string.IsNullOrWhiteSpace(coverMediumUrl))
-                                {
-                                    olr.ImageUrl = coverMediumUrl;
-                                }
-                            }
-                            catch (Exception exCover)
-                            {
-                                _logger.LogDebug(exCover, "Failed to parse OpenLibrary covers for {Url}", jsonUrl);
-                            }
-
-                            // If we found a description or image, ensure metadata source is set
-                            if (!string.IsNullOrWhiteSpace(olr.Description) || !string.IsNullOrWhiteSpace(olr.ImageUrl))
-                            {
-                                olr.MetadataSource = string.IsNullOrWhiteSpace(olr.MetadataSource) ? "OpenLibrary" : olr.MetadataSource;
-                                olr.IsEnriched = true;
-                                _logger.LogInformation("OpenLibrary enriched candidate {Title} with description/image from {Url}", olr.Title, jsonUrl);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "OpenLibrary enrichment failed for candidate {Title}", olr.Title);
-                            continue;
-                        }
-                    }
-                }
-
-                // Deduplicate unified candidate list
+                // Deduplicate and enforce unified candidate cap
                 asinCandidates = asinCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 // Enforce unified candidate cap (if specified) so we don't attempt enrichment on too many ASINs
                 if (candidateLimit > 0 && asinCandidates.Count > candidateLimit)
@@ -779,8 +1129,8 @@ namespace Listenarr.Api.Services
                     _logger.LogInformation("Trimming unified ASIN candidate list from {Before} to candidateLimit={Limit}", asinCandidates.Count, candidateLimit);
                     asinCandidates = asinCandidates.Take(candidateLimit).ToList();
                 }
-                _logger.LogInformation("Unified ASIN candidate list size: {Count} (amazonCap={AmazonCap}, audibleCap={AudibleCap})", asinCandidates.Count, amazonProviderCap, audibleProviderCap);
-                await BroadcastSearchProgressAsync($"Found {asinCandidates.Count} ASIN candidates", null);
+                _logger.LogInformation("Unified ASIN candidate list size: {Count}", asinCandidates.Count);
+                await _searchProgressReporter.BroadcastAsync($"Found {asinCandidates.Count} ASIN candidates", null);
 
                 // If we don't have any ASIN candidates, do not return early. Instead allow
                 // OpenLibrary-derived candidates (if any) to be merged and processed later
@@ -796,268 +1146,23 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Will use {Count} metadata source(s) for all ASINs", metadataSources.Count);
 
                 // Step 4: Enrich each ASIN with detailed metadata concurrently (limit concurrency)
-                var semaphore = new SemaphoreSlim(3); // throttle external fetches
-                var enrichmentTasks = new List<Task>();
-                var enriched = new ConcurrentBag<SearchResult>();
-                var asinsNeedingFallback = new ConcurrentBag<string>();
-                // Diagnostic: track per-ASIN disposition / drop reason for easier debugging
-                var candidateDropReasons = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var enrichmentResult = await _asinEnricher.EnrichAsinsAsync(
+                    asinCandidates,
+                    asinToRawResult,
+                    asinToAudibleResult,
+                    asinToSource,
+                    asinToOpenLibrary,
+                    metadataSources,
+                    query,
+                    ct);
 
-                foreach (var asin in asinCandidates)
-                {
-                    enrichmentTasks.Add(Task.Run(async () =>
-                    {
-                        await semaphore.WaitAsync();
-                        try
-                        {
-                            _logger.LogDebug("Enriching ASIN {Asin}", asin);
-                            await BroadcastSearchProgressAsync($"Enriching ASIN: {asin}", asin);
-
-                            // Get the original search results
-                            asinToRawResult.TryGetValue(asin, out var rawResult);
-                            asinToAudibleResult.TryGetValue(asin, out var audibleResult);
-                            asinToSource.TryGetValue(asin, out var originalSource);
-
-                            AudibleBookMetadata? metadata = null;
-                            string? metadataSourceName = null;
-
-                            // If this ASIN was added from OpenLibrary augmentation, prefer OpenLibrary metadata
-                            if (asinToOpenLibrary.TryGetValue(asin, out var olBook))
-                            {
-                                try
-                                {
-                                    _logger.LogInformation("ASIN {Asin} has OpenLibrary augmentation. Considering OL metadata.", asin);
-
-                                    // Build a simple haystack from OL fields and check if the original query
-                                    // appears anywhere in those fields. Only show OL-derived results when
-                                    // the search value appears in OL metadata (title/author/publisher/subject).
-                                    var hayOl = string.Join(" ", new[] {
-                                        olBook.Title ?? string.Empty,
-                                        olBook.AuthorName != null ? string.Join(" ", olBook.AuthorName) : string.Empty,
-                                        olBook.Publisher != null ? string.Join(" ", olBook.Publisher) : string.Empty,
-                                        olBook.Subject != null ? string.Join(" ", olBook.Subject) : string.Empty
-                                    }.Where(s => !string.IsNullOrWhiteSpace(s)));
-
-                                    var queryMatchesOl = false;
-                                    if (!string.IsNullOrWhiteSpace(hayOl) && !string.IsNullOrWhiteSpace(query))
-                                    {
-                                        queryMatchesOl = hayOl.IndexOf(query ?? string.Empty, StringComparison.OrdinalIgnoreCase) >= 0;
-                                    }
-
-                                    if (queryMatchesOl)
-                                    {
-                                        // Convert OpenLibrary book to AudibleBookMetadata-like object
-                                        metadata = new AudibleBookMetadata
-                                        {
-                                            Asin = asin,
-                                            Source = "OpenLibrary",
-                                            Title = olBook.Title,
-                                            Authors = olBook.AuthorName?.Where(a => !string.IsNullOrWhiteSpace(a)).ToList(),
-                                            Publisher = olBook.Publisher != null && olBook.Publisher.Any() ? olBook.Publisher.FirstOrDefault() : null,
-                                            PublishYear = olBook.FirstPublishYear?.ToString(),
-                                            Description = null,
-                                            ImageUrl = olBook.CoverId.HasValue ? $"https://covers.openlibrary.org/b/id/{olBook.CoverId}-L.jpg" : null
-                                        };
-                                        metadataSourceName = "OpenLibrary";
-                                        _logger.LogInformation("Using OpenLibrary metadata for ASIN {Asin} (title: {Title})", asin, olBook.Title);
-                                    }
-                                    else
-                                    {
-                                        // OL exists for this ASIN but does not contain the query -> queue for fallback
-                                        _logger.LogInformation("OpenLibrary has entry for ASIN {Asin} but OL metadata did not contain the query; queuing for fallback", asin);
-                                        asinsNeedingFallback.Add(asin);
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Failed to convert OpenLibrary metadata for ASIN {Asin}", asin);
-                                }
-
-                                // Skip calling Audimeta/Audnexus for OpenLibrary-augmented ASINs
-                                if (metadata != null)
-                                {
-                                    // proceed to convert metadata below without trying other metadata sources
-                                }
-                                else
-                                {
-                                    // move on to next ASIN; no remote metadata calls for OL-derived ASINs
-                                    return;
-                                }
-                            }
-
-                            // Use the pre-fetched metadata sources (avoid DbContext concurrency issues)
-                            if (metadata == null && metadataSources.Count > 0)
-                            {
-                                _logger.LogInformation("Attempting to fetch metadata for ASIN {Asin} from {Count} configured source(s): {Sources}",
-                                    asin, metadataSources.Count, string.Join(", ", metadataSources.Select(s => s.Name)));
-                            }
-
-                            // Try each metadata source in priority order until one succeeds
-                            foreach (var source in metadataSources)
-                            {
-                                try
-                                {
-                                    _logger.LogInformation("Attempting to fetch metadata from {SourceName} ({BaseUrl}) for ASIN {Asin}", source.Name, source.BaseUrl, asin);
-                                    await BroadcastSearchProgressAsync($"Fetching metadata from {source.Name} for ASIN: {asin}", asin);
-
-                                    if (source.BaseUrl.Contains("audimeta.de", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        _logger.LogDebug("Calling Audimeta service for ASIN {Asin}", asin);
-                                        var audimetaData = await _audimetaService.GetBookMetadataAsync(asin, "us", true);
-
-                                        if (audimetaData != null)
-                                        {
-                                            _logger.LogInformation("âœ“ Audimeta returned data for ASIN {Asin}. Title: {Title}", asin, audimetaData.Title ?? "null");
-                                            metadata = ConvertAudimetaToMetadata(audimetaData, asin, originalSource ?? "Audible");
-                                            metadataSourceName = source.Name; // Store which metadata source succeeded
-                                            _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName}", asin, source.Name);
-                                            break; // Success! Stop trying other sources
-                                        }
-                                        else
-                                        {
-                                            _logger.LogWarning("âœ— Audimeta returned null for ASIN {Asin}", asin);
-
-                                            // Retry once without cache (force audimeta to refresh) when cache lookup fails
-                                            try
-                                            {
-                                                _logger.LogInformation("Audimeta returned null for ASIN {Asin} (cache=true); retrying without cache", asin);
-                                                var audimetaRetry = await _audimetaService.GetBookMetadataAsync(asin, "us", false);
-                                                if (audimetaRetry != null)
-                                                {
-                                                    _logger.LogInformation("âœ“ Audimeta returned data for ASIN {Asin} on retry (no-cache). Title: {Title}", asin, audimetaRetry.Title ?? "null");
-                                                    metadata = ConvertAudimetaToMetadata(audimetaRetry, asin, originalSource ?? "Audible");
-                                                    metadataSourceName = source.Name;
-                                                    _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName} (no-cache)", asin, source.Name);
-                                                    break;
-                                                }
-                                                else
-                                                {
-                                                    _logger.LogWarning("âœ— Audimeta returned null on retry for ASIN {Asin}", asin);
-                                                }
-                                            }
-                                            catch (Exception exRetry)
-                                            {
-                                                _logger.LogWarning(exRetry, "Audimeta retry without cache failed for ASIN {Asin}", asin);
-                                            }
-                                        }
-                                    }
-                                    else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        _logger.LogDebug("Calling Audnexus service for ASIN {Asin}", asin);
-                                        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, "us", true, false);
-
-                                        if (audnexusData != null)
-                                        {
-                                            _logger.LogInformation("âœ“ Audnexus returned data for ASIN {Asin}. Title: {Title}", asin, audnexusData.Title ?? "null");
-                                            metadata = ConvertAudnexusToMetadata(audnexusData, asin, originalSource ?? "Audible");
-                                            metadataSourceName = source.Name; // Store which metadata source succeeded
-                                            _logger.LogInformation("Successfully enriched ASIN {Asin} with metadata from {SourceName}", asin, source.Name);
-                                            break; // Success! Stop trying other sources
-                                        }
-                                        else
-                                        {
-                                            _logger.LogWarning("âœ— Audnexus returned null for ASIN {Asin}", asin);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning("Unknown metadata source type: {BaseUrl}, skipping", source.BaseUrl);
-                                    }
-                                }
-                                catch (Exception sourceEx)
-                                {
-                                    _logger.LogWarning(sourceEx, "Failed to fetch metadata from {SourceName} for ASIN {Asin}, trying next source", source.Name, asin);
-                                    continue; // Try next metadata source
-                                }
-                            }
-
-                            // If all metadata sources failed, try the configured audible metadata scraper as a last
-                            // attempt before queuing the ASIN for fallback scraping. Tests commonly replace
-                            // IAudibleMetadataService with a deterministic test implementation and expect
-                            // it to be used when upstream metadata sources are not configured.
-                            if (metadata == null)
-                            {
-                                try
-                                {
-                                    if (_audibleMetadataService != null)
-                                    {
-                                        _logger.LogInformation("No external metadata sources succeeded for ASIN {Asin} - trying audible metadata scraper", asin);
-                                        var scrapedMd = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
-                                        if (scrapedMd != null)
-                                        {
-                                            metadata = scrapedMd;
-                                            metadataSourceName = "AudibleScrape";
-                                            _logger.LogInformation("Audible metadata scraper returned data for ASIN {Asin} (title: {Title})", asin, metadata.Title);
-                                        }
-                                    }
-                                }
-                                catch (Exception exScrape)
-                                {
-                                    _logger.LogWarning(exScrape, "Audible metadata scraper failed for ASIN {Asin}", asin);
-                                }
-
-                                if (metadata == null)
-                                {
-                                    asinsNeedingFallback.Add(asin);
-                                    // Note that this ASIN has no metadata yet
-                                    try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; } catch { }
-                                }
-                            }
-
-
-                            // If we have an Audible search result, populate/merge that data first
-                            if (audibleResult != null && metadata != null)
-                            {
-                                var searchMetadata = PopulateMetadataFromSearchResult(audibleResult);
-                                MergeMetadata(searchMetadata, metadata);
-                                metadata = searchMetadata;
-                            }
-
-                            if (metadata != null)
-                            {
-                                // Accept metadata even if Title is missing. ConvertMetadataToSearchResult
-                                // will use raw result title as fallback if metadata title is empty.
-                                var enrichedResult = await ConvertMetadataToSearchResultAsync(metadata, asin, rawResult.Title, rawResult.Author, rawResult.ImageUrl);
-                                enrichedResult.IsEnriched = true;
-
-                                // Store the metadata source name for the badge
-                                if (!string.IsNullOrEmpty(metadataSourceName))
-                                {
-                                    enrichedResult.MetadataSource = metadataSourceName;
-                                    _logger.LogInformation("âœ“ Enriched result for ASIN {Asin} - Title: {Title}, MetadataSource: {MetadataSource}",
-                                        asin, enrichedResult.Title ?? "null", metadataSourceName);
-                                }
-                                else
-                                {
-                                    _logger.LogWarning("âš  Metadata obtained for ASIN {Asin} but metadataSourceName is null/empty", asin);
-                                }
-
-                                enriched.Add(enrichedResult);
-                                try { candidateDropReasons[asin] = "enriched_from_metadata"; } catch { }
-                            }
-                            else
-                            {
-                                _logger.LogWarning("âœ— No metadata obtained for ASIN {Asin} after trying all sources and scraping", asin);
-                                try { candidateDropReasons[asin] = "no_metadata_after_sources"; } catch { }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Metadata enrichment failed for ASIN {Asin}", asin);
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }));
-                }
-                await Task.WhenAll(enrichmentTasks);
-
-                await Task.WhenAll(enrichmentTasks);
+                var enriched = enrichmentResult.EnrichedResults;
+                var asinsNeedingFallback = enrichmentResult.AsinsNeedingFallback;
+                var candidateDropReasons = enrichmentResult.CandidateDropReasons;
 
                 // Only return enriched items (metadata success); skip basic fallbacks entirely
-                var enrichedList = enriched.ToList();
-                await BroadcastSearchProgressAsync($"Enrichment complete. Found {enrichedList.Count} enriched results", null);
+                var enrichedList = enriched;
+                await _searchProgressReporter.BroadcastAsync($"Enrichment complete. Found {enrichedList.Count} enriched results", null);
 
                 // Merge OpenLibrary-derived results (created earlier) into the enriched list so
                 // OpenLibrary-only augmentation produces visible, scoreable items without calling Amazon.
@@ -1096,7 +1201,7 @@ namespace Listenarr.Api.Services
                             }
                         }
 
-                        await BroadcastSearchProgressAsync($"OpenLibrary augmentation added {openLibraryDerivedResults.Count} candidate(s)", null);
+                        await _searchProgressReporter.BroadcastAsync($"OpenLibrary augmentation added {openLibraryDerivedResults.Count} candidate(s)", null);
 
                         // Diagnostic: dump enrichedList immediately after merging OpenLibrary-derived candidates
                         try
@@ -1119,99 +1224,18 @@ namespace Listenarr.Api.Services
                 // Last-ditch fallback: scrape product detail pages for ASINs that failed all metadata sources
                 try
                 {
-                    var fallbackAsins = asinsNeedingFallback.Distinct(StringComparer.OrdinalIgnoreCase)
-                        .Where(a => !string.IsNullOrWhiteSpace(a))
-                        .Except(enrichedList.Select(e => e.Asin), StringComparer.OrdinalIgnoreCase)
-                        .ToList();
+                    var fallbackResult = await _fallbackScraper.ScrapeAsinsAsync(
+                        asinsNeedingFallback,
+                        enrichedList,
+                        candidateDropReasons,
+                        asinToRawResult,
+                        ct);
 
-                    if (fallbackAsins.Any())
-                    {
-                        _logger.LogInformation("Attempting product-page scraping fallback for {Count} ASIN(s)", fallbackAsins.Count);
-                        await BroadcastSearchProgressAsync($"Scraping product pages for {fallbackAsins.Count} ASINs", null);
-
-                        var scrapeSemaphore = new SemaphoreSlim(3);
-                        var scrapeTasks = new List<Task>();
-
-                        foreach (var fa in fallbackAsins)
-                        {
-                            scrapeTasks.Add(Task.Run(async () =>
-                            {
-                                await scrapeSemaphore.WaitAsync();
-                                try
-                                {
-                                    _logger.LogInformation("Scraping product page for ASIN {Asin}", fa);
-                                    var scraped = await _amazonSearchService.ScrapeProductPageAsync(fa!);
-                                    if (scraped != null)
-                                    {
-                                        // Skip scraped titles that are clearly promotional or noise (e.g., "Unlock 15% savings")
-                                        if (IsTitleNoise(scraped.Title) || IsPromotionalTitle(scraped.Title))
-                                        {
-                                            _logger.LogInformation("Skipping scraped ASIN {Asin} because title appears promotional/noise: {Title}", fa, scraped.Title);
-                                            if (!string.IsNullOrWhiteSpace(fa))
-                                            {
-                                                try { candidateDropReasons[fa] = "scrape_filtered_promotional_or_noise"; } catch { }
-                                            }
-                                            return;
-                                        }
-                                        // Convert scraped data into AudibleBookMetadata-like object for conversion
-                                        var metadata = new AudibleBookMetadata
-                                        {
-                                            Asin = scraped.Asin,
-                                            Source = "Amazon",
-                                            Title = scraped.Title,
-                                            Subtitle = null,
-                                            Authors = !string.IsNullOrWhiteSpace(scraped.Author) ? new List<string> { scraped.Author } : null,
-                                            Author = scraped.Author,
-                                            ImageUrl = scraped.ImageUrl,
-                                            PublishYear = scraped.PublishYear,
-                                            Publisher = scraped.Publisher,
-                                            Version = scraped.Version,
-                                            Language = scraped.Language,
-                                            Series = scraped.Series,
-                                            SeriesNumber = scraped.SeriesNumber,
-                                            Runtime = scraped.RuntimeMinutes,
-                                            Narrators = !string.IsNullOrWhiteSpace(scraped.Narrator) ? scraped.Narrator.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(n => n.Trim()).ToList() : null
-                                        };
-
-                                        var enrichedResult = await ConvertMetadataToSearchResultAsync(metadata, fa!, null, null, scraped.ImageUrl);
-                                        enrichedResult.IsEnriched = true;
-                                        enriched.Add(enrichedResult);
-                                        if (!string.IsNullOrWhiteSpace(fa))
-                                        {
-                                            try { candidateDropReasons[fa] = "scrape_enriched"; } catch { }
-                                        }
-                                        _logger.LogInformation("Product-page scraping enriched ASIN {Asin} with title={Title}", fa, scraped.Title);
-                                    }
-                                    else
-                                    {
-                                        _logger.LogInformation("Product-page scraping returned no useful data for ASIN {Asin}", fa);
-                                        if (!string.IsNullOrWhiteSpace(fa))
-                                        {
-                                            try { candidateDropReasons[fa] = "scrape_no_data"; } catch { }
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Product-page scraping failed for ASIN {Asin}", fa);
-                                    if (!string.IsNullOrWhiteSpace(fa))
-                                    {
-                                        try { candidateDropReasons[fa] = "scrape_exception"; } catch { }
-                                    }
-                                }
-                                finally
-                                {
-                                    scrapeSemaphore.Release();
-                                }
-                            }));
-                        }
-
-                        await Task.WhenAll(scrapeTasks);
-
-                        // Refresh enrichedList after scraping attempts
-                        enrichedList = enriched.ToList();
-                        await BroadcastSearchProgressAsync($"Scraping fallback complete. Total enriched results now: {enrichedList.Count}", null);
-                    }
+                    // Add scraped results to enriched list
+                    enriched.AddRange(fallbackResult.ScrapedResults);
+                    enrichedList = enriched;
+                    
+                    await _searchProgressReporter.BroadcastAsync($"Total enriched results after fallback: {enrichedList.Count}", null);
                 }
                 catch (Exception ex)
                 {
@@ -1219,15 +1243,12 @@ namespace Listenarr.Api.Services
                 }
 
                 // Compute scores and apply deferred filtering (containment, author/publisher, fuzzy)
-                var scored = new List<(SearchResult Result, double Score, double ContainmentScore, double FuzzyScore, string DropReason)>();
+                var scored = new List<ScoredSearchResult>();
 
                 foreach (var r in enrichedList)
                 {
                     double containmentScore = 0.0;
                     double fuzzyScore = 0.0;
-
-                    // Always preserve OpenLibrary-sourced items
-                    var isOpenLibrary = string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase);
 
                     // Compute containment and fuzzy similarity based on title/author/description
                     try
@@ -1240,114 +1261,13 @@ namespace Listenarr.Api.Services
                         _logger.LogDebug(ex, "Failed to compute containment/fuzzy scores for ASIN {Asin}", r.Asin);
                     }
 
-                    // Compute completeness: fraction of important fields present
-                    int fieldsPresent = 0;
-                    if (!string.IsNullOrWhiteSpace(r.Title)) fieldsPresent++;
-                    if (!string.IsNullOrWhiteSpace(r.Artist)) fieldsPresent++;
-                    if (!string.IsNullOrWhiteSpace(r.Publisher)) fieldsPresent++;
-                    if (!string.IsNullOrWhiteSpace(r.ImageUrl)) fieldsPresent++;
-                    double completenessScore = fieldsPresent / 4.0;
-
-                    // Source priority: proper metadata sources get higher base multiplier
-                    int sourcePriority = 0;
-                    if (!string.IsNullOrEmpty(r.MetadataSource))
-                    {
-                        var md = r.MetadataSource.ToLowerInvariant();
-                        if (md.Contains("audimeta") || md.Contains("audnex") || md.Contains("audnexus") || md.Contains("openlibrary")) sourcePriority = 2;
-                        else if (md == "amazon" || md == "audible") sourcePriority = 1;
-                        else sourcePriority = 1;
-                    }
-
-                    // More granular relevance scoring
-                    // Features considered:
-                    // - Title containment (token containment of query in result fields)
-                    // - Title fuzzy similarity (levenshtein-based)
-                    // - Exact author match (query tokens appear in artist)
-                    // - ASIN exact match (query equals asin)
-                    // - Series match (query tokens match series)
-                    // - Metadata completeness
-                    // - Source priority (proper metadata sources preferred)
-                    // - Promotional/noise penalty
-
-                    // Title containment remains the primary signal
-                    double titleContainment = containmentScore; // 0.0 - 1.0
-
-                    // Title fuzzy similarity gives a smaller boost for near-miss spellings
-                    double titleFuzzy = fuzzyScore; // 0.0 - 1.0
-
-                    // Author match: proportion of query tokens that appear in artist
-                    double authorMatch = 0.0;
-                    try
-                    {
-                        var artist = (r.Artist ?? string.Empty);
-                        var queryTokens = TokenizeAndNormalize(query ?? string.Empty);
-                        if (!string.IsNullOrWhiteSpace(artist) && queryTokens.Any())
-                        {
-                            var artistTokens = new HashSet<string>(TokenizeAndNormalize(artist), StringComparer.OrdinalIgnoreCase);
-                            int matchedAuthor = queryTokens.Count(qt => artistTokens.Contains(qt));
-                            authorMatch = Math.Min(1.0, (double)matchedAuthor / queryTokens.Count);
-                        }
-                    }
-                    catch { authorMatch = 0.0; }
-
-                    // ASIN exact match: if the query is exactly an ASIN, strong boost
-                    double asinMatch = 0.0;
-                    if (!string.IsNullOrWhiteSpace(r.Asin) && !string.IsNullOrWhiteSpace(query) && string.Equals(r.Asin, query.Trim(), StringComparison.OrdinalIgnoreCase))
-                        asinMatch = 1.0;
-
-                    // Series match: give small boost if series tokens found
-                    double seriesMatch = 0.0;
-                    if (!string.IsNullOrWhiteSpace(r.Series) && !string.IsNullOrWhiteSpace(query))
-                    {
-                        var seriesTokens = new HashSet<string>(TokenizeAndNormalize(r.Series));
-                        var qtoks = TokenizeAndNormalize(query);
-                        if (qtoks.Any())
-                        {
-                            var matched = qtoks.Count(qt => seriesTokens.Contains(qt));
-                            seriesMatch = Math.Min(1.0, (double)matched / qtoks.Count);
-                        }
-                    }
-
-                    // Source priority normalized to 0..1 (0 = scraped/low, 1 = proper metadata)
-                    double sourcePriorityNormalized = (sourcePriority >= 2) ? 1.0 : (sourcePriority == 1 ? 0.5 : 0.0);
-
-                    // Promotional penalty
-                    double promoPenalty = IsPromotionalTitle(r.Title) ? 0.25 : 0.0;
-
-                    // Weights: tuned to prefer title containment and author match, then fuzzy and completeness
-                    const double W_TitleContainment = 0.45;
-                    const double W_AuthorMatch = 0.18;
-                    const double W_TitleFuzzy = 0.12;
-                    const double W_Completeness = 0.10;
-                    const double W_Source = 0.06;
-                    const double W_AsinExact = 0.05;
-                    const double W_Series = 0.04;
-
-                    double rawScore =
-                        (titleContainment * W_TitleContainment) +
-                        (authorMatch * W_AuthorMatch) +
-                        (titleFuzzy * W_TitleFuzzy) +
-                        (completenessScore * W_Completeness) +
-                        (sourcePriorityNormalized * W_Source) +
-                        (asinMatch * W_AsinExact) +
-                        (seriesMatch * W_Series);
-
-                    // Apply promo penalty (subtract) and clamp to 0..1
-                    rawScore = Math.Max(0.0, Math.Min(1.0, rawScore - promoPenalty));
-
-                    // Small extra boost if title fuzzy is very high but containment low
-                    if (titleContainment < 0.4 && titleFuzzy > 0.85)
-                    {
-                        rawScore = Math.Min(1.0, rawScore + (titleFuzzy * 0.1));
-                    }
-
-                    double score = rawScore;
-
+                    // Use the scorer to compute comprehensive relevance score
+                    var scoredResult = _searchResultScorer.ScoreResult(r, query ?? string.Empty, containmentScore, fuzzyScore);
+                    
                     // Attach computed score to the SearchResult so callers / UI can inspect it
-                    try { r.Score = (int)Math.Round(score * 100.0); } catch { }
+                    try { r.Score = (int)Math.Round(scoredResult.Score * 100.0); } catch { }
 
-                    // Default keep reason is empty; we'll set DropReason if filtered out
-                    scored.Add((r, score, containmentScore, fuzzyScore, string.Empty));
+                    scored.Add(scoredResult);
                 }
 
                 var finalList = new List<SearchResult>();
@@ -1356,13 +1276,6 @@ namespace Listenarr.Api.Services
                 foreach (var s in scored.OrderByDescending(s => s.Score))
                 {
                     var r = s.Result;
-
-                    // OpenLibrary items preserved unless explicitly rejected by requireAuthorAndPublisher
-                    if (isOpenLibraryResult(r) && !requireAuthorAndPublisher)
-                    {
-                        finalList.Add(r);
-                        continue;
-                    }
 
                     // Author/publisher requirement
                     if (requireAuthorAndPublisher)
@@ -1381,7 +1294,7 @@ namespace Listenarr.Api.Services
                         if (string.Equals(containmentMode, "Strict", StringComparison.OrdinalIgnoreCase))
                         {
                             // Require direct containment (substring) in key fields
-                            var hay = string.Join(" ", new[] { r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
+                            var hay = string.Join(" ", new[] { r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series }.Where(s2 => !string.IsNullOrEmpty(s2))).ToLowerInvariant();
                             if (string.IsNullOrEmpty(hay) || hay.IndexOf(query ?? string.Empty, StringComparison.OrdinalIgnoreCase) < 0)
                             {
                                 keep = false;
@@ -1425,8 +1338,8 @@ namespace Listenarr.Api.Services
                         break;
                 }
 
-                results.AddRange(finalList);
-                await BroadcastSearchProgressAsync($"Returning {results.Count} final results", null);
+                results.AddRange(finalList.Select(r => SearchResultConverters.ToMetadata(r)));
+                await _searchProgressReporter.BroadcastAsync($"Returning {results.Count} final results", null);
 
                 // If still no enriched results, try OpenLibrary derived titles to attempt enrichment again
                 if (!results.Any())
@@ -1443,7 +1356,7 @@ namespace Listenarr.Api.Services
                                 if (!string.IsNullOrEmpty(book.Title) && book.Title != query)
                                 {
                                     _logger.LogInformation("Trying Amazon search with OpenLibrary title: {Title}", book.Title);
-                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!);
+                                    var altResults = await _amazonSearchService.SearchAudiobooksAsync(book.Title!, null, ct);
 
                                     foreach (var altResult in altResults.Take(2))
                                     {
@@ -1451,15 +1364,15 @@ namespace Listenarr.Api.Services
                                         {
                                             try
                                             {
-                                                await BroadcastSearchProgressAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
+                                                await _searchProgressReporter.BroadcastAsync($"Attempting metadata fetch for alternate ASIN: {altResult.Asin}", altResult.Asin);
 
                                                 // Try audimeta first
-                                                var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, "us", true);
+                                                var audimetaData = await _audimetaService.GetBookMetadataAsync(altResult.Asin, region, true, language);
                                                 AudibleBookMetadata? metadata = null;
 
                                                 if (audimetaData != null)
                                                 {
-                                                    metadata = ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
+                                                    metadata = _metadataConverters.ConvertAudimetaToMetadata(audimetaData, altResult.Asin, "Amazon");
                                                 }
                                                 else
                                                 {
@@ -1473,9 +1386,10 @@ namespace Listenarr.Api.Services
 
                                                 if (metadata != null && !string.IsNullOrEmpty(metadata.Title))
                                                 {
-                                                    var searchResult = await ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
+                                                    var searchResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, altResult.Asin);
                                                     searchResult.IsEnriched = true;
-                                                    results.Add(searchResult);
+                                                    results.Add(SearchResultConverters.ToMetadata(searchResult));
+
                                                 }
                                             }
                                             catch (Exception ex)
@@ -1498,36 +1412,13 @@ namespace Listenarr.Api.Services
                     // Preserve OpenLibrary results regardless of title heuristics
                     (string.Equals(r.MetadataSource, "OpenLibrary", StringComparison.OrdinalIgnoreCase))
                     // For all other results apply the usual title checks AND ensure it looks like an audiobook
-                    || (!string.IsNullOrWhiteSpace(r.Title) && !IsTitleNoise(r.Title) && r.Title.Length >= 3 && IsLikelyAudiobook(r))
+                    || (!string.IsNullOrWhiteSpace(r.Title) && !SearchValidation.IsTitleNoise(r.Title) && r.Title.Length >= 3 && SearchValidation.IsLikelyAudiobook(SearchResultConverters.ToSearchResult(r)))
                 ).ToList();
 
-                // Additional filter: if the result does not contain the original search query
-                // anywhere in its key fields, drop it. Exempt proper metadata sources
-                // (e.g. Audimeta/Audnexus) and OpenLibrary (preserve these).
+                // Apply progress broadcast for filtering/scoring phase
                 if (!string.IsNullOrWhiteSpace(query))
                 {
-                    var q = query.Trim();
-                    results = results.Where(r =>
-                    {
-                        // Preserve results from authoritative metadata sources (OpenLibrary,
-                        // Audimeta/Audnexus) and from the audible scraper. These sources
-                        // are considered authoritative enough to bypass the simple query
-                        // containment requirement used for raw/conversion results.
-                        if (!string.IsNullOrWhiteSpace(r.MetadataSource))
-                        {
-                            var mdLower = r.MetadataSource.ToLowerInvariant();
-                            if (mdLower.Contains("openlibrary") || mdLower.Contains("audimeta") || mdLower.Contains("audnex") || mdLower.Contains("audnexus") || mdLower.Contains("audible"))
-                                return true;
-                        }
-
-                        // For all other results require the original search query to appear
-                        // somewhere in the result's own fields (title/author/description/etc).
-                        var hay = string.Join(" ", new[] {
-                            r.Title, r.Artist, r.Album, r.Description, r.Publisher, r.Narrator, r.Language, r.Series, r.Quality, r.ProductUrl, r.ImageUrl, r.Asin, r.Source
-                        }.Where(s => !string.IsNullOrEmpty(s))).ToLowerInvariant();
-
-                        return hay.IndexOf(q.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase) >= 0;
-                    }).ToList();
+                    await _searchProgressReporter.BroadcastAsync($"Filtering and scoring {results.Count} results", null);
                 }
 
                 // Sort results primarily by computed relevance score, then by metadata source priority
@@ -1574,7 +1465,7 @@ namespace Listenarr.Api.Services
                             }
 
                             // Title noise or unlikely audiobook
-                            if (IsTitleNoise(enrichedCandidate.Title) || !IsLikelyAudiobook(enrichedCandidate))
+                            if (SearchValidation.IsTitleNoise(enrichedCandidate.Title) || !SearchValidation.IsLikelyAudiobook(enrichedCandidate))
                             {
                                 try { candidateDropReasons[asin] = "filtered_title_or_not_likely"; } catch { }
                                 finalAsinEntries.Add($"{asin}:filtered_title_or_not_likely");
@@ -1652,6 +1543,11 @@ namespace Listenarr.Api.Services
                 _logger.LogInformation("Intelligent search complete. Returning {Count} filtered and sorted results for query: {Query}", results.Count, query);
                 return results;
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Intelligent search cancelled by request for query: {Query}", query);
+                return results;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during intelligent search for query: {Query}", query);
@@ -1659,158 +1555,6 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private static bool IsValidAsin(string asin)
-        {
-            if (string.IsNullOrEmpty(asin))
-                return false;
-
-            // Amazon ASIN format: 10 characters, typically starting with B0 or digits
-            return asin.Length == 10 &&
-                   (asin.StartsWith("B0") || char.IsDigit(asin[0])) &&
-                   asin.All(c => char.IsLetterOrDigit(c));
-        }
-
-        private static bool IsTitleNoise(string? title)
-        {
-            if (string.IsNullOrWhiteSpace(title)) return true;
-
-            var t = title.Trim();
-
-            // Common noise phrases that appear in search results
-            string[] noisePhrases = new[]
-            {
-                "No results", "Suggested Searches", "No results found", "Try again",
-                "Browse categories", "Customer Service", "Help", "Search", "Menu",
-                "Sign in", "Account", "Audible.com", "Language", "Currency"
-            };
-
-            // Check if title contains any noise phrases
-            if (noisePhrases.Any(p => t.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0))
-                return true;
-
-            // Check if title is mostly whitespace/newlines
-            if (t.All(c => char.IsWhiteSpace(c) || c == '\n' || c == '\r'))
-                return true;
-
-            // Check for excessive newlines (typical of scraped navigation elements)
-            if (t.Count(c => c == '\n') > 2)
-                return true;
-
-            return false;
-        }
-
-        private static bool IsPromotionalTitle(string? title)
-        {
-            if (string.IsNullOrWhiteSpace(title)) return false;
-            var t = title.Trim();
-            var lower = t.ToLowerInvariant();
-
-            // Percent discounts like '15%'
-            if (Regex.IsMatch(t, @"\b\d+%")) return true;
-
-            // Phrases like 'Unlock 15% savings', 'Unlock X%'
-            if (lower.Contains("unlock") && (lower.Contains("save") || lower.Contains("savings") || Regex.IsMatch(lower, "\\d+%"))) return true;
-
-            // 'Visit the <brand> Store' promotional links
-            if (Regex.IsMatch(lower, "visit the .*store")) return true;
-
-            // Short promo starts
-            if (lower.StartsWith("unlock ") || lower.StartsWith("save ") || lower.StartsWith("visit the ")) return true;
-
-            return false;
-        }
-
-        private static bool IsAuthorNoise(string? author)
-        {
-            if (string.IsNullOrWhiteSpace(author)) return true;
-            var a = author.Trim();
-            // Filter out common header/navigation noise in author fields
-            if (a.Length < 2) return true;
-            if (a.Equals("Authors", StringComparison.OrdinalIgnoreCase)) return true;
-            if (a.Equals("By:", StringComparison.OrdinalIgnoreCase)) return true;
-            if (a.StartsWith("Sort by", StringComparison.OrdinalIgnoreCase)) return true;
-            if (a.Contains("English - USD", StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
-        }
-
-        // Heuristic: detect product-like titles that are unlikely to be audiobooks
-        private static bool IsProductLikeTitle(string? title)
-        {
-            if (string.IsNullOrWhiteSpace(title)) return false;
-            var t = title.Trim();
-            var lower = t.ToLowerInvariant();
-
-            // Quick rejects for extremely long descriptive product titles
-            if (t.Length > 200) return true;
-
-            // Common product keywords that rarely appear in audiobook titles
-            string[] productKeywords = new[]
-            {
-                "led","lamp","light","charger","battery","watt","volt","usb","hdmi","case","cover","shirt",
-                "socks","decor","decoration","decorations","gift","necklace","bracelet","ring","halloween",
-                "christmas","remote","plug","adapter","holder","stand","tool","kit","pack of","set of","piece",
-                "cm","mm","inch","inches","oz","ml","capacity","dimensions","material","fabric","men's","women's"
-            };
-
-            if (productKeywords.Any(k => lower.Contains(k))) return true;
-
-            // Model / pack patterns: 'Pack of 2', 'Set of 3', 'x cm', numeric dimension patterns
-            if (Regex.IsMatch(lower, "\\b(pack of|set of|set x|\bx\b|\bpcs?\b|\\bqty\\b|\\bpiece\\b)", RegexOptions.IgnoreCase)) return true;
-            if (Regex.IsMatch(t, "\\b\\d{1,4}\\s?(cm|mm|in|inches|oz|ml)\\b", RegexOptions.IgnoreCase)) return true;
-
-            // Titles that contain 'store' in a way that suggests a vendor name are product-like
-            if (lower.Contains("store") || lower.Contains("official store") || lower.Contains("visit the")) return true;
-
-            // If title contains many commas and descriptive clauses it's more likely a product listing
-            if (t.Count(c => c == ',') >= 3) return true;
-
-            return false;
-        }
-
-        // Heuristic: detect if the artist field refers to a store/seller rather than an author
-        private static bool IsSellerArtist(string? artist)
-        {
-            if (string.IsNullOrWhiteSpace(artist)) return false;
-            var a = artist.Trim().ToLowerInvariant();
-            if (a.Contains("store") || a.Contains("seller") || a.Contains("official store") || a.Contains("shop")) return true;
-            if (a.StartsWith("visit the ") && a.EndsWith(" store")) return true;
-            return false;
-        }
-
-        // Conservative heuristic: determine whether a SearchResult looks like a genuine audiobook
-        private static bool IsLikelyAudiobook(SearchResult r)
-        {
-            if (r == null) return false;
-
-            // If a proper metadata provider enriched it, trust it
-            if (!string.IsNullOrWhiteSpace(r.MetadataSource))
-            {
-                var md = r.MetadataSource.ToLowerInvariant();
-                if (md.Contains("audimeta") || md.Contains("audnex") || md.Contains("audnexus") || md.Contains("audible"))
-                    return true;
-            }
-
-            // If we have runtime in minutes and it's a reasonable audiobook length (>5 minutes)
-            if (r.Runtime.HasValue && r.Runtime.Value > 5) return true;
-
-            // Narrator or publisher presence strongly indicates audiobook metadata
-            if (!string.IsNullOrWhiteSpace(r.Narrator)) return true;
-            if (!string.IsNullOrWhiteSpace(r.Publisher)) return true;
-
-            // Title tokens that explicitly mention audiobook cues
-            var title = r.Title ?? string.Empty;
-            var lower = title.ToLowerInvariant();
-            string[] audioKeywords = new[] { "audiobook", "narrated by", "read by", "full-cast", "full cast", "unabridged", "abridged" };
-            if (audioKeywords.Any(k => lower.Contains(k))) return true;
-
-            // Reject if title looks product-like or artist looks like a seller
-            if (IsProductLikeTitle(title) || IsSellerArtist(r.Artist)) return false;
-
-            // Fallback: if title is short and contains no product keywords, treat as possible audiobook
-            if (!string.IsNullOrWhiteSpace(title) && title.Length < 120 && !IsProductLikeTitle(title)) return true;
-
-            return false;
-        }
 
         // Tokenize and normalize a string for containment and fuzzy matching.
         // Preserves hyphenated tokens (e.g. "sg-1") as requested.
@@ -1987,318 +1731,6 @@ namespace Listenarr.Api.Services
             return bestUrl;
         }
 
-        /// <summary>
-        /// Populate metadata from Audible search result data (has runtime, series, etc.)
-        /// </summary>
-        private AudibleBookMetadata PopulateMetadataFromSearchResult(AudibleSearchResult? searchResult)
-        {
-            var metadata = new AudibleBookMetadata
-            {
-                Source = "Audible"
-            };
-
-            if (searchResult == null)
-            {
-                _logger.LogDebug("No search result provided for metadata population");
-                return metadata;
-            }
-
-            _logger.LogInformation("Populating metadata from search result: Duration={Duration}, Series={Series}, SeriesNumber={SeriesNumber}, Language={Language}, ReleaseDate={ReleaseDate}",
-                searchResult.Duration, searchResult.Series, searchResult.SeriesNumber, searchResult.Language, searchResult.ReleaseDate);
-
-            metadata.Asin = searchResult.Asin;
-            metadata.Title = searchResult.Title;
-            if (!string.IsNullOrEmpty(searchResult.Author))
-            {
-                metadata.Authors = new List<string> { searchResult.Author };
-            }
-            if (!string.IsNullOrEmpty(searchResult.Narrator))
-            {
-                metadata.Narrators = searchResult.Narrator.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(n => n.Trim())
-                    .ToList();
-            }
-            metadata.ImageUrl = searchResult.ImageUrl;
-            metadata.Series = searchResult.Series;
-            metadata.SeriesNumber = searchResult.SeriesNumber;
-            metadata.Subtitle = searchResult.Subtitle;
-            metadata.Language = searchResult.Language;
-
-            // Parse duration/runtime from search result (e.g., "Length: 21 hrs and 22 mins")
-            if (!string.IsNullOrEmpty(searchResult.Duration))
-            {
-                var match = Regex.Match(searchResult.Duration, @"(\d+)\s*hrs?\s+(?:and\s+)?(\d+)\s*mins?", RegexOptions.IgnoreCase);
-                if (match.Success)
-                {
-                    int hours = int.Parse(match.Groups[1].Value);
-                    int minutes = int.Parse(match.Groups[2].Value);
-                    metadata.Runtime = hours * 60 + minutes;
-                    _logger.LogInformation("Parsed runtime from search result: {Runtime} minutes ({Hours}h {Minutes}m)", metadata.Runtime, hours, minutes);
-                }
-            }
-
-            // Parse release date to extract year
-            if (!string.IsNullOrEmpty(searchResult.ReleaseDate))
-            {
-                var yearMatch = Regex.Match(searchResult.ReleaseDate, @"(\d{2})-(\d{2})-(\d{2})");
-                if (yearMatch.Success)
-                {
-                    var year = int.Parse(yearMatch.Groups[3].Value);
-                    metadata.PublishYear = (2000 + year).ToString();
-                    _logger.LogInformation("Parsed publish year from search result: {PublishYear}", metadata.PublishYear);
-                }
-            }
-
-            return metadata;
-        }
-
-        private AudibleBookMetadata ConvertAudimetaToMetadata(AudimetaBookResponse audimetaData, string asin, string source = "Audible")
-        {
-            var metadata = new AudibleBookMetadata
-            {
-                Asin = audimetaData.Asin ?? asin,
-                Source = source, // Use the original search source (Amazon or Audible)
-                Title = audimetaData.Title,
-                Subtitle = audimetaData.Subtitle,
-                Authors = audimetaData.Authors?.Select(a => a.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
-                Narrators = audimetaData.Narrators?.Select(n => n.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
-                Publisher = audimetaData.Publisher,
-                Description = audimetaData.Description,
-                Genres = audimetaData.Genres?.Select(g => g.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
-                Language = audimetaData.Language,
-                Isbn = audimetaData.Isbn,
-                ImageUrl = audimetaData.ImageUrl,
-                Abridged = audimetaData.BookFormat?.Contains("abridged", StringComparison.OrdinalIgnoreCase) ?? false,
-                Explicit = audimetaData.Explicit ?? false
-            };
-
-            // Handle series (audimeta returns array, we just take the first one)
-            if (audimetaData.Series != null && audimetaData.Series.Any())
-            {
-                var firstSeries = audimetaData.Series.First();
-                metadata.Series = firstSeries.Name;
-                metadata.SeriesNumber = firstSeries.Position;
-            }
-
-            // Convert runtime from minutes to minutes (audimeta returns lengthMinutes)
-            if (audimetaData.LengthMinutes.HasValue && audimetaData.LengthMinutes > 0)
-            {
-                metadata.Runtime = audimetaData.LengthMinutes.Value;
-            }
-
-            // Extract year from releaseDate (format: "2023-10-24T00:00:00.000+00:00")
-            string? dateStr = audimetaData.ReleaseDate ?? audimetaData.PublishDate;
-            if (!string.IsNullOrEmpty(dateStr))
-            {
-                var yearMatch = Regex.Match(dateStr, @"\d{4}");
-                if (yearMatch.Success)
-                {
-                    metadata.PublishYear = yearMatch.Value;
-                }
-            }
-
-            _logger.LogInformation("Converted audimeta data for {Asin}: Title={Title}, Runtime={Runtime}min, Year={Year}, Series={Series}, ImageUrl={ImageUrl}",
-                asin, metadata.Title, metadata.Runtime, metadata.PublishYear, metadata.Series, metadata.ImageUrl);
-
-            return metadata;
-        }
-
-        private AudibleBookMetadata ConvertAudnexusToMetadata(AudnexusBookResponse audnexusData, string asin, string source = "Audible")
-        {
-            var metadata = new AudibleBookMetadata
-            {
-                Asin = audnexusData.Asin ?? asin,
-                Source = source, // Use the original search source (Amazon or Audible)
-                Title = audnexusData.Title,
-                Subtitle = audnexusData.Subtitle,
-                Authors = audnexusData.Authors?.Select(a => a.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
-                Narrators = audnexusData.Narrators?.Select(n => n.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
-                Publisher = audnexusData.PublisherName,
-                Description = audnexusData.Description ?? audnexusData.Summary,
-                Genres = audnexusData.Genres?.Select(g => g.Name).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToList(),
-                Language = audnexusData.Language,
-                Isbn = audnexusData.Isbn,
-                ImageUrl = audnexusData.Image,
-                Abridged = audnexusData.FormatType?.Contains("abridged", StringComparison.OrdinalIgnoreCase) ?? false,
-                Explicit = audnexusData.IsAdult ?? false
-            };
-
-            // Handle series (primary series first, then secondary) - Audnexus returns single objects, not arrays
-            if (audnexusData.SeriesPrimary != null)
-            {
-                metadata.Series = audnexusData.SeriesPrimary.Name;
-                metadata.SeriesNumber = audnexusData.SeriesPrimary.Position;
-            }
-            else if (audnexusData.SeriesSecondary != null)
-            {
-                metadata.Series = audnexusData.SeriesSecondary.Name;
-                metadata.SeriesNumber = audnexusData.SeriesSecondary.Position;
-            }
-
-            // Convert runtime from minutes
-            if (audnexusData.RuntimeLengthMin.HasValue && audnexusData.RuntimeLengthMin > 0)
-            {
-                metadata.Runtime = audnexusData.RuntimeLengthMin.Value;
-            }
-
-            // Extract year from releaseDate (format: "2021-05-04T00:00:00.000Z")
-            if (!string.IsNullOrEmpty(audnexusData.ReleaseDate))
-            {
-                var yearMatch = Regex.Match(audnexusData.ReleaseDate, @"\d{4}");
-                if (yearMatch.Success)
-                {
-                    metadata.PublishYear = yearMatch.Value;
-                }
-            }
-            // Fallback to copyright year if no release date
-            else if (audnexusData.Copyright.HasValue)
-            {
-                metadata.PublishYear = audnexusData.Copyright.Value.ToString();
-            }
-
-            _logger.LogInformation("Converted Audnexus data for {Asin}: Title={Title}, Runtime={Runtime}min, Year={Year}, Series={Series}, ImageUrl={ImageUrl}",
-                asin, metadata.Title, metadata.Runtime, metadata.PublishYear, metadata.Series, metadata.ImageUrl);
-
-            return metadata;
-        }
-
-        /// <summary>
-        /// Merge scraped metadata into search result metadata (scraped data takes priority except for fields search results do better)
-        /// </summary>
-        private void MergeMetadata(AudibleBookMetadata target, AudibleBookMetadata scraped)
-        {
-            // Scraped data takes priority for these fields
-            if (!string.IsNullOrEmpty(scraped.Source))
-                target.Source = scraped.Source; // Source is based on actual URL, so scraped wins
-            if (!string.IsNullOrEmpty(scraped.Title))
-                target.Title = scraped.Title;
-            if (scraped.Authors != null && scraped.Authors.Any())
-                target.Authors = scraped.Authors;
-            if (scraped.Narrators != null && scraped.Narrators.Any())
-                target.Narrators = scraped.Narrators;
-            if (!string.IsNullOrEmpty(scraped.ImageUrl))
-            {
-                _logger.LogDebug("Using image from metadata source ({Source}): {ImageUrl}", scraped.Source ?? "Unknown", scraped.ImageUrl);
-                target.ImageUrl = scraped.ImageUrl;
-            }
-            if (!string.IsNullOrEmpty(scraped.Description))
-                target.Description = scraped.Description;
-            if (!string.IsNullOrEmpty(scraped.Publisher))
-                target.Publisher = scraped.Publisher;
-            if (!string.IsNullOrEmpty(scraped.Language))
-                target.Language = scraped.Language;
-            if (!string.IsNullOrEmpty(scraped.Version))
-                target.Version = scraped.Version;
-            if (scraped.Genres != null && scraped.Genres.Any())
-                target.Genres = scraped.Genres;
-
-            // Keep search result data if not found in scraped data
-            // (Search results have runtime, series, release date that product pages often don't)
-            if (target.Runtime == null && scraped.Runtime != null)
-                target.Runtime = scraped.Runtime;
-            if (string.IsNullOrEmpty(target.Series) && !string.IsNullOrEmpty(scraped.Series))
-                target.Series = scraped.Series;
-            if (string.IsNullOrEmpty(target.SeriesNumber) && !string.IsNullOrEmpty(scraped.SeriesNumber))
-                target.SeriesNumber = scraped.SeriesNumber;
-            if (string.IsNullOrEmpty(target.PublishYear) && !string.IsNullOrEmpty(scraped.PublishYear))
-                target.PublishYear = scraped.PublishYear;
-        }
-
-        private Task<SearchResult> ConvertMetadataToSearchResultAsync(AudibleBookMetadata metadata, string asin, string? fallbackTitle = null, string? fallbackAuthor = null, string? fallbackImageUrl = null)
-        {
-            // Use metadata if available, otherwise fallback to raw search result, finally to generic fallback
-            var title = metadata.Title;
-            if (string.IsNullOrWhiteSpace(title) || title == "Audible" || title.Contains("English - USD"))
-            {
-                title = fallbackTitle;
-            }
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                title = "Unknown Title";
-            }
-
-            var author = metadata.Authors?.FirstOrDefault();
-            if (IsAuthorNoise(author))
-            {
-                author = fallbackAuthor;
-            }
-            if (IsAuthorNoise(author))
-            {
-                author = "Unknown Author";
-            }
-
-            var imageUrl = metadata.ImageUrl;
-            if (string.IsNullOrWhiteSpace(imageUrl))
-            {
-                imageUrl = fallbackImageUrl;
-            }
-
-            // Download and cache the image to temp storage for future use
-            // Keep the original external URL for search results to avoid 404s
-            if (!string.IsNullOrEmpty(imageUrl) && !string.IsNullOrEmpty(asin))
-            {
-                try
-                {
-                    // Cache the image in background, but don't wait for it or change the URL
-                    // This ensures search results always show images immediately from their source
-                    _ = _imageCacheService.DownloadAndCacheImageAsync(imageUrl, asin);
-                    _logger.LogDebug("Started background image cache for ASIN {Asin}", asin);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to initiate image caching for ASIN {Asin}", asin);
-                }
-            }
-
-            // Generate product URL based on source and ASIN
-            string? productUrl = null;
-            if (!string.IsNullOrEmpty(asin))
-            {
-                productUrl = metadata.Source == "Amazon"
-                    ? $"https://www.amazon.com/dp/{asin}"
-                    : $"https://www.audible.com/pd/{asin}";
-            }
-
-            return Task.FromResult(new SearchResult
-            {
-                Id = Guid.NewGuid().ToString(),
-                Title = title,
-                Artist = author ?? "Unknown Author",
-                Album = metadata.Series ?? metadata.Title ?? "Unknown Album",
-                Category = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" }),
-                Size = 0, // We don't have file size from metadata
-                Seeders = 0, // Not applicable for direct Amazon results
-                Leechers = 0, // Not applicable for direct Amazon results
-                MagnetLink = $"amazon://asin/{asin}", // Use a custom scheme to identify Amazon sources
-                Source = metadata.Source ?? "Amazon/Audible", // Use the metadata source (Audible or Amazon) if available
-                PublishedDate = !string.IsNullOrEmpty(metadata.PublishYear) && int.TryParse(metadata.PublishYear, out var year) ? new DateTime(year, 1, 1) : DateTime.MinValue,
-                Quality = metadata.Version ?? "Unknown",
-                Format = "Audiobook",
-                Description = metadata.Description,
-                Publisher = metadata.Publisher,
-                Language = metadata.Language,
-                Runtime = metadata.Runtime,
-                Narrator = string.Join(", ", metadata.Narrators ?? new List<string>()),
-                Series = metadata.Series,
-                SeriesNumber = metadata.SeriesNumber,
-                ImageUrl = imageUrl,
-                Asin = asin,
-                ProductUrl = productUrl
-            });
-        }
-
-        private SearchResult ConvertAmazonSearchToResult(AmazonSearchResult amazonResult)
-        {
-            return new SearchResult
-            {
-                Title = amazonResult.Title ?? "Unknown Title",
-                Artist = amazonResult.Author ?? "Unknown Author",
-                Source = "Amazon",
-                Asin = amazonResult.Asin ?? "",
-                ImageUrl = amazonResult.ImageUrl ?? ""
-            };
-        }
-
         private SearchResult ConvertAudibleSearchToResult(AudibleSearchResult audibleResult)
         {
             return new SearchResult
@@ -2313,7 +1745,7 @@ namespace Listenarr.Api.Services
                 Leechers = 0,
                 MagnetLink = $"audible://asin/{audibleResult.Asin}",
                 Source = "Audible",
-                PublishedDate = DateTime.MinValue,
+                PublishedDate = "1970-01-01",
                 Quality = "Unknown",
                 Format = "Audiobook",
                 Description = null,
@@ -2323,6 +1755,28 @@ namespace Listenarr.Api.Services
                 Narrator = audibleResult.Narrator,
                 ImageUrl = audibleResult.ImageUrl,
                 Asin = audibleResult.Asin
+            };
+        }
+
+        private MetadataSearchResult ConvertAudibleSearchToMetadataResult(AudibleSearchResult audibleResult)
+        {
+            return new MetadataSearchResult
+            {
+                Id = Guid.NewGuid().ToString(),
+                Title = audibleResult.Title ?? "Unknown Title",
+                Artist = audibleResult.Author ?? "Unknown Author",
+                Album = audibleResult.Title ?? "Unknown Album",
+                Category = "Audiobook",
+                Source = "Audible",
+                PublishedDate = "1970-01-01",
+                Format = "Audiobook",
+                Runtime = ParseDuration(audibleResult.Duration),
+                Narrator = audibleResult.Narrator,
+                ImageUrl = audibleResult.ImageUrl,
+                Asin = audibleResult.Asin,
+                ProductUrl = audibleResult.Asin != null ? $"https://www.audible.com/pd/{audibleResult.Asin}" : null,
+                IsEnriched = false,
+                MetadataSource = "Audible"
             };
         }
 
@@ -2385,10 +1839,13 @@ namespace Listenarr.Api.Services
                             if (!string.IsNullOrEmpty(asin))
                             {
                                 var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
-                                result.Title = metadata.Title ?? result.Title;
-                                result.Artist = metadata.Authors?.FirstOrDefault() ?? result.Artist;
-                                result.Album = metadata.Series ?? result.Album;
-                                result.Category = string.Join(", ", metadata.Genres ?? new List<string>());
+                                if (metadata != null)
+                                {
+                                    result.Title = metadata.Title ?? result.Title;
+                                    result.Artist = metadata.Authors?.FirstOrDefault() ?? result.Artist;
+                                    result.Album = metadata.Series ?? result.Album;
+                                    result.Category = string.Join(", ", metadata.Genres ?? new List<string>());
+                                }
                                 // Add more fields as needed
                             }
                         }
@@ -2442,13 +1899,140 @@ namespace Listenarr.Api.Services
                     return new List<SearchResult>();
                 }
 
-                // Search using the indexer
-                return await SearchIndexerAsync(indexer, query, category);
+                // By default, reuse existing SearchIndexerAsync for a SearchResult response
+                var req = new Listenarr.Api.Models.SearchRequest();
+                // If this indexer has MyAnonamouse options encoded in AdditionalSettings, apply them
+                var mamOpts = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
+                if (mamOpts != null) req.MyAnonamouse = mamOpts;
+
+                var idxResults = await SearchIndexerAsync(indexer, query, category, req);
+                return idxResults.Select(r => SearchResultConverters.ToSearchResult(r)).ToList();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
                 return new List<SearchResult>();
+            }
+        }
+
+        public async Task<List<Listenarr.Domain.Models.IndexerSearchResult>> SearchIndexerResultsAsync(string apiId, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null)
+        {
+            try
+            {
+                Indexer? indexer = null;
+
+                if (int.TryParse(apiId, out var indexerId))
+                {
+                    indexer = await _dbContext.Indexers.FindAsync(indexerId);
+                }
+                else
+                {
+                    indexer = await _dbContext.Indexers
+                        .Where(i => i.Name.Equals(apiId, StringComparison.OrdinalIgnoreCase))
+                        .FirstOrDefaultAsync();
+                }
+
+                if (indexer == null || !indexer.IsEnabled)
+                {
+                    _logger.LogWarning("Indexer not found or disabled for apiId: {ApiId}", apiId);
+                    return new List<Listenarr.Domain.Models.IndexerSearchResult>();
+                }
+
+                // Apply MyAnonamouse options from indexer if not provided explicitly
+                if (request?.MyAnonamouse == null)
+                {
+                    var mam = ParseMamOptionsFromAdditionalSettings(indexer.AdditionalSettings);
+                    if (mam != null)
+                    {
+                        request ??= new Listenarr.Api.Models.SearchRequest();
+                        request.MyAnonamouse = mam;
+                    }
+                }
+
+                var idxResults = await SearchIndexerAsync(indexer, query, category, request);
+                return idxResults;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error searching indexer {apiId} for query: {query}");
+                return new List<Listenarr.Domain.Models.IndexerSearchResult>();
+            }
+        }
+
+        private Listenarr.Api.Models.MyAnonamouseOptions? ParseMamOptionsFromAdditionalSettings(string? additional)
+        {
+            if (string.IsNullOrWhiteSpace(additional)) return null;
+            try
+            {
+                using var doc = JsonDocument.Parse(additional);
+                var root = doc.RootElement;
+                // Expect either { mam_id: '...', mam_options: { ... } } or { mam_id: '...', ...flat options... }
+                if (root.ValueKind != JsonValueKind.Object) return null;
+
+                var opts = new Listenarr.Api.Models.MyAnonamouseOptions();
+                if (root.TryGetProperty("mam_options", out var mo) && mo.ValueKind == JsonValueKind.Object)
+                {
+                    if (mo.TryGetProperty("searchInDescription", out var sid) && sid.ValueKind == JsonValueKind.True || sid.ValueKind == JsonValueKind.False)
+                        opts.SearchInDescription = sid.GetBoolean();
+                    if (mo.TryGetProperty("searchInSeries", out var sis) && (sis.ValueKind == JsonValueKind.True || sis.ValueKind == JsonValueKind.False))
+                        opts.SearchInSeries = sis.GetBoolean();
+                    if (mo.TryGetProperty("searchInFilenames", out var sif) && (sif.ValueKind == JsonValueKind.True || sif.ValueKind == JsonValueKind.False))
+                        opts.SearchInFilenames = sif.GetBoolean();
+                    if (mo.TryGetProperty("language", out var lang) && lang.ValueKind == JsonValueKind.String)
+                        opts.SearchLanguage = lang.GetString();
+                    if (mo.TryGetProperty("filter", out var filter) && filter.ValueKind == JsonValueKind.String)
+                    {
+                        if (Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(filter.GetString() ?? string.Empty, true, out var f)) opts.Filter = f;
+                    }
+                    if (mo.TryGetProperty("freeleechWedge", out var wedge) && wedge.ValueKind == JsonValueKind.String)
+                    {
+                        if (Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(wedge.GetString() ?? string.Empty, true, out var w)) opts.FreeleechWedge = w;
+                    }
+                    if (mo.TryGetProperty("enrichResults", out var enrich) && (enrich.ValueKind == JsonValueKind.True || enrich.ValueKind == JsonValueKind.False))
+                        opts.EnrichResults = enrich.GetBoolean();
+                    if (mo.TryGetProperty("enrichTopResults", out var enrichTop) && (enrichTop.ValueKind == JsonValueKind.Number || enrichTop.ValueKind == JsonValueKind.String))
+                    {
+                        if (enrichTop.ValueKind == JsonValueKind.Number) opts.EnrichTopResults = enrichTop.GetInt32();
+                        else if (int.TryParse(enrichTop.GetString(), out var etmp)) opts.EnrichTopResults = etmp;
+                    }
+                    return opts;
+                }
+
+                // Fallback: check for flat properties directly on root
+                if (root.TryGetProperty("searchInDescription", out var sid2) && (sid2.ValueKind == JsonValueKind.True || sid2.ValueKind == JsonValueKind.False))
+                    opts.SearchInDescription = sid2.GetBoolean();
+                if (root.TryGetProperty("searchInSeries", out var sis2) && (sis2.ValueKind == JsonValueKind.True || sis2.ValueKind == JsonValueKind.False))
+                    opts.SearchInSeries = sis2.GetBoolean();
+                if (root.TryGetProperty("searchInFilenames", out var sif2) && (sif2.ValueKind == JsonValueKind.True || sif2.ValueKind == JsonValueKind.False))
+                    opts.SearchInFilenames = sif2.GetBoolean();
+                if (root.TryGetProperty("language", out var lang2) && lang2.ValueKind == JsonValueKind.String)
+                    opts.SearchLanguage = lang2.GetString();
+                if (root.TryGetProperty("filter", out var filter2) && filter2.ValueKind == JsonValueKind.String)
+                {
+                    if (Enum.TryParse<Listenarr.Api.Models.MamTorrentFilter>(filter2.GetString() ?? string.Empty, true, out var f2)) opts.Filter = f2;
+                }
+                if (root.TryGetProperty("freeleechWedge", out var wedge2) && wedge2.ValueKind == JsonValueKind.String)
+                {
+                    if (Enum.TryParse<Listenarr.Api.Models.MamFreeleechWedge>(wedge2.GetString() ?? string.Empty, true, out var w2)) opts.FreeleechWedge = w2;
+                }
+                if (root.TryGetProperty("enrichResults", out var enrich2) && (enrich2.ValueKind == JsonValueKind.True || enrich2.ValueKind == JsonValueKind.False))
+                    opts.EnrichResults = enrich2.GetBoolean();
+                if (root.TryGetProperty("enrichTopResults", out var enrichTop2) && (enrichTop2.ValueKind == JsonValueKind.Number || enrichTop2.ValueKind == JsonValueKind.String))
+                {
+                    if (enrichTop2.ValueKind == JsonValueKind.Number) opts.EnrichTopResults = enrichTop2.GetInt32();
+                    else if (int.TryParse(enrichTop2.GetString(), out var etmp2)) opts.EnrichTopResults = etmp2;
+                }
+
+                // If no properties were found, return null
+                if (opts.SearchInDescription == null && opts.SearchInSeries == null && opts.SearchInFilenames == null && opts.SearchLanguage == null && opts.Filter == null && opts.FreeleechWedge == null && opts.EnrichResults == null && opts.EnrichTopResults == null)
+                    return null;
+
+                return opts;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse AdditionalSettings JSON for MAM options");
+                return null;
             }
         }
 
@@ -2470,7 +2054,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<List<SearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null)
+        private async Task<List<IndexerSearchResult>> SearchIndexerAsync(Indexer indexer, string query, string? category = null, Listenarr.Api.Models.SearchRequest? request = null)
         {
             try
             {
@@ -2504,43 +2088,36 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                if (indexer.Implementation.Equals("InternetArchive", StringComparison.OrdinalIgnoreCase))
+                // Try to find a matching provider for this indexer type
+                var provider = _searchProviders.FirstOrDefault(p => 
+                    p.IndexerType.Equals(indexer.Implementation, StringComparison.OrdinalIgnoreCase) ||
+                    (p.IndexerType.Equals("Torznab", StringComparison.OrdinalIgnoreCase) && indexer.Implementation.Equals("Newznab", StringComparison.OrdinalIgnoreCase)));
+                
+                if (provider != null)
                 {
-                    var iaResults = await SearchInternetArchiveAsync(indexer, query, category);
+                    var providerResults = await provider.SearchAsync(indexer, query, category, request);
                     // Ensure Source is set for all results
-                    foreach (var r in iaResults)
+                    foreach (var r in providerResults)
                     {
                         if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
                     }
-                    return iaResults;
-                }
-                else if (indexer.Implementation.Equals("MyAnonamouse", StringComparison.OrdinalIgnoreCase))
-                {
-                    var mamResults = await SearchMyAnonamouseAsync(indexer, query, category);
-                    foreach (var r in mamResults)
-                    {
-                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
-                    }
-                    return mamResults;
+                    return providerResults;
                 }
                 else
                 {
-                    var tnResults = await SearchTorznabNewznabAsync(indexer, query, category);
-                    foreach (var r in tnResults)
-                    {
-                        if (string.IsNullOrWhiteSpace(r.Source)) r.Source = fallbackName;
-                    }
-                    return tnResults;
+                    // Default fallback if no provider matches
+                    _logger.LogWarning("No provider found for indexer type: {Implementation}", indexer.Implementation);
+                    return new List<IndexerSearchResult>();
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private async Task<List<SearchResult>> SearchTorznabNewznabAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchTorznabNewznabAsync(Indexer indexer, string query, string? category)
         {
             try
             {
@@ -2558,13 +2135,13 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Indexer {Name} returned status {Status}", indexer.Name, response.StatusCode);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 var xmlContent = await response.Content.ReadAsStringAsync();
 
                 // Parse Torznab/Newznab XML response
-                var results = ParseTorznabResponse(xmlContent, indexer);
+                var results = await ParseTorznabResponseAsync(xmlContent, indexer);
 
                 _logger.LogInformation("Indexer {Name} returned {Count} results", indexer.Name, results.Count);
                 return results;
@@ -2572,11 +2149,11 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching Torznab/Newznab indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private async Task<List<SearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchMyAnonamouseAsync(Indexer indexer, string query, string? category, Listenarr.Api.Models.SearchRequest? request = null)
         {
             try
             {
@@ -2588,7 +2165,7 @@ namespace Listenarr.Api.Services
                 if (string.IsNullOrEmpty(mamId))
                 {
                     _logger.LogWarning("MyAnonamouse indexer {Name} missing mam_id", indexer.Name);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 // Build MyAnonamouse API request (mam_id is sent as a cookie)
@@ -2605,19 +2182,33 @@ namespace Listenarr.Api.Services
 
                 // Build JSON payload according to new MyAnonamouse structure
                 // Build tor object to mirror the browse.php parameter shapes (tor[text], tor[srchIn][field]=true, tor[cat][]=...)
+                var srchInDict = new Dictionary<string, bool>
+                {
+                    ["title"] = true,
+                    ["author"] = true,
+                    ["narrator"] = true,
+                    ["series"] = true,
+                    ["description"] = false, // default off (Prowlarr default)
+                    ["filenames"] = true,     // search filenames by default (Prowlarr default)
+                    ["filetype"] = true
+                };
+
+                // Apply request overrides if present
+                if (request?.MyAnonamouse != null)
+                {
+                    var opts = request.MyAnonamouse;
+                    if (opts.SearchInDescription.HasValue)
+                        srchInDict["description"] = opts.SearchInDescription.Value;
+                    if (opts.SearchInSeries.HasValue)
+                        srchInDict["series"] = opts.SearchInSeries.Value;
+                    if (opts.SearchInFilenames.HasValue)
+                        srchInDict["filename"] = opts.SearchInFilenames.Value;
+                }
+
                 var torObject = new Dictionary<string, object>
                 {
                     ["text"] = query,
-                    // Use field->true mapping like browse.php (e.g. tor[srchIn][title]=true)
-                    ["srchIn"] = new Dictionary<string, bool>
-                    {
-                        ["title"] = true,
-                        ["author"] = true,
-                        ["narrator"] = true,
-                        ["series"] = true,
-                        ["description"] = true,
-                        ["filetype"] = true
-                    },
+                    ["srchIn"] = srchInDict,
                     ["searchType"] = searchType,
                     ["searchIn"] = "torrents",
                     // Keep explicit cat[] list copied from the browse URL
@@ -2636,6 +2227,16 @@ namespace Listenarr.Api.Services
                     ["perpage"] = "100"
                 };
 
+                // If SearchLanguage specified in options, override the default
+                if (request?.MyAnonamouse?.SearchLanguage != null)
+                {
+                    torObject["browse_lang"] = new[] { request.MyAnonamouse.SearchLanguage };
+                }
+
+                // Apply filter mappings for Prowlarr-like options
+                // e.g. onlyActive, onlyFreeleech, freeleechOrVip, onlyVip, notVip
+
+                // Try to parse title/author from the query to give MyAnonamouse more targeted fields
                 if (!string.IsNullOrWhiteSpace(parsedTitle))
                 {
                     torObject["title"] = parsedTitle;
@@ -2646,64 +2247,209 @@ namespace Listenarr.Api.Services
                     torObject["author"] = parsedAuthor;
                 }
 
-                // Build form-encoded content following the example for loadSearchJSONbasic.php
-                // Example: tor[cat][]=0&tor[sortType]=default&tor[browseStart]=true&tor[startNumber]=0&bannerLink&bookmarks&dlLink&description&tor[text]=mp3%20m4a
-                var formPairs = new List<KeyValuePair<string, string>>();
-                // Minimal/required fields per example
-                formPairs.Add(new KeyValuePair<string, string>("tor[cat][]", "0"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[sortType]", "default"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[browseStart]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[startNumber]", "0"));
 
-                // Keys present without explicit values in the example; represent them with empty string
-                formPairs.Add(new KeyValuePair<string, string>("bannerLink", string.Empty));
-                formPairs.Add(new KeyValuePair<string, string>("bookmarks", string.Empty));
-                formPairs.Add(new KeyValuePair<string, string>("dlLink", string.Empty));
-                formPairs.Add(new KeyValuePair<string, string>("description", string.Empty));
 
-                // tor[text] is the search query (example uses 'mp3 m4a')
-                formPairs.Add(new KeyValuePair<string, string>("tor[text]", query ?? string.Empty));
+                // Additional browse options seen on browse.php - build indexed querystring params to match Prowlarr's shape
+                var queryParams = new List<KeyValuePair<string, string>>();
 
-                // Preserve audiobook filtering if available: include main_cat
-                formPairs.Add(new KeyValuePair<string, string>("tor[main_cat][]", "13"));
-
-                // Add searchIn and srchIn fields so we request torrents and relevant fields
-                formPairs.Add(new KeyValuePair<string, string>("tor[searchIn]", "torrents"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][title]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][author]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][narrator]", "true"));
-                formPairs.Add(new KeyValuePair<string, string>("tor[srchIn][series]", "true"));
-
-                var content = new FormUrlEncodedContent(formPairs);
-                var formString = await content.ReadAsStringAsync();
-                _logger.LogInformation("MyAnonamouse outgoing form (loadSearchJSONbasic): {Form}", formString);
-
-                var request = new HttpRequestMessage(HttpMethod.Post, url)
+                if (torObject.TryGetValue("browse_lang", out var blObj) && blObj is string[] browseLangs)
                 {
-                    Content = content
-                };
-
-                // Add browser-like headers to avoid "invalid request" errors
-                request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                request.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
-                request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                request.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
-
-                using var httpClient = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
-                _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-
-                var response = await httpClient.SendAsync(request);
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("MyAnonamouse error response: {Content}", LogRedaction.RedactText(errorContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
-                    return new List<SearchResult>();
+                    for (int i = 0; i < browseLangs.Length; i++)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[browse_lang][{i}]", browseLangs[i]));
+                    }
                 }
 
-                var jsonResponse = await response.Content.ReadAsStringAsync();
-                _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
-                var results = ParseMyAnonamouseResponse(jsonResponse, indexer);
+                if (torObject.TryGetValue("browseFlagsHideVsShow", out var hideShowObj))
+                {
+                    var hideShowVal = hideShowObj?.ToString() ?? string.Empty;
+                    queryParams.Add(new KeyValuePair<string, string>("tor[browseFlagsHideVsShow]", hideShowVal));
+                }
+
+                if (torObject.TryGetValue("unit", out var unitObj))
+                {
+                    var unitVal = unitObj?.ToString() ?? string.Empty;
+                    queryParams.Add(new KeyValuePair<string, string>("tor[unit]", unitVal));
+                }
+
+                // Optional: perpage to control number of results (default to 100 if present)
+                if (torObject.TryGetValue("perpage", out var perpageObj))
+                {
+                    var perpageVal = perpageObj?.ToString() ?? string.Empty;
+                    queryParams.Add(new KeyValuePair<string, string>("tor[perpage]", perpageVal));
+                }
+
+                // Add all explicit categories from torObject using indexed keys (mirrors Prowlarr)
+                if (torObject.TryGetValue("cat", out var catObj) && catObj is string[] cats)
+                {
+                    for (int i = 0; i < cats.Length; i++)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[cat][{i}]", cats[i]));
+                    }
+                }
+                else
+                {
+                    // No cat specified: send explicit 0 (Prowlarr uses tor[cat][] = 0)
+                    queryParams.Add(new KeyValuePair<string, string>("tor[cat][]", "0"));
+                }
+
+                // Add search-related and paging parameters (safely coalesce to empty strings)
+                var sortTypeVal = torObject.TryGetValue("sortType", out var sortTypeObj) ? sortTypeObj?.ToString() ?? string.Empty : string.Empty;
+                queryParams.Add(new KeyValuePair<string, string>("tor[sortType]", sortTypeVal));
+                queryParams.Add(new KeyValuePair<string, string>("tor[browseStart]", "true"));
+                var startNumberVal = torObject.TryGetValue("startNumber", out var startNumberObj) ? startNumberObj?.ToString() ?? string.Empty : string.Empty;
+                queryParams.Add(new KeyValuePair<string, string>("tor[startNumber]", startNumberVal));
+
+                // Keys present without explicit values in the example; represent them with empty string
+                queryParams.Add(new KeyValuePair<string, string>("bannerLink", string.Empty));
+                queryParams.Add(new KeyValuePair<string, string>("bookmarks", string.Empty));
+                queryParams.Add(new KeyValuePair<string, string>("dlLink", string.Empty));
+                queryParams.Add(new KeyValuePair<string, string>("description", string.Empty));
+
+                // tor[text] is the search query
+                queryParams.Add(new KeyValuePair<string, string>("tor[text]", query ?? string.Empty));
+
+                // Preserve audiobook filtering if available: include main_cat values
+                if (torObject.TryGetValue("main_cat", out var mainCatObj) && mainCatObj is string[] mainCats)
+                {
+                    for (int i = 0; i < mainCats.Length; i++)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[main_cat][{i}]", mainCats[i]));
+                    }
+                }
+
+                // Add searchIn and srchIn fields so we request torrents and relevant fields
+                var searchInVal = torObject.TryGetValue("searchIn", out var searchInObj) ? searchInObj?.ToString() ?? string.Empty : string.Empty;
+                queryParams.Add(new KeyValuePair<string, string>("tor[searchIn]", searchInVal));
+                // srchIn fields: ensure the same fields we set above are present
+                if (torObject.TryGetValue("srchIn", out var srchInObj) && srchInObj is Dictionary<string, bool> srchInValues)
+                {
+                    foreach (var kv in srchInValues)
+                    {
+                        queryParams.Add(new KeyValuePair<string, string>($"tor[srchIn][{kv.Key}]", kv.Value ? "true" : "false"));
+                    }
+                }
+                // Add explicit searchType (title/author/all)
+                queryParams.Add(new KeyValuePair<string, string>("tor[searchType]", searchType));
+
+                // Apply filter flags based on request options (e.g., active, freeleech, vip)
+                if (request?.MyAnonamouse?.Filter != null)
+                {
+                    switch (request.MyAnonamouse.Filter)
+                    {
+                        case Listenarr.Api.Models.MamTorrentFilter.Active:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[onlyActive]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.Freeleech:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[onlyFreeleech]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.FreeleechOrVip:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[freeleechOrVip]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.Vip:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[onlyVip]", "1"));
+                            break;
+                        case Listenarr.Api.Models.MamTorrentFilter.NotVip:
+                            queryParams.Add(new KeyValuePair<string, string>("tor[notVip]", "1"));
+                            break;
+                    }
+                }
+
+                // Apply freeleech wedge preference
+                var freeleechWedge = request?.MyAnonamouse?.FreeleechWedge;
+                if (freeleechWedge != null)
+                {
+                    queryParams.Add(new KeyValuePair<string, string>("tor[freeleechWedge]", freeleechWedge.Value.ToString().ToLowerInvariant()));
+                }
+
+                var qs = string.Join("&", queryParams.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value ?? string.Empty)}"));
+                var fullUrl = url + (qs.Length > 0 ? "?" + qs : string.Empty);
+
+                _logger.LogInformation("MyAnonamouse outgoing query (loadSearchJSONbasic): {Query}", qs);
+
+                var mamRequest = new HttpRequestMessage(HttpMethod.Get, fullUrl);
+                // Add browser-like headers to avoid "invalid request" errors
+                mamRequest.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                mamRequest.Headers.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
+                mamRequest.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                mamRequest.Headers.Referrer = new Uri("https://www.myanonamouse.net/");
+
+                // Prefer using the injected HttpClient in tests (so DelegatingHandler stubs can capture requests)
+                HttpClient? disposableClient = null;
+                HttpClient httpClientToUse = _httpClient;
+                List<IndexerSearchResult> results = new List<IndexerSearchResult>();
+                try
+                {
+                    var indexerUri = new Uri(indexer.Url);
+                    if (_httpClient?.BaseAddress == null || !string.Equals(_httpClient.BaseAddress.Host, indexerUri.Host, StringComparison.OrdinalIgnoreCase))
+                    {
+                        httpClientToUse = MyAnonamouseHelper.CreateAuthenticatedHttpClient(mamId, indexer.Url);
+                        disposableClient = httpClientToUse;
+                    }
+                    else
+                    {
+                        // Add cookie header for injected client so the request is authenticated for MAM
+                        if (!string.IsNullOrEmpty(mamId))
+                            mamRequest.Headers.Add("Cookie", $"mam_id={mamId}");
+                    }
+
+                    _logger.LogDebug("MyAnonamouse API URL: {Url}", LogRedaction.RedactText(url, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+
+                    var response = await httpClientToUse.SendAsync(mamRequest);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("MyAnonamouse returned status {Status}", response.StatusCode);
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("MyAnonamouse error response: {Content}", LogRedaction.RedactText(errorContent, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+                        return new List<IndexerSearchResult>();
+                    }
+
+                    // Capture and persist an updated mam_id cookie if the tracker provided one in Set-Cookie
+                    try
+                    {
+                        var newMam = MyAnonamouseHelper.TryExtractMamIdFromResponse(response);
+                        if (!string.IsNullOrEmpty(newMam) && !string.Equals(newMam, mamId, StringComparison.Ordinal))
+                        {
+                            _logger.LogInformation("MyAnonamouse: received updated mam_id from response for indexer {Name}", indexer.Name);
+                            var idx = await _dbContext.Indexers.FindAsync(indexer.Id);
+                            if (idx != null)
+                            {
+                                idx.AdditionalSettings = MyAnonamouseHelper.UpdateMamIdInAdditionalSettings(idx.AdditionalSettings, newMam);
+                                _dbContext.Indexers.Update(idx);
+                                await _dbContext.SaveChangesAsync();
+                                mamId = newMam;
+                            }
+                        }
+                    }
+                    catch (Exception exMam)
+                    {
+                        _logger.LogDebug(exMam, "Failed to persist updated mam_id from MyAnonamouse response");
+                    }
+
+                    var jsonResponse = await response.Content.ReadAsStringAsync();
+                    _logger.LogDebug("MyAnonamouse raw response: {Response}", jsonResponse);
+                    results = ParseMyAnonamouseResponse(jsonResponse, indexer);
+
+                    // Optional per-result enrichment: fetch individual item pages to populate missing fields
+                    try
+                    {
+                        // Respect global IncludeEnrichment and per-indexer MyAnonamouse options
+                        var shouldEnrich = (request?.IncludeEnrichment ?? false) && (request?.MyAnonamouse?.EnrichResults == true);
+                        if (shouldEnrich)
+                        {
+                            var enrichTop = request?.MyAnonamouse?.EnrichTopResults ?? 3;
+                            await EnrichMyAnonamouseResultsAsync(indexer, results, enrichTop, mamId, httpClientToUse);
+                        }
+                    }
+                    catch (Exception exEnrich)
+                    {
+                        _logger.LogWarning(exEnrich, "MyAnonamouse enrichment step failed");
+                    }
+                }
+                finally
+                {
+                    disposableClient?.Dispose();
+                }
 
                 _logger.LogInformation("MyAnonamouse returned {Count} results", results.Count);
                 return results;
@@ -2711,13 +2457,19 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching MyAnonamouse indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private List<SearchResult> ParseMyAnonamouseResponse(string jsonResponse, Indexer indexer)
+        private List<IndexerSearchResult> ParseMyAnonamouseResponse(string jsonResponse, Indexer indexer)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
+
+            if (indexer == null)
+            {
+                _logger.LogError("ParseMyAnonamouseResponse called with null indexer");
+                return results;
+            }
 
             try
             {
@@ -2817,6 +2569,18 @@ namespace Listenarr.Api.Services
                         var firstRaw = dataArrayElement[0].ToString();
                         var preview = firstRaw.Length > 400 ? firstRaw.Substring(0, 400) + "..." : firstRaw;
                         _logger.LogDebug("First MyAnonamouse item preview: {Preview}", LogRedaction.RedactText(preview, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+
+                        // Log full property list for the first item to aid debugging field names
+                        try
+                        {
+                            var firstItem = dataArrayElement[0];
+                            var fields = string.Join(", ", firstItem.EnumerateObject().Select(p => $"{p.Name}={p.Value}"));
+                            _logger.LogInformation("First MyAnonamouse result fields: {Fields}", LogRedaction.RedactText(fields, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { indexer.ApiKey ?? string.Empty })));
+                        }
+                        catch (Exception exFields)
+                        {
+                            _logger.LogDebug(exFields, "Failed to enumerate fields of first MyAnonamouse item");
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -2829,6 +2593,20 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
+                        // Log property names for first few items to aid debugging
+                        if (_mamDebugIndex < 3)
+                        {
+                            try
+                            {
+                                var propertyNames = item.EnumerateObject().Select(p => p.Name).ToList();
+                                _logger.LogInformation("MyAnonamouse result #{Index} has properties: {Properties}", _mamDebugIndex, string.Join(", ", propertyNames));
+                            }
+                            catch (Exception exNames)
+                            {
+                                _logger.LogDebug(exNames, "Failed to enumerate property names for MyAnonamouse result #{Index}", _mamDebugIndex);
+                            }
+                        }
+
                         string id;
                         if (item.TryGetProperty("id", out var idElem))
                         {
@@ -2843,11 +2621,11 @@ namespace Listenarr.Api.Services
                         var title = "";
                         if (item.TryGetProperty("title", out var titleElem))
                         {
-                            title = titleElem.GetString() ?? "";
+                            title = titleElem.ValueKind == JsonValueKind.String ? titleElem.GetString() ?? "" : titleElem.ToString();
                         }
                         else if (item.TryGetProperty("name", out titleElem))
                         {
-                            title = titleElem.GetString() ?? "";
+                            title = titleElem.ValueKind == JsonValueKind.String ? titleElem.GetString() ?? "" : titleElem.ToString();
                         }
                         var sizeStr = "";
                         if (item.TryGetProperty("size", out var sizeElem))
@@ -2867,10 +2645,176 @@ namespace Listenarr.Api.Services
                         }
                         var seeders = item.TryGetProperty("seeders", out var seedElem) ? seedElem.GetInt32() : 0;
                         var leechers = item.TryGetProperty("leechers", out var leechElem) ? leechElem.GetInt32() : 0;
-                        var dlHash = item.TryGetProperty("dl", out var dlElem) ? dlElem.GetString() : "";
-                        var category = item.TryGetProperty("catname", out var catElem) ? catElem.GetString() : "";
-                        var tags = item.TryGetProperty("tags", out var tagsElem) ? tagsElem.GetString() : "";
-                        var description = item.TryGetProperty("description", out var descElem) ? descElem.GetString() : "";
+                        string dlHash = string.Empty;
+                        if (item.TryGetProperty("dl", out var dlElem))
+                        {
+                            dlHash = dlElem.ValueKind == JsonValueKind.String ? dlElem.GetString() ?? string.Empty : dlElem.ToString();
+                        }
+
+                        // New: explicit downloadUrl / infoUrl / fileName fields commonly provided by Prowlarr
+                        string? downloadUrlField = null;
+                        string? infoUrlField = null;
+                        string? fileNameField = null;
+                        // Use case-insensitive property lookup for robustness against differing casing in tracker responses
+                        foreach (var prop in item.EnumerateObject())
+                        {
+                            var name = prop.Name;
+                            if (downloadUrlField == null && string.Equals(name, "downloadUrl", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                                downloadUrlField = prop.Value.GetString();
+                            if (infoUrlField == null && string.Equals(name, "infoUrl", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                                infoUrlField = prop.Value.GetString();
+                            if (fileNameField == null && string.Equals(name, "fileName", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                                fileNameField = prop.Value.GetString();
+                        }
+
+                        string category = string.Empty;
+                        if (item.TryGetProperty("catname", out var catElem))
+                        {
+                            category = catElem.ValueKind == JsonValueKind.String ? catElem.GetString() ?? string.Empty : catElem.ToString();
+                        }
+
+                        string tags = string.Empty;
+                        if (item.TryGetProperty("tags", out var tagsElem))
+                        {
+                            tags = tagsElem.ValueKind == JsonValueKind.String ? tagsElem.GetString() ?? string.Empty : tagsElem.ToString();
+                        }
+
+                        string description = string.Empty;
+                        if (item.TryGetProperty("description", out var descElem))
+                        {
+                            description = descElem.ValueKind == JsonValueKind.String ? descElem.GetString() ?? string.Empty : descElem.ToString();
+                        }
+
+                        // Parse grabs/files when present (Prowlarr exposes these directly for MyAnonamouse)
+                        var grabs = 0;
+                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count", "times_completed", "completed", "downloaded", "times_downloaded" };
+                        foreach (var prop in item.EnumerateObject())
+                        {
+                            // Case-insensitive match against known grab keys
+                            if (grabKeys.Any(k => string.Equals(k, prop.Name, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                var ge = prop.Value;
+                                _logger.LogInformation("Found grabs candidate field '{Field}' (kind={Kind}) for '{Title}': {Value}", prop.Name, ge.ValueKind, ge.ToString(), title);
+                                if (ge.ValueKind == JsonValueKind.Number)
+                                {
+                                    grabs = ge.GetInt32();
+                                    _logger.LogInformation("Parsed grabs for '{Title}' from field '{Field}': {Grabs}", title, prop.Name, grabs);
+                                    break;
+                                }
+                                else if (ge.ValueKind == JsonValueKind.String && int.TryParse(ge.GetString(), out var gtmp))
+                                {
+                                    grabs = gtmp;
+                                    _logger.LogInformation("Parsed grabs (string) for '{Title}' from field '{Field}': {Grabs}", title, prop.Name, grabs);
+                                    break;
+                                }
+                            }
+                        }
+
+                        var files = 0;
+                        foreach (var prop in item.EnumerateObject())
+                        {
+                            if (string.Equals(prop.Name, "files", StringComparison.OrdinalIgnoreCase) || string.Equals(prop.Name, "numfiles", StringComparison.OrdinalIgnoreCase) || string.Equals(prop.Name, "num_files", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var fe = prop.Value;
+                                _logger.LogInformation("Found files candidate field '{Field}' (kind={Kind}) for '{Title}': {Value}", prop.Name, fe.ValueKind, fe.ToString(), title);
+                                if (fe.ValueKind == JsonValueKind.Number)
+                                {
+                                    files = fe.GetInt32();
+                                    _logger.LogInformation("Parsed files for '{Title}' from field '{Field}': {Files}", title, prop.Name, files);
+                                }
+                                else if (fe.ValueKind == JsonValueKind.String && int.TryParse(fe.GetString(), out var ftmp))
+                                {
+                                    files = ftmp;
+                                    _logger.LogInformation("Parsed files (string) for '{Title}' from field '{Field}': {Files}", title, prop.Name, files);
+                                }
+                                break;
+                            }
+                        }
+
+                        // Prefer explicit 'added' timestamp when present (MyAnonamouse uses "yyyy-MM-dd HH:mm:ss")
+                        DateTime? publishDate = null;
+                        if (item.TryGetProperty("added", out var addedElem) && addedElem.ValueKind == JsonValueKind.String)
+                        {
+                            var addedStr = addedElem.GetString();
+                            if (!string.IsNullOrWhiteSpace(addedStr))
+                            {
+                                try
+                                {
+                                    publishDate = DateTime.ParseExact(addedStr, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).ToLocalTime();
+                                }
+                                catch (Exception)
+                                {
+                                    // ignore and fallback to other fields below
+                                }
+                            }
+                        }
+
+                        // Parse publish date when present; fallback to 'age' if necessary
+                        if (!publishDate.HasValue)
+                        {
+                            string? publishDateStr = null;
+                            if (item.TryGetProperty("publishDate", out var pdElem) && pdElem.ValueKind == JsonValueKind.String)
+                                publishDateStr = pdElem.GetString();
+                            else if (item.TryGetProperty("publish_date", out var pd2) && pd2.ValueKind == JsonValueKind.String)
+                                publishDateStr = pd2.GetString();
+                            else if (item.TryGetProperty("publishdate", out var pd3) && pd3.ValueKind == JsonValueKind.String)
+                                publishDateStr = pd3.GetString();
+
+                            if (!string.IsNullOrWhiteSpace(publishDateStr))
+                            {
+                                if (System.DateTimeOffset.TryParse(publishDateStr, out var dto))
+                                {
+                                    publishDate = dto.UtcDateTime;
+                                }
+                                else if (DateTime.TryParse(publishDateStr, out var pdv))
+                                {
+                                    publishDate = DateTime.SpecifyKind(pdv, DateTimeKind.Utc);
+                                }
+                            }
+                            else
+                            {
+                                // Support multiple representations of "age": days, hours, minutes, or alternate keys (ageHours, ageMinutes)
+                                int? days = null;
+                                double? hours = null;
+                                double? minutes = null;
+
+                                // Prefer explicit ageHours/ageMinutes if present
+                                if (item.TryGetProperty("ageHours", out var ah) && (ah.ValueKind == JsonValueKind.Number || ah.ValueKind == JsonValueKind.String))
+                                {
+                                    if (ah.ValueKind == JsonValueKind.Number) hours = ah.GetDouble();
+                                    else if (double.TryParse(ah.GetString(), out var htmp)) hours = htmp;
+                                }
+                                if (item.TryGetProperty("ageMinutes", out var am) && (am.ValueKind == JsonValueKind.Number || am.ValueKind == JsonValueKind.String))
+                                {
+                                    if (am.ValueKind == JsonValueKind.Number) minutes = am.GetDouble();
+                                    else if (double.TryParse(am.GetString(), out var mtmp)) minutes = mtmp;
+                                }
+
+                                // Fallback to 'age' if present. Heuristic: small values (<=48) likely hours; otherwise treat as days.
+                                if ((hours == null && minutes == null) && item.TryGetProperty("age", out var ageElem))
+                                {
+                                    if (ageElem.ValueKind == JsonValueKind.Number)
+                                    {
+                                        var a = ageElem.GetDouble();
+                                        if (a <= 48) hours = a;
+                                        else days = (int)Math.Floor(a);
+                                    }
+                                    else if (ageElem.ValueKind == JsonValueKind.String && double.TryParse(ageElem.GetString(), out var adtmp))
+                                    {
+                                        var a = adtmp;
+                                        if (a <= 48) hours = a;
+                                        else days = (int)Math.Floor(a);
+                                    }
+                                }
+
+                                if (minutes.HasValue && minutes.Value > 0)
+                                    publishDate = DateTime.UtcNow.AddMinutes(-minutes.Value);
+                                else if (hours.HasValue && hours.Value > 0)
+                                    publishDate = DateTime.UtcNow.AddHours(-hours.Value);
+                                else if (days.HasValue && days.Value > 0)
+                                    publishDate = DateTime.UtcNow.AddDays(-days.Value);
+                            }
+                        }
 
                         if (string.IsNullOrEmpty(title))
                             continue;
@@ -2946,18 +2890,110 @@ namespace Listenarr.Api.Services
                             }
                         }
 
-                        // Detect quality and format from tags
-                        var quality = DetectQualityFromTags(tags ?? "");
-                        var format = DetectFormatFromTags(tags ?? "");
+                        // Detect quality and format with robust fallbacks:
+                        // 1) Prefer explicit format/filetype fields when present
+                        // 2) Use tags when available
+                        // 3) Fallback to description and title (filename) parsing
 
-                        // Build download URL
+                        // Try to read explicit format/filetype fields from the item (case-insensitive)
+                        string rawFormatField = string.Empty;
+                        foreach (var prop in item.EnumerateObject())
+                        {
+                            if (prop.Value.ValueKind == JsonValueKind.String && (string.Equals(prop.Name, "format", StringComparison.OrdinalIgnoreCase) || string.Equals(prop.Name, "filetype", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                rawFormatField = prop.Value.GetString() ?? string.Empty;
+                                break;
+                            }
+                        }
+
+                        // Detect format from tags and from explicit field
+                        var formatFromTags = DetectFormatFromTags(tags ?? "");
+                        var formatFromField = !string.IsNullOrEmpty(rawFormatField) ? DetectFormatFromTags(rawFormatField) : null;
+                        var finalFormat = (formatFromField != null && formatFromField != "MP3") ? formatFromField : formatFromTags;
+
+                        // Log explicit filetype when present
+                        if (!string.IsNullOrEmpty(rawFormatField))
+                        {
+                            _logger.LogDebug("MyAnonamouse: found explicit filetype '{Filetype}' for item {Id}", rawFormatField, id);
+                        }
+
+                        // Detect quality: prefer tags, then explicit format field, then description/title
+                        var qualityFromTags = DetectQualityFromTags(tags ?? "");
+                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : ( !string.IsNullOrEmpty(rawFormatField) ? DetectQualityFromFormat(rawFormatField) : "Unknown" );
+
+                        // Fallback: try to detect quality from description or title (filename-like text)
+                        if (finalQuality == "Unknown")
+                        {
+                            if (!string.IsNullOrEmpty(description))
+                            {
+                                var q = DetectQualityFromTags(description);
+                                if (q != "Unknown") finalQuality = q;
+                                else
+                                {
+                                    var q2 = DetectQualityFromFormat(description);
+                                    if (q2 != "Unknown") finalQuality = q2;
+                                }
+                            }
+
+                            if (finalQuality == "Unknown")
+                            {
+                                var probeText = title ?? string.Empty;
+                                var q = DetectQualityFromTags(probeText);
+                                if (q != "Unknown") finalQuality = q;
+                                else
+                                {
+                                    var q2 = DetectQualityFromFormat(probeText);
+                                    if (q2 != "Unknown") finalQuality = q2;
+                                }
+                            }
+                        }
+
+                        // Additional fallback: if format still looks generic MP3, probe description/title
+                        if (finalFormat == "MP3")
+                        {
+                            if (!string.IsNullOrEmpty(description))
+                            {
+                                var f = DetectFormatFromTags(description);
+                                if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
+                            }
+
+                            if (finalFormat == "MP3")
+                            {
+                                var probeText = title ?? string.Empty;
+                                var f = DetectFormatFromTags(probeText);
+                                if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
+                            }
+                        }
+
+                        // Build download URL (include mam_id if configured)
                         var downloadUrl = "";
                         if (!string.IsNullOrEmpty(dlHash))
                         {
-                            downloadUrl = $"https://www.myanonamouse.net/tor/download.php/{dlHash}";
+                            var baseUrl = (indexer?.Url ?? "https://www.myanonamouse.net").TrimEnd('/');
+                            downloadUrl = $"{baseUrl}/tor/download.php/{dlHash}";
+                            var mamIdLocal = MyAnonamouseHelper.TryGetMamId(indexer?.AdditionalSettings);
+                            if (!string.IsNullOrEmpty(mamIdLocal))
+                            {
+                                // Normalize mam_id: if the stored value is already percent-encoded, unescape it first
+                                // to avoid double-encoding sequences like "%252B". Then escape once for safe query use.
+                                try
+                                {
+                                    mamIdLocal = Uri.UnescapeDataString(mamIdLocal);
+                                }
+                                catch
+                                {
+                                    // If unescape fails for any reason, fall back to original value
+                                }
+
+                                downloadUrl += $"?mam_id={Uri.EscapeDataString(mamIdLocal)}";
+                            }
                         }
 
-                        var result = new SearchResult
+                        // Preserve raw language code for later flagging/flags list
+                        string rawLangCode = string.Empty;
+                        _logger.LogDebug("MyAnonamouse: rawFormat='{Raw}', finalFormat='{Final}', rawLang='{LangCode}'", rawFormatField, finalFormat, rawLangCode);
+
+                        var result = new IndexerSearchResult
                         {
                             Id = id ?? Guid.NewGuid().ToString(),
                             Title = title ?? "Unknown",
@@ -2967,18 +3003,26 @@ namespace Listenarr.Api.Services
                             Size = size,
                             Seeders = seeders,
                             Leechers = leechers,
-                            Source = indexer.Name,
-                            PublishedDate = DateTime.UtcNow,
-                            Quality = quality,
-                            Format = format,
+                            Source = indexer?.Name ?? "MyAnonamouse",
+                            PublishedDate = publishDate?.ToString("o") ?? string.Empty,
+                            Quality = finalQuality,
+                            Format = finalFormat,
                             TorrentUrl = downloadUrl,
                             // Use MyAnonamouse public item page pattern: https://myanonamouse.net/t/{id}
-                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id)}" : indexer.Url,
+                            ResultUrl = !string.IsNullOrEmpty(id) ? $"https://myanonamouse.net/t/{Uri.EscapeDataString(id!)}" : (indexer?.Url ?? ""),
                             MagnetLink = "",
                             NzbUrl = ""
                         };
-                        result.IndexerId = indexer.Id;
-                        result.IndexerImplementation = indexer.Implementation;
+                        // If we have a parsed language code, map to name and preserve raw code
+                        if (!string.IsNullOrEmpty(rawLangCode) && string.IsNullOrEmpty(result.Language))
+                        {
+                            result.Language = ParseLanguageFromCode(rawLangCode) ?? ParseLanguageFromText(rawLangCode);
+                            if (!string.IsNullOrEmpty(result.Language) && !string.IsNullOrEmpty(rawLangCode)) 
+                            {
+                                rawLangCode = rawLangCode.ToUpperInvariant();
+                            }
+                        }                        result.IndexerId = indexer?.Id;
+                        result.IndexerImplementation = indexer?.Implementation ?? string.Empty;
                         // Robust link detection: prefer magnet/hash/torrent indicators, only treat as NZB when explicit NZB fields exist
                         try
                         {
@@ -3039,15 +3083,52 @@ namespace Listenarr.Api.Services
                                 nzbUrlDetected = nzbElem.GetString() ?? string.Empty;
 
                             // Apply discovered links to the result
-                            if (!string.IsNullOrEmpty(magnetLink)) result.MagnetLink = magnetLink;
-                            if (!string.IsNullOrEmpty(torrentUrlDetected)) result.TorrentUrl = torrentUrlDetected;
-                            if (!string.IsNullOrEmpty(nzbUrlDetected)) result.NzbUrl = nzbUrlDetected;
+                            if (!string.IsNullOrEmpty(magnetLink)) result.MagnetLink = magnetLink ?? string.Empty;
+                            if (!string.IsNullOrEmpty(torrentUrlDetected)) result.TorrentUrl = torrentUrlDetected ?? string.Empty;
+                            if (!string.IsNullOrEmpty(nzbUrlDetected)) result.NzbUrl = nzbUrlDetected ?? string.Empty;
 
-                            // Prefer marking as Torrent when either magnet or torrent URL exists
+                            // If a direct downloadUrl was provided by the API, prefer that as the torrent/nzb URL
+                            if (!string.IsNullOrEmpty(downloadUrlField))
+                            {
+                                // Choose disposition based on common hints and protocol
+                                if ((downloadUrlField ?? string.Empty).EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) || (item.TryGetProperty("protocol", out var protoElem) && protoElem.ValueKind == JsonValueKind.String && protoElem.GetString()?.Equals("torrent", StringComparison.OrdinalIgnoreCase) == true))
+                                {
+                                    result.TorrentUrl = downloadUrlField ?? string.Empty;
+                                }
+                                else if ((downloadUrlField ?? string.Empty).EndsWith(".nzb", StringComparison.OrdinalIgnoreCase) || (item.TryGetProperty("protocol", out var proto2Elem) && proto2Elem.ValueKind == JsonValueKind.String && proto2Elem.GetString()?.Equals("usenet", StringComparison.OrdinalIgnoreCase) == true))
+                                {
+                                    result.NzbUrl = downloadUrlField ?? string.Empty;
+                                }
+                                else
+                                {
+                                    // Unknown, prefer TorrentUrl by default
+                                    result.TorrentUrl = downloadUrlField ?? string.Empty;
+                                }
+                            }
+
+                            // If guid is present and looks like a URL, prefer it as the canonical link
+                            if (item.TryGetProperty("guid", out var guidElem) && guidElem.ValueKind == JsonValueKind.String && Uri.IsWellFormedUriString(guidElem.GetString(), UriKind.Absolute))
+                            {
+                                result.ResultUrl = guidElem.GetString();
+                            }
+
+                            // If infoUrl is present, use it as the canonical page link when available
+                            if (!string.IsNullOrEmpty(infoUrlField))
+                            {
+                                result.ResultUrl = infoUrlField;
+                            }
+
+                            // Use filename field to populate TorrentFileName when available
+                            if (!string.IsNullOrEmpty(fileNameField))
+                            {
+                                result.TorrentFileName = fileNameField;
+                            }
+
+                            // Prefer marking the download type when either magnet/torrent or NZB URL exists
                             if (!string.IsNullOrEmpty(result.MagnetLink) || !string.IsNullOrEmpty(result.TorrentUrl))
-                                result.Format = "Torrent";
+                                result.DownloadType = "Torrent";
                             else if (!string.IsNullOrEmpty(result.NzbUrl))
-                                result.Format = "NZB";
+                                result.DownloadType = "nzb";
 
                             _logger.LogDebug("MyAnonamouse parsed item #{Index} link-disposition: magnet={MagnetPresent}, torrent={TorrentPresent}, nzb={NzbPresent}", _mamDebugIndex, !string.IsNullOrEmpty(result.MagnetLink), !string.IsNullOrEmpty(result.TorrentUrl), !string.IsNullOrEmpty(result.NzbUrl));
                         }
@@ -3056,19 +3137,108 @@ namespace Listenarr.Api.Services
                             _logger.LogDebug(exLink, "Failed to detect links for MyAnonamouse item {Id}", id);
                         }
 
-                        // Attempt to parse language codes from title or tags (e.g. [ENG / M4B])
-                        var detectedLang = ParseLanguageFromText(title + " " + (tags ?? ""));
-                        if (!string.IsNullOrEmpty(detectedLang))
+                        // Prefer explicit language fields when present (lang_code, language_code, lang, language) - case-insensitive search
+                        string explicitLang = string.Empty;
+                        foreach (var prop in item.EnumerateObject())
                         {
-                            result.Language = detectedLang;
+                            if ((prop.Name.Equals("lang_code", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("language_code", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("lang", StringComparison.OrdinalIgnoreCase) || prop.Name.Equals("language", StringComparison.OrdinalIgnoreCase)) && prop.Value.ValueKind == JsonValueKind.String)
+                            {
+                                explicitLang = prop.Value.GetString() ?? string.Empty;
+                                rawLangCode = explicitLang;
+                                _logger.LogDebug("MyAnonamouse: found language field '{Field}'='{Lang}' for item {Id}", prop.Name, explicitLang, id);
+                                break;
+                            }
                         }
+
+                        // Numeric language id fallback (case-insensitive check)
+                        if (string.IsNullOrEmpty(explicitLang) && item.TryGetProperty("language", out var langNumElem) && langNumElem.ValueKind == JsonValueKind.Number)
+                        {
+                            var numeric = langNumElem.GetInt32();
+                            if (numeric == 1) { explicitLang = "ENG"; rawLangCode = "ENG"; }
+                            _logger.LogDebug("MyAnonamouse: found numeric language id={Num} mapped to '{Lang}' for item {Id}", numeric, explicitLang, id);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(explicitLang))
+                        {
+                            // Prefer direct code mapping (e.g., ENG -> English) when a short code is provided
+                            var parsedLang = ParseLanguageFromCode(explicitLang) ?? ParseLanguageFromText(explicitLang);
+                            if (!string.IsNullOrWhiteSpace(parsedLang))
+                            {
+                                result.Language = parsedLang;
+                                // store normalized code for flags
+                                rawLangCode = explicitLang.ToUpperInvariant();
+                            }
+                        }
+
+                        // Fallback: parse title, tags and description for language codes (e.g. '[ENG / M4B]')
+                        if (string.IsNullOrWhiteSpace(result.Language))
+                        {
+                            var probe = string.Join(" ", new[] { title ?? string.Empty, tags ?? string.Empty, description ?? string.Empty }).Trim();
+                            var detectedLang = ParseLanguageFromText(probe);
+                            if (!string.IsNullOrEmpty(detectedLang))
+                            {
+                                result.Language = detectedLang;
+                            }
+                        }
+
+                        // Build flags list similar to Prowlarr: include raw language code and filetype (uppercase)
+                        var flagsList = new List<string>();
+                        if (!string.IsNullOrEmpty(rawLangCode)) flagsList.Add(rawLangCode);
+                        if (!string.IsNullOrEmpty(rawFormatField)) flagsList.Add(rawFormatField.ToUpperInvariant());
+
+                        // Append flags to the title if not already present (try to use raw lang/filetype first)
+                        if (flagsList.Count > 0)
+                        {
+                            // Avoid duplicating if title already contains bracketed flags
+                            if (!System.Text.RegularExpressions.Regex.IsMatch(title ?? string.Empty, "\\[.*\\]$"))
+                            {
+                                title = (title ?? string.Empty) + " [" + string.Join(" / ", flagsList) + "]";
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(fileNameField))
+                        {
+                            // Fallback: extract trailing bracketed flags from filename (before extension) and append them as-is
+                            try
+                            {
+                                var fname = fileNameField;
+                                var dotIdx = fname.LastIndexOf('.');
+                                var nameOnly = dotIdx > 0 ? fname.Substring(0, dotIdx) : fname;
+                                var bracketStart = nameOnly.IndexOf(" [");
+                                if (bracketStart >= 0)
+                                {
+                                    var suffix = nameOnly.Substring(bracketStart);
+                                    if (!System.Text.RegularExpressions.Regex.IsMatch(title ?? string.Empty, "\\[.*\\]$") && !(title ?? string.Empty).Contains(suffix))
+                                    {
+                                        title = (title ?? string.Empty) + suffix;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Failed to extract bracketed flags from filename for MyAnonamouse item {Id}", id);
+                            }
+                        }
+
+                        // Append VIP marker when the item is flagged as VIP
+                        if (item.TryGetProperty("vip", out var vipElem))
+                        {
+                            if (vipElem.ValueKind == JsonValueKind.True || (vipElem.ValueKind == JsonValueKind.String && string.Equals(vipElem.GetString(), "true", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                title ??= string.Empty;
+                                if (!title.EndsWith(" [VIP]")) title = title + " [VIP]";
+                            }
+                        }
+
+                        // Apply grabs/files to the result when available
+                        result.Grabs = grabs;
+                        result.Files = files;
 
                         try
                         {
                             if (_mamDebugIndex < 5)
                             {
-                                _logger.LogDebug("ParseMyAnonamouse: constructed SearchResult #{Index} -> Id='{Id}', Title='{Title}', Size={Size}, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Artist='{Artist}', Album='{Album}', Category='{Category}', Source='{Source}'",
-                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "");
+                                _logger.LogDebug("ParseMyAnonamouse: constructed SearchResult #{Index} -> Id='{Id}', Title='{Title}', Size={Size}, Seeders={Seeders}, TorrentUrl='{TorrentUrl}', Artist='{Artist}', Album='{Album}', Category='{Category}', Source='{Source}', Grabs={Grabs}, Files={Files}, PublishedDate={PublishedDate}'",
+                                    _mamDebugIndex, result.Id, result.Title, result.Size, result.Seeders, result.TorrentUrl ?? "", result.Artist ?? "", result.Album ?? "", result.Category ?? "", result.Source ?? "", result.Grabs, result.Files, result.PublishedDate);
                             }
                         }
                         catch (Exception ex)
@@ -3077,6 +3247,30 @@ namespace Listenarr.Api.Services
                         }
 
                         _mamDebugIndex++;
+                        // Final best-effort: if title lacks bracketed flags but we have a TorrentFileName with them, append the filename's suffix
+                        if (!string.IsNullOrEmpty(result.TorrentFileName) && !System.Text.RegularExpressions.Regex.IsMatch(result.Title ?? string.Empty, "\\[.*\\]$") )
+                        {
+                            try
+                            {
+                                var fname = result.TorrentFileName;
+                                var dotIdx2 = fname.LastIndexOf('.');
+                                var nameOnly2 = dotIdx2 > 0 ? fname.Substring(0, dotIdx2) : fname;
+                                var bracketStart2 = nameOnly2.IndexOf(" [");
+                                if (bracketStart2 >= 0)
+                                {
+                                    var suffix2 = nameOnly2.Substring(bracketStart2);
+                                    if (!(result.Title ?? string.Empty).Contains(suffix2))
+                                    {
+                                        result.Title = (result.Title ?? string.Empty) + suffix2;
+                                    }
+                                }
+                            }
+                            catch (Exception ex2)
+                            {
+                                _logger.LogDebug(ex2, "Failed to append filename flags to title for MyAnonamouse item {Id}", id);
+                            }
+                        }
+
 
                         results.Add(result);
                     }
@@ -3132,6 +3326,132 @@ namespace Listenarr.Api.Services
             }
 
             return null;
+        }
+
+        // Optional enrichment step: fetch individual item pages to populate missing grabs/files/format/language
+        private async Task EnrichMyAnonamouseResultsAsync(Indexer indexer, List<IndexerSearchResult> results, int topN, string? mamId, HttpClient httpClient)
+        {
+            if (results == null || results.Count == 0) return;
+            if (topN <= 0) return;
+
+            var candidates = results.Where(r => (r.Grabs == 0 || r.Files == 0 || string.IsNullOrEmpty(r.Format) || string.IsNullOrEmpty(r.Language))).Take(topN).ToList();
+            if (!candidates.Any()) return;
+
+            _logger.LogDebug("Enriching {Count} MyAnonamouse results (topN={TopN})", candidates.Count, topN);
+
+            var sem = new SemaphoreSlim(4);
+            var tasks = candidates.Select(async r =>
+            {
+                await sem.WaitAsync();
+                try
+                {
+                    var cacheKey = $"mam:enrich:{r.ResultUrl}";
+                    if (_cache != null && _cache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IndexerSearchResult cached)
+                    {
+                        // Apply cached values
+                        if (cached.Grabs > 0) r.Grabs = cached.Grabs;
+                        if (cached.Files > 0) r.Files = cached.Files;
+                        if (!string.IsNullOrEmpty(cached.Format) && string.IsNullOrEmpty(r.Format)) r.Format = cached.Format;
+                        if (!string.IsNullOrEmpty(cached.Language) && string.IsNullOrEmpty(r.Language)) r.Language = cached.Language;
+                        return;
+                    }
+
+                    if (string.IsNullOrEmpty(r.ResultUrl)) return;
+
+                    // Extract torrent ID from result URL (e.g., https://www.myanonamouse.net/t/28972 -> 28972)
+                    var idMatch = System.Text.RegularExpressions.Regex.Match(r.ResultUrl, @"/t/(\d+)");
+                    if (!idMatch.Success) return;
+                    var torrentId = idMatch.Groups[1].Value;
+
+                    // Request JSON detail endpoint
+                    var detailUrl = $"{indexer.Url.TrimEnd('/')}/tor/js/loadTorrentJSONBasic.php?id={torrentId}";
+                    var req = new HttpRequestMessage(HttpMethod.Get, detailUrl);
+                    req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    req.Headers.Accept.ParseAdd("application/json");
+                    if (!string.IsNullOrEmpty(mamId)) req.Headers.Add("Cookie", $"mam_id={mamId}");
+
+                    var resp = await httpClient.SendAsync(req);
+                    if (!resp.IsSuccessStatusCode) return;
+                    var json = await resp.Content.ReadAsStringAsync();
+
+                    // Parse JSON for enrichment fields
+                    try
+                    {
+                        var detail = System.Text.Json.JsonDocument.Parse(json).RootElement;
+                        
+                        // Handle potential wrapper objects (e.g., { "data": {...} } or { "response": {...} })
+                        if (detail.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            detail = dataProp;
+                        }
+                        else if (detail.TryGetProperty("response", out var respProp) && respProp.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            detail = respProp;
+                        }
+                        
+                        var grabs = 0;
+                        var grabKeys = new[] { "grabs", "snatches", "snatched", "snatched_count", "snatches_count", "numgrabs", "num_grabs", "grab_count", "times_completed", "time_completed", "downloaded", "times_downloaded", "completed" };
+                        foreach (var key in grabKeys)
+                        {
+                            if (detail.TryGetProperty(key, out var gEl))
+                            {
+                                if (gEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                {
+                                    grabs = gEl.GetInt32();
+                                    _logger.LogDebug("Enrichment: found grabs field '{Field}'={Value} for {Id}", key, grabs, r.Id);
+                                    break;
+                                }
+                                else if (gEl.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(gEl.GetString(), out var gtmp))
+                                {
+                                    grabs = gtmp;
+                                    _logger.LogDebug("Enrichment: parsed grabs (string) field '{Field}'={Value} for {Id}", key, grabs, r.Id);
+                                    break;
+                                }
+                            }
+                        }
+                        var files = detail.GetPropertyOrDefault("files", 0);
+                        var format = detail.GetPropertyOrDefault("filetype", "");
+                        var langCode = detail.GetPropertyOrDefault("lang_code", "");
+
+                        // Apply values
+                        if (grabs > 0) r.Grabs = grabs;
+                        if (files > 0) r.Files = files;
+                        if (!string.IsNullOrEmpty(format) && string.IsNullOrEmpty(r.Format)) r.Format = format.ToUpper();
+                        if (!string.IsNullOrEmpty(langCode) && string.IsNullOrEmpty(r.Language)) r.Language = ParseLanguageFromCode(langCode);
+                        
+                        _logger.LogDebug("Enriched MyAnonamouse result {Id}: grabs={Grabs}, files={Files}, format={Format}, language={Language}", r.Id, r.Grabs, r.Files, r.Format, r.Language);
+                    }
+                    catch (Exception exParse)
+                    {
+                        _logger.LogDebug(exParse, "Failed to parse MyAnonamouse detail JSON for {Id}", r.Id);
+                        return;
+                    }
+
+                    // Cache the enriched values
+                    if (_cache != null)
+                    {
+                        try
+                        {
+                            var entryOptions = new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions() { SlidingExpiration = TimeSpan.FromHours(1) };
+                            _cache.Set(cacheKey, (object)new IndexerSearchResult { Grabs = r.Grabs, Files = r.Files, Format = r.Format, Language = r.Language }, entryOptions);
+                        }
+                        catch (Exception exCache)
+                        {
+                            _logger.LogDebug(exCache, "Failed to set enrichment cache for {Key}", cacheKey);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to enrich MyAnonamouse result {Id}", r.Id);
+                }
+                finally
+                {
+                    sem.Release();
+                }
+            }).ToArray();
+
+            await Task.WhenAll(tasks);
         }
 
         // Try to heuristically split a user query into (title, author).
@@ -3207,6 +3527,12 @@ namespace Listenarr.Api.Services
             // Add limit
             queryParams.Add("limit=100");
 
+            // Request extended info for Newznab/Torznab indexers to include grabs/snatches and other attributes when available
+            if (!string.IsNullOrEmpty(indexer.Implementation) && (indexer.Implementation.Equals("newznab", StringComparison.OrdinalIgnoreCase) || indexer.Implementation.Equals("torznab", StringComparison.OrdinalIgnoreCase)))
+            {
+                queryParams.Add("extended=1");
+            }
+
             return $"{url}{apiPath}?{string.Join("&", queryParams)}";
         }
 
@@ -3266,7 +3592,7 @@ namespace Listenarr.Api.Services
             return cleaned;
         }
 
-        private async Task<List<SearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
+        private async Task<List<IndexerSearchResult>> SearchInternetArchiveAsync(Indexer indexer, string query, string? category)
         {
             try
             {
@@ -3305,7 +3631,7 @@ namespace Listenarr.Api.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Internet Archive returned status {Status}", response.StatusCode);
-                    return new List<SearchResult>();
+                    return new List<IndexerSearchResult>();
                 }
 
                 var jsonResponse = await response.Content.ReadAsStringAsync();
@@ -3319,13 +3645,13 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching Internet Archive indexer {Name}", indexer.Name);
-                return new List<SearchResult>();
+                return new List<IndexerSearchResult>();
             }
         }
 
-        private async Task<List<SearchResult>> ParseInternetArchiveSearchResponse(string jsonResponse, Indexer indexer)
+        private async Task<List<IndexerSearchResult>> ParseInternetArchiveSearchResponse(string jsonResponse, Indexer indexer)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
 
             try
             {
@@ -3400,7 +3726,7 @@ namespace Listenarr.Api.Services
                         _logger.LogDebug("Found audio file for {Title}: {FileName} ({Format}, {Size} bytes)",
                             title, audioFile.FileName, audioFile.Format, audioFile.Size);
 
-                        var iaResult = new SearchResult
+                        var iaResult = new IndexerSearchResult
                         {
                             Id = Guid.NewGuid().ToString(),
                             Title = title,
@@ -3416,7 +3742,8 @@ namespace Listenarr.Api.Services
                             DownloadType = "DDL", // Direct Download Link
                             Format = audioFile.Format,
                             Quality = DetectQualityFromFormat(audioFile.Format),
-                            Source = $"{indexer.Name} (Internet Archive)"
+                            Source = $"{indexer.Name} (Internet Archive)",
+                            PublishedDate = string.Empty
                         };
 
                         // Ensure ResultUrl is present (fallback to item page or archive details)
@@ -3529,9 +3856,9 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private List<SearchResult> ParseTorznabResponse(string xmlContent, Indexer indexer)
+        internal async Task<List<IndexerSearchResult>> ParseTorznabResponseAsync(string xmlContent, Indexer indexer)
         {
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
 
             try
             {
@@ -3568,7 +3895,7 @@ namespace Listenarr.Api.Services
                 {
                     try
                     {
-                        var result = new SearchResult
+                        var result = new IndexerSearchResult
                         {
                             Id = item.Element("guid")?.Value ?? Guid.NewGuid().ToString(),
                             Title = item.Element("title")?.Value ?? "Unknown",
@@ -3582,16 +3909,17 @@ namespace Listenarr.Api.Services
                         var pubDateStr = item.Element("pubDate")?.Value;
                         if (DateTime.TryParse(pubDateStr, out var pubDate))
                         {
-                            result.PublishedDate = pubDate;
+                            result.PublishedDate = pubDate.ToString("o");
                         }
                         else
                         {
-                            result.PublishedDate = DateTime.UtcNow;
+                            result.PublishedDate = string.Empty;
                         }
 
-                        // Parse Torznab/Newznab attributes
-                        var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
-                        var attributes = item.Elements(torznabNs + "attr").ToList();
+// Parse Torznab/Newznab attributes (support both torznab and newznab namespaces)
+                var torznabNs = System.Xml.Linq.XNamespace.Get("http://torznab.com/schemas/2015/feed");
+                var newznabNs = System.Xml.Linq.XNamespace.Get("http://www.newznab.com/DTD/2010/feeds/attributes/");
+                var attributes = item.Elements(torznabNs + "attr").Concat(item.Elements(newznabNs + "attr")).ToList();
 
                         foreach (var attr in attributes)
                         {
@@ -3626,9 +3954,151 @@ namespace Listenarr.Api.Services
                                 case "magneturl":
                                     result.MagnetLink = value;
                                     break;
-                                case "grabs":
-                                    // Usenet grabs can be used as a quality indicator
+                                case "filetype":
+                                case "format":
+                                    // Prefer explicit filetype/format attributes
+                                    var normalizedFmt = value?.ToLowerInvariant() ?? string.Empty;
+                                    if (normalizedFmt.Contains("m4b")) result.Format = "M4B";
+                                    else if (normalizedFmt.Contains("flac")) result.Format = "FLAC";
+                                    else if (normalizedFmt.Contains("opus")) result.Format = "OPUS";
+                                    else if (normalizedFmt.Contains("aac")) result.Format = "AAC";
+                                    else if (normalizedFmt.Contains("mp3")) result.Format = "MP3";
+
+                                    // Also set Quality from format where possible
+                                    if (string.IsNullOrEmpty(result.Quality))
+                                    {
+                                        if (normalizedFmt.Contains("320")) result.Quality = "MP3 320kbps";
+                                        else if (normalizedFmt.Contains("256")) result.Quality = "MP3 256kbps";
+                                        else if (normalizedFmt.Contains("192")) result.Quality = "MP3 192kbps";
+                                        else if (normalizedFmt.Contains("128")) result.Quality = "MP3 128kbps";
+                                        else if (normalizedFmt.Contains("m4b")) result.Quality = "M4B";
+                                    }
                                     break;
+                                case "lang_code":
+                                case "language_code":
+                                case "lang":
+                                    // Standardized language codes (e.g., ENG, FR)
+                                    try
+                                    {
+                                        var parsedLang = ParseLanguageFromText(value ?? string.Empty);
+                                        if (!string.IsNullOrEmpty(parsedLang)) result.Language = parsedLang;
+                                    }
+                                    catch { }
+                                    break;
+                                case "language":
+                                    // Some indexers use numeric language IDs (e.g., 1 -> ENG)
+                                    if (int.TryParse(value, out var langNum))
+                                    {
+                                        if (langNum == 1) result.Language = "English";
+                                        // Add other mappings if required in the future
+                                    }
+                                    else
+                                    {
+                                        try
+                                        {
+                                            var pl = ParseLanguageFromText(value ?? string.Empty);
+                                            if (!string.IsNullOrEmpty(pl)) result.Language = pl;
+                                        }
+                                        catch { }
+                                    }
+                                    break;
+                                case "grabs":
+                                    if (int.TryParse(value, out var grabs))
+                                        result.Grabs = grabs;
+                                    break;
+                                case "files":
+                                    if (int.TryParse(value, out var files))
+                                        result.Files = files;
+                                    break;
+                                case "usenetdate":
+                                    // Some indexers expose a usenet-specific date attribute; prefer it if parseable
+                                    if (long.TryParse(value, out var unixSec))
+                                    {
+                                        try
+                                        {
+                                            var dt = DateTimeOffset.FromUnixTimeSeconds(unixSec).UtcDateTime;
+                                            result.PublishedDate = dt.ToString("o");
+                                        }
+                                        catch { }
+                                    }
+                                    else if (DateTime.TryParse(value, out var udt))
+                                    {
+                                        result.PublishedDate = udt.ToString("o");
+                                    }
+                                    break;
+                            }
+                        }
+
+                        // Fallback: some indexers don't expose "grabs" as a standard torznab/newznab attr.
+                        // Attempt a few common alternate attribute names and elements (snatches, comments, etc.)
+                        if (result.Grabs == 0)
+                        {
+                            var altNames = new[] { "snatches", "snatched", "numgrabs", "num_grabs", "grab_count" };
+                            foreach (var alt in altNames)
+                            {
+                                var altAttr = attributes.FirstOrDefault(a => string.Equals(a.Attribute("name")?.Value, alt, System.StringComparison.OrdinalIgnoreCase));
+                                if (altAttr != null)
+                                {
+                                    var av = altAttr.Attribute("value")?.Value ?? altAttr.Value;
+                                    if (!string.IsNullOrEmpty(av) && int.TryParse(av, out var g2))
+                                    {
+                                        result.Grabs = g2;
+                                        _logger.LogDebug("Set grabs from alternate attr '{Alt}' for {Title}: {Grabs}", alt, result.Title, g2);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // If still zero, and a comments element points to a details URL (althub-style), attempt to scrape comment count
+                            if (result.Grabs == 0)
+                            {
+                                var commentsVal = item.Element("comments")?.Value;
+                                if (!string.IsNullOrEmpty(commentsVal))
+                                {
+                                    // If comments is a URL, try scraping the page for a numeric comments count (only for known indexers to avoid many extra requests)
+                                    if (Uri.TryCreate(commentsVal, UriKind.Absolute, out var commentsUri) && indexer.Url != null && indexer.Url.Contains("althub", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        try
+                                        {
+                                            var commentsPageUrl = new Uri(commentsUri.GetLeftPart(UriPartial.Path));
+                                            _logger.LogDebug("Fetching comments page to extract grabs for {Title}: {Url}", result.Title, commentsPageUrl);
+                                            using var resp = await _httpClient.GetAsync(commentsPageUrl);
+                                            if (resp.IsSuccessStatusCode)
+                                            {
+                                                var html = await resp.Content.ReadAsStringAsync();
+                                                var htmlDoc = new HtmlAgilityPack.HtmlDocument();
+                                                htmlDoc.LoadHtml(html);
+
+                                                // Look for common comment count patterns in page text
+                                                var text = htmlDoc.DocumentNode.InnerText;
+                                                var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d{1,6})\\s+comments?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                if (!m.Success)
+                                                {
+                                                    m = System.Text.RegularExpressions.Regex.Match(text, "Comments\\s*[:\\(]?\\s*(\\d{1,6})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                }
+
+                                                if (m.Success && int.TryParse(m.Groups[1].Value, out var scrapedComments))
+                                                {
+                                                    result.Grabs = scrapedComments;
+                                                    _logger.LogDebug("Scraped comments count for {Title}: {Grabs}", result.Title, scrapedComments);
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Failed to scrape comments page for {Title}", result.Title);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Some feeds put a numeric comments value directly; parse that
+                                        if (int.TryParse(commentsVal, out var commVal))
+                                        {
+                                            result.Grabs = commVal;
+                                            _logger.LogDebug("Set grabs from <comments> element for {Title}: {Grabs}", result.Title, commVal);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -3646,6 +4116,18 @@ namespace Listenarr.Api.Services
                                 else
                                 {
                                     result.TorrentUrl = enclosureUrl;
+                                }
+                            }
+
+                            // If the indexer provides an enclosure length, use it as a size fallback
+                            var lengthStr = enclosure.Attribute("length")?.Value;
+                            if (!string.IsNullOrEmpty(lengthStr) && result.Size == 0)
+                            {
+                                var parsedLen = ParseSizeString(lengthStr);
+                                if (parsedLen > 0)
+                                {
+                                    result.Size = parsedLen;
+                                    _logger.LogDebug("Set size from enclosure length for {Title}: {Size} bytes", result.Title, parsedLen);
                                 }
                             }
                         }
@@ -3792,31 +4274,31 @@ namespace Listenarr.Api.Services
             return results;
         }
 
-        private List<SearchResult> GenerateMockIndexerResults(string query)
+        private List<IndexerSearchResult> GenerateMockIndexerResults(string query)
         {
             // Generate multiple mock results to simulate real indexer responses
             // Default to torrent for backwards compatibility
             return GenerateMockIndexerResults(query, "Mock Indexer", "Torrent");
         }
 
-        private List<SearchResult> GenerateMockIndexerResults(string query, string indexerName)
+        private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName)
         {
             // Default to torrent for backwards compatibility
             return GenerateMockIndexerResults(query, indexerName, "Torrent");
         }
 
-        private List<SearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
+        private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
         {
             // Generate multiple mock results to simulate real indexer responses
             var random = new Random();
-            var results = new List<SearchResult>();
+            var results = new List<IndexerSearchResult>();
             var isUsenet = indexerType.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
 
             _logger.LogInformation("Generating {Count} mock {Type} results for indexer {IndexerName}", 5, indexerType, indexerName);
 
             for (int i = 0; i < 5; i++)
             {
-                var result = new SearchResult
+                var result = new IndexerSearchResult
                 {
                     Id = Guid.NewGuid().ToString(),
                     Title = $"{query} - Quality {i + 1}",
@@ -3827,7 +4309,7 @@ namespace Listenarr.Api.Services
                     Seeders = isUsenet ? 0 : random.Next(5, 100), // Usenet doesn't have seeders
                     Leechers = isUsenet ? 0 : random.Next(0, 20), // Usenet doesn't have leechers
                     Source = indexerName,
-                    PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)),
+                    PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)).ToString("o"),
                     Quality = i switch
                     {
                         0 => "MP3 64kbps",
@@ -3876,7 +4358,7 @@ namespace Listenarr.Api.Services
                     Leechers = 3,
                     MagnetLink = "magnet:?xt=urn:btih:sample",
                     Source = source,
-                    PublishedDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 365)),
+                    PublishedDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(1, 365)).ToString("o"),
                     Quality = "MP3 128kbps",
                     Format = "MP3"
                 }
@@ -4007,6 +4489,22 @@ namespace Listenarr.Api.Services
                 if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
             }
 
+            return null;
+        }
+
+        private string? ParseLanguageFromCode(string? code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return null;
+
+            var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "ENG", "English" }, { "EN", "English" },
+                { "DUT", "Dutch" },    { "NL", "Dutch" },
+                { "GER", "German" },   { "DE", "German" },
+                { "FRE", "French" },   { "FR", "French" }
+            };
+
+            if (codes.TryGetValue(code.ToUpperInvariant(), out var lang)) return lang;
             return null;
         }
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Test setup: Polyfill / mock environment pieces that tests expect
 // - Provide a Mock WebSocket implementation so SignalR code can run in jsdom
 
@@ -26,6 +27,79 @@ class MockWebSocket {
   }
 }
 
+// Centralized apiService and signalR mocks used by unit tests.
+import { vi } from 'vitest'
+
+vi.mock('@/services/api', () => ({
+  apiService: {
+    searchAudimetaByTitleAndAuthor: vi.fn(async () => ({ totalResults: 0, results: [] })),
+    advancedSearch: async (params: unknown) => {
+      const p = params as { title?: string; author?: string } | undefined
+      if (p?.title) {
+        const mod = await import('@/services/api')
+        const svc = mod.apiService as unknown as {
+          searchAudimetaByTitleAndAuthor?: (
+            title: string,
+            author?: string,
+          ) => Promise<{ totalResults?: number; results?: unknown[] } | unknown>
+        }
+        if (svc.searchAudimetaByTitleAndAuthor) {
+          const resp = (await svc.searchAudimetaByTitleAndAuthor(p.title, p.author)) as unknown
+          const r = resp as any
+          return (r?.results) || r || []
+        }
+        return []
+      }
+      return { totalResults: 0, results: [] }
+    },
+    getImageUrl: vi.fn((url: string) => url || ''),
+    getStartupConfig: vi.fn(async () => ({})),
+    getApplicationSettings: vi.fn(async () => ({})),
+    getLibrary: vi.fn(async () => []),
+    previewLibraryPath: vi.fn(async () => ({ path: '' })),
+    getQualityProfiles: vi.fn(async () => []),
+    getApiConfigurations: vi.fn(async () => []),
+  },
+}))
+
+vi.mock('@/services/signalr', () => ({
+  signalRService: {
+    connect: () => {},
+    onDownloadsList: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onSearchProgress: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onQueueUpdate: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onDownloadUpdate: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onFilesRemoved: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onAudiobookUpdate: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onNotification: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onToast: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+  },
+}))
+
 // Ensure global WebSocket exists for code that references it
 if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
   ;(globalThis as unknown as { WebSocket?: unknown }).WebSocket = MockWebSocket
@@ -42,13 +116,35 @@ if (typeof console.debug !== 'function') console.debug = console.log.bind(consol
 // Provide a simple localStorage polyfill for tests that rely on it
 // Ensure a working localStorage implementation exists for tests. Some test
 // runners may set a placeholder object; normalize it so .setItem/.getItem exist.
-if (typeof (globalThis as unknown as { localStorage?: unknown }).localStorage === 'undefined' ||
-    typeof (globalThis as any).localStorage?.setItem !== 'function') {
-  ;(globalThis as unknown as { localStorage?: any }).localStorage = {
+if (
+  typeof (globalThis as unknown as { localStorage?: { setItem?: unknown } }).localStorage ===
+    'undefined' ||
+  typeof (globalThis as unknown as { localStorage?: { setItem?: unknown } }).localStorage
+    ?.setItem !== 'function'
+) {
+  ;(
+    globalThis as unknown as {
+      localStorage?: {
+        _store?: Record<string, string>
+        getItem?: (k: string) => string | null
+        setItem?: (k: string, v: string) => void
+        removeItem?: (k: string) => void
+        clear?: () => void
+      }
+    }
+  ).localStorage = {
     _store: {} as Record<string, string>,
-    getItem(key: string) { return this._store[key] ?? null },
-    setItem(key: string, value: string) { this._store[key] = value + '' },
-    removeItem(key: string) { delete this._store[key] },
-    clear() { this._store = {} }
+    getItem(key: string) {
+      return this._store[key] ?? null
+    },
+    setItem(key: string, value: string) {
+      this._store[key] = value + ''
+    },
+    removeItem(key: string) {
+      delete this._store[key]
+    },
+    clear() {
+      this._store = {}
+    },
   }
 }

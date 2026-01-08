@@ -40,8 +40,10 @@ namespace Listenarr.Api.Extensions
             var circuitBreakerPolicy = HttpPolicyExtensions.HandleTransientHttpError()
                 .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30));
 
-            // Default HTTP client
-            services.AddHttpClient();
+            // Default HTTP client (bypass system proxy unless explicitly configured)
+            services.AddHttpClient("default")
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
+            services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
 
             // Generic named client used by legacy code paths for downloads
             services.AddHttpClient("DownloadClient")
@@ -131,44 +133,11 @@ namespace Listenarr.Api.Extensions
 
             // US-origin client (supports optional proxy via configuration)
             services.AddHttpClient("us")
-                .ConfigurePrimaryHttpMessageHandler(() =>
-                {
-                    var handler = new HttpClientHandler
-                    {
-                        AutomaticDecompression = DecompressionMethods.All
-                    };
-
-                    try
-                    {
-                        var section = config.GetSection("ExternalRequests");
-                        var useProxy = section.GetValue<bool>("UseUsProxy");
-                        if (useProxy)
-                        {
-                            var host = section.GetValue<string>("UsProxyHost");
-                            var port = section.GetValue<int>("UsProxyPort");
-                            if (!string.IsNullOrWhiteSpace(host) && port > 0)
-                            {
-                                var proxy = new WebProxy(host, port);
-                                var user = section.GetValue<string>("UsProxyUsername");
-                                var pass = section.GetValue<string>("UsProxyPassword");
-                                if (!string.IsNullOrWhiteSpace(user))
-                                    proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
-                                handler.Proxy = proxy;
-                                handler.UseProxy = true;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Swallow here; caller services can detect proxy misconfigurations via failing requests.
-                    }
-
-                    return handler;
-                });
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config));
 
             // Typed clients used by scraping/search services. Add consistent handlers + policies.
             services.AddHttpClient<Listenarr.Api.Services.IAmazonSearchService, Listenarr.Api.Services.AmazonSearchService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(HttpPolicyExtensions
                     .HandleTransientHttpError()
                     .OrResult((HttpResponseMessage r) => r.StatusCode == HttpStatusCode.Forbidden
@@ -183,27 +152,60 @@ namespace Listenarr.Api.Extensions
                     .CircuitBreakerAsync(6, TimeSpan.FromMinutes(2)));
 
             services.AddHttpClient<Listenarr.Api.Services.IAudibleSearchService, Listenarr.Api.Services.AudibleSearchService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
-                .AddPolicyHandler(circuitBreakerPolicy)
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(retryPolicy);
 
             // Misc scraping/metadata clients (Audible metadata, Audimeta, Audnexus)
             services.AddHttpClient<Listenarr.Api.Services.IAudibleMetadataService, Listenarr.Api.Services.AudibleMetadataService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
-                .AddPolicyHandler(circuitBreakerPolicy)
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient<Listenarr.Api.Services.AudimetaService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
-                .AddPolicyHandler(circuitBreakerPolicy)
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(retryPolicy);
 
             services.AddHttpClient<Listenarr.Api.Services.AudnexusService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
-                .AddPolicyHandler(circuitBreakerPolicy)
+                .ConfigurePrimaryHttpMessageHandler(() => CreateExternalHandler(config))
                 .AddPolicyHandler(retryPolicy);
 
             return services;
+        }
+
+        // Centralized handler to avoid inheriting system proxies; uses app settings when enabled.
+        private static HttpClientHandler CreateExternalHandler(IConfiguration config)
+        {
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                UseProxy = false
+            };
+
+            try
+            {
+                var section = config.GetSection("ExternalRequests");
+                var useProxy = section.GetValue<bool>("UseUsProxy");
+                if (useProxy)
+                {
+                    var host = section.GetValue<string>("UsProxyHost");
+                    var port = section.GetValue<int>("UsProxyPort");
+                    if (!string.IsNullOrWhiteSpace(host) && port > 0)
+                    {
+                        var proxy = new WebProxy(host, port);
+                        var user = section.GetValue<string>("UsProxyUsername");
+                        var pass = section.GetValue<string>("UsProxyPassword");
+                        if (!string.IsNullOrWhiteSpace(user))
+                            proxy.Credentials = new NetworkCredential(user, pass ?? string.Empty);
+                        handler.Proxy = proxy;
+                        handler.UseProxy = true;
+                    }
+                }
+            }
+            catch
+            {
+                // Swallow here; caller services can detect proxy misconfigurations via failing requests.
+            }
+
+            return handler;
         }
 
         /// <summary>
@@ -263,6 +265,9 @@ namespace Listenarr.Api.Extensions
             // Register the concrete factory as scoped so it can safely resolve scoped adapters via DI.
             services.AddScoped<IDownloadClientAdapterFactory, Listenarr.Api.Services.Adapters.DownloadClientAdapterFactory>();
 
+            // Register import item resolution service (Sonarr's ProvideImportItemService pattern)
+            services.AddScoped<IImportItemResolutionService, ImportItemResolutionService>();
+
             // Register notification payload builder adapter for DI so callers can inject/mokc payload construction.
             services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
 
@@ -273,6 +278,31 @@ namespace Listenarr.Api.Extensions
             services.AddSingleton<Listenarr.Application.Services.IHubBroadcaster, Listenarr.Api.Services.SignalRHubBroadcaster>();
 
             return services;
+        }
+    }
+
+    /// <summary>
+    /// Extension methods for System.Text.Json types
+    /// </summary>
+    public static class JsonExtensions
+    {
+        /// <summary>
+        /// Gets a property value from a JsonElement, returning defaultValue if the property doesn't exist or is null.
+        /// </summary>
+        public static T GetPropertyOrDefault<T>(this System.Text.Json.JsonElement element, string propertyName, T defaultValue = default!)
+        {
+            if (element.TryGetProperty(propertyName, out var prop) && prop.ValueKind != System.Text.Json.JsonValueKind.Null)
+            {
+                try
+                {
+                    return System.Text.Json.JsonSerializer.Deserialize<T>(prop.GetRawText()) ?? defaultValue;
+                }
+                catch
+                {
+                    return defaultValue;
+                }
+            }
+            return defaultValue;
         }
     }
 }

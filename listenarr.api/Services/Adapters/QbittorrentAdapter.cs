@@ -119,7 +119,8 @@ namespace Listenarr.Api.Services.Adapters
                     _logger.LogDebug("Authenticated to qBittorrent for client {ClientId}", LogRedaction.SanitizeText(client.Id));
                 }
 
-                var beforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
+                // Request only the hash field before adding to minimize memory usage
+                var beforeResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash", ct);
                 var existingHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (beforeResp.IsSuccessStatusCode)
                 {
@@ -202,7 +203,8 @@ namespace Listenarr.Api.Services.Adapters
 
                 await Task.Delay(1000, ct);
 
-                var afterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
+                // Request only necessary fields (hash and name) to reduce response size
+                var afterResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields=hash,name", ct);
                 if (afterResp.IsSuccessStatusCode)
                 {
                     var afterJson = await afterResp.Content.ReadAsStringAsync(ct);
@@ -220,6 +222,7 @@ namespace Listenarr.Api.Services.Adapters
                                         var hash = hEl.GetString() ?? string.Empty;
                                         if (!existingHashes.Contains(hash))
                                         {
+                                            var name = t.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? "" : "";
                                             _logger.LogInformation("Detected new qBittorrent torrent: hash={Hash}", hash);
                                             return hash;
                                         }
@@ -349,7 +352,9 @@ namespace Listenarr.Api.Services.Adapters
                     return items;
                 }
 
-                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info", ct);
+                // Limit fields returned to reduce memory usage
+                var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
+                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields={Uri.EscapeDataString(fields)}", ct);
                 if (!torrentsResp.IsSuccessStatusCode) return items;
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);
@@ -442,6 +447,131 @@ namespace Listenarr.Api.Services.Adapters
         public Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
         {
             return Task.FromResult(new List<(string Id, string Name)>());
+        }
+
+        /// <summary>
+        /// Resolves the actual import item for a completed download.
+        /// EXACTLY matches Sonarr's GetImportItem pattern.
+        /// </summary>
+        public async Task<QueueItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            Download download,
+            QueueItem queueItem,
+            QueueItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // ✅ Clone to avoid modifying original (Sonarr pattern)
+            var result = queueItem.Clone();
+
+            // On API >= 2.6.1, ContentPath/OutputPath is already set correctly from content_path field
+            if (!string.IsNullOrEmpty(result.ContentPath))
+            {
+                _logger.LogDebug("Using existing ContentPath for import: {Path}", result.ContentPath);
+                return result;
+            }
+
+            var hash = download.Metadata?.GetValueOrDefault("TorrentHash")?.ToString();
+            if (string.IsNullOrEmpty(hash))
+            {
+                _logger.LogWarning("No torrent hash found in download metadata for download {DownloadId}", download.Id);
+                return result;
+            }
+
+            var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}";
+
+            try
+            {
+                var cookieJar = new CookieContainer();
+                var handler = new HttpClientHandler
+                {
+                    CookieContainer = cookieJar,
+                    UseCookies = true,
+                    AutomaticDecompression = DecompressionMethods.All
+                };
+
+                using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+
+                // Login
+                using var loginData = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("username", client.Username ?? string.Empty),
+                    new KeyValuePair<string, string>("password", client.Password ?? string.Empty)
+                });
+
+                var loginResp = await httpClient.PostAsync($"{baseUrl}/api/v2/auth/login", loginData, ct);
+                if (!loginResp.IsSuccessStatusCode && loginResp.StatusCode != HttpStatusCode.Forbidden)
+                {
+                    _logger.LogWarning("qBittorrent login failed for import resolution");
+                    return result;
+                }
+
+                // ✅ Query files API to determine base folder (Sonarr QBittorrent.cs pattern)
+                var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
+                if (!filesResp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to query torrent files for hash {Hash}", hash);
+                    return result;
+                }
+
+                var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
+                var files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson);
+                
+                if (files == null || !files.Any())
+                {
+                    _logger.LogDebug("No files found for torrent {Hash}", hash);
+                    return result;
+                }
+
+                // Get torrent properties to find save_path
+                var propsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/properties?hash={hash}", ct);
+                if (!propsResp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to query torrent properties for hash {Hash}", hash);
+                    return result;
+                }
+
+                var propsJson = await propsResp.Content.ReadAsStringAsync(ct);
+                var props = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propsJson);
+                var savePath = props?.TryGetValue("save_path", out var savePathEl) == true 
+                    ? savePathEl.GetString() ?? string.Empty 
+                    : string.Empty;
+
+                if (string.IsNullOrEmpty(savePath))
+                {
+                    _logger.LogWarning("No save_path found for torrent {Hash}", hash);
+                    return result;
+                }
+
+                // Get first file's path and extract subdirectory
+                var firstFile = files[0];
+                var fileName = firstFile.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
+                
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    _logger.LogWarning("No file name found in torrent {Hash}", hash);
+                    return result;
+                }
+
+                // Extract the first subdirectory from file path (qBittorrent uses / separator even on Windows)
+                var pathParts = fileName.Split('/');
+                var subfolder = pathParts.Length > 1 ? pathParts[0] : string.Empty;
+
+                // Construct output path
+                var outputPath = !string.IsNullOrEmpty(subfolder) 
+                    ? System.IO.Path.Combine(savePath, subfolder)
+                    : savePath;
+
+                // ✅ Apply remote path mapping
+                result.ContentPath = await _pathMappingService.TranslatePathAsync(client.Id, outputPath);
+                
+                _logger.LogInformation("Resolved import path for {Hash}: {Path}", hash, result.ContentPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error resolving import item for torrent {Hash}", hash);
+            }
+
+            return result;
         }
     }
 }

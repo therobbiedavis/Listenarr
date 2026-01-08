@@ -1,6 +1,11 @@
 <template>
   <div class="custom-select" :class="{ open: isOpen, disabled }">
-  <div class="select-trigger" @click.stop="toggleDropdown" :tabindex="disabled ? -1 : 0" @keydown="handleKeydown">
+    <div
+      class="select-trigger"
+      @click.stop="toggleDropdown"
+      :tabindex="disabled ? -1 : 0"
+      @keydown="handleKeydown"
+    >
       <div class="select-content">
         <component :is="selectedOption?.icon" v-if="selectedOption?.icon" class="option-icon" />
         <span class="option-text">{{ selectedOption?.label || placeholder }}</span>
@@ -22,12 +27,7 @@
     </div>
 
     <!-- Invisible native select for form compatibility -->
-    <select
-      :value="modelValue"
-      @input="onNativeInput"
-      class="hidden-select"
-      ref="hiddenSelect"
-    >
+    <select :value="modelValue" @input="onNativeInput" class="hidden-select" ref="hiddenSelect">
       <option v-for="option in options" :key="option.value" :value="option.value">
         {{ option.label }}
       </option>
@@ -59,7 +59,7 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   placeholder: 'Select an option',
-  disabled: false
+  disabled: false,
 })
 
 const emit = defineEmits<Emits>()
@@ -69,7 +69,7 @@ const dropdown = ref<HTMLElement>()
 const hiddenSelect = ref<HTMLSelectElement>()
 
 const selectedOption = computed(() => {
-  return props.options.find(option => option.value === props.modelValue)
+  return props.options.find((option) => option.value === props.modelValue)
 })
 
 const toggleDropdown = () => {
@@ -132,7 +132,7 @@ onUnmounted(() => {
 // Expose methods for form compatibility
 defineExpose({
   focus: () => hiddenSelect.value?.focus(),
-  blur: () => hiddenSelect.value?.blur()
+  blur: () => hiddenSelect.value?.blur(),
 })
 </script>
 
@@ -149,7 +149,7 @@ defineExpose({
   padding: 6px 8px;
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   color: #fff;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -212,7 +212,7 @@ defineExpose({
   right: 0;
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 1000;
   max-height: 200px;
@@ -260,7 +260,6 @@ defineExpose({
 
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
-
 }
 
 /* Mobile-friendly: hide text and icons in trigger on screens 1024px and below */

@@ -7,29 +7,29 @@
           <i class="ph ph-x"></i>
         </button>
       </div>
-      
+
       <div class="modal-body">
         <form @submit.prevent="handleSubmit">
           <!-- Basic Information -->
           <div class="form-section">
             <h3><i class="ph ph-info"></i> Basic Information</h3>
-            
+
             <div class="form-group">
               <label for="name">Profile Name *</label>
-              <input 
-                id="name" 
-                v-model="formData.name" 
-                type="text" 
-                required 
+              <input
+                id="name"
+                v-model="formData.name"
+                type="text"
+                required
                 placeholder="e.g., High Quality, Any Quality, Space Saver"
               />
             </div>
 
             <div class="form-group">
               <label for="description">Description</label>
-              <textarea 
-                id="description" 
-                v-model="formData.description" 
+              <textarea
+                id="description"
+                v-model="formData.description"
                 rows="2"
                 placeholder="Optional description of this quality profile"
               />
@@ -37,10 +37,7 @@
 
             <div class="form-group">
               <label class="checkbox-label">
-                <input 
-                  type="checkbox" 
-                  v-model="formData.isDefault"
-                />
+                <input type="checkbox" v-model="formData.isDefault" />
                 <span>Set as default profile</span>
               </label>
               <small class="info-text">
@@ -56,23 +53,23 @@
               Select which qualities to allow and set their priority (higher priority = preferred).
               The cutoff quality determines when to stop upgrading.
             </p>
-            
+
             <div class="quality-list">
               <div v-for="quality in availableQualities" :key="quality" class="quality-item">
                 <label class="checkbox-label">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     :checked="isQualityAllowed(quality)"
                     @change="toggleQuality(quality, $event)"
                   />
                   <span class="quality-name">{{ quality }}</span>
                 </label>
-                
+
                 <div v-if="isQualityAllowed(quality)" class="quality-controls">
                   <label class="priority-label">
                     Priority:
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       :value="getQualityPriority(quality)"
                       @input="updateQualityPriority(quality, $event)"
                       min="0"
@@ -80,10 +77,10 @@
                       class="priority-input"
                     />
                   </label>
-                  
+
                   <label class="radio-label">
-                    <input 
-                      type="radio" 
+                    <input
+                      type="radio"
                       :value="quality"
                       v-model="formData.cutoffQuality"
                       :disabled="!isQualityAllowed(quality)"
@@ -93,7 +90,7 @@
                 </div>
               </div>
             </div>
-            
+
             <small class="info-text">
               <i class="ph ph-info"></i>
               Cutoff quality: Downloads will stop upgrading once this quality is reached
@@ -106,22 +103,22 @@
             <p class="section-description">
               Preferred audio formats in order of preference (most preferred first).
             </p>
-            
+
             <div class="tag-input-group">
               <div class="tags-list">
-                <div 
-                  v-for="(format, index) in formData.preferredFormats" 
+                <div
+                  v-for="(format, index) in formData.preferredFormats"
                   :key="index"
                   class="tag removable"
                 >
                   {{ format }}
                   <button type="button" @click="removeFormat(index)" class="tag-remove">
-                    <i class="ph ph-x"></i>
+                    <PhX />
                   </button>
                 </div>
               </div>
               <div class="tag-input">
-                <input 
+                <input
                   v-model="newFormat"
                   @keypress.enter.prevent="addFormat"
                   type="text"
@@ -141,11 +138,11 @@
             <p class="section-description">
               Set minimum and maximum file sizes in megabytes (leave blank for no limit).
             </p>
-            
+
             <div class="form-row">
               <div class="form-group">
                 <label for="minimumSize">Minimum Size (MB)</label>
-                <input 
+                <input
                   id="minimumSize"
                   v-model.number="formData.minimumSize"
                   type="number"
@@ -153,10 +150,10 @@
                   placeholder="No minimum"
                 />
               </div>
-              
+
               <div class="form-group">
                 <label for="maximumSize">Maximum Size (MB)</label>
-                <input 
+                <input
                   id="maximumSize"
                   v-model.number="formData.maximumSize"
                   type="number"
@@ -170,7 +167,7 @@
           <!-- Word Filters -->
           <div class="form-section">
             <h3><i class="ph ph-text-aa"></i> Word Filters</h3>
-            
+
             <!-- Preferred Words -->
             <div class="filter-group">
               <h4><i class="ph ph-sparkle"></i> Preferred Words (Bonus Points)</h4>
@@ -179,19 +176,19 @@
               </p>
               <div class="tag-input-group">
                 <div class="tags-list">
-                  <div 
-                    v-for="(word, index) in formData.preferredWords" 
+                  <div
+                    v-for="(word, index) in formData.preferredWords"
                     :key="index"
                     class="tag positive removable"
                   >
                     {{ word }}
                     <button type="button" @click="removePreferredWord(index)" class="tag-remove">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                     </button>
                   </div>
                 </div>
                 <div class="tag-input">
-                  <input 
+                  <input
                     v-model="newPreferredWord"
                     @keypress.enter.prevent="addPreferredWord"
                     type="text"
@@ -213,19 +210,19 @@
               </p>
               <div class="tag-input-group">
                 <div class="tags-list">
-                  <div 
-                    v-for="(word, index) in formData.mustContain" 
+                  <div
+                    v-for="(word, index) in formData.mustContain"
                     :key="index"
                     class="tag required removable"
                   >
                     {{ word }}
                     <button type="button" @click="removeMustContain(index)" class="tag-remove">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                     </button>
                   </div>
                 </div>
                 <div class="tag-input">
-                  <input 
+                  <input
                     v-model="newMustContain"
                     @keypress.enter.prevent="addMustContain"
                     type="text"
@@ -247,19 +244,19 @@
               </p>
               <div class="tag-input-group">
                 <div class="tags-list">
-                  <div 
-                    v-for="(word, index) in formData.mustNotContain" 
+                  <div
+                    v-for="(word, index) in formData.mustNotContain"
                     :key="index"
                     class="tag forbidden removable"
                   >
                     {{ word }}
                     <button type="button" @click="removeMustNotContain(index)" class="tag-remove">
-                      <i class="ph ph-x"></i>
+                      <PhX />
                     </button>
                   </div>
                 </div>
                 <div class="tag-input">
-                  <input 
+                  <input
                     v-model="newMustNotContain"
                     @keypress.enter.prevent="addMustNotContain"
                     type="text"
@@ -277,25 +274,23 @@
           <!-- Language Preferences -->
           <div class="form-section">
             <h3><i class="ph ph-translate"></i> Language Preferences</h3>
-            <p class="section-description">
-              Preferred languages in order of preference.
-            </p>
-            
+            <p class="section-description">Preferred languages in order of preference.</p>
+
             <div class="tag-input-group">
               <div class="tags-list">
-                <div 
-                  v-for="(lang, index) in formData.preferredLanguages" 
+                <div
+                  v-for="(lang, index) in formData.preferredLanguages"
                   :key="index"
                   class="tag removable"
                 >
                   {{ lang }}
                   <button type="button" @click="removeLanguage(index)" class="tag-remove">
-                    <i class="ph ph-x"></i>
+                    <PhX />
                   </button>
                 </div>
               </div>
               <div class="tag-input">
-                <input 
+                <input
                   v-model="newLanguage"
                   @keypress.enter.prevent="addLanguage"
                   type="text"
@@ -312,10 +307,10 @@
           <!-- Release Preferences -->
           <div class="form-section">
             <h3><i class="ph ph-clock-counter-clockwise"></i> Release Preferences</h3>
-            
+
             <div class="form-group">
               <label for="minimumSeeders">Minimum Seeders (Torrents)</label>
-              <input 
+              <input
                 id="minimumSeeders"
                 v-model.number="formData.minimumSeeders"
                 type="number"
@@ -328,11 +323,24 @@
             </div>
 
             <div class="form-group">
+              <label for="minimumScore">Minimum Score Threshold</label>
+              <input
+                id="minimumScore"
+                v-model.number="formData.minimumScore"
+                type="number"
+                min="0"
+                max="100"
+                placeholder="0 = allow any score"
+              />
+              <small class="info-text">
+                Reject releases with a score below this threshold (Sonarr-style MinFormatScore). 0 =
+                no minimum.
+              </small>
+            </div>
+
+            <div class="form-group">
               <label class="checkbox-label">
-                <input 
-                  type="checkbox" 
-                  v-model="formData.preferNewerReleases"
-                />
+                <input type="checkbox" v-model="formData.preferNewerReleases" />
                 <span>Prefer newer releases</span>
               </label>
               <small class="info-text">
@@ -342,7 +350,7 @@
 
             <div v-if="formData.preferNewerReleases" class="form-group">
               <label for="maximumAge">Maximum Age (Days)</label>
-              <input 
+              <input
                 id="maximumAge"
                 v-model.number="formData.maximumAge"
                 type="number"
@@ -357,9 +365,7 @@
 
           <!-- Form Actions -->
           <div class="form-actions">
-            <button type="button" @click="closeModal" class="cancel-button">
-              Cancel
-            </button>
+            <button type="button" @click="closeModal" class="cancel-button">Cancel</button>
             <button type="submit" class="submit-button">
               <i class="ph ph-check"></i>
               {{ profile ? 'Update Profile' : 'Create Profile' }}
@@ -373,6 +379,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { PhX } from '@phosphor-icons/vue'
 import type { QualityProfile } from '@/types'
 
 const props = defineProps<{
@@ -391,7 +398,7 @@ const availableQualities = [
   'Low (64 kbps)',
   'Medium (128 kbps)',
   'High (192-256 kbps)',
-  'Lossless (FLAC)'
+  'Lossless (FLAC)',
 ]
 
 // Form data
@@ -410,7 +417,7 @@ const formData = ref<QualityProfile>({
   minimumSeeders: 0,
   isDefault: false,
   preferNewerReleases: false,
-  maximumAge: 0
+  maximumAge: 0,
 })
 
 // Tag input refs
@@ -421,51 +428,55 @@ const newMustNotContain = ref('')
 const newLanguage = ref('')
 
 // Initialize form when profile changes
-watch(() => props.profile, (newProfile) => {
-  if (newProfile) {
-    formData.value = JSON.parse(JSON.stringify(newProfile))
-  } else {
-    // Reset to defaults
-    formData.value = {
-      name: '',
-      description: '',
-      qualities: [],
-      cutoffQuality: '',
-      minimumSize: undefined,
-      maximumSize: undefined,
-      preferredFormats: [],
-      preferredWords: [],
-      mustNotContain: [],
-      mustContain: [],
-      preferredLanguages: [],
-      minimumSeeders: 0,
-      isDefault: false,
-      preferNewerReleases: false,
-      maximumAge: 0
+watch(
+  () => props.profile,
+  (newProfile) => {
+    if (newProfile) {
+      formData.value = JSON.parse(JSON.stringify(newProfile))
+    } else {
+      // Reset to defaults
+      formData.value = {
+        name: '',
+        description: '',
+        qualities: [],
+        cutoffQuality: '',
+        minimumSize: undefined,
+        maximumSize: undefined,
+        preferredFormats: [],
+        preferredWords: [],
+        mustNotContain: [],
+        mustContain: [],
+        preferredLanguages: [],
+        minimumSeeders: 0,
+        isDefault: false,
+        preferNewerReleases: false,
+        maximumAge: 0,
+      }
     }
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 // Quality management
 const isQualityAllowed = (quality: string): boolean => {
-  return formData.value.qualities.some(q => q.quality === quality && q.allowed)
+  return formData.value.qualities.some((q) => q.quality === quality && q.allowed)
 }
 
 const getQualityPriority = (quality: string): number => {
-  const qual = formData.value.qualities.find(q => q.quality === quality)
+  const qual = formData.value.qualities.find((q) => q.quality === quality)
   return qual?.priority ?? 0
 }
 
 const toggleQuality = (quality: string, event: Event) => {
   const target = event.target as HTMLInputElement
   const allowed = target.checked
-  
+
   if (!formData.value.qualities) {
     formData.value.qualities = []
   }
-  
-  const existingIndex = formData.value.qualities.findIndex(q => q.quality === quality)
-  
+
+  const existingIndex = formData.value.qualities.findIndex((q) => q.quality === quality)
+
   if (existingIndex !== -1) {
     const qualityDef = formData.value.qualities[existingIndex]
     if (qualityDef) {
@@ -475,7 +486,7 @@ const toggleQuality = (quality: string, event: Event) => {
     formData.value.qualities.push({
       quality,
       allowed,
-      priority: 50
+      priority: 50,
     })
   }
 
@@ -488,8 +499,8 @@ const toggleQuality = (quality: string, event: Event) => {
 const updateQualityPriority = (quality: string, event: Event) => {
   const target = event.target as HTMLInputElement
   const priority = parseInt(target.value)
-  
-  const qual = formData.value.qualities.find(q => q.quality === quality)
+
+  const qual = formData.value.qualities.find((q) => q.quality === quality)
   if (qual) {
     qual.priority = priority
   }
@@ -585,7 +596,7 @@ import { useToast } from '@/services/toastService'
 const handleSubmit = () => {
   const toast = useToast()
   // Validate at least one quality is selected
-  if (!formData.value.qualities.some(q => q.allowed)) {
+  if (!formData.value.qualities.some((q) => q.allowed)) {
     toast.error('Validation', 'Please select at least one quality')
     return
   }
@@ -596,7 +607,9 @@ const handleSubmit = () => {
     return
   }
 
-  if (!formData.value.qualities.some(q => q.quality === formData.value.cutoffQuality && q.allowed)) {
+  if (
+    !formData.value.qualities.some((q) => q.quality === formData.value.cutoffQuality && q.allowed)
+  ) {
     toast.error('Validation', 'Cutoff quality must be one of the allowed qualities')
     return
   }
@@ -622,7 +635,7 @@ const handleSubmit = () => {
 
 .modal-content {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   max-width: 800px;
   width: 100%;
   max-height: 90vh;
@@ -687,7 +700,7 @@ const handleSubmit = () => {
 
 .form-section h3 {
   margin: 0 0 0.5rem 0;
-  color: #2196F3;
+  color: #2196f3;
   font-size: 1.2rem;
   display: flex;
   align-items: center;
@@ -721,16 +734,16 @@ const handleSubmit = () => {
   font-weight: 500;
 }
 
-.form-group input[type="text"],
-.form-group input[type="url"],
-.form-group input[type="number"],
+.form-group input[type='text'],
+.form-group input[type='url'],
+.form-group input[type='number'],
 .form-group textarea,
 .form-group select {
   width: 100%;
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 1rem;
 }
@@ -756,7 +769,7 @@ const handleSubmit = () => {
   padding: 0.5rem 0;
 }
 
-.checkbox-label input[type="checkbox"] {
+.checkbox-label input[type='checkbox'] {
   width: 18px;
   height: 18px;
   margin: 0;
@@ -766,22 +779,22 @@ const handleSubmit = () => {
   appearance: none;
   background-color: #1a1a1a;
   border: 2px solid #555;
-  border-radius: 3px;
+  border-radius: 6px;
   position: relative;
   transition: all 0.2s ease;
   vertical-align: sub;
 }
 
-.checkbox-label input[type="checkbox"]:hover {
+.checkbox-label input[type='checkbox']:hover {
   border-color: #007acc;
 }
 
-.checkbox-label input[type="checkbox"]:checked {
+.checkbox-label input[type='checkbox']:checked {
   background-color: #007acc;
   border-color: #007acc;
 }
 
-.checkbox-label input[type="checkbox"]:checked::after {
+.checkbox-label input[type='checkbox']:checked::after {
   content: '';
   position: absolute;
   left: 5px;
@@ -793,7 +806,7 @@ const handleSubmit = () => {
   transform: rotate(45deg);
 }
 
-.checkbox-label input[type="checkbox"]:focus {
+.checkbox-label input[type='checkbox']:focus {
   outline: 2px solid rgba(0, 122, 204, 0.3);
   outline-offset: 2px;
 }
@@ -813,7 +826,7 @@ const handleSubmit = () => {
 }
 
 .info-text i {
-  color: #2196F3;
+  color: #2196f3;
 }
 
 /* Quality List */
@@ -831,7 +844,7 @@ const handleSubmit = () => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .quality-name {
@@ -859,7 +872,7 @@ const handleSubmit = () => {
   padding: 0.4rem;
   background-color: #2a2a2a;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
 }
 
@@ -872,7 +885,7 @@ const handleSubmit = () => {
   cursor: pointer;
 }
 
-.radio-label input[type="radio"] {
+.radio-label input[type='radio'] {
   cursor: pointer;
 }
 
@@ -899,9 +912,9 @@ const handleSubmit = () => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0.8rem;
-  background-color: #2196F3;
+  background-color: #2196f3;
   color: #fff;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.9rem;
 }
 
@@ -948,16 +961,16 @@ const handleSubmit = () => {
   padding: 0.6rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
 }
 
 .add-button {
   padding: 0.6rem 1rem;
-  background-color: #2196F3;
+  background-color: #2196f3;
   color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -991,7 +1004,7 @@ const handleSubmit = () => {
 .submit-button {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;
@@ -1008,7 +1021,7 @@ const handleSubmit = () => {
 }
 
 .submit-button {
-  background-color: #2196F3;
+  background-color: #2196f3;
   color: #fff;
   display: flex;
   align-items: center;

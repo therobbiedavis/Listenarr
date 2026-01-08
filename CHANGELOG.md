@@ -5,6 +5,141 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.46] - 2026-01-07
+
+### Added
+- **Download finalization**: Added `ExtractArchives` application setting and an EF Core migration to persist it (migration: `20251231003000_AddExtractArchivesToApplicationSettings`). This enables automatic archive extraction on completed downloads when enabled.
+- **Wanted view download indicators**: Visual feedback for active downloads in wanted view with download icon, status badge, and pulse/bounce animations using CSS keyframes
+- **Legacy root folder migration**: On startup, a legacy single `ApplicationSettings.outputPath` will be migrated into the new `RootFolder` table as a named root called `Default` with `IsDefault = true` (only when no root folders already exist).
+- **Download client test endpoint**: Implemented test connection functionality for download clients in settings modal with real API integration and proper error handling.
+- **Root folder management**: Complete root folder system with named folders, selection when adding/editing audiobooks, move/rename confirmation dialogs, and comprehensive E2E and unit tests.
+- **Bulk update endpoint**: Batch update API endpoint for audiobooks with frontend integration for efficient mass updates.
+- **Notification system**: Toast messages now also appear as persistent notifications via SignalR, with support for import and deletion broadcasts.
+- **Quality profile minimum score threshold**: Added MinimumScore property to quality profiles (similar to Sonarr's MinFormatScore) to reject releases below specified threshold (migration: `20260103235802_AddMinimumScoreToQualityProfile`).
+- **Import item resolution service**: Implemented GetImportItemAsync pattern across all download client adapters following Sonarr's approach for accurate post-download path resolution.
+- **Lazy image loading**: Native browser loading="lazy" for all images with placeholder support, replacing custom lazy loading logic.
+- **Advanced search and collection features**: New AdvancedSearchModal with ASIN, author, title, and series search prefixes for precise queries
+- **Collection view**: Comprehensive CollectionView for managing audiobook collections with author and series grouping
+- **Author ASIN support**: Backend author ASIN resolution via Audimeta with author image caching and database persistence (migration: `20251225220155_AddAuthorAsins`)
+- **Sub-navigation for audiobooks**: Sidebar navigation for grouping audiobooks by books, authors, or series with route sync
+- **Series display enhancements**: Full series lists as badges with tooltips, normalized series data from various sources
+- **Smart score UI and sorting**: Prowlarr-style composite scoring with normalized score display, sorting by Grabs and Language
+- **Inspect torrent modal**: View and download cached torrent files and announce URLs for downloads with diagnostics support
+- **MyAnonamouse enhancements**: Advanced search options including filters, language, and enrichment toggles
+- **Search cancellation**: Cancel ongoing searches with abort signal support throughout backend async operations
+- **Image fallback system**: Consistent image fallback mechanism with placeholder handling and failed image caching
+- **Download client toggle**: Enable/disable download clients directly from settings view
+
+### Changed
+- **Production-ready logging standardization**: Comprehensive console logging cleanup and standardization across the entire application
+  - Removed 10 debug `console.log` statements from production code
+  - Migrated 82 `console.error` calls to professional `errorTracking` service across 18 files (views, stores, services)
+  - Migrated 16 `console.warn` calls to `logger.warn` service across 10 files
+  - All application code now uses centralized logging services (`logger` and `errorTracking`)
+  - Infrastructure code (auth, errorTracking, SignalR) appropriately retains console for low-level diagnostics
+  - SignalR logs now gated behind DEV mode checks
+  - Clean production console output with structured error tracking ready for external monitoring integration (Sentry, LogRocket)
+- **SearchService architecture refactoring**: Implemented provider pattern for improved maintainability and extensibility
+  - Created `IIndexerSearchProvider` interface with dynamic provider selection
+  - Extracted 3 indexer-specific providers: `TorznabNewznabSearchProvider`, `MyAnonamouseSearchProvider`, `InternetArchiveSearchProvider`
+  - Separated indexer-specific logic into focused, testable provider classes
+  - Follows proven adapter pattern already used in download client implementations
+  - Easier to add new indexer types by implementing the provider interface
+- **SettingsView component extraction**: Fully componentized settings view for improved maintainability
+  - Extracted 7 focused tab components reducing SettingsView from 4,722 to 3,540 lines (-25% reduction)
+  - `ApiSettingsTab` (682 lines), `DownloadClientSettingsTab` (840 lines), `QualityProfilesTab` (634 lines)
+  - `NotificationSettingsTab` (1,082 lines), `ImportSettingsTab` (363 lines), `UiSettingsTab` (480 lines), `GeneralSettingsTab` (897 lines)
+  - All tabs use composition API with proper props/emits pattern
+  - Improved code organization and component reusability
+- **Search/Metadata API refactor**: Added `api/metadata` controller and deprecated `api/search/metadata` + `api/search/audimeta` (any external consumers should migrate)
+- **Search pipeline refactoring**: Modular ASIN enrichment (AsinEnricher), fallback scraping (FallbackScraper), direct ASIN search (AsinSearchHandler), and result scoring (SearchResultScorer)
+- **Download monitoring optimization**: Reduced qBittorrent API calls by consolidating torrent info requests, added per-client poll scheduling for Transmission, SABnzbd, and NZBGet to avoid overload.
+- **qBittorrent polling optimization**: Per-client polling intervals, batch requests, memory caching for torrent properties, field limiting with category/hash filtering
+- **Download cleanup**: Added 'remove completed downloads' option for download clients (migration: `20260103175654_AddRemoveCompletedDownloadsToClients`), always stores absolute file paths for imports, enhanced download queue removal and orphaned download handling.
+- **Image handling improvements**: Local image paths preserved when moving audiobooks, normalized all image URLs to use API endpoint, placeholder images served when covers missing, simplified error handling, consistent placeholder usage across views.
+- **Automatic search improvements**: AutomaticSearchService now skips searches if quality cutoff is already met.
+- **ActivityView debug tools**: Added debug tools and comprehensive tests for download activity monitoring
+- **MyAnonamouse result enrichment**: Richer result data with seeders, leechers, grabs, files, language, and quality fields
+- **Frontend build optimization**: Patched @microsoft/signalr to remove Rollup warnings, included only available font formats
+- **Download status filtering**: Active downloads in frontend now exclude terminal states ('Moved', 'Completed', 'Failed', 'Cancelled') for cleaner UI state management
+- **Performance optimization**: Added v-memo directive to WantedView audiobook cards with proper reactive dependencies to optimize large list rendering
+
+### Fixed
+- **Transmission download import**: Fixed authentication issues preventing automatic import by implementing proper 409/session-id retry pattern in PollTransmissionAsync to match TransmissionAdapter CSRF protection
+- **Download queue processing**: Fixed stuck jobs blocking all imports by implementing ResetStuckJobsAsync() to reset "Processing" state jobs on DownloadProcessingBackgroundService startup
+- **Download status lifecycle**: Ensured Status = DownloadStatus.Moved is set after successful import in all 8 code paths within CompletedDownloadProcessor for consistent terminal state handling
+- **Import notifications and history**: Moved history entry and notification creation to execute BEFORE cleanup operations to ensure they're created for all successful imports, not just when downloads remain in client
+- **Transmission cleanup**: Fixed torrent removal after import by extracting torrent hash using torrentInfo.HashString instead of download.ExternalId for proper cleanup
+- **Wanted status accuracy**: Fixed wanted view showing incorrect status when files deleted by adding physical file existence checks (File.Exists) in 3 locations: LibraryController.GetAllAudiobooks, LibraryController.GetAudiobook, and ScanBackgroundService.BroadcastLibraryUpdate
+- **TypeScript compilation**: Removed non-existent contentPath property reference from downloads store that was causing TS2339 errors
+- **MyAnonamouse authentication & downloads**: Persist `mam_id` values received from tracker responses and explicitly include `mam_id` cookie on direct torrent downloads when the torrent host differs from the configured indexer; adds unit tests covering cookie persistence and download caching.
+- **Null checks**: Added missing null checks for audiobook properties in EditAudiobookModal and simplified author assignment logic in SearchService to handle null values consistently.
+- **Import directory creation**: Destination directories now created automatically if missing instead of skipping import
+- **Cache stampede prevention**: Added AsyncKeyedLock to prevent concurrent cache operations
+- **Result table UI**: Row hover now underlines title for better visual feedback
+- **Font loading**: Removed unavailable WOFF font format, optimized font loading
+- **Null handling**: Improved null handling across services and test setup
+- **Logging and error handling**: Enhanced logging for download updates and auth operations with detailed debugging
+
+### Security
+- **MyAnonamouse cookie handling**: Persist `mam_id` cookies from tracker responses, include on direct torrent downloads with proper caching and validation
+
+### Technical Debt
+- **Error tracking infrastructure**: Comprehensive `ErrorTrackingService` implemented with structured error context, ready for external service integration
+- **Documentation**: Updated release readiness review, TODO tracking, console logging audit, and refactoring plans to reflect completed work
+- **Test coverage**: Added E2E tests for move flow and root folders, unit tests for move queue, import resolution, quality profile scoring, bulk update operations, search sorting, scoring, and MyAnonamouse parsing
+- **Code quality**: Replaced `Assert.True(...Any)` with `Assert.Contains` to satisfy xUnit analyzers
+- **Search result types**: Enhanced type definitions with optional fields and richer metadata support
+
+### Added
+- **Advanced search and collection features**: New AdvancedSearchModal with ASIN, author, title, and series search prefixes for precise queries
+- **Collection view**: Comprehensive CollectionView for managing audiobook collections with author and series grouping
+- **Author ASIN support**: Backend author ASIN resolution via Audimeta with author image caching and database persistence (migration: `20251225220155_AddAuthorAsins`)
+- **Sub-navigation for audiobooks**: Sidebar navigation for grouping audiobooks by books, authors, or series with route sync
+- **Series display enhancements**: Full series lists as badges with tooltips, normalized series data from various sources
+- **Smart score UI and sorting**: Prowlarr-style composite scoring with normalized score display, sorting by Grabs and Language
+- **Inspect torrent modal**: View and download cached torrent files and announce URLs for downloads with diagnostics support
+- **MyAnonamouse enhancements**: Advanced search options including filters, language, and enrichment toggles
+- **Search cancellation**: Cancel ongoing searches with abort signal support throughout backend async operations
+- **Image fallback system**: Consistent image fallback mechanism with placeholder handling and failed image caching
+- **Download client toggle**: Enable/disable download clients directly from settings view
+
+### Changed
+- **Search/Metadata API refactor**: Added `api/metadata` controller and deprecated `api/search/metadata` + `api/search/audimeta` (any external consumers should migrate)
+- **Search pipeline refactoring**: Modular ASIN enrichment (AsinEnricher), fallback scraping (FallbackScraper), direct ASIN search (AsinSearchHandler), and result scoring (SearchResultScorer)
+- **qBittorrent polling optimization**: Per-client polling intervals, batch requests, memory caching for torrent properties, field limiting with category/hash filtering
+- **Download monitoring improvements**: Enhanced completed and failed download handling with deduplication between queue and DB failures
+- **ActivityView debug tools**: Added debug tools and comprehensive tests for download activity monitoring
+- **Image handling**: Normalized all image URLs to use API endpoint, placeholder images served when covers missing
+- **MyAnonamouse result enrichment**: Richer result data with seeders, leechers, grabs, files, language, and quality fields
+- **Frontend build optimization**: Patched @microsoft/signalr to remove Rollup warnings, included only available font formats
+
+### Fixed
+- **Import directory creation**: Destination directories now created automatically if missing instead of skipping import
+- **Cache stampede prevention**: Added AsyncKeyedLock to prevent concurrent cache operations
+- **Result table UI**: Row hover now underlines title for better visual feedback
+- **Font loading**: Removed unavailable WOFF font format, optimized font loading
+- **Null handling**: Improved null handling across services and test setup
+- **Logging and error handling**: Enhanced logging for download updates and auth operations with detailed debugging
+
+### Security
+- **MyAnonamouse cookie handling**: Persist `mam_id` cookies from tracker responses, include on direct torrent downloads with proper caching and validation
+
+### Documentation
+- **AI agent instructions**: Comprehensive update to all AI assistant instruction files in .github folder
+  - Enhanced copilot-instructions.md with critical backend/frontend architecture patterns, troubleshooting scenarios, and security considerations
+  - Updated .cursorrules with critical patterns sections for both backend and frontend
+  - Restructured RULES.md as comprehensive navigation guide with file organization and quick reference
+  - Updated all provider-specific files (ANTHROPIC.md, OpenAI.md, AZURE_OPENAI.md, BARD.md, COHERE.md, BEDROCK.md, HUGGINGFACE.md) with Listenarr-specific guidance
+  - Enhanced tool-specific files (clinerules, windsurfrules, WARP.md) with project overview and critical patterns
+  - Updated CONVENTIONS.md with references to primary documentation files
+  - All files now include download lifecycle, file validation, authentication patterns, job processing, and common troubleshooting scenarios
+
+### Technical Debt
+- **Test coverage expansion**: Added comprehensive tests for search sorting, scoring, MyAnonamouse parsing, quality profiles, and import service
+- **Code quality**: Replaced `Assert.True(...Any)` with `Assert.Contains` to satisfy xUnit analyzers
+- **Search result types**: Enhanced type definitions with optional fields and richer metadata support
+
 ## [0.2.45] - 2025-12-10
 
 ### Changed
@@ -24,6 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tooltip displays missing required fields (audiobook, quality profile, language)
   - Info icon only appears when validation issues exist
   - Added `rejections` field to preview items for backend validation feedback
+- **Search/Metadata API refactor**: Added `api/metadata` controller and deprecated `api/search/metadata` + `api/search/audimeta` (Discord bot and any external consumers should migrate)
 
 ### Fixed
 - **FolderBrowser Validation**: External path changes (like selecting recent folders) now automatically trigger validation

@@ -48,11 +48,7 @@
         <div class="section-card">
           <h2>Recent Activity</h2>
           <div class="activity-list">
-            <div 
-              v-for="activity in recentActivity" 
-              :key="activity.id"
-              class="activity-item"
-            >
+            <div v-for="activity in recentActivity" :key="activity.id" class="activity-item">
               <div class="activity-icon">
                 <component :is="getActivityIconComponent(activity.type)" class="ph-activity-icon" />
               </div>
@@ -75,13 +71,13 @@
         <div class="section-card">
           <h2>Recently Added</h2>
           <div class="episodes-list">
-            <div 
-              v-for="audiobook in recentlyAdded" 
-              :key="audiobook.id"
-              class="episode-item"
-            >
+            <div v-for="audiobook in recentlyAdded" :key="audiobook.id" class="episode-item">
               <div class="episode-poster">
-                <img :src="audiobook.poster || '/placeholder-poster.jpg'" :alt="audiobook.title" loading="lazy" />
+                <img
+                  :src="audiobook.poster || '/placeholder-poster.jpg'"
+                  :alt="audiobook.title"
+                  loading="lazy"
+                />
               </div>
               <div class="episode-info">
                 <h4>{{ safeText(audiobook.title) }}</h4>
@@ -162,29 +158,29 @@ import {
   PhWarning,
   PhDownloadSimple,
   PhActivity,
-  PhFileText
+  PhFileText,
 } from '@phosphor-icons/vue'
 
 // Sample dashboard data
 const audiobookStats = ref({
   total: 15,
-  monitored: 12
+  monitored: 12,
 })
 
 const downloadStats = ref({
   active: 3,
-  completed: 8
+  completed: 8,
 })
 
 const wantedStats = ref({
   missing: 12,
-  cutoffUnmet: 4
+  cutoffUnmet: 4,
 })
 
 const storageStats = ref({
   used: '45.2 GB',
   total: '500 GB',
-  percentage: 9
+  percentage: 9,
 })
 
 const recentActivity = ref([
@@ -193,22 +189,22 @@ const recentActivity = ref([
     type: 'download',
     title: 'Downloaded: The Hobbit by J.R.R. Tolkien',
     status: 'completed',
-    timestamp: new Date(Date.now() - 5 * 60 * 1000)
+    timestamp: new Date(Date.now() - 5 * 60 * 1000),
   },
   {
     id: '2',
     type: 'download',
     title: 'Downloading: Dune by Frank Herbert',
     status: 'downloading',
-    timestamp: new Date(Date.now() - 2 * 60 * 1000)
+    timestamp: new Date(Date.now() - 2 * 60 * 1000),
   },
   {
     id: '3',
     type: 'import',
     title: 'Imported: Foundation Series Collection',
     status: 'completed',
-    timestamp: new Date(Date.now() - 30 * 60 * 1000)
-  }
+    timestamp: new Date(Date.now() - 30 * 60 * 1000),
+  },
 ])
 
 const recentlyAdded = ref([
@@ -219,7 +215,7 @@ const recentlyAdded = ref([
     narrator: 'Nick Podehl',
     duration: '27h 55m',
     addedDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    poster: '/placeholder-audiobook.jpg'
+    poster: '/placeholder-audiobook.jpg',
   },
   {
     id: '2',
@@ -228,8 +224,8 @@ const recentlyAdded = ref([
     narrator: 'Michael Kramer',
     duration: '24h 39m',
     addedDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-    poster: '/placeholder-audiobook.jpg'
-  }
+    poster: '/placeholder-audiobook.jpg',
+  },
 ])
 
 const getActivityIconComponent = (type: string) => {
@@ -294,7 +290,7 @@ const formatTime = (timestamp: Date): string => {
 .stats-card {
   background-color: #2a2a2a;
   padding: 1.5rem;
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -345,7 +341,7 @@ const formatTime = (timestamp: Date): string => {
 
 .section-card {
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
 }
 
@@ -404,7 +400,7 @@ const formatTime = (timestamp: Date): string => {
 
 .status-badge {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: bold;
   text-transform: uppercase;
@@ -439,7 +435,7 @@ const formatTime = (timestamp: Date): string => {
   width: 40px;
   height: 60px;
   background-color: #555;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -512,7 +508,7 @@ const formatTime = (timestamp: Date): string => {
   align-items: center;
   padding: 0.75rem;
   background-color: #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .health-label {
@@ -522,7 +518,7 @@ const formatTime = (timestamp: Date): string => {
 
 .health-status {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: bold;
 }
@@ -555,19 +551,33 @@ const formatTime = (timestamp: Date): string => {
 }
 
 /* Icons */
-.icon-plus::before { content: '+'; }
-.icon-search::before { content: '🔍'; }
-.icon-import::before { content: '📁'; }
-.icon-wanted::before { content: '⚠️'; }
-.icon-download::before { content: '📥'; }
-.icon-metadata::before { content: '📋'; }
-.icon-activity::before { content: '⚡'; }
+.icon-plus::before {
+  content: '+';
+}
+.icon-search::before {
+  content: '🔍';
+}
+.icon-import::before {
+  content: '📁';
+}
+.icon-wanted::before {
+  content: '⚠️';
+}
+.icon-download::before {
+  content: '📥';
+}
+.icon-metadata::before {
+  content: '📋';
+}
+.icon-activity::before {
+  content: '⚡';
+}
 
 @media (max-width: 768px) {
   .dashboard-content {
     grid-template-columns: 1fr;
   }
-  
+
   .dashboard-grid {
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   }

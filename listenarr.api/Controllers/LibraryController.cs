@@ -49,10 +49,7 @@ namespace Listenarr.Api.Controllers
         private readonly IMoveQueueService? _moveQueueService;
         private readonly IFileNamingService _fileNamingService;
         private readonly NotificationService? _notificationService;
-
-        /// <summary>
-        /// Initializes a new <see cref="LibraryController"/> with required services.
-        /// </summary>
+            private readonly IRootFolderService? _rootFolderService;
         /// <param name="repo">Repository for audiobook persistence and queries.</param>
         /// <param name="imageCacheService">Service for caching and moving cover images.</param>
         /// <param name="logger">Logger instance for diagnostic messages.</param>
@@ -62,6 +59,7 @@ namespace Listenarr.Api.Controllers
         /// <param name="scanQueueService">Optional background scan queue service for asynchronous scans.</param>
         /// <param name="moveQueueService">Optional background move queue service for processing move requests.</param>
         /// <param name="notificationService">Service for sending webhook notifications.</param>
+        /// <param name="rootFolderService">Optional root folder service for managing and enumerating configured root folders used for validating explicit scan paths.</param>
         public LibraryController(
             IAudiobookRepository repo,
             IImageCacheService imageCacheService,
@@ -71,7 +69,8 @@ namespace Listenarr.Api.Controllers
             IFileNamingService fileNamingService,
             IScanQueueService? scanQueueService = null,
             IMoveQueueService? moveQueueService = null,
-            NotificationService? notificationService = null)
+            NotificationService? notificationService = null,
+            IRootFolderService? rootFolderService = null)
         {
             _repo = repo;
             _imageCacheService = imageCacheService;
@@ -82,6 +81,7 @@ namespace Listenarr.Api.Controllers
             _scanQueueService = scanQueueService;
             _moveQueueService = moveQueueService;
             _notificationService = notificationService;
+            _rootFolderService = rootFolderService;
         }
 
         public class ScanRequest
@@ -104,8 +104,15 @@ namespace Listenarr.Api.Controllers
             {
                 try
                 {
-                    metadata.PublishYear = request.SearchResult.PublishedDate.Year.ToString();
-                    _logger.LogInformation("Extracted publish year from search result publishedDate: {Year}", metadata.PublishYear);
+                    if (DateTime.TryParse(request.SearchResult.PublishedDate, out var publishDate))
+                    {
+                        metadata.PublishYear = publishDate.Year.ToString();
+                        _logger.LogInformation("Extracted publish year from search result publishedDate: {Year}", metadata.PublishYear);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Could not parse PublishedDate as DateTime: {PublishedDate}", request.SearchResult.PublishedDate);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -239,6 +246,66 @@ namespace Listenarr.Api.Controllers
             }
 
             await _repo.AddAsync(audiobook);
+
+            // Resolve author ASINs and cache author images via Audimeta when possible
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var audimeta = scope.ServiceProvider.GetRequiredService<AudimetaService>();
+
+                if (audiobook.Authors != null && audiobook.Authors.Any())
+                {
+                    audiobook.AuthorAsins = audiobook.AuthorAsins ?? new List<string>();
+                    foreach (var authorName in audiobook.Authors)
+                    {
+                        try
+                        {
+                            var info = await audimeta.LookupAuthorAsync(authorName);
+                            if (info != null && !string.IsNullOrWhiteSpace(info.Asin))
+                            {
+                                // Avoid duplicates
+                                if (!audiobook.AuthorAsins.Contains(info.Asin))
+                                {
+                                    audiobook.AuthorAsins.Add(info.Asin);
+                                }
+
+                                // Ensure author image is cached in authors folder (will download if necessary)
+                                try
+                                {
+                                    var moved = await _imageCacheService.MoveToAuthorLibraryStorageAsync(info.Asin, info.Image);
+                                    if (moved != null)
+                                    {
+                                        _logger.LogInformation("Cached author image for {Author} (ASIN: {Asin})", authorName, info.Asin);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Failed to cache author image for {Author}", authorName);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Author lookup failed for {Author}", authorName);
+                        }
+                    }
+
+                    // Persist any updated author ASINs
+                    try
+                    {
+                        _dbContext.Audiobooks.Update(audiobook);
+                        await _dbContext.SaveChangesAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to persist author ASINs for audiobook '{Title}'", audiobook.Title);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error resolving author ASINs for audiobook '{Title}'", audiobook.Title);
+            }
 
             // Send notification if configured
             if (_notificationService != null)
@@ -484,7 +551,7 @@ namespace Listenarr.Api.Controllers
                     source = f.Source,
                     createdAt = f.CreatedAt
                 }).ToList(),
-                wanted = a.Monitored && (a.Files == null || !a.Files.Any())
+                wanted = a.Monitored && (a.Files == null || !a.Files.Any() || !a.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
             });
 
             return Ok(dto);
@@ -553,7 +620,7 @@ namespace Listenarr.Api.Controllers
                     source = f.Source,
                     createdAt = f.CreatedAt
                 }).ToList(),
-                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any())
+                wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any() || !updated.Files.Any(f => !string.IsNullOrEmpty(f.Path) && System.IO.File.Exists(f.Path)))
             };
 
             return Ok(audiobookDto);
@@ -741,9 +808,10 @@ namespace Listenarr.Api.Controllers
             }
 
             // Delete associated image from cache if it exists
-            if (!string.IsNullOrEmpty(audiobook.Asin))
+            try
             {
-                try
+                // Prefer ASIN-based cleanup when available
+                if (!string.IsNullOrEmpty(audiobook.Asin))
                 {
                     var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
                     if (imagePath != null)
@@ -756,11 +824,52 @@ namespace Listenarr.Api.Controllers
                         }
                     }
                 }
-                catch (Exception ex)
+                else if (!string.IsNullOrEmpty(audiobook.ImageUrl))
                 {
-                    _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
-                    // Continue with deletion even if image cleanup fails
+                    // If ImageUrl points to our cached library folder, extract the filename and delete it
+                    try
+                    {
+                        // Safely extract identifier from an internal library image URL
+                        const string __marker = "/config/cache/images/library/";
+                        var __url = audiobook.ImageUrl ?? string.Empty;
+                        var __idx = __url.IndexOf(__marker, StringComparison.OrdinalIgnoreCase);
+                        if (__idx >= 0)
+                        {
+                            var filename = __url.Substring(__idx + __marker.Length);
+                            // Ensure we only take the file name portion (prevent embedded paths)
+                            filename = System.IO.Path.GetFileName(filename);
+                            var identifier = System.IO.Path.GetFileNameWithoutExtension(filename);
+
+                            // Validate identifier to a conservative whitelist (alnum, dash, underscore, dot)
+                            if (!string.IsNullOrEmpty(identifier) && System.Text.RegularExpressions.Regex.IsMatch(identifier, "^[A-Za-z0-9_\\-\\.]{1,128}$"))
+                            {
+                                var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
+                                if (!string.IsNullOrEmpty(imagePath))
+                                {
+                                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                    if (System.IO.File.Exists(fullPath))
+                                    {
+                                        System.IO.File.Delete(fullPath);
+                                        _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Image identifier from ImageUrl for audiobook id {Id} is invalid: {Identifier}", audiobook.Id, identifier);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
+                // Continue with deletion even if image cleanup fails
             }
 
             var deleted = await _repo.DeleteByIdAsync(id);
@@ -802,9 +911,9 @@ namespace Listenarr.Api.Controllers
                             }
 
                             // Delete associated image from cache if it exists
-                            if (!string.IsNullOrEmpty(audiobook.Asin))
+                            try
                             {
-                                try
+                                if (!string.IsNullOrEmpty(audiobook.Asin))
                                 {
                                     var imagePath = await _imageCacheService.GetCachedImagePathAsync(audiobook.Asin);
                                     if (imagePath != null)
@@ -818,11 +927,50 @@ namespace Listenarr.Api.Controllers
                                         }
                                     }
                                 }
-                                catch (Exception ex)
+                                else if (!string.IsNullOrEmpty(audiobook.ImageUrl))
                                 {
-                                    _logger.LogWarning(ex, "Failed to delete cached image for ASIN {Asin}", audiobook.Asin);
-                                    // Continue with deletion even if image cleanup fails
+                                    try
+                                    {
+                                        // Safely extract identifier from an internal library image URL
+                                        const string __marker = "/config/cache/images/library/";
+                                        var __url = audiobook.ImageUrl ?? string.Empty;
+                                        var __idx = __url.IndexOf(__marker, StringComparison.OrdinalIgnoreCase);
+                                        if (__idx >= 0)
+                                        {
+                                            var filename = __url.Substring(__idx + __marker.Length);
+                                            filename = System.IO.Path.GetFileName(filename);
+                                            var identifier = System.IO.Path.GetFileNameWithoutExtension(filename);
+
+                                            if (!string.IsNullOrEmpty(identifier) && System.Text.RegularExpressions.Regex.IsMatch(identifier, "^[A-Za-z0-9_\\-\\.]{1,128}$"))
+                                            {
+                                                var imagePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
+                                                if (!string.IsNullOrEmpty(imagePath))
+                                                {
+                                                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), imagePath);
+                                                    if (System.IO.File.Exists(fullPath))
+                                                    {
+                                                        System.IO.File.Delete(fullPath);
+                                                        deletedImagesCount++;
+                                                        _logger.LogInformation("Deleted cached image for identifier (from ImageUrl): {Identifier}", identifier);
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                _logger.LogWarning("Image identifier from ImageUrl for audiobook id {Id} is invalid: {Identifier}", audiobook.Id, identifier);
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Failed to delete cached image based on stored ImageUrl for audiobook id {Id}", audiobook.Id);
+                                    }
                                 }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
+                                // Continue with deletion even if image cleanup fails
                             }
 
                             // Log history entry for the deleted audiobook
@@ -902,6 +1050,203 @@ namespace Listenarr.Api.Controllers
             return Ok(result);
         }
 
+        [HttpPost("bulk-update")]
+        public async Task<IActionResult> BulkUpdateAudiobooks([FromBody] BulkUpdateRequest request)
+        {
+            if (request?.Ids == null || !request.Ids.Any())
+            {
+                return BadRequest(new { message = "No audiobook IDs provided for bulk update" });
+            }
+
+            var results = new List<object>();
+
+            // Fetch application settings once for naming pattern when processing rootFolder changes
+            ApplicationSettings? settings = null;
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                settings = await configService.GetApplicationSettingsAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load application settings while performing bulk update");
+            }
+
+            foreach (var id in request.Ids.Distinct())
+            {
+                var entryErrors = new List<string>();
+                var success = false;
+
+                try
+                {
+                    var audiobook = await _repo.GetByIdAsync(id);
+                    if (audiobook == null)
+                    {
+                        entryErrors.Add($"Audiobook with ID {id} not found");
+                        results.Add(new { id, success, errors = entryErrors });
+                        continue;
+                    }
+
+                    // Track whether any change was applied
+                    var changed = false;
+
+                    // Monitored
+                    if (request.Updates != null && request.Updates.TryGetValue("monitored", out var monitoredObj))
+                    {
+                        try
+                        {
+                            bool monVal;
+                            if (monitoredObj is JsonElement je)
+                            {
+                                monVal = je.ValueKind == JsonValueKind.True;
+                            }
+                            else
+                            {
+                                monVal = Convert.ToBoolean(monitoredObj);
+                            }
+
+                            audiobook.Monitored = monVal;
+                            changed = true;
+                            _logger.LogInformation("Set Monitored={Monitored} for audiobook id={Id}", monVal, id);
+
+                            // History entry
+                            _dbContext.History.Add(new History
+                            {
+                                AudiobookId = audiobook.Id,
+                                AudiobookTitle = audiobook.Title ?? "Unknown",
+                                EventType = "Updated",
+                                Message = $"Monitored set to {monVal}",
+                                Source = "BulkUpdate",
+                                Timestamp = DateTime.UtcNow
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Invalid monitored value: {ex.Message}");
+                        }
+                    }
+
+                    // QualityProfileId
+                    if (request.Updates != null && request.Updates.TryGetValue("qualityProfileId", out var qpObj))
+                    {
+                        try
+                        {
+                            int qpVal;
+                            if (qpObj is JsonElement jq)
+                            {
+                                qpVal = jq.GetInt32();
+                            }
+                            else
+                            {
+                                qpVal = Convert.ToInt32(qpObj);
+                            }
+
+                            audiobook.QualityProfileId = qpVal;
+                            changed = true;
+                            _logger.LogInformation("Set QualityProfileId={Profile} for audiobook id={Id}", qpVal, id);
+
+                            _dbContext.History.Add(new History
+                            {
+                                AudiobookId = audiobook.Id,
+                                AudiobookTitle = audiobook.Title ?? "Unknown",
+                                EventType = "Updated",
+                                Message = $"Quality profile set to {qpVal}",
+                                Source = "BulkUpdate",
+                                Timestamp = DateTime.UtcNow
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Invalid qualityProfileId value: {ex.Message}");
+                        }
+                    }
+
+                    // Root folder change (rootFolder => path string)
+                    if (request.Updates != null && request.Updates.TryGetValue("rootFolder", out var rootObj))
+                    {
+                        try
+                        {
+                            string? rootPath = null;
+                            if (rootObj is JsonElement jr)
+                            {
+                                if (jr.ValueKind == JsonValueKind.String)
+                                    rootPath = jr.GetString();
+                            }
+                            else if (rootObj != null)
+                            {
+                                rootPath = rootObj.ToString();
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(rootPath))
+                            {
+                                // Use configured naming pattern to compute full base directory for this audiobook
+                                var fileNamingPattern = settings?.FileNamingPattern ?? string.Empty;
+                                var newBase = ComputeAudiobookBaseDirectoryFromPattern(audiobook, rootPath, fileNamingPattern);
+
+                                try
+                                {
+                                    if (!Directory.Exists(newBase))
+                                    {
+                                        Directory.CreateDirectory(newBase);
+                                        _logger.LogInformation("Created directory for audiobook id={Id} at {Path}", id, newBase);
+                                    }
+
+                                    audiobook.BasePath = newBase;
+                                    changed = true;
+
+                                    _dbContext.History.Add(new History
+                                    {
+                                        AudiobookId = audiobook.Id,
+                                        AudiobookTitle = audiobook.Title ?? "Unknown",
+                                        EventType = "Updated",
+                                        Message = $"BasePath set to {newBase} via bulk update",
+                                        Source = "BulkUpdate",
+                                        Timestamp = DateTime.UtcNow
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                    entryErrors.Add($"Failed to apply root folder for audiobook {id}: {ex.Message}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Invalid rootFolder value: {ex.Message}");
+                        }
+                    }
+
+                    // Persist updates for this audiobook
+                    if (changed)
+                    {
+                        try
+                        {
+                            _dbContext.Audiobooks.Update(audiobook);
+                            await _dbContext.SaveChangesAsync();
+                            success = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            entryErrors.Add($"Failed to save changes for audiobook {id}: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        entryErrors.Add("No valid updates provided for this audiobook");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    entryErrors.Add($"Unhandled error: {ex.Message}");
+                }
+
+                results.Add(new { id, success, errors = entryErrors });
+            }
+
+            return Ok(new { message = "Bulk update completed", results });
+        }
+
         /// <summary>
         /// Scan the filesystem for files belonging to this audiobook, extract metadata (ffprobe) and persist AudiobookFile records.
         /// Optional body: { path: "C:\\some\\folder" } to scan a specific folder instead of the configured output path.
@@ -949,24 +1294,82 @@ namespace Listenarr.Api.Controllers
                 using var scope = _scopeFactory.CreateScope();
                 var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
                 var settings = await configService.GetApplicationSettingsAsync();
+
                 // If audiobook has a BasePath configured, always scan that path for safety
                 // Do not fall back to the global output path when a BasePath is present.
                 if (!string.IsNullOrEmpty(audiobook.BasePath))
                 {
-                    scanRoot = audiobook.BasePath;
+                    scanRoot = Path.GetFullPath(audiobook.BasePath);
                     _logger.LogDebug("Audiobook has BasePath; using it as scan root: {ScanRoot}", scanRoot);
+                }
+                else if (!string.IsNullOrEmpty(request?.Path))
+                {
+                    // Validate requested path is absolute and contained within a configured root folder or the global output path
+                    string requestedFull;
+                    try
+                    {
+                        requestedFull = Path.GetFullPath(request.Path!);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Invalid requested scan path provided: {Path}", request.Path);
+                        return BadRequest(new { message = "Invalid scan path", path = request.Path });
+                    }
+
+                    // Build whitelist of allowed root paths
+                    var allowedRoots = new List<string>();
+                    if (_rootFolderService != null)
+                    {
+                        var roots = await _rootFolderService.GetAllAsync();
+                        foreach (var r in roots)
+                        {
+                            try { allowedRoots.Add(Path.GetFullPath(r.Path)); } catch { }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(settings?.OutputPath))
+                    {
+                        try { allowedRoots.Add(Path.GetFullPath(settings.OutputPath)); } catch { }
+                    }
+
+                    if (allowedRoots.Count == 0)
+                    {
+                        _logger.LogWarning("Scan request path provided but no root folders are configured; rejecting request.");
+                        return BadRequest(new { message = "No root folders configured; cannot accept explicit scan path" });
+                    }
+
+                    // Check that requestedFull is equal to or under one of the allowed roots
+                    var allowed = allowedRoots.Any(ar => string.Equals(requestedFull, ar, StringComparison.OrdinalIgnoreCase)
+                        || requestedFull.StartsWith(ar.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        || requestedFull.StartsWith(ar.TrimEnd(Path.AltDirectorySeparatorChar) + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+
+                    if (!allowed)
+                    {
+                        _logger.LogWarning("Requested scan path {Path} is not inside configured root folders", request.Path);
+                        return BadRequest(new { message = "Requested scan path is not within configured root folders", path = request.Path });
+                    }
+
+                    scanRoot = requestedFull;
                 }
                 else
                 {
-                    // No BasePath yet - allow explicit request path, otherwise fall back to configured output path
-                    scanRoot = request?.Path ?? settings.OutputPath;
+                    // No BasePath and no explicit path - fall back to configured output path
+                    scanRoot = !string.IsNullOrEmpty(settings?.OutputPath) ? Path.GetFullPath(settings.OutputPath) : null;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read application settings for scan; falling back to request path or basePath");
-                // If BasePath exists prefer it, otherwise use request path (settings not available here)
-                scanRoot = !string.IsNullOrEmpty(audiobook.BasePath) ? audiobook.BasePath : request?.Path;
+                _logger.LogWarning(ex, "Failed to read application settings for scan; cannot validate request path without configured roots");
+                // If BasePath exists prefer it; otherwise, we cannot determine a safe scan root
+                if (!string.IsNullOrEmpty(audiobook.BasePath))
+                {
+                    scanRoot = Path.GetFullPath(audiobook.BasePath);
+                }
+                else
+                {
+                    _logger.LogWarning("Configuration unavailable and audiobook has no BasePath; rejecting scan request for audiobook {AudiobookId}", id);
+                    return StatusCode(500, new { message = "Failed to determine a safe scan path" });
+                }
             }
 
             if (string.IsNullOrEmpty(scanRoot) || !Directory.Exists(scanRoot))
@@ -1349,6 +1752,24 @@ namespace Listenarr.Api.Controllers
                     final = Path.Combine(root, final.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 }
 
+                // If caller explicitly asked to change the DB without moving files, update the BasePath and return early.
+                if (request.MoveFiles.HasValue && request.MoveFiles.Value == false)
+                {
+                    try
+                    {
+                        audiobook.BasePath = final;
+                        _dbContext.Audiobooks.Update(audiobook);
+                        await _dbContext.SaveChangesAsync();
+                        _logger.LogInformation("Updated BasePath for audiobook {AudiobookId} without moving files: {BasePath}", id, final);
+                        return Ok(new { message = "Destination updated" });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to update BasePath for audiobook {AudiobookId}", id);
+                        return StatusCode(500, new { message = "Failed to update BasePath", error = ex.Message });
+                    }
+                }
+
                 // Determine source path snapshot to use for the move. Prefer an explicit source from the request
                 // (the frontend should send the original source if it updated the audiobook BasePath before requesting a move),
                 // otherwise fall back to the current audiobook.BasePath as a best-effort.
@@ -1359,6 +1780,43 @@ namespace Listenarr.Api.Controllers
                 if (string.IsNullOrWhiteSpace(sourcePath))
                 {
                     return BadRequest(new { message = "Source path not provided. Supply current source path in the Move request or ensure audiobook has a valid BasePath." });
+                }
+
+                // Validate source exists now to provide earlier feedback to clients (avoids enqueueing doomed jobs)
+                if (!Directory.Exists(sourcePath))
+                {
+                    return BadRequest(new { message = "Source path does not exist. Ensure the audiobook's current BasePath exists or provide a valid SourcePath in the request." });
+                }
+
+                // Validate target parent is valid and writable (try to create if necessary)
+                var targetParent = Path.GetDirectoryName(final);
+                if (string.IsNullOrEmpty(targetParent))
+                {
+                    return BadRequest(new { message = "Invalid target path" });
+                }
+                try
+                {
+                    if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to access or create target parent {TargetParent}", targetParent);
+                    return BadRequest(new { message = "Target parent path is not writable or unavailable" });
+                }
+
+                // If source and target are identical, nothing to do
+                try
+                {
+                    var srcFull = Path.GetFullPath(sourcePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    var tgtFull = Path.GetFullPath(final).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (string.Equals(srcFull, tgtFull, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(new { message = "Source and target paths are identical; nothing to move." });
+                    }
+                }
+                catch
+                {
+                    // Ignore errors normalizing paths; background worker will fail if invalid
                 }
 
                 var jobId = await _moveQueueService.EnqueueMoveAsync(id, final, sourcePath);
@@ -2130,6 +2588,10 @@ namespace Listenarr.Api.Controllers
         {
             public string? DestinationPath { get; set; }
             public string? SourcePath { get; set; }
+            // If provided and false, update DB only and do not enqueue a move job
+            public bool? MoveFiles { get; set; }
+            // When moving files, whether to delete the original folder if empty after the move
+            public bool? DeleteEmptySource { get; set; }
         }
 
     }

@@ -10,12 +10,16 @@ const disconnectedListeners: Set<() => void> = new Set()
 
 export function onConnected(cb: () => void): () => void {
   connectedListeners.add(cb)
-  return () => { connectedListeners.delete(cb) }
+  return () => {
+    connectedListeners.delete(cb)
+  }
 }
 
 export function onDisconnected(cb: () => void): () => void {
   disconnectedListeners.add(cb)
-  return () => { disconnectedListeners.delete(cb) }
+  return () => {
+    disconnectedListeners.delete(cb)
+  }
 }
 
 export function setConnected(val: boolean) {
@@ -23,11 +27,15 @@ export function setConnected(val: boolean) {
   try {
     if (val) {
       for (const cb of Array.from(connectedListeners)) {
-        try { cb() } catch {}
+        try {
+          cb()
+        } catch {}
       }
     } else {
       for (const cb of Array.from(disconnectedListeners)) {
-        try { cb() } catch {}
+        try {
+          cb()
+        } catch {}
       }
     }
   } catch {}
@@ -49,5 +57,5 @@ export default {
   onDisconnected,
   setConnected,
   setLastError,
-  setReconnectAttempts
+  setReconnectAttempts,
 }

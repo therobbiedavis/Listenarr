@@ -51,7 +51,22 @@ namespace Listenarr.Domain.Models
         /// <summary>
         /// Sort by quality score (when available)
         /// </summary>
-        Quality
+        Quality,
+
+        /// <summary>
+        /// Smart ranking inspired by Prowlarr (multi-tiered scoring)
+        /// </summary>
+        Smart,
+
+        /// <summary>
+        /// Sort by language token (e.g., English, Spanish)
+        /// </summary>
+        Language,
+
+        /// <summary>
+        /// Sort by grabs/snatches (Usenet / DDL popularity)
+        /// </summary>
+        Grabs
     }
 
     /// <summary>

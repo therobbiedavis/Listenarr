@@ -114,19 +114,68 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Remove an item from the download queue
+        /// Retrieve cached torrent bytes (if cached) for a given download id
         /// </summary>
-        [HttpDelete("queue/{downloadId}")]
-        public async Task<ActionResult> RemoveFromQueue(string downloadId, [FromQuery] string? downloadClientId = null)
+        [HttpGet("cached/{downloadId}/torrent")]
+        public async Task<IActionResult> GetCachedTorrent(string downloadId)
         {
             try
             {
-                var removed = await _downloadService.RemoveFromQueueAsync(downloadId, downloadClientId);
+                var tuple = await _downloadService.GetCachedTorrentAsync(downloadId);
+                var bytes = tuple.Bytes;
+                var fileName = tuple.FileName ?? "download.torrent";
+                if (bytes != null && bytes.Length > 0)
+                {
+                    _logger.LogInformation("Served cached torrent for download {DownloadId}", downloadId);
+                    return File(bytes, "application/x-bittorrent", fileName);
+                }
+
+                return NotFound(new { error = "Cached torrent not found", downloadId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving cached torrent for download {DownloadId}", downloadId);
+                return StatusCode(500, new { message = "Failed to retrieve cached torrent", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Retrieve cached announce URLs for a given download id
+        /// </summary>
+        [HttpGet("cached/{downloadId}/announces")]
+        public async Task<IActionResult> GetCachedAnnounces(string downloadId)
+        {
+            try
+            {
+                var announces = await _downloadService.GetCachedAnnouncesAsync(downloadId);
+                if (announces != null && announces.Count > 0)
+                {
+                    _logger.LogInformation("Served cached announces for download {DownloadId}", downloadId);
+                    return Ok(new { downloadId, announces });
+                }
+                return NotFound(new { error = "Cached announces not found", downloadId });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving cached announces for download {DownloadId}", downloadId);
+                return StatusCode(500, new { message = "Failed to retrieve cached announces", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Remove an item from the download queue
+        /// </summary>
+        [HttpDelete("queue/{downloadId}")]
+        public async Task<ActionResult> RemoveFromQueue(string downloadId, [FromQuery] string? downloadClientId = null, [FromQuery] bool force = false)
+        {
+            try
+            {
+                var removed = await _downloadService.RemoveFromQueueAsync(downloadId, downloadClientId, force);
                 if (removed)
                 {
                     return Ok(new { message = "Removed from queue successfully" });
                 }
-                return NotFound(new { message = "Download not found in queue" });
+                return NotFound(new { message = "Download not found in queue or removal failed. Try force=true to remove from database only." });
             }
             catch (Exception ex)
             {

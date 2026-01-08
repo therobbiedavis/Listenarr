@@ -177,6 +177,9 @@ appsettings.Production.json
 **/config/dataprotection-keys/
 **/dataprotection-keys/
 
+# Nix config
+*.nix
+
 ##########################
 # OS & System Files      #
 ##########################
@@ -274,3 +277,4 @@ listenarr.api/wwwroot/assets/
 listenarr.api/wwwroot/index.html
 listenarr.api/wwwroot/*.map
 listenarr.api/wwwroot/assets/**
+listenarr.api/config/appsettings/appsettings.json

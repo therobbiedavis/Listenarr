@@ -26,6 +26,7 @@ using System.Collections.Generic;
 using Microsoft.Playwright;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Listenarr.Api.Services.Extractors;
 
 namespace Listenarr.Api.Services
 {
@@ -34,10 +35,10 @@ namespace Listenarr.Api.Services
         // Playwright fallback counter
         private static long _playwrightFallbackCount = 0;
 
-        private readonly HttpClient _httpClient;
-        private readonly ILogger<AudibleMetadataService> _logger;
-        private readonly IMemoryCache? _cache;
-        private readonly ILoggerFactory _loggerFactory;
+        protected readonly HttpClient _httpClient;
+        protected readonly ILogger<AudibleMetadataService> _logger;
+        protected readonly IMemoryCache? _cache;
+        protected readonly ILoggerFactory _loggerFactory;
 
         public AudibleMetadataService(HttpClient httpClient, ILogger<AudibleMetadataService> logger, IMemoryCache? cache = null, ILoggerFactory? loggerFactory = null)
         {
@@ -47,7 +48,7 @@ namespace Listenarr.Api.Services
             _loggerFactory = loggerFactory ?? LoggerFactory.Create(_ => { });
         }
 
-        public async Task<AudibleBookMetadata> ScrapeAudibleMetadataAsync(string asin)
+        public async Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(asin)) return new AudibleBookMetadata();
 
@@ -58,27 +59,21 @@ namespace Listenarr.Api.Services
                 return cached;
             }
 
-            // Try Audible product page first, then Amazon fallback on 404
-            var tryUrls = new[] {
-                $"https://www.audible.com/pd/{asin}",
-                $"https://www.amazon.com/dp/{asin}",
-                $"https://www.amazon.com/gp/product/{asin}"
-            };
-
-            foreach (var url in tryUrls)
+            // Only scrape Audible.com
+            var url = $"https://www.audible.com/pd/{asin}";
+            
+            try
             {
-                try
+                var (html, statusCode) = await GetHtmlAsync(url, ct);
+
+                // If Audible returns 404, return null (don't fallback)
+                if (statusCode == 404)
                 {
-                    var (html, statusCode) = await GetHtmlAsync(url);
+                    _logger.LogDebug("Audible returned 404 for ASIN {Asin}", asin);
+                    return null;
+                }
 
-                    // If Audible returns 404, immediately try Amazon
-                    if (statusCode == 404 && url.Contains("audible.com"))
-                    {
-                        _logger.LogDebug("Audible returned 404 for ASIN {Asin}, trying Amazon fallback", asin);
-                        continue;
-                    }
-
-                    if (string.IsNullOrEmpty(html)) continue;
+                if (string.IsNullOrEmpty(html)) return null;
 
                     var doc = new HtmlDocument();
                     doc.LoadHtml(html);
@@ -106,40 +101,22 @@ namespace Listenarr.Api.Services
                     // If the page explicitly indicates the audiobook is unavailable, skip accepting this page
                     if (IsUnavailablePage(doc))
                     {
-                        _logger.LogDebug("Audible page for {Url} appears unavailable; skipping", url);
-                        continue;
+                        _logger.LogDebug("Audible page for ASIN {Asin} appears unavailable", asin);
+                        return null;
                     }
 
-                    // ASIN - set canonical property only
-                    metadata.Asin = asin;
+                // ASIN - set canonical property only
+                metadata.Asin = asin;
 
-                    // Set source based on URL
-                    if (url.Contains("audible.com"))
-                    {
-                        metadata.Source = "Audible";
-                    }
-                    else if (url.Contains("amazon."))
-                    {
-                        metadata.Source = "Amazon";
-                    }
+                // Set source to Audible
+                metadata.Source = "Audible";
 
-                    // Extract from adbl-product-details component FIRST (Audible's primary metadata container)
-                    if (url.Contains("audible.com"))
-                    {
-                        // Try to extract from search result list item first (has clean structured data)
-                        ExtractFromSearchResult(doc, metadata);
+                // Extract from adbl-product-details component FIRST (Audible's primary metadata container)
+                // Try to extract from search result list item first (has clean structured data)
+                ExtractFromSearchResult(doc, metadata);
 
-                        // Then extract from product details page (will fill in missing fields)
-                        ExtractFromProductDetails(doc, metadata);
-                    }
-
-                    // Extract from Amazon's audibleproductdetails_feature_div section (requires Playwright rendering)
-                    if (url.Contains("amazon.com"))
-                    {
-                        ExtractFromAmazonAudibleDetails(doc, metadata);
-                    }
-
-                    // Title (fall back to visible selectors if component didn't provide)
+                // Then extract from product details page (will fill in missing fields)
+                ExtractFromProductDetails(doc, metadata);                    // Title (fall back to visible selectors if component didn't provide)
                     if (string.IsNullOrWhiteSpace(metadata.Title))
                     {
                         var titleNode = doc.DocumentNode.SelectSingleNode("//h1 | //h1//span | //span[@id='productTitle'] | //meta[@property='og:title']");
@@ -285,17 +262,27 @@ namespace Listenarr.Api.Services
                     }
 
                     // Clean up authors list: remove narrators and publisher from authors if they snuck in
+                    // BUT preserve at least one author even if they're also narrator (e.g., Louis C.K.)
                     if (metadata.Authors != null && metadata.Authors.Any())
                     {
                         var originalAuthorCount = metadata.Authors.Count;
-                        metadata.Authors = metadata.Authors
+                        var filtered = metadata.Authors
                             .Where(a => !a.Contains("Publisher", StringComparison.OrdinalIgnoreCase))
                             .Where(a => metadata.Narrators == null || !metadata.Narrators.Any(n => a.Equals(n, StringComparison.OrdinalIgnoreCase)))
                             .ToList();
 
-                        if (metadata.Authors.Count < originalAuthorCount)
+                        // Only apply filter if we still have authors left; otherwise keep original
+                        if (filtered.Any())
                         {
-                            _logger.LogInformation("Filtered authors from {Original} to {Filtered} (removed narrators/publisher)", originalAuthorCount, metadata.Authors.Count);
+                            metadata.Authors = filtered;
+                            if (metadata.Authors.Count < originalAuthorCount)
+                            {
+                                _logger.LogInformation("Filtered authors from {Original} to {Filtered} (removed narrators/publisher)", originalAuthorCount, metadata.Authors.Count);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Skipped author filtering (would leave 0 authors); keeping {Count} author(s) who are also narrator(s)", originalAuthorCount);
                         }
                     }
 
@@ -303,6 +290,8 @@ namespace Listenarr.Api.Services
                     if (string.IsNullOrWhiteSpace(metadata.Publisher))
                     {
                         var publisher = doc.DocumentNode.SelectSingleNode("//meta[@name='publisher']")?.GetAttributeValue("content", null)
+                            ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and @class='line' and @key='publisher']//a[@class='link']")?.InnerText?.Trim()
+                            ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and contains(@key,'publisher')]//div[@class='value']//a")?.InnerText?.Trim()
                             ?? doc.DocumentNode.SelectSingleNode("//li[contains(.,'Publisher')]|//th[contains(.,'Publisher')]/following-sibling::td")?.InnerText?.Trim();
                         if (!string.IsNullOrWhiteSpace(publisher)) metadata.Publisher = publisher;
                     }
@@ -329,35 +318,239 @@ namespace Listenarr.Api.Services
                             if (hrsMatch.Success) total += int.Parse(hrsMatch.Groups[1].Value) * 60;
                             if (minsMatch.Success) total += int.Parse(minsMatch.Groups[1].Value);
                             if (total > 0) metadata.Runtime = total;
-                        }
-                    }
-
-                    // Ensure at least ASIN or Title present before accepting
-                    if (!string.IsNullOrWhiteSpace(metadata.Title) || !string.IsNullOrWhiteSpace(metadata.ImageUrl) || (metadata.Authors != null && metadata.Authors.Any()))
-                    {
-                        _logger.LogInformation("Metadata extracted for ASIN {Asin} from {Source}: Title={Title}, Authors={AuthorCount}, Language={Language}, Publisher={Publisher}, HasDescription={HasDesc}",
-                            asin, metadata.Source ?? "Unknown", metadata.Title, metadata.Authors?.Count ?? 0, metadata.Language, metadata.Publisher, !string.IsNullOrWhiteSpace(metadata.Description));
-
-                        if (_cache != null)
-                        {
-                            _cache.Set(cacheKey, metadata, TimeSpan.FromHours(12));
-                        }
-                        return metadata;
                     }
                 }
-                catch (Exception ex)
+
+                // Ensure at least ASIN or Title present before accepting
+                if (!string.IsNullOrWhiteSpace(metadata.Title) || !string.IsNullOrWhiteSpace(metadata.ImageUrl) || (metadata.Authors != null && metadata.Authors.Any()))
                 {
-                    _logger.LogDebug(ex, "Scrape attempt failed for URL {Url}", url);
-                }
-            }
+                    _logger.LogInformation("Metadata extracted for ASIN {Asin} from Audible: Title={Title}, Authors={AuthorCount}, Language={Language}, Publisher={Publisher}, HasDescription={HasDesc}",
+                        asin, metadata.Title, metadata.Authors?.Count ?? 0, metadata.Language, metadata.Publisher, !string.IsNullOrWhiteSpace(metadata.Description));
 
-            // If nothing found, return minimal metadata with ASIN to allow fallback
-            var fallbackMeta = new AudibleBookMetadata { Asin = asin };
-            if (_cache != null) _cache.Set(cacheKey, fallbackMeta, TimeSpan.FromHours(1));
-            return fallbackMeta;
+                    if (_cache != null)
+                    {
+                        _cache.Set(cacheKey, metadata, TimeSpan.FromHours(12));
+                    }
+                    return metadata;
+                }
+                
+                // If nothing useful extracted, return null
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Scrape attempt failed for Audible ASIN {Asin}", asin);
+                return null;
+            }
         }
 
-        private async Task<(string? html, int statusCode)> GetHtmlAsync(string url)
+        public async Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin)
+        {
+            if (string.IsNullOrWhiteSpace(asin)) return new AudibleBookMetadata();
+
+            var cacheKey = $"amazon:metadata:{asin}";
+            if (_cache != null && _cache.TryGetValue(cacheKey, out AudibleBookMetadata? cached) && cached != null)
+            {
+                _logger.LogDebug("Cache hit for Amazon ASIN {Asin}", asin);
+                return cached;
+            }
+
+            // Only scrape Amazon.com
+            var url = $"https://www.amazon.com/dp/{asin}";
+            
+            try
+            {
+                var (html, statusCode) = await GetHtmlAsync(url);
+
+                // If Amazon returns 404, return null
+                if (statusCode == 404)
+                {
+                    _logger.LogDebug("Amazon returned 404 for ASIN {Asin}", asin);
+                    return null;
+                }
+
+                if (string.IsNullOrEmpty(html)) return null;
+
+                var doc = new HtmlDocument();
+                doc.LoadHtml(html);
+
+                var metadata = new AudibleBookMetadata();
+
+                // Attempt to pull structured JSON-LD first
+                var jsonLd = ExtractFromJsonLd(doc);
+                if (jsonLd != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(jsonLd.Title)) metadata.Title = jsonLd.Title;
+                    if (!string.IsNullOrWhiteSpace(jsonLd.Description)) metadata.Description = jsonLd.Description;
+                    if (!string.IsNullOrWhiteSpace(jsonLd.ImageUrl)) metadata.ImageUrl = jsonLd.ImageUrl;
+                    if (!string.IsNullOrWhiteSpace(jsonLd.PublishYear)) metadata.PublishYear = jsonLd.PublishYear;
+                    if (!string.IsNullOrWhiteSpace(jsonLd.Language)) metadata.Language = jsonLd.Language;
+                    if (!string.IsNullOrWhiteSpace(jsonLd.Publisher)) metadata.Publisher = jsonLd.Publisher;
+                    if (jsonLd.Authors != null && jsonLd.Authors.Any()) metadata.Authors = jsonLd.Authors;
+                    if (jsonLd.Narrators != null && jsonLd.Narrators.Any())
+                    {
+                        metadata.Narrators = jsonLd.Narrators;
+                        _logger.LogInformation("Extracted {Count} narrator(s) from JSON-LD: {Narrators}", jsonLd.Narrators.Count, string.Join(", ", jsonLd.Narrators));
+                    }
+                }
+
+                // If unavailable, return null
+                if (IsUnavailablePage(doc))
+                {
+                    _logger.LogDebug("Amazon page for ASIN {Asin} appears unavailable", asin);
+                    return null;
+                }
+
+                metadata.Asin = asin;
+                metadata.Source = "Amazon";
+
+                // Extract from Amazon's audibleproductdetails_feature_div
+                ExtractFromAmazonAudibleDetails(doc, metadata);
+
+                // Fallback title extraction
+                if (string.IsNullOrWhiteSpace(metadata.Title))
+                {
+                    var titleNode = doc.DocumentNode.SelectSingleNode("//h1 | //h1//span | //span[@id='productTitle'] | //meta[@property='og:title']");
+                    var title = titleNode?.InnerText?.Trim() ?? titleNode?.GetAttributeValue("content", null)?.Trim();
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        title = System.Text.RegularExpressions.Regex.Replace(title, "\\s+", " ").Trim();
+                        title = System.Text.RegularExpressions.Regex.Replace(title, @"\s*[:-]\s*(?:Audible Audio Edition|Audible Audiobook|Audio CD|MP3 CD|Kindle Edition|Paperback|Hardcover)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        metadata.Title = title;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(metadata.Series))
+                {
+                    ParseSeriesFromTitle(metadata);
+                }
+
+                if (string.IsNullOrWhiteSpace(metadata.Description))
+                {
+                    metadata.Description = ExtractDescription(doc);
+                }
+
+                if (string.IsNullOrWhiteSpace(metadata.Language))
+                {
+                    metadata.Language = ExtractLanguage(doc);
+                }
+
+                if (string.IsNullOrWhiteSpace(metadata.PublishYear))
+                {
+                    metadata.PublishYear = ExtractPublishYear(doc);
+                }
+
+                if (!string.IsNullOrWhiteSpace(metadata.Language))
+                {
+                    metadata.Language = CleanLanguage(metadata.Language);
+                }
+
+                // Image extraction (abbreviated for brevity - same logic as Audible version)
+                if (string.IsNullOrWhiteSpace(metadata.ImageUrl))
+                {
+                    var img = doc.DocumentNode.SelectSingleNode("//img[contains(@id,'ebooksImgBlkFront')]")?.GetAttributeValue("src", null)
+                        ?? doc.DocumentNode.SelectSingleNode("//img[contains(@id,'imgBlkFront')]")?.GetAttributeValue("src", null)
+                        ?? doc.DocumentNode.SelectSingleNode("//meta[@property='og:image']")?.GetAttributeValue("content", null);
+                    metadata.ImageUrl = img;
+                }
+
+                // Authors extraction
+                if (metadata.Authors == null || !metadata.Authors.Any())
+                {
+                    var authorNodes = doc.DocumentNode.SelectNodes("//a[contains(@class,'contributorNameID')]|//span[contains(@class,'author')]//a");
+                    if (authorNodes != null)
+                    {
+                        metadata.Authors = authorNodes.Select(n => n.InnerText?.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList()!;
+                    }
+                }
+
+                // Narrators extraction
+                if (metadata.Narrators == null || !metadata.Narrators.Any())
+                {
+                    var narratorNodes = doc.DocumentNode.SelectNodes("//span[contains(text(),'Narrated by')]//following-sibling::*//a");
+                    if (narratorNodes != null)
+                    {
+                        metadata.Narrators = narratorNodes.Select(n => n.InnerText?.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList()!;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(metadata.Description))
+                    {
+                        var narratorMatch = System.Text.RegularExpressions.Regex.Match(metadata.Description,
+                            @"(?:Narrated\s+by|Read\s+by)[:\s]+([^\.]+)",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (narratorMatch.Success)
+                        {
+                            var narratorText = NormalizeNameString(narratorMatch.Groups[1].Value);
+                            if (!string.IsNullOrWhiteSpace(narratorText))
+                            {
+                                metadata.Narrators = narratorText.Split(',').Select(n => n.Trim()).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+                            }
+                        }
+                    }
+                }
+
+                // Clean up authors list
+                if (metadata.Authors != null && metadata.Authors.Any())
+                {
+                    var originalAuthorCount = metadata.Authors.Count;
+                    var filtered = metadata.Authors
+                        .Where(a => !a.Contains("Publisher", StringComparison.OrdinalIgnoreCase))
+                        .Where(a => metadata.Narrators == null || !metadata.Narrators.Any(n => a.Equals(n, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+
+                    if (filtered.Any())
+                    {
+                        metadata.Authors = filtered;
+                    }
+                }
+
+                // Publisher extraction
+                if (string.IsNullOrWhiteSpace(metadata.Publisher))
+                {
+                    var publisher = doc.DocumentNode.SelectSingleNode("//meta[@name='publisher']")?.GetAttributeValue("content", null)
+                        ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and @class='line' and @key='publisher']//a[@class='link']")?.InnerText?.Trim()
+                        ?? doc.DocumentNode.SelectSingleNode("//div[@data-testid='line' and contains(@key,'publisher')]//div[@class='value']//a")?.InnerText?.Trim()
+                        ?? doc.DocumentNode.SelectSingleNode("//li[contains(.,'Publisher')]|//th[contains(.,'Publisher')]/following-sibling::td")?.InnerText?.Trim();
+                    if (!string.IsNullOrWhiteSpace(publisher)) metadata.Publisher = publisher;
+                }
+
+                // Runtime extraction
+                if (metadata.Runtime == null)
+                {
+                    var runtimeText = doc.DocumentNode.SelectSingleNode("//span[contains(@class,'runtimeLabel')]|//li[contains(text(),'hrs')]|//span[contains(text(),'hr')]")?.InnerText;
+                    if (!string.IsNullOrWhiteSpace(runtimeText))
+                    {
+                        var hrsMatch = System.Text.RegularExpressions.Regex.Match(runtimeText, "(\\d+)\\s*hrs?");
+                        var minsMatch = System.Text.RegularExpressions.Regex.Match(runtimeText, "(\\d+)\\s*mins?");
+                        int total = 0;
+                        if (hrsMatch.Success) total += int.Parse(hrsMatch.Groups[1].Value) * 60;
+                        if (minsMatch.Success) total += int.Parse(minsMatch.Groups[1].Value);
+                        if (total > 0) metadata.Runtime = total;
+                    }
+                }
+
+                // Validate and return
+                if (!string.IsNullOrWhiteSpace(metadata.Title) || !string.IsNullOrWhiteSpace(metadata.ImageUrl) || (metadata.Authors != null && metadata.Authors.Any()))
+                {
+                    _logger.LogInformation("Metadata extracted for ASIN {Asin} from Amazon: Title={Title}, Authors={AuthorCount}, Language={Language}, Publisher={Publisher}, HasDescription={HasDesc}",
+                        asin, metadata.Title, metadata.Authors?.Count ?? 0, metadata.Language, metadata.Publisher, !string.IsNullOrWhiteSpace(metadata.Description));
+
+                    if (_cache != null)
+                    {
+                        _cache.Set(cacheKey, metadata, TimeSpan.FromHours(12));
+                    }
+                    return metadata;
+                }
+                
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Scrape attempt failed for Amazon ASIN {Asin}", asin);
+                return null;
+            }
+        }
+
+        protected async Task<(string? html, int statusCode)> GetHtmlAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -380,7 +573,7 @@ namespace Listenarr.Api.Services
                 request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
                 request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
                 request.Headers.Add("Accept-Encoding", "gzip, deflate, br");
-                var response = await _httpClient.SendAsync(request);
+                var response = await _httpClient.SendAsync(request, ct);
                 var statusCode = (int)response.StatusCode;
 
                 if (statusCode == 404)
@@ -404,7 +597,7 @@ namespace Listenarr.Api.Services
                 }
 
                 // Try Playwright fallback on-demand (await-using for async disposables)
-                return await GetHtmlWithPlaywrightAsync(url);
+                return await GetHtmlWithPlaywrightAsync(url, ct);
             }
             catch (Exception ex)
             {
@@ -413,7 +606,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private async Task<(string? html, int statusCode)> GetHtmlWithPlaywrightAsync(string url)
+        protected async Task<(string? html, int statusCode)> GetHtmlWithPlaywrightAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -435,6 +628,7 @@ namespace Listenarr.Api.Services
                 System.Threading.Interlocked.Increment(ref _playwrightFallbackCount);
                 pwLogger.LogInformation("Playwright invocation count: {Count}", Interlocked.Read(ref _playwrightFallbackCount));
 
+                if (ct.IsCancellationRequested) return (null, 0);
                 using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
                 await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true, Args = new[] { "--no-sandbox" } });
                 await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" });
@@ -443,6 +637,7 @@ namespace Listenarr.Api.Services
                 // Navigate with a more resilient wait strategy (DOMContentLoaded instead of NetworkIdle)
                 // Increase timeout to 60 seconds for slow connections/CAPTCHA scenarios
                 var gotoOptions = new Microsoft.Playwright.PageGotoOptions { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = 60000 };
+                if (ct.IsCancellationRequested) return (null, 0);
                 var pwResponse = await page.GotoAsync(url, gotoOptions);
 
                 var responseStatus = pwResponse?.Status ?? 0;
@@ -477,6 +672,53 @@ namespace Listenarr.Api.Services
                 if (found)
                 {
                     await page.WaitForTimeoutAsync(2000); // Wait 2s for component hydration
+                }
+
+                // Extract publisher from page content before returning
+                // Try both shadow DOM and visible page text
+                try
+                {
+                    // Try to extract from the full page text including all components
+                    var publisherFromPage = await page.EvaluateAsync<string>(@"
+                        () => {
+                            // Strategy 1: Look in document body text for Publisher pattern
+                            const bodyText = document.body.textContent || '';
+                            let match = bodyText.match(/Publisher[:\s]+([^\n]+?)(?=\s*(?:Release Date|Language|Length|ASIN|Categories|$))/i);
+                            if (match) {
+                                const pub = match[1].trim();
+                                if (pub && pub.length > 0 && pub.length < 100 && !pub.match(/^\d+$/)) {
+                                    return pub;
+                                }
+                            }
+                            
+                            // Strategy 2: Look for publisher in meta tags
+                            const metaPublisher = document.querySelector('meta[property=""book:publisher""], meta[name=""publisher""]');
+                            if (metaPublisher && metaPublisher.content) return metaPublisher.content.trim();
+                            
+                            return null;
+                        }
+                    ");
+                    
+                    if (!string.IsNullOrWhiteSpace(publisherFromPage))
+                    {
+                        pwLogger.LogInformation("Extracted publisher from page content: {Publisher}", publisherFromPage);
+                        // Inject as HTML comment so it can be extracted later
+                        var safePublisher = publisherFromPage.Replace("'", "\\'").Replace("\r", "").Replace("\n", " ").Replace("--", "");
+                        await page.EvaluateAsync(@"
+                            (publisher) => {
+                                const comment = document.createComment('LISTENARR_PUBLISHER: ' + publisher);
+                                document.body.appendChild(comment);
+                            }
+                        ", safePublisher);
+                    }
+                    else
+                    {
+                        pwLogger.LogWarning("Could not extract publisher from page content");
+                    }
+                }
+                catch (Exception publisherEx)
+                {
+                    pwLogger.LogWarning(publisherEx, "Error extracting publisher from page");
                 }
 
                 var content = await page.ContentAsync();
@@ -519,7 +761,10 @@ namespace Listenarr.Api.Services
             foreach (var asin in asins)
             {
                 var metadata = await ScrapeAudibleMetadataAsync(asin);
-                results.Add(metadata);
+                if (metadata != null)
+                {
+                    results.Add(metadata);
+                }
             }
             return results;
         }
@@ -655,7 +900,7 @@ namespace Listenarr.Api.Services
                 {
                     var imageId = match.Groups[1].Value;
                     cleanUrl = $"https://m.media-amazon.com/images/I/{imageId}._SL500_.jpg";
-                    _logger.LogInformation("Cleaned social share URL to: {CleanUrl}", cleanUrl);
+                    _logger.LogDebug("Cleaned social share URL to: {CleanUrl}", cleanUrl);
                 }
             }
 
@@ -712,7 +957,13 @@ namespace Listenarr.Api.Services
                         if (root.TryGetProperty("headline", out p)) desc = p.GetString();
                         if (root.TryGetProperty("description", out p) && string.IsNullOrEmpty(desc)) desc = p.GetString();
                         if (root.TryGetProperty("image", out p)) img = p.ValueKind == JsonValueKind.String ? p.GetString() : p[0].GetString();
-                        if (root.TryGetProperty("datePublished", out p)) year = p.GetString();
+                        if (root.TryGetProperty("datePublished", out p))
+                        {
+                            var dateStr = p.GetString();
+                            // Extract just the year from ISO date format (e.g., "2025-11-11" -> "2025")
+                            var yearMatch = System.Text.RegularExpressions.Regex.Match(dateStr ?? "", @"\b(19|20)\d{2}\b");
+                            year = yearMatch.Success ? yearMatch.Value : dateStr;
+                        }
                         if (root.TryGetProperty("inLanguage", out p)) lang = p.GetString();
                         if (root.TryGetProperty("publisher", out p) && p.ValueKind == JsonValueKind.Object && p.TryGetProperty("name", out var np)) pub = np.GetString();
                         if (root.TryGetProperty("author", out p))
@@ -1114,13 +1365,16 @@ namespace Listenarr.Api.Services
             // Image - look for product image (book cover), not site logo
             // Try meta og:image first (most reliable), then look for product-specific images
             var imgNode = doc.DocumentNode.SelectSingleNode("//meta[@property='og:image']")
+                       ?? doc.DocumentNode.SelectSingleNode("//meta[@name='og:image']")
                        ?? productDetails.SelectSingleNode(".//img[contains(@src,'images/I/')]")
                        ?? doc.DocumentNode.SelectSingleNode("//img[contains(@src,'images/I/') and contains(@src,'_SL')]")
+                       ?? doc.DocumentNode.SelectSingleNode("//img[contains(@class,'product') and contains(@src,'images/I/')]")
+                       ?? doc.DocumentNode.SelectSingleNode("//div[contains(@class,'product-image')]//img")
                        ?? productDetails.SelectSingleNode(".//img[contains(@class,'bc-image-inset-border')]")
                        ?? productDetails.SelectSingleNode(".//img");
             if (imgNode != null)
             {
-                var imgUrl = imgNode.GetAttributeValue("content", null) ?? imgNode.GetAttributeValue("src", null);
+                var imgUrl = imgNode.GetAttributeValue("content", null) ?? imgNode.GetAttributeValue("src", null) ?? imgNode.GetAttributeValue("data-src", null);
                 var cleanUrl = CleanImageUrl(imgUrl);
                 if (!string.IsNullOrWhiteSpace(cleanUrl))
                 {
@@ -1129,12 +1383,28 @@ namespace Listenarr.Api.Services
                 }
                 else
                 {
-                    _logger.LogWarning("Found image but filtered as logo/nav: {Url}", imgUrl);
+                    _logger.LogWarning("Found image node but URL filtered as logo/nav: {Url}", imgUrl);
                 }
             }
             else
             {
-                _logger.LogWarning("No image element found in component or page");
+                _logger.LogWarning("No image element found in component or page for ASIN {Asin}", metadata.Asin);
+                // Last resort: check if there's any Amazon image URL in the raw HTML
+                var docHtml = doc.DocumentNode.OuterHtml;
+                if (!string.IsNullOrEmpty(docHtml) && docHtml.Contains("images/I/"))
+                {
+                    var imageMatch = System.Text.RegularExpressions.Regex.Match(docHtml, @"(https?://[^""']+/images/I/[A-Za-z0-9_-]+\.[^""']+)");
+                    if (imageMatch.Success)
+                    {
+                        var foundUrl = imageMatch.Groups[1].Value;
+                        var cleanUrl = CleanImageUrl(foundUrl);
+                        if (!string.IsNullOrWhiteSpace(cleanUrl))
+                        {
+                            metadata.ImageUrl = cleanUrl;
+                            _logger.LogInformation("Extracted image URL via regex fallback: {Url}", cleanUrl);
+                        }
+                    }
+                }
             }
 
             // Authors - Extract from productDetails area after Playwright rendering
@@ -1628,6 +1898,22 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogInformation("Starting ExtractFromProductMetadata for adbl-product-metadata component");
 
+                // First, check for publisher extracted from shadow DOM via Playwright JavaScript
+                if (string.IsNullOrWhiteSpace(metadata.Publisher))
+                {
+                    var htmlContent = doc.DocumentNode.OuterHtml;
+                    var shadowPublisherMatch = System.Text.RegularExpressions.Regex.Match(
+                        htmlContent, 
+                        @"<!--LISTENARR_PUBLISHER:\s*(.+?)-->",
+                        System.Text.RegularExpressions.RegexOptions.Singleline);
+                    
+                    if (shadowPublisherMatch.Success)
+                    {
+                        metadata.Publisher = shadowPublisherMatch.Groups[1].Value.Trim();
+                        _logger.LogInformation("Extracted publisher from shadow DOM (via Playwright): {Publisher}", metadata.Publisher);
+                    }
+                }
+
                 // Log all custom elements starting with "adbl-"
                 var allAdblElements = doc.DocumentNode.SelectNodes("//*[starts-with(local-name(), 'adbl-')]");
                 if (allAdblElements != null)
@@ -1877,7 +2163,23 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                // Extract Publisher (e.g., "Publisher\nRecorded Books" or "Publisher Recorded Books")
+                // Extract Publisher - Try DOM-based extraction first for modern HTML
+                if (string.IsNullOrWhiteSpace(metadata.Publisher))
+                {
+                    // Modern Audible HTML structure with data-testid="line"
+                    var publisherNode = doc.DocumentNode.SelectSingleNode(
+                        "//div[@data-testid='line' and @key='publisher']//a[@class='link']" +
+                        " | //div[@data-testid='line' and contains(@key,'publisher')]//div[@class='value']//a" +
+                        " | //div[contains(@class,'line')]//div[contains(@class,'label') and contains(text(),'Publisher')]/following-sibling::div//a");
+                    
+                    if (publisherNode != null)
+                    {
+                        metadata.Publisher = publisherNode.InnerText?.Trim();
+                        _logger.LogInformation("Extracted publisher from DOM structure: {Publisher}", metadata.Publisher);
+                    }
+                }
+
+                // Fallback to regex extraction from rendered text for legacy HTML
                 if (string.IsNullOrWhiteSpace(metadata.Publisher))
                 {
                     var publisherMatch = System.Text.RegularExpressions.Regex.Match(pageText,
@@ -2000,7 +2302,8 @@ namespace Listenarr.Api.Services
 
     public interface IAudibleMetadataService
     {
-        Task<AudibleBookMetadata> ScrapeAudibleMetadataAsync(string asin);
+        Task<AudibleBookMetadata?> ScrapeAudibleMetadataAsync(string asin, CancellationToken ct = default);
+        Task<AudibleBookMetadata?> ScrapeAmazonMetadataAsync(string asin);
         Task<List<AudibleBookMetadata>> PrefetchAsync(List<string> asins);
     }
 }

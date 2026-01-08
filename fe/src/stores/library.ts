@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import type { Audiobook } from '@/types'
+import { errorTracking } from '@/services/errorTracking'
 
 export const useLibraryStore = defineStore('library', () => {
   const audiobooks = ref<Audiobook[]>([])
@@ -16,23 +17,25 @@ export const useLibraryStore = defineStore('library', () => {
     try {
       const serverList = await apiService.getLibrary()
       // Defensive merge: prefer server-provided fields, but avoid wiping local files when server returns empty array
-      const merged = serverList.map(serverItem => {
-        const local = audiobooks.value.find(b => b.id === serverItem.id)
+      const merged = serverList.map((serverItem) => {
+        const local = audiobooks.value.find((b) => b.id === serverItem.id)
         if (!local) return serverItem
 
         // If server provided files array is empty but local has files, keep local files
-        const files = (serverItem.files && serverItem.files.length > 0)
-          ? serverItem.files
-          : (local.files && local.files.length > 0)
-            ? local.files
-            : serverItem.files
+        const files =
+          serverItem.files && serverItem.files.length > 0
+            ? serverItem.files
+            : local.files && local.files.length > 0
+              ? local.files
+              : serverItem.files
 
         // Preserve a meaningful basePath: prefer server value when present, otherwise keep local
-        const basePath = (serverItem.basePath && serverItem.basePath.length > 0)
-          ? serverItem.basePath
-          : (local.basePath && local.basePath.length > 0)
-            ? local.basePath
-            : serverItem.basePath
+        const basePath =
+          serverItem.basePath && serverItem.basePath.length > 0
+            ? serverItem.basePath
+            : local.basePath && local.basePath.length > 0
+              ? local.basePath
+              : serverItem.basePath
 
         return { ...local, ...serverItem, files, basePath }
       })
@@ -40,7 +43,10 @@ export const useLibraryStore = defineStore('library', () => {
       audiobooks.value = merged
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch library'
-      console.error('Failed to fetch library:', err)
+      errorTracking.captureException(err as Error, {
+        component: 'LibraryStore',
+        operation: 'fetchLibrary',
+      })
     } finally {
       loading.value = false
     }
@@ -50,13 +56,17 @@ export const useLibraryStore = defineStore('library', () => {
     try {
       await apiService.removeFromLibrary(id)
       // Remove from local state
-      audiobooks.value = audiobooks.value.filter(book => book.id !== id)
+      audiobooks.value = audiobooks.value.filter((book) => book.id !== id)
       // Remove from selection if selected
       selectedIds.value.delete(id)
       return true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to remove audiobook'
-      console.error('Failed to remove audiobook:', err)
+      errorTracking.captureException(err as Error, {
+        component: 'LibraryStore',
+        operation: 'removeFromLibrary',
+        metadata: { audiobookId: id },
+      })
       return false
     }
   }
@@ -67,23 +77,32 @@ export const useLibraryStore = defineStore('library', () => {
     try {
       const result = await apiService.bulkRemoveFromLibrary(ids)
       // Remove from local state
-      audiobooks.value = audiobooks.value.filter(book => !ids.includes(book.id))
+      audiobooks.value = audiobooks.value.filter((book) => !ids.includes(book.id))
       // Clear selection
       clearSelection()
       return { success: true, deletedCount: result.deletedCount }
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to bulk remove audiobooks'
-      console.error('Failed to bulk remove audiobooks:', err)
+      errorTracking.captureException(err as Error, {
+        component: 'LibraryStore',
+        operation: 'bulkRemoveFromLibrary',
+        metadata: { count: ids.length },
+      })
       return { success: false, deletedCount: 0 }
     }
   }
 
   // Apply a safe, local-only update when the server tells us files were removed for an audiobook
   // Payload shape: { audiobookId: number, removed: Array<{ id: number, path: string }> }
-  function applyFilesRemoved(payload: { audiobookId: number; removed?: Array<{ id?: number; path?: string }> } | null | undefined) {
+  function applyFilesRemoved(
+    payload:
+      | { audiobookId: number; removed?: Array<{ id?: number; path?: string }> }
+      | null
+      | undefined,
+  ) {
     if (!payload || typeof payload.audiobookId !== 'number') return
 
-    const bookIndex = audiobooks.value.findIndex(b => b.id === payload.audiobookId)
+    const bookIndex = audiobooks.value.findIndex((b) => b.id === payload.audiobookId)
     if (bookIndex === -1) return // we don't have this audiobook loaded locally
 
     const book = audiobooks.value[bookIndex]
@@ -93,7 +112,7 @@ export const useLibraryStore = defineStore('library', () => {
     if (removed.length === 0) return
 
     // Build new files array excluding removed entries (match by id when present, otherwise by path)
-    const newFiles = (book.files || []).filter(f => {
+    const newFiles = (book.files || []).filter((f) => {
       // If any removed entry matches this file, exclude it
       for (const r of removed) {
         if (typeof r.id === 'number' && typeof f.id === 'number' && r.id === f.id) return false
@@ -107,7 +126,7 @@ export const useLibraryStore = defineStore('library', () => {
 
     // If the current primary filePath was one of the removed paths, clear it (safe behavior)
     if (book.filePath) {
-      const removedPaths = removed.map(r => r.path).filter(Boolean) as string[]
+      const removedPaths = removed.map((r) => r.path).filter(Boolean) as string[]
       if (removedPaths.includes(book.filePath)) {
         updated.filePath = undefined
         updated.fileSize = undefined
@@ -121,23 +140,31 @@ export const useLibraryStore = defineStore('library', () => {
 
   // Register SignalR subscriptions, but skip during unit tests to avoid noisy logs
   // and test-time side effects. Vitest exposes markers on import.meta or globalThis.
-  const isVitest = !!((import.meta as unknown as { vitest?: unknown }).vitest || (globalThis as unknown as { __vitest?: unknown }).__vitest)
+  const isVitest = !!(
+    (import.meta as unknown as { vitest?: unknown }).vitest ||
+    (globalThis as unknown as { __vitest?: unknown }).__vitest
+  )
   if (!isVitest) {
     try {
       // Register a SignalR subscription once when the store is created so we can keep local state in sync
       // We intentionally do not unsubscribe because the store's lifetime matches the app lifetime.
       signalRService.onFilesRemoved((payload) => {
         try {
-          applyFilesRemoved(payload as { audiobookId: number; removed?: Array<{ id?: number; path?: string }> })
+          applyFilesRemoved(
+            payload as { audiobookId: number; removed?: Array<{ id?: number; path?: string }> },
+          )
         } catch (e) {
           // Defensive: don't allow signal handler errors to break the app
-          console.error('Error applying FilesRemoved to library store', e)
+          errorTracking.captureException(e as Error, {
+            component: 'LibraryStore',
+            operation: 'signalr.onFilesRemoved',
+          })
         }
       })
 
       signalRService.onAudiobookUpdate((updatedAudiobook) => {
         try {
-          const index = audiobooks.value.findIndex(b => b.id === updatedAudiobook.id)
+          const index = audiobooks.value.findIndex((b) => b.id === updatedAudiobook.id)
           if (index !== -1) {
             // Update the audiobook in the store, preserving reactivity
             audiobooks.value = audiobooks.value.slice()
@@ -145,14 +172,20 @@ export const useLibraryStore = defineStore('library', () => {
             if (!prev) return
             const merged = { ...prev, ...updatedAudiobook }
             // Preserve basePath if server payload omits or clears it
-            if ((!('basePath' in updatedAudiobook) || !updatedAudiobook.basePath) && prev.basePath) {
+            if (
+              (!('basePath' in updatedAudiobook) || !updatedAudiobook.basePath) &&
+              prev.basePath
+            ) {
               merged.basePath = prev.basePath
             }
             audiobooks.value[index] = merged
           }
         } catch (e) {
           // Defensive: don't allow signal handler errors to break the app
-          console.error('Error applying AudiobookUpdate to library store', e)
+          errorTracking.captureException(e as Error, {
+            component: 'LibraryStore',
+            operation: 'signalr.onAudiobookUpdate',
+          })
         }
       })
     } catch {
@@ -169,7 +202,7 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   function selectAll() {
-    audiobooks.value.forEach(book => selectedIds.value.add(book.id))
+    audiobooks.value.forEach((book) => selectedIds.value.add(book.id))
   }
 
   function clearSelection() {
@@ -191,6 +224,6 @@ export const useLibraryStore = defineStore('library', () => {
     toggleSelection,
     selectAll,
     clearSelection,
-    isSelected
+    isSelected,
   }
 })

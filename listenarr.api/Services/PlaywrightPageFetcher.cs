@@ -55,31 +55,39 @@ namespace Listenarr.Api.Services
                         // Fall back to calling the Playwright CLI via `npx playwright install` if available
                         try
                         {
-                            var psi = new System.Diagnostics.ProcessStartInfo
+                            var resolvedNpx = ProcessHelpers.FindExecutableOnPath("npx");
+                            if (string.IsNullOrEmpty(resolvedNpx))
                             {
-                                FileName = "npx",
-                                Arguments = "playwright install",
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            };
-
-                            if (_processRunner != null)
-                            {
-                                var pr = await _processRunner.RunAsync(psi, timeoutMs: 2 * 60 * 1000).ConfigureAwait(false);
-                                if (!pr.TimedOut && pr.ExitCode == 0)
-                                {
-                                    _logger.LogInformation("Playwright browsers installed via npx (process runner)");
-                                }
-                                else
-                                {
-                                    _logger.LogDebug("Playwright npx install output: {Out}\n{Err}", pr.Stdout, pr.Stderr);
-                                }
+                                _logger.LogInformation("npx not found on PATH; skipping Playwright CLI install fallback in PlaywrightPageFetcher.");
                             }
                             else
                             {
-                                _logger.LogDebug("IProcessRunner is not available; skipping npx Playwright install fallback in PlaywrightPageFetcher.");
+                                var psi = new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = resolvedNpx,
+                                    Arguments = "playwright install",
+                                    RedirectStandardOutput = true,
+                                    RedirectStandardError = true,
+                                    UseShellExecute = false,
+                                    CreateNoWindow = true
+                                };
+
+                                if (_processRunner != null)
+                                {
+                                    var pr = await _processRunner.RunAsync(psi, timeoutMs: 2 * 60 * 1000).ConfigureAwait(false);
+                                    if (!pr.TimedOut && pr.ExitCode == 0)
+                                    {
+                                        _logger.LogInformation("Playwright browsers installed via npx (process runner)");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogDebug("Playwright npx install output: {Out}\n{Err}", pr.Stdout, pr.Stderr);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("IProcessRunner is not available; skipping npx Playwright install fallback in PlaywrightPageFetcher.");
+                                }
                             }
                         }
                         catch (Exception ex2)

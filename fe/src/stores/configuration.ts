@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, QualityProfile } from '@/types'
+import type {
+  ApiConfiguration,
+  DownloadClientConfiguration,
+  ApplicationSettings,
+  QualityProfile,
+} from '@/types'
 import { apiService } from '@/services/api'
+import { errorTracking } from '@/services/errorTracking'
 
 export const useConfigurationStore = defineStore('configuration', () => {
   const apiConfigurations = ref<ApiConfiguration[]>([])
@@ -9,105 +15,136 @@ export const useConfigurationStore = defineStore('configuration', () => {
   const applicationSettings = ref<ApplicationSettings | null>(null)
   const qualityProfiles = ref<QualityProfile[]>([])
   const isLoading = ref(false)
-  
+
   const loadApiConfigurations = async () => {
     isLoading.value = true
     try {
       const configs = await apiService.getApiConfigurations()
       apiConfigurations.value = configs
     } catch (error) {
-      console.error('Failed to load API configurations:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'loadApiConfigurations',
+      })
     } finally {
       isLoading.value = false
     }
   }
-  
+
   const saveApiConfiguration = async (config: ApiConfiguration) => {
     try {
       await apiService.saveApiConfiguration(config)
       await loadApiConfigurations() // Refresh the list
     } catch (error) {
-      console.error('Failed to save API configuration:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'saveApiConfiguration',
+        metadata: { configId: config.id },
+      })
       throw error
     }
   }
-  
+
   const deleteApiConfiguration = async (id: string) => {
     try {
       await apiService.deleteApiConfiguration(id)
       await loadApiConfigurations() // Refresh the list
     } catch (error) {
-      console.error('Failed to delete API configuration:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'deleteApiConfiguration',
+        metadata: { configId: id },
+      })
       throw error
     }
   }
-  
+
   const loadDownloadClientConfigurations = async () => {
     isLoading.value = true
     try {
       const configs = await apiService.getDownloadClientConfigurations()
       downloadClientConfigurations.value = configs
     } catch (error) {
-      console.error('Failed to load download client configurations:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'loadDownloadClientConfigurations',
+      })
     } finally {
       isLoading.value = false
     }
   }
-  
+
   const saveDownloadClientConfiguration = async (config: DownloadClientConfiguration) => {
     try {
       await apiService.saveDownloadClientConfiguration(config)
       await loadDownloadClientConfigurations() // Refresh the list
     } catch (error) {
-      console.error('Failed to save download client configuration:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'saveDownloadClientConfiguration',
+        metadata: { configId: config.id },
+      })
       throw error
     }
   }
-  
+
   const deleteDownloadClientConfiguration = async (id: string) => {
     try {
       await apiService.deleteDownloadClientConfiguration(id)
       await loadDownloadClientConfigurations() // Refresh the list
     } catch (error) {
-      console.error('Failed to delete download client configuration:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'deleteDownloadClientConfiguration',
+        metadata: { configId: id },
+      })
       throw error
     }
   }
-  
+
   const loadApplicationSettings = async () => {
     isLoading.value = true
     try {
       const settings = await apiService.getApplicationSettings()
       applicationSettings.value = settings
     } catch (error) {
-      console.error('Failed to load application settings:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'loadApplicationSettings',
+      })
     } finally {
       isLoading.value = false
     }
   }
-  
+
   const saveApplicationSettings = async (settings: ApplicationSettings) => {
     try {
       const savedSettings = await apiService.saveApplicationSettings(settings)
       applicationSettings.value = savedSettings
     } catch (error) {
-      console.error('Failed to save application settings:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'saveApplicationSettings',
+      })
       throw error
     }
   }
-  
+
   const loadQualityProfiles = async () => {
     isLoading.value = true
     try {
       const profiles = await apiService.getQualityProfiles()
       qualityProfiles.value = profiles
     } catch (error) {
-      console.error('Failed to load quality profiles:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'loadQualityProfiles',
+      })
     } finally {
       isLoading.value = false
     }
   }
-  
+
   const saveQualityProfile = async (profile: QualityProfile) => {
     try {
       if (profile.id) {
@@ -117,21 +154,29 @@ export const useConfigurationStore = defineStore('configuration', () => {
       }
       await loadQualityProfiles() // Refresh the list
     } catch (error) {
-      console.error('Failed to save quality profile:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'saveQualityProfile',
+        metadata: { profileId: profile.id },
+      })
       throw error
     }
   }
-  
+
   const deleteQualityProfile = async (id: number) => {
     try {
       await apiService.deleteQualityProfile(id)
       await loadQualityProfiles() // Refresh the list
     } catch (error) {
-      console.error('Failed to delete quality profile:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'ConfigurationStore',
+        operation: 'deleteQualityProfile',
+        metadata: { profileId: id },
+      })
       throw error
     }
   }
-  
+
   return {
     apiConfigurations,
     downloadClientConfigurations,
@@ -148,6 +193,6 @@ export const useConfigurationStore = defineStore('configuration', () => {
     saveApplicationSettings,
     loadQualityProfiles,
     saveQualityProfile,
-    deleteQualityProfile
+    deleteQualityProfile,
   }
 })

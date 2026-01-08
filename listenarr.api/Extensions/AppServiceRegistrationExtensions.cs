@@ -18,6 +18,12 @@ namespace Listenarr.Api.Extensions
             services.AddScoped<IConfigurationService, ConfigurationService>();
             // Startup config: read config.json (optional) and expose via IStartupConfigService
             services.AddSingleton<IStartupConfigService, StartupConfigService>();
+            
+            // Register indexer search providers
+            services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.InternetArchiveSearchProvider>();
+            services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.TorznabNewznabSearchProvider>();
+            services.AddScoped<Listenarr.Api.Services.Search.Providers.IIndexerSearchProvider, Listenarr.Api.Services.Search.Providers.MyAnonamouseSearchProvider>();
+            
             services.AddScoped<ISearchService, SearchService>();
             services.AddScoped<IMetadataService, MetadataService>();
             services.AddScoped<IAudioFileService, AudioFileService>();
@@ -49,7 +55,11 @@ namespace Listenarr.Api.Extensions
             // NOTE: IAudibleMetadataService is already registered as a typed HttpClient above.
             // Removing duplicate scoped registration to avoid overriding the typed client configuration.
             services.AddScoped<IOpenLibraryService, OpenLibraryService>();
-            services.AddScoped<IImageCacheService, ImageCacheService>();
+            services.AddScoped<IImageCacheService>(sp => new ImageCacheService(
+                sp.GetRequiredService<ILogger<ImageCacheService>>(),
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>().ContentRootPath
+            ));
             services.AddScoped<IFileNamingService, FileNamingService>();
             // Centralized import service: handles moving/copying, naming and audiobook registration
             services.AddScoped<IImportService, ImportService>();
@@ -57,6 +67,8 @@ namespace Listenarr.Api.Extensions
             services.AddScoped<IFileMover, FileMover>();
             // File finalizer: handles import delegation and final-path sync
             services.AddScoped<IFileFinalizer, FileFinalizer>();
+            // Archive extractor for extracting common archive types (zip/rar/7z)
+            services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
             // Completed download processor: handles imports and registration when a download completes
             services.AddScoped<ICompletedDownloadProcessor, CompletedDownloadProcessor>();
             // Bind FileMover options from configuration (optional)

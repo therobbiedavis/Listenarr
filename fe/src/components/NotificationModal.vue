@@ -51,7 +51,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   type: 'info',
-  autoClose: 3000
+  autoClose: 3000,
 })
 
 const emit = defineEmits<{
@@ -69,13 +69,16 @@ const handleClose = () => {
 }
 
 // Auto-close functionality
-watch(() => props.visible, (isVisible) => {
-  if (isVisible && props.autoClose > 0) {
-    autoCloseTimer = setTimeout(() => {
-      handleClose()
-    }, props.autoClose)
-  }
-})
+watch(
+  () => props.visible,
+  (isVisible) => {
+    if (isVisible && props.autoClose > 0) {
+      autoCloseTimer = setTimeout(() => {
+        handleClose()
+      }, props.autoClose)
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -95,7 +98,7 @@ watch(() => props.visible, (isVisible) => {
 
 .notification-modal {
   background: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 1.5rem;
   max-width: 500px;
   width: 100%;
@@ -214,11 +217,11 @@ watch(() => props.visible, (isVisible) => {
   .notification-modal {
     max-width: calc(100vw - 2rem);
   }
-  
+
   .notification-icon i {
     font-size: 2rem;
   }
-  
+
   .notification-content h3 {
     font-size: 1.1rem;
   }

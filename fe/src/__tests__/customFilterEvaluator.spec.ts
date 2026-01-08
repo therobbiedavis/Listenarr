@@ -15,14 +15,14 @@ describe('customFilterEvaluator - grouping and precedence', () => {
     publishYear: '2020',
     files: [],
     filePath: '',
-    fileSize: 0
+    fileSize: 0,
   } as unknown as Audiobook
 
   it('evaluates simple AND/OR grouping: (A OR B) AND C', () => {
     const rules = [
       { field: 'title', operator: 'contains', value: 'alpha', groupStart: true },
       { field: 'title', operator: 'contains', value: 'beta', conjunction: 'or', groupEnd: true },
-      { field: 'author', operator: 'contains', value: 'smith', conjunction: 'and' }
+      { field: 'author', operator: 'contains', value: 'smith', conjunction: 'and' },
     ]
 
     // base has title Alpha and author Smith -> (true OR false) AND true => true
@@ -38,7 +38,7 @@ describe('customFilterEvaluator - grouping and precedence', () => {
     const rules = [
       { field: 'title', operator: 'contains', value: 'alpha' },
       { field: 'title', operator: 'contains', value: 'beta', conjunction: 'or' },
-      { field: 'author', operator: 'contains', value: 'smith', conjunction: 'and' }
+      { field: 'author', operator: 'contains', value: 'smith', conjunction: 'and' },
     ]
 
     // base: title contains alpha, so true OR (false AND true) => true

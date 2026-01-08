@@ -21,12 +21,8 @@ RUN apt-get update \
 	&& npm --version \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
-RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build
-
-FROM build AS publish
-RUN dotnet publish "Listenarr.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
-# Pre-install Playwright browsers to avoid runtime download delays
-RUN cd /app/publish && bash playwright.sh install
+RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build \
+	&& dotnet publish "Listenarr.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
@@ -37,7 +33,16 @@ RUN apt-get update \
 	&& apt-get install -y --no-install-recommends nodejs \
 	&& node --version \
 	&& npm --version \
-	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
-COPY --from=publish /app/publish .
+COPY --from=build /app/publish .
+# Install Playwright
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+	&& sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-debian-bullseye-prod bullseye main" > /etc/apt/sources.list.d/microsoft.list' \
+	&& apt-get update \
+	&& apt-get install -y --no-install-recommends powershell \
+	&& pwsh playwright.ps1 install-deps \
+	&& pwsh playwright.ps1 install \
+	&& apt-get remove -y powershell \
+	&& apt-get clean
+
 ENTRYPOINT ["dotnet", "Listenarr.Api.dll"]

@@ -138,6 +138,9 @@ namespace Listenarr.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ExtractArchives")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("FileNamingPattern")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -210,6 +213,9 @@ namespace Listenarr.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Asin")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthorAsins")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Authors")
@@ -473,6 +479,10 @@ namespace Listenarr.Infrastructure.Migrations
 
                     b.Property<int>("Port")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("RemoveCompletedDownloads")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Settings")
                         .IsRequired()
@@ -783,6 +793,9 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<int>("MaximumSize")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("MinimumScore")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("MinimumSeeders")
                         .HasColumnType("INTEGER");
 
@@ -864,6 +877,45 @@ namespace Listenarr.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RemotePathMappings");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Models.RootFolder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("RootFolders", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Models.User", b =>

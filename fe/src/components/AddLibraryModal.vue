@@ -1,9 +1,18 @@
 <template>
   <div v-if="visible" class="modal-overlay" @click="closeModal">
-    <div class="modal-content add-library-modal" @click.stop>
+    <div
+      ref="modalRef"
+      class="modal-content add-library-modal"
+      @click.stop
+      tabindex="-1"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-library-title"
+      aria-describedby="add-library-desc"
+    >
       <div class="modal-header">
-        <h2>Add to Library</h2>
-        <button class="close-btn" @click="closeModal">
+        <h2 id="add-library-title">Add to Library</h2>
+        <button class="close-btn" @click="closeModal" aria-label="Close add to library dialog">
           <i class="ph ph-x"></i>
         </button>
       </div>
@@ -12,10 +21,32 @@
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" />
-            <div v-else class="placeholder-cover">
-              <i class="ph ph-image"></i>
-              <span>No Cover</span>
+            <div class="image-viewport">
+              <img
+                v-if="resolvedImageUrl || enriched?.imageUrl || book.imageUrl"
+                :src="imageSrc"
+                :alt="book.title"
+                loading="lazy"
+                @error="onImageError"
+                @load="onImageLoad"
+                :aria-hidden="!book.title"
+              />
+              <div v-else class="placeholder-cover">
+                <i class="ph ph-image"></i>
+                <span>No Cover</span>
+              </div>
+              <div v-if="imageLoading" class="image-loading-overlay">
+                <i class="ph ph-spinner ph-spin"></i>
+              </div>
+              <div v-if="imageError" class="image-error-overlay">
+                <div class="error-inner">
+                  <i class="ph ph-image"></i>
+                  <div>Image unavailable</div>
+                  <button class="btn btn-secondary small" @click.stop="retryImage">
+                    Retry Image
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -23,9 +54,7 @@
           <div class="book-details">
             <div class="detail-section">
               <h3>{{ book.title }}</h3>
-              <p v-if="book.authors?.length" class="authors">
-                by {{ book.authors.join(', ') }}
-              </p>
+              <p v-if="book.authors?.length" class="authors">by {{ book.authors.join(', ') }}</p>
               <p v-if="book.narrators?.length" class="narrators">
                 Narrated by {{ book.narrators.join(', ') }}
               </p>
@@ -36,8 +65,12 @@
               <div class="description" v-html="book.description"></div>
             </div>
 
-            <div class="detail-section">
+            <div class="detail-section" id="add-library-desc">
               <h4>Publication Information</h4>
+              <div class="meta-source-row">
+                <small v-if="metadataLoading">Loading metadata...</small>
+                <small v-else-if="metadataSource">Metadata: {{ metadataSource }}</small>
+              </div>
               <div class="detail-grid">
                 <div v-if="book.publisher" class="detail-item">
                   <span class="label">Publisher:</span>
@@ -74,14 +107,10 @@
 
           <div class="option-group">
             <label class="option-label">
-              <input
-                type="checkbox"
-                v-model="options.monitored"
-                class="option-checkbox"
-              />
+              <input type="checkbox" v-model="options.monitored" class="option-checkbox" />
               <span class="option-text">
                 <strong>Monitor for new releases</strong>
-                <br>
+                <br />
                 <small>Automatically search for better quality versions of this audiobook</small>
               </span>
             </label>
@@ -89,44 +118,50 @@
 
           <div class="option-group">
             <label class="option-label">
-              <input
-                type="checkbox"
-                v-model="options.autoSearch"
-                class="option-checkbox"
-              />
+              <input type="checkbox" v-model="options.autoSearch" class="option-checkbox" />
               <span class="option-text">
                 <strong>Search for downloads immediately</strong>
-                <br>
+                <br />
                 <small>Start searching for available downloads right after adding to library</small>
               </span>
             </label>
           </div>
 
-            <div class="option-group">
-              <label class="form-label">Destination</label>
-              <div class="destination-display">
-                <div class="destination-row">
-                  <div class="root-label">{{ rootPath || 'Not configured' }}\</div>
-                  <input type="text" v-model="options.relativePath" class="form-input relative-input" placeholder="e.g. Author/Title" />
+          <div class="option-group">
+            <label class="form-label">Destination</label>
+            <div class="destination-display">
+              <div class="destination-row">
+                <div class="root-select">
+                  <RootFolderSelect
+                    v-model:rootId="selectedRootId"
+                    v-model:customPath="customRootPath"
+                  />
                 </div>
-                <small class="form-help">Root (left) is read-only — edit the output path relative to it on the right.</small>
+                <input
+                  type="text"
+                  v-model="options.relativePath"
+                  class="form-input relative-input"
+                  placeholder="e.g. Author/Title"
+                />
               </div>
+              <small class="form-help"
+                >Select a named root (or custom path) and edit the path relative to it on the
+                right.</small
+              >
             </div>
+          </div>
 
-            <div class="option-group">
+          <div class="option-group">
             <label class="form-label">Quality Profile</label>
             <select v-model="options.qualityProfileId" class="form-select">
               <option :value="null">Use Default Profile</option>
-              <option
-                v-for="profile in qualityProfiles"
-                :key="profile.id"
-                :value="profile.id"
-              >
+              <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
                 {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
               </option>
             </select>
             <small class="form-help">
-              Choose which quality profile to use for automatic downloads. Leave as "Use Default Profile" to automatically use the default profile.
+              Choose which quality profile to use for automatic downloads. Leave as "Use Default
+              Profile" to automatically use the default profile.
             </small>
           </div>
         </div>
@@ -140,7 +175,7 @@
         <button
           class="btn btn-primary"
           @click="addToLibrary"
-          :disabled="isAdding"
+          :disabled="isAdding || metadataLoading"
         >
           <i v-if="isAdding" class="ph ph-spinner ph-spin"></i>
           <i v-else class="ph ph-plus"></i>
@@ -152,15 +187,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed, onBeforeUnmount, nextTick } from 'vue'
 import type { AudibleBookMetadata, QualityProfile, Audiobook } from '@/types'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
+import { logger } from '@/utils/logger'
+import RootFolderSelect from '@/components/RootFolderSelect.vue'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 
 interface Props {
   visible: boolean
   book: AudibleBookMetadata
+  resolvedImageUrl?: string
 }
 
 interface Emits {
@@ -182,8 +221,12 @@ const options = ref({
   qualityProfileId: null as number | null,
   autoSearch: false,
   // editable relative path portion (relative to rootPath)
-  relativePath: '' as string | null
+  relativePath: '' as string | null,
 })
+
+const rootStore = useRootFoldersStore()
+const selectedRootId = ref<number | null>(null)
+const customRootPath = ref<string | null>(null)
 
 const rootPath = ref<string>('')
 const previewFull = ref<string>('')
@@ -191,11 +234,36 @@ const previewRelative = ref<string>('')
 
 // Hold an enriched metadata object (populate if metadata sources available)
 const enriched = ref<AudibleBookMetadata | null>(null)
+// Image and metadata UI state
+const imageError = ref(false)
+const imageLoading = ref(false)
+const imageRetryCount = ref(0)
+const metadataLoading = ref(false)
+const metadataSource = ref<string | null>(null)
+
+const imageSrc = computed(() => {
+  // prefer resolvedImageUrl passed from parent
+  const base = props.resolvedImageUrl || enriched.value?.imageUrl || props.book?.imageUrl || ''
+  if (!base) return ''
+  // If we retried, append cache-buster to force reload
+  if (imageRetryCount.value > 0) {
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}r=${Date.now()}`
+  }
+  return base
+})
 
 // Local types for audimeta response to avoid `any`
-interface AudimetaPerson { name?: string }
-interface AudimetaSeries { name?: string; position?: string | number }
-interface AudimetaGenre { name?: string }
+interface AudimetaPerson {
+  name?: string
+}
+interface AudimetaSeries {
+  name?: string
+  position?: string | number
+}
+interface AudimetaGenre {
+  name?: string
+}
 interface Audimeta {
   asin?: string
   title?: string
@@ -216,7 +284,10 @@ interface Audimeta {
 }
 
 // Helper to map audimeta response to AudibleBookMetadata
-const mapAudimetaToAudible = (audimeta: Partial<Audimeta> | undefined, source?: string): AudibleBookMetadata => {
+const mapAudimetaToAudible = (
+  audimeta: Partial<Audimeta> | undefined,
+  source?: string,
+): AudibleBookMetadata => {
   let publishYear: string | undefined
   const dateStr = audimeta?.publishDate || audimeta?.releaseDate
   if (dateStr && typeof dateStr === 'string') {
@@ -224,30 +295,38 @@ const mapAudimetaToAudible = (audimeta: Partial<Audimeta> | undefined, source?: 
     publishYear = yearMatch ? yearMatch[0] : undefined
   }
 
-  const authors = (audimeta?.authors || []).map(a => a?.name).filter(Boolean) as string[]
-  const narrators = (audimeta?.narrators || []).map(n => n?.name).filter(Boolean) as string[]
-  const genres = (audimeta?.genres || []).map(g => g?.name).filter(Boolean) as string[]
+  const authors = (audimeta?.authors || []).map((a) => a?.name).filter(Boolean) as string[]
+  const narrators = (audimeta?.narrators || []).map((n) => n?.name).filter(Boolean) as string[]
+  const genres = (audimeta?.genres || []).map((g) => g?.name).filter(Boolean) as string[]
 
-  const firstSeries = (audimeta?.series && audimeta.series.length > 0) ? audimeta.series[0] : undefined
+  const firstSeries =
+    audimeta?.series && audimeta.series.length > 0 ? audimeta.series[0] : undefined
 
   return {
     asin: audimeta?.asin || props.book?.asin || '',
     title: audimeta?.title || props.book?.title || 'Unknown Title',
     subtitle: audimeta?.subtitle,
-    authors: authors.length ? authors : (props.book?.authors || []),
-    narrators: narrators.length ? narrators : (props.book?.narrators || []),
+    authors: authors.length ? authors : props.book?.authors || [],
+    narrators: narrators.length ? narrators : props.book?.narrators || [],
     publisher: audimeta?.publisher || props.book?.publisher,
     publishYear: publishYear || props.book?.publishYear,
     description: audimeta?.description || props.book?.description,
     imageUrl: audimeta?.imageUrl || props.book?.imageUrl,
-    runtime: typeof audimeta?.lengthMinutes === 'number' ? audimeta.lengthMinutes * 60 : props.book?.runtime,
+    runtime:
+      typeof audimeta?.lengthMinutes === 'number'
+        ? audimeta.lengthMinutes * 60
+        : props.book?.runtime,
     language: audimeta?.language || props.book?.language,
-    genres: genres.length ? genres : (props.book?.genres || []),
+    genres: genres.length ? genres : props.book?.genres || [],
     series: firstSeries?.name || props.book?.series,
-    seriesNumber: firstSeries?.position !== undefined ? String(firstSeries.position) : props.book?.seriesNumber,
-    abridged: typeof audimeta?.bookFormat === 'string' ? audimeta.bookFormat.toLowerCase().includes('abridged') : Boolean(props.book?.abridged),
+    seriesNumber:
+      firstSeries?.position !== undefined ? String(firstSeries.position) : props.book?.seriesNumber,
+    abridged:
+      typeof audimeta?.bookFormat === 'string'
+        ? audimeta.bookFormat.toLowerCase().includes('abridged')
+        : Boolean(props.book?.abridged),
     isbn: audimeta?.isbn || props.book?.isbn,
-    source: source || props.book?.source
+    source: source || props.book?.source,
   }
 }
 
@@ -258,29 +337,50 @@ const seedPreview = async () => {
 
   // Load application settings to get default root
   await configStore.loadApplicationSettings()
-  rootPath.value = configStore.applicationSettings?.outputPath || ''
+  // Load named root folders if available
+  await rootStore.load()
+  if (rootStore.folders.length > 0) {
+    const def = rootStore.folders.find((f) => f.isDefault) || rootStore.folders[0]
+    selectedRootId.value = def?.id ?? null
+    // override rootPath for preview
+    rootPath.value = def?.path || configStore.applicationSettings?.outputPath || ''
+  } else {
+    // Fallback to legacy outputPath if no root folders
+    rootPath.value = configStore.applicationSettings?.outputPath || ''
+  }
 
   // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
   try {
     if (props.book?.asin) {
+      metadataLoading.value = true
       try {
         const resp = await apiService.getMetadata(props.book.asin, 'us', true)
         if (resp && resp.metadata) {
           enriched.value = mapAudimetaToAudible(resp.metadata, resp.source)
+          metadataSource.value = resp.source || null
         }
       } catch (metaErr) {
         // ignore metadata fetch errors - we'll fall back to provided book
-        console.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+        logger.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+      } finally {
+        metadataLoading.value = false
       }
     }
 
     const metadataForPreview = (enriched.value || props.book) as AudibleBookMetadata
     // Compute a preview path using server logic
-    const resp2 = await apiService.previewLibraryPath(metadataForPreview, rootPath.value || undefined)
+    const resp2 = await apiService.previewLibraryPath(
+      metadataForPreview,
+      rootPath.value || undefined,
+    )
     previewFull.value = resp2?.fullPath || ''
     previewRelative.value = resp2?.relativePath || ''
-    // Seed editable relative path
-    options.value.relativePath = previewRelative.value
+    // Seed editable relative path — prefer server-relative, otherwise derive from full preview and configured root
+    options.value.relativePath = deriveRelative(
+      previewRelative.value,
+      previewFull.value,
+      rootPath.value,
+    )
   } catch (e) {
     console.error('Failed to preview path:', e)
   }
@@ -291,46 +391,193 @@ onMounted(() => {
   seedPreview()
 })
 
+// Watch for resolvedImageUrl changes to reset image error state
+watch(
+  () => props.resolvedImageUrl,
+  () => {
+    imageError.value = false
+    imageRetryCount.value = 0
+  },
+)
+
+function onImageError() {
+  imageLoading.value = false
+  imageError.value = true
+}
+
+function onImageLoad() {
+  imageLoading.value = false
+  imageError.value = false
+}
+
+function retryImage() {
+  imageError.value = false
+  imageRetryCount.value++
+  imageLoading.value = true
+  // The computed imageSrc will include a cache-buster when retryCount>0
+}
+
+// Helper to derive a relative path from server preview/paths
+function deriveRelative(
+  serverRelative: string | undefined | null,
+  serverFull: string | undefined | null,
+  root: string | undefined | null,
+): string {
+  const rootVal = root || ''
+  // Prefer explicit server-provided relative
+  if (serverRelative && String(serverRelative).trim().length > 0) return serverRelative
+
+  // If no root configured, fall back to showing the full path
+  if (!rootVal) return serverFull || ''
+  if (!serverFull) return ''
+
+  // Normalize separators to forward slash for comparison
+  const normRoot = rootVal.replace(/\\/g, '/')
+  const normFull = serverFull.replace(/\\/g, '/')
+
+  // Ensure trailing slash on root for slicing
+  const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
+
+  if (normFull.toLowerCase() === normRoot.toLowerCase()) return ''
+  if (normFull.toLowerCase().startsWith(rootWithSlash.toLowerCase())) {
+    const rel = normFull.slice(rootWithSlash.length).replace(/^\/+/, '')
+    // Preserve user's original separator preference from configured root
+    const useBackslash = rootVal.includes('\\')
+    return useBackslash ? rel.replace(/\//g, '\\') : rel
+  }
+
+  // Not under root: show full path so user can edit it
+  return serverFull
+}
+
 // Re-seed preview if the passed book changes after mount (parent may update props)
-watch(() => props.book, (newVal) => {
-  if (!newVal) return
-  seedPreview()
-})
+watch(
+  () => props.book,
+  (newVal) => {
+    if (!newVal) return
+    seedPreview()
+  },
+)
+
+const modalRef = ref<HTMLElement | null>(null)
 
 const closeModal = () => {
   emit('close')
 }
+
+// Focus management for accessibility: trap focus inside modal and restore on close
+let previousActiveElement: HTMLElement | null = null
+
+const getFocusable = (container: HTMLElement | null): HTMLElement[] => {
+  if (!container) return []
+  const selectors = [
+    'a[href]',
+    'button:not([disabled])',
+    'textarea:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',')
+  return Array.from(container.querySelectorAll<HTMLElement>(selectors))
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  if (!modalRef.value) return
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    closeModal()
+    return
+  }
+
+  if (e.key === 'Tab') {
+    const focusable = getFocusable(modalRef.value)
+    if (focusable.length === 0) {
+      e.preventDefault()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const active = document.activeElement as HTMLElement | null
+    if (e.shiftKey) {
+      if (!active || active === first) {
+        e.preventDefault()
+        last?.focus()
+      }
+    } else {
+      if (!active || active === last) {
+        e.preventDefault()
+        first?.focus()
+      }
+    }
+  }
+}
+
+watch(
+  () => props.visible,
+  async (val) => {
+    if (val) {
+      previousActiveElement = document.activeElement as HTMLElement | null
+      await nextTick()
+      if (modalRef.value) {
+        modalRef.value.focus()
+      }
+      document.addEventListener('keydown', onKeyDown, { capture: true })
+    } else {
+      document.removeEventListener('keydown', onKeyDown, { capture: true })
+      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+        previousActiveElement.focus()
+      }
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeyDown, { capture: true })
+})
 
 const addToLibrary = async () => {
   if (!props.book) return
 
   isAdding.value = true
   // Combine rootPath + relativePath into full destination path
-    let destination: string | undefined = undefined
-    try {
-      const rel = (options.value.relativePath || '').trim()
-      if (rootPath.value && rel) {
-        const sep = rootPath.value.includes('\\') ? '\\' : '/'
-        const cleanedRel = rel.replace(/\\|\//g, sep)
-        destination = rootPath.value.endsWith(sep) ? rootPath.value + cleanedRel : rootPath.value + sep + cleanedRel
-      } else if (rootPath.value && !rel) {
-        destination = rootPath.value
-      }
+  let destination: string | undefined = undefined
+  try {
+    const rel = (options.value.relativePath || '').trim()
+    // Resolve selected root (custom, named, or default)
+    let root = null
+    if (selectedRootId.value === 0) root = customRootPath.value || ''
+    else if (selectedRootId.value && selectedRootId.value > 0) {
+      const found = rootStore.folders.find((f) => f.id === selectedRootId.value)
+      root = found?.path || ''
+    } else {
+      // Use default root folder, fallback to legacy outputPath for compatibility
+      const defaultRoot = rootStore.folders.find((f) => f.isDefault)
+      root = defaultRoot?.path || configStore.applicationSettings?.outputPath || ''
+    }
 
-      const metadataToSend = (enriched.value || props.book) as AudibleBookMetadata
-      const result = await apiService.addToLibrary(metadataToSend, {
-        monitored: options.value.monitored,
-        qualityProfileId: options.value.qualityProfileId || undefined,
-        autoSearch: options.value.autoSearch,
-        destinationPath: destination || undefined
-      })
-      toast.success('Added', `"${metadataToSend.title}" has been added to your library!`)
-      emit('added', result.audiobook)
+    if (root && rel) {
+      const sep = root.includes('\\') ? '\\' : '/'
+      const cleanedRel = rel.replace(/\\|\//g, sep)
+      destination = root.endsWith(sep) ? root + cleanedRel : root + sep + cleanedRel
+    } else if (root && !rel) {
+      destination = root
+    }
+
+    const metadataToSend = (enriched.value || props.book) as AudibleBookMetadata
+    const result = await apiService.addToLibrary(metadataToSend, {
+      monitored: options.value.monitored,
+      qualityProfileId: options.value.qualityProfileId || undefined,
+      autoSearch: options.value.autoSearch,
+      destinationPath: destination || undefined,
+    })
+    toast.success('Added', `"${metadataToSend.title}" has been added to your library!`)
+    emit('added', result.audiobook)
     closeModal()
   } catch (err: unknown) {
     console.error('Failed to add audiobook:', err)
-    const errorMessage = err instanceof Error ? err.message : 'Failed to add audiobook. Please try again.'
-  toast.error('Add failed', errorMessage)
+    const errorMessage =
+      err instanceof Error ? err.message : 'Failed to add audiobook. Please try again.'
+    toast.error('Add failed', errorMessage)
   } finally {
     isAdding.value = false
   }
@@ -366,7 +613,7 @@ const capitalizeFirst = (str: string): string => {
 
 .modal-content {
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
   max-width: 900px;
   width: 100%;
@@ -374,6 +621,64 @@ const capitalizeFirst = (str: string): string => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+.book-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-viewport {
+  width: 100%;
+  aspect-ratio: 1/1;
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.06));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-viewport img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.placeholder-cover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.image-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  color: white;
+}
+.image-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+}
+.image-error-overlay .error-inner {
+  text-align: center;
+}
+.image-error-overlay .error-inner .btn.small {
+  margin-top: 0.5rem;
+}
+
+.meta-source-row {
+  margin-bottom: 0.5rem;
 }
 
 .modal-header {
@@ -397,7 +702,7 @@ const capitalizeFirst = (str: string): string => {
   font-size: 1.5rem;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -431,7 +736,7 @@ const capitalizeFirst = (str: string): string => {
   height: 160px;
   flex-shrink: 0;
   background-color: #555;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -477,7 +782,8 @@ const capitalizeFirst = (str: string): string => {
   padding-bottom: 0.5rem;
 }
 
-.authors, .narrators {
+.authors,
+.narrators {
   color: #007acc;
   margin: 0.25rem 0;
   font-weight: 500;
@@ -534,7 +840,7 @@ const capitalizeFirst = (str: string): string => {
   gap: 0.75rem;
   cursor: pointer;
   padding: 0.75rem;
-  border-radius: 8px;
+  border-radius: 6px;
   transition: background-color 0.2s;
 }
 
@@ -571,7 +877,7 @@ const capitalizeFirst = (str: string): string => {
   width: 100%;
   padding: 0.75rem;
   border: 1px solid #555;
-  border-radius: 8px;
+  border-radius: 6px;
   background-color: #333;
   color: white;
   font-size: 1rem;
@@ -613,7 +919,7 @@ const capitalizeFirst = (str: string): string => {
 .form-input:focus {
   outline: none;
   border-color: #007acc;
-  box-shadow: 0 0 0 3px rgba(0,122,204,0.06);
+  box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.06);
 }
 
 /* Row layout for destination: root left, input right */
@@ -626,7 +932,8 @@ const capitalizeFirst = (str: string): string => {
 .root-label {
   padding: 0.45rem 0 0.45rem 0.6rem;
   color: #ccc;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
   font-size: 0.9rem;
   width: fit-content;
   white-space: nowrap;
@@ -639,7 +946,7 @@ const capitalizeFirst = (str: string): string => {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
   display: flex;
@@ -690,7 +997,9 @@ const capitalizeFirst = (str: string): string => {
     margin: 1rem;
   }
 
-  .modal-header, .modal-body, .modal-footer {
+  .modal-header,
+  .modal-body,
+  .modal-footer {
     padding: 1rem;
   }
 

@@ -203,29 +203,68 @@ namespace Listenarr.Api.Services.Adapters
                     return false;
                 }
 
-                var removeUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
-                if (deleteFiles)
-                    removeUrl += "&del_files=1";
-
                 var http = _httpFactory.CreateClient("DownloadClient");
-                var response = await http.GetAsync(removeUrl, ct);
-                if (!response.IsSuccessStatusCode)
+                bool removedFromQueue = false;
+                bool removedFromHistory = false;
+
+                // Try to remove from queue first (for active downloads)
+                var queueRemoveUrl = $"{baseUrl}?mode=queue&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                if (deleteFiles)
+                    queueRemoveUrl += "&del_files=1";
+
+                try
                 {
-                    _logger.LogWarning("Failed to remove from SABnzbd: Status {Status}", response.StatusCode);
-                    return false;
+                    var queueResponse = await http.GetAsync(queueRemoveUrl, ct);
+                    if (queueResponse.IsSuccessStatusCode)
+                    {
+                        var queueContent = await queueResponse.Content.ReadAsStringAsync(ct);
+                        var queueDoc = JsonDocument.Parse(queueContent);
+                        if (queueDoc.RootElement.TryGetProperty("status", out var queueStatus))
+                        {
+                            removedFromQueue = queueStatus.GetBoolean();
+                        }
+                    }
+                }
+                catch (Exception queueEx)
+                {
+                    _logger.LogDebug(queueEx, "Could not remove {DownloadId} from SABnzbd queue (may not be in queue)", id);
                 }
 
-                var content = await response.Content.ReadAsStringAsync(ct);
-                var doc = JsonDocument.Parse(content);
+                // Try to remove from history (for completed downloads)
+                var historyRemoveUrl = $"{baseUrl}?mode=history&name=delete&value={Uri.EscapeDataString(id)}&apikey={Uri.EscapeDataString(apiKey)}&output=json";
+                if (deleteFiles)
+                    historyRemoveUrl += "&del_files=1";
 
-                if (doc.RootElement.TryGetProperty("status", out var status))
+                try
                 {
-                    var statusBool = status.GetBoolean();
-                    _logger.LogInformation("Removed {DownloadId} from SABnzbd: {Success}", LogRedaction.SanitizeText(id), statusBool);
-                    return statusBool;
+                    var historyResponse = await http.GetAsync(historyRemoveUrl, ct);
+                    if (historyResponse.IsSuccessStatusCode)
+                    {
+                        var historyContent = await historyResponse.Content.ReadAsStringAsync(ct);
+                        var historyDoc = JsonDocument.Parse(historyContent);
+                        if (historyDoc.RootElement.TryGetProperty("status", out var historyStatus))
+                        {
+                            removedFromHistory = historyStatus.GetBoolean();
+                        }
+                    }
+                }
+                catch (Exception historyEx)
+                {
+                    _logger.LogDebug(historyEx, "Could not remove {DownloadId} from SABnzbd history (may not be in history)", id);
                 }
 
-                return true;
+                var success = removedFromQueue || removedFromHistory;
+                if (success)
+                {
+                    _logger.LogInformation("Removed {DownloadId} from SABnzbd (queue: {Queue}, history: {History}, deleteFiles: {DeleteFiles})", 
+                        LogRedaction.SanitizeText(id), removedFromQueue, removedFromHistory, deleteFiles);
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to remove {DownloadId} from SABnzbd (not found in queue or history)", LogRedaction.SanitizeText(id));
+                }
+
+                return success;
             }
             catch (Exception ex)
             {
@@ -340,6 +379,14 @@ namespace Listenarr.Api.Services.Adapters
                             ? await _pathMappingService.TranslatePathAsync(client.Id, remotePath)
                             : remotePath;
 
+                        // For SABnzbd, construct ContentPath from download path + filename
+                        var contentPath = !string.IsNullOrEmpty(remotePath) && !string.IsNullOrEmpty(filename)
+                            ? Path.Combine(remotePath, filename)
+                            : remotePath;
+                        var localContentPath = !string.IsNullOrEmpty(contentPath)
+                            ? await _pathMappingService.TranslatePathAsync(client.Id, contentPath)
+                            : contentPath;
+
                         items.Add(new QueueItem
                         {
                             Id = nzoId,
@@ -358,7 +405,8 @@ namespace Listenarr.Api.Services.Adapters
                             CanPause = mappedStatus == "downloading" || mappedStatus == "queued",
                             CanRemove = true,
                             RemotePath = remotePath,
-                            LocalPath = localPath
+                            LocalPath = localPath,
+                            ContentPath = localContentPath
                         });
                     }
                     catch (Exception ex)
@@ -478,6 +526,110 @@ namespace Listenarr.Api.Services.Adapters
             catch
             {
                 return 0;
+            }
+        }
+
+        /// <summary>
+        /// Resolves the actual import item for a completed download.
+        /// Queries SABnzbd history for storage path.
+        /// EXACTLY matches Sonarr's Sabnzbd.GetImportItem pattern.
+        /// </summary>
+        public async Task<QueueItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            Download download,
+            QueueItem queueItem,
+            QueueItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // Clone to avoid mutating the original
+            var result = queueItem.Clone();
+
+            // If ContentPath is already set and exists, use it
+            if (!string.IsNullOrEmpty(result.ContentPath))
+            {
+                var localPath = await _pathMappingService.TranslatePathAsync(client.Id, result.ContentPath);
+                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                {
+                    result.ContentPath = localPath;
+                    return result;
+                }
+            }
+
+            try
+            {
+                // Query SABnzbd history for the download
+                var baseUrl = $"{(client.UseSSL ? "https" : "http")}://{client.Host}:{client.Port}/api";
+                var apiKey = "";
+                if (client.Settings != null && client.Settings.TryGetValue("apiKey", out var apiKeyObj))
+                {
+                    apiKey = apiKeyObj?.ToString() ?? "";
+                }
+
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    _logger.LogWarning("SABnzbd API key not configured for client {ClientId}", client.Id);
+                    return result;
+                }
+
+                // Query history with nzo_id filter
+                var historyUrl = $"{baseUrl}?mode=history&output=json&apikey={Uri.EscapeDataString(apiKey)}";
+                var http = _httpFactory.CreateClient("DownloadClient");
+                var historyResp = await http.GetAsync(historyUrl, ct);
+
+                if (!historyResp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to query SABnzbd history for download {NzoId}", queueItem.Id);
+                    return result;
+                }
+
+                var historyText = await historyResp.Content.ReadAsStringAsync(ct);
+                if (string.IsNullOrWhiteSpace(historyText))
+                {
+                    return result;
+                }
+
+                var doc = JsonDocument.Parse(historyText);
+                if (!doc.RootElement.TryGetProperty("history", out var history) ||
+                    !history.TryGetProperty("slots", out var slots) ||
+                    slots.ValueKind != JsonValueKind.Array)
+                {
+                    _logger.LogWarning("Invalid SABnzbd history response format");
+                    return result;
+                }
+
+                // Find matching history entry
+                foreach (var slot in slots.EnumerateArray())
+                {
+                    var nzoId = slot.TryGetProperty("nzo_id", out var nzo) ? nzo.GetString() ?? string.Empty : string.Empty;
+                    if (nzoId != queueItem.Id) continue;
+
+                    // Extract storage path
+                    var storage = slot.TryGetProperty("storage", out var storageProp) ? storageProp.GetString() : null;
+                    if (string.IsNullOrEmpty(storage))
+                    {
+                        _logger.LogWarning("No storage path found for SABnzbd download {NzoId}", queueItem.Id);
+                        return result;
+                    }
+
+                    // Apply path mapping
+                    var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, storage);
+                    result.ContentPath = localContentPath;
+
+                    _logger.LogDebug(
+                        "Resolved SABnzbd content path for {NzoId}: {ContentPath}",
+                        queueItem.Id,
+                        localContentPath);
+
+                    return result;
+                }
+
+                _logger.LogWarning("Download {NzoId} not found in SABnzbd history", queueItem.Id);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error resolving import item for SABnzbd download {NzoId}", queueItem.Id);
+                return result;
             }
         }
     }

@@ -218,10 +218,8 @@ namespace Listenarr.Api.Services
                                     using var afScope = _scopeFactory.CreateScope();
                                     var audioFileService = afScope.ServiceProvider.GetRequiredService<IAudioFileService>();
 
-                                    // Calculate relative path from base path
-                                    var relativePath = !string.IsNullOrEmpty(basePath) ? Path.GetRelativePath(basePath, filePath) : filePath;
-
-                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, relativePath, "scan");
+                                    // Store absolute path - metadata extraction needs full path
+                                    var created = await audioFileService.EnsureAudiobookFileAsync(audiobook.Id, filePath, "scan");
                                     if (created) createdFiles++;
                                 }
                                 catch (Exception ex)
@@ -239,12 +237,28 @@ namespace Listenarr.Api.Services
                                     .Where(f => f.AudiobookId == audiobook.Id)
                                     .ToListAsync();
 
-                                var foundSet = new HashSet<string>(
-                                    foundFiles.Select(f => !string.IsNullOrEmpty(basePath) ? Path.GetRelativePath(basePath, f) : f),
-                                    StringComparer.OrdinalIgnoreCase);
-                                var toRemove = existingFiles
-                                    .Where(f => f.Path != null && !foundSet.Contains(f.Path))
-                                    .ToList();
+                                // Create set of found files (absolute paths)
+                                var foundSet = new HashSet<string>(foundFiles, StringComparer.OrdinalIgnoreCase);
+                                
+                                // Check which existing files still exist
+                                var toRemove = new List<AudiobookFile>();
+                                foreach (var existingFile in existingFiles)
+                                {
+                                    if (string.IsNullOrEmpty(existingFile.Path)) continue;
+                                    
+                                    // Normalize path: if relative, make it absolute using basePath
+                                    var fullPath = existingFile.Path;
+                                    if (!Path.IsPathRooted(fullPath) && !string.IsNullOrEmpty(basePath))
+                                    {
+                                        fullPath = Path.GetFullPath(Path.Combine(basePath, fullPath));
+                                    }
+                                    
+                                    // Check if file still exists on disk
+                                    if (!foundSet.Contains(fullPath))
+                                    {
+                                        toRemove.Add(existingFile);
+                                    }
+                                }
 
                                 List<object> removedFilesDto = new();
                                 if (toRemove.Count > 0)
@@ -408,43 +422,14 @@ namespace Listenarr.Api.Services
                             var updated = await db.Audiobooks.Include(a => a.Files).FirstOrDefaultAsync(a => a.Id == audiobook.Id);
                             if (updated != null)
                             {
-                                // Project to a lightweight DTO to avoid JSON reference cycles when serializing EF tracked entities
-                                var audiobookDto = new
-                                {
-                                    id = updated.Id,
-                                    title = updated.Title,
-                                    authors = updated.Authors,
-                                    description = updated.Description,
-                                    imageUrl = updated.ImageUrl,
-                                    filePath = updated.FilePath,
-                                    fileSize = updated.FileSize,
-                                    basePath = updated.BasePath,
-                                    runtime = updated.Runtime,
-                                    monitored = updated.Monitored,
-                                    quality = updated.Quality,
-                                    series = updated.Series,
-                                    seriesNumber = updated.SeriesNumber,
-                                    tags = updated.Tags,
-                                    files = updated.Files?.Select(f => new
-                                    {
-                                        id = f.Id,
-                                        path = f.Path,
-                                        size = f.Size,
-                                        durationSeconds = f.DurationSeconds,
-                                        format = f.Format,
-                                        bitrate = f.Bitrate,
-                                        sampleRate = f.SampleRate,
-                                        channels = f.Channels,
-                                        source = f.Source,
-                                        createdAt = f.CreatedAt
-                                    }).ToList()
-                                    ,
-                                    wanted = updated.Monitored && (updated.Files == null || !updated.Files.Any())
-                                };
-
+                                // Build an authoritative Audiobook DTO and broadcast it
+                                var audiobookDto = Listenarr.Api.Services.AudiobookDtoFactory.BuildFromEntity(db, updated);
                                 await _hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDto);
                                 await _hubContext.Clients.All.SendAsync("ScanJobUpdate", new { jobId = job.Id.ToString(), audiobookId = job.AudiobookId, status = "Completed", found = foundFiles.Count, created = createdFiles, completedAt = DateTime.UtcNow });
                                 _logger.LogInformation("Broadcasted AudiobookUpdate for AudiobookId {AudiobookId} after scan job {JobId}", audiobook.Id, job.Id);
+                                
+                                // Mark job as completed in queue to prevent deduplication issues
+                                try { _queue.UpdateJobStatus(job.Id, "Completed"); } catch { }
                             }
                         }
                         catch (Exception ex)

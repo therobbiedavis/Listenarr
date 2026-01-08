@@ -1,3 +1,5 @@
+import { errorTracking } from '@/services/errorTracking'
+
 export interface AudnexusBook {
   asin: string
   title: string
@@ -72,25 +74,29 @@ class AudnexusService {
 
   private async request<T>(endpoint: string): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
-    
+
     try {
       const response = await fetch(url, {
         headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'Listenarr/1.0.0'
-        }
+          Accept: 'application/json',
+          'User-Agent': 'Listenarr/1.0.0',
+        },
       })
-      
+
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error('Book not found with the provided ASIN')
         }
         throw new Error(`Audnexus API error: ${response.status} ${response.statusText}`)
       }
-      
+
       return await response.json()
     } catch (error) {
-      console.error('Audnexus API request failed:', error)
+      errorTracking.captureException(error as Error, {
+        component: 'AudnexusService',
+        operation: 'request',
+        metadata: { endpoint },
+      })
       throw error
     }
   }
@@ -102,23 +108,25 @@ class AudnexusService {
     }
 
     const book = await this.request<AudnexusBook>(`/books/${asin}`)
-    
+
     // Transform the detailed book data into our search result format
     return {
       asin: book.asin,
       title: book.title,
-      author: book.authors.map(a => a.name).join(', '),
-      narrator: book.narrators.map(n => n.name).join(', '),
+      author: book.authors.map((a) => a.name).join(', '),
+      narrator: book.narrators.map((n) => n.name).join(', '),
       description: book.description || book.summary,
       image: book.image,
       publishDate: book.publishDate || book.releaseDate,
       runtimeLengthMin: book.runtimeLengthMin,
       runtimeLengthFormat: book.runtimeLengthFormat,
-      genres: book.genres.map(g => g.name),
-      series: book.seriesPrimary ? {
-        name: book.seriesPrimary.name,
-        position: book.seriesPrimary.position
-      } : undefined
+      genres: book.genres.map((g) => g.name),
+      series: book.seriesPrimary
+        ? {
+            name: book.seriesPrimary.name,
+            position: book.seriesPrimary.position,
+          }
+        : undefined,
     }
   }
 

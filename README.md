@@ -191,11 +191,11 @@ npm run dev:web      # Start only frontend web
 
 ## Discord bot (optional)
 
-Listenarr includes a small reference Discord bot (in `tools/discord-bot`) that registers a slash command and forwards requests to the running Listenarr API. The bot is optional — the preferred integration is configuring the Discord settings from the Listenarr UI so the server manages the registration for you. Use the steps below for local development or to run the bot separately.
+Listenarr includes a small reference Discord bot (in `listenarr.api/tools/discord-bot`) that registers a slash command and forwards requests to the running Listenarr API. The bot is optional — the preferred integration is configuring the Discord settings from the Listenarr UI so the server manages the registration for you. Use the steps below for local development or to run the bot separately.
 
 Prerequisites:
 - A running Listenarr instance (see steps above)
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - A Discord application with a bot token and application ID
 
 Quick start (development):
@@ -338,6 +338,17 @@ Configure your search APIs in the Settings page:
 - API key management
 - Priority-based search ordering
 - Connection testing
+
+### Logging Configuration
+
+You can control the application logging level in three ways:
+
+- Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose, Debug, Information, Warning, Error, Fatal (e.g., `LISTENARR_LOG_LEVEL=Debug`).
+- Configuration file: create or edit `appsettings.json` or `appsettings.Development.json` in the `listenarr.api` project (or the `config/appsettings` directory when running the container). Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
+- Runtime args / orchestration: pass environment variables via `docker run -e LISTENARR_LOG_LEVEL=Debug` or `docker-compose` environment section.
+
+Docker users: the provided `docker-compose.yml` includes an example `LISTENARR_LOG_LEVEL` entry; for non-Docker users changing `appsettings.Development.json` before starting the app is the easiest way to set a custom default logging level.
+
 
 ### Download Clients
 

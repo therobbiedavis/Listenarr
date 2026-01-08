@@ -6,19 +6,45 @@
     </div>
 
     <!-- Quick raw-fetch debug control -->
-    <div style="margin-bottom:1rem;">
-      <button @click="fetchRawDebug(searchQuery || 'Harry')" class="search-button" style="background:#6c757d">Fetch Raw API Results (apiService)</button>
-      <button @click="fetchRawDebugWindow(searchQuery || 'Harry')" class="search-button" style="background:#495057;margin-left:0.5rem">Fetch Raw API Results (window.fetch)</button>
+    <div style="margin-bottom: 1rem">
+      <button
+        @click="fetchRawDebug(searchQuery || 'Harry')"
+        class="search-button"
+        style="background: #6c757d"
+      >
+        Fetch Raw API Results (apiService)
+      </button>
+      <button
+        @click="fetchRawDebugWindow(searchQuery || 'Harry')"
+        class="search-button"
+        style="background: #495057; margin-left: 0.5rem"
+      >
+        Fetch Raw API Results (window.fetch)
+      </button>
     </div>
 
     <!-- Debug: show raw search results (temporary) -->
-    <div v-if="!searchStore.isSearching" class="debug-results" style="background:#fff;border:1px solid #eee;padding:1rem;border-radius:6px;margin-top:1rem;">
+    <div
+      v-if="!searchStore.isSearching && !searchStore.isCancelled"
+      class="debug-results"
+      style="
+        background: #fff;
+        border: 1px solid #eee;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-top: 1rem;
+      "
+    >
       <strong>Debug: raw searchStore.searchResults</strong>
-      <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(searchStore.searchResults, null, 2) }}</pre>
-      <div style="margin-top:0.5rem">
+      <pre style="max-height: 300px; overflow: auto; font-size: 12px">{{
+        JSON.stringify(searchStore.searchResults, null, 2)
+      }}</pre>
+      <div style="margin-top: 0.5rem">
         <strong>Raw debug fetch results (window.rawDebugResults):</strong>
         <div>Count: {{ rawDebugResults ? rawDebugResults.length : 0 }}</div>
-        <pre style="max-height:300px;overflow:auto;font-size:12px;">{{ JSON.stringify(rawDebugResults, null, 2) }}</pre>
+        <pre style="max-height: 300px; overflow: auto; font-size: 12px">{{
+          JSON.stringify(rawDebugResults, null, 2)
+        }}</pre>
       </div>
     </div>
 
@@ -31,12 +57,19 @@
           class="search-input"
           @keyup.enter="performSearch"
         />
-        <button 
-          @click="performSearch" 
+        <button
+          @click="performSearch"
           :disabled="!searchQuery.trim() || searchStore.isSearching"
           class="search-button"
         >
           {{ searchStore.isSearching ? 'Searching...' : 'Search' }}
+        </button>
+        <button
+          v-if="searchStore.isSearching"
+          @click="cancelSearch"
+          class="search-button cancel-button"
+        >
+          Cancel
         </button>
       </div>
 
@@ -54,15 +87,15 @@
       <PhSpinner class="ph-spin" />
       <p>Searching...</p>
     </div>
+    <div v-else-if="showCancelled" class="cancelled">
+      <PhXCircle />
+      <p>Search cancelled</p>
+    </div>
 
-    <div v-else-if="searchStore.hasResults" class="search-results">
+    <div v-else-if="showResults" class="search-results">
       <h3>Search Results ({{ searchStore.searchResults.length }})</h3>
       <div class="results-grid">
-        <div 
-          v-for="result in searchStore.searchResults" 
-          :key="result.id"
-          class="result-card"
-        >
+        <div v-for="result in searchStore.searchResults" :key="result.id" class="result-card">
           <div class="result-info">
             <h4>
               <a
@@ -77,12 +110,12 @@
             </h4>
             <p class="result-artist">{{ safeText(result.artist) }}</p>
             <p class="result-album">{{ safeText(result.album) }}</p>
-            
+
             <!-- Quality Score Badge -->
             <div v-if="getResultScore(result.id)" class="quality-score">
               <ScorePopover :content="getScoreBreakdownTooltip(getResultScore(result.id))">
                 <template #default>
-                  <span 
+                  <span
                     v-if="getResultScore(result.id)?.isRejected"
                     class="score-badge rejected"
                     :title="getResultScore(result.id)?.rejectionReasons.join(', ')"
@@ -90,14 +123,14 @@
                     <PhXCircle />
                     Rejected
                   </span>
-                  <span v-else :class="['score-badge', getScoreClass(getResultScore(result.id)?.totalScore || 0)]">
+                  <span v-else :class="['score-badge', getVisibleScoreClass(result.id)]">
                     <PhStar />
-                    Score: {{ getResultScore(result.id)?.totalScore }}
+                    Score: {{ getVisibleScoreValue(result.id) ?? '-' }}
                   </span>
                 </template>
               </ScorePopover>
             </div>
-            
+
             <!-- Audiobook metadata -->
             <div v-if="result.narrator || result.runtime || result.series" class="audiobook-meta">
               <p v-if="result.narrator" class="meta-narrator">
@@ -108,25 +141,37 @@
                   ⏱ {{ formatRuntime(result.runtime) }}
                 </span>
                 <span v-if="result.series" class="meta-series">
-                  Series: {{ safeText(result.series) }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
+                  Series: {{ safeText(result.series)
+                  }}<span v-if="result.seriesNumber"> #{{ result.seriesNumber }}</span>
                 </span>
               </div>
             </div>
-            
+
             <div class="result-meta">
               <span class="result-size">{{ formatFileSize(result.size) }}</span>
-              <span class="result-quality">{{ result.quality }}</span>
+              <span v-if="result.quality" class="result-quality">{{ result.quality }}</span>
               <span class="result-source">{{ result.source }}</span>
+              <span v-if="result.language" class="result-language">
+                <PhGlobe /> {{ capitalizeLanguage(result.language) }}
+              </span>
             </div>
             <div class="result-stats">
-              <span class="seeders">↑ {{ result.seeders }}</span>
-              <span class="leechers">↓ {{ result.leechers }}</span>
+              <span v-if="result.seeders !== undefined && result.seeders !== null" class="seeders"
+                >↑ {{ result.seeders }}</span
+              >
+              <span
+                v-if="result.leechers !== undefined && result.leechers !== null"
+                class="leechers"
+                >↓ {{ result.leechers }}</span
+              >
+              <span v-if="result.grabs !== undefined" class="grabs">✚ {{ result.grabs }}</span>
+              <span v-if="result.files !== undefined" class="files">📁 {{ result.files }}</span>
             </div>
           </div>
           <div class="result-actions">
-            <button 
+            <button
               @click="addToLibrary(result)"
-              :class="['add-button', { 'added': addedResults.has(result.id) }]"
+              :class="['add-button', { added: addedResults.has(result.id) }]"
               :disabled="isAddingToLibrary || addedResults.has(result.id)"
             >
               <template v-if="addedResults.has(result.id)">
@@ -142,7 +187,7 @@
       </div>
     </div>
 
-    <div v-else-if="searchQuery && !searchStore.isSearching" class="no-results">
+    <div v-else-if="showNoResults" class="no-results">
       <p>No results found for "{{ searchQuery }}"</p>
     </div>
   </div>
@@ -150,10 +195,12 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus } from '@phosphor-icons/vue'
+import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus, PhGlobe } from '@phosphor-icons/vue'
 import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
+import { logger } from '@/utils/logger'
+import { errorTracking } from '@/services/errorTracking'
 import type { SearchResult, AudibleBookMetadata, QualityScore, QualityProfile } from '@/types'
 import { useToast } from '@/services/toastService'
 import { getScoreBreakdownTooltip } from '@/composables/useScore'
@@ -163,10 +210,6 @@ import { safeText } from '@/utils/textUtils'
 const searchStore = useSearchStore()
 const libraryStore = useLibraryStore()
 const toast = useToast()
-
-console.log('SearchView component loaded')
-console.log('searchStore:', searchStore)
-console.log('libraryStore:', libraryStore)
 
 const searchQuery = ref('')
 const selectedCategory = ref('')
@@ -181,187 +224,196 @@ onMounted(async () => {
   try {
     defaultProfile.value = await apiService.getDefaultQualityProfile()
   } catch (error) {
-    console.warn('No default quality profile found:', error)
+    logger.warn('No default quality profile found:', error)
   }
   // Expose the search store and search results for quick debugging in DevTools
   try {
     const w = window as unknown as Record<string, unknown>
     w.searchStore = searchStore
     w.searchResults = searchStore.searchResults
-    console.debug('[SearchView] Exposed searchStore and searchResults on window for debugging')
+    logger.debug('[SearchView] Exposed searchStore and searchResults on window for debugging')
   } catch {}
 })
 
 const fetchRawDebug = async (q: string) => {
+  try {
+    const results = await apiService.intelligentSearch(q || 'Harry')
+    rawDebugResults.value = results as unknown[]
     try {
-      const results = await apiService.intelligentSearch(q || 'Harry')
-      rawDebugResults.value = results as unknown[]
-      try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
-      console.debug('[SearchView] Raw debug results fetched (apiService)', results)
-    } catch (e) {
-      console.error('[SearchView] Raw debug fetch failed (apiService)', e)
-      rawDebugResults.value = null
-    }
+      ;(window as unknown as Record<string, unknown>).rawDebugResults = results
+    } catch {}
+    logger.debug('[SearchView] Raw debug results fetched (apiService)', results)
+  } catch (e) {
+    logger.error('[SearchView] Raw debug fetch failed (apiService)', e as Error)
+    rawDebugResults.value = null
+  }
+}
+
+const capitalizeLanguage = (language: string | undefined): string => {
+  if (!language) return ''
+  return language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
 }
 
 const fetchRawDebugWindow = async (q: string) => {
+  try {
+    const body = JSON.stringify({ mode: 'Simple', query: q })
+    const resp = await window.fetch('/api/search', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const results = await resp.json()
+    rawDebugResults.value = results as unknown[]
     try {
-      const resp = await window.fetch(`/api/search/intelligent?query=${encodeURIComponent(q)}`, { credentials: 'include' })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const results = await resp.json()
-      rawDebugResults.value = results as unknown[]
-      try { (window as unknown as Record<string, unknown>).rawDebugResults = results } catch {}
-      console.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
-    } catch (e) {
-      console.error('[SearchView] Raw debug fetch failed (window.fetch)', e)
-      rawDebugResults.value = null
-    }
+      ;(window as unknown as Record<string, unknown>).rawDebugResults = results
+    } catch {}
+    logger.debug('[SearchView] Raw debug results fetched (window.fetch)', results)
+  } catch (e) {
+    logger.error('[SearchView] Raw debug fetch failed (window.fetch)', e as Error)
+    rawDebugResults.value = null
+  }
 }
 
 const performSearch = async () => {
-  console.log('=== performSearch START ===')
-  console.log('Search query:', searchQuery.value)
-  
   if (!searchQuery.value.trim()) {
-    console.log('Search query is empty, aborting')
     return
   }
-  
+
   // Clear added results and scores for new search
-  console.log('Clearing added results and scores')
   addedResults.value.clear()
   qualityScores.value.clear()
-  
-  console.log('Calling searchStore.search()')
-  await searchStore.search(
-    searchQuery.value.trim(),
-    selectedCategory.value || undefined
-  )
-  console.log('searchStore.search() completed')
-  // Ensure the store and results are available on window for debugging
+
+  await searchStore.search(searchQuery.value.trim(), selectedCategory.value || undefined)
+
+  // Ensure the store and results are available on window for debugging (dev only)
   try {
     const w = window as unknown as Record<string, unknown>
     w.searchStore = searchStore
     w.searchResults = searchStore.searchResults
-    console.debug('[SearchView] Bound searchStore/searchResults to window after search')
+    logger.debug('[SearchView] Bound searchStore/searchResults to window after search')
   } catch {}
-  console.log('Search results count:', searchStore.searchResults.length)
-  
+
   // Wait for next tick to ensure searchResults are updated
-  console.log('Waiting for nextTick()')
   await nextTick()
-  console.log('nextTick() completed')
-  
+
   // Score search results if we have a default profile
   if (defaultProfile.value?.id && searchStore.searchResults.length > 0) {
     try {
-      console.log('Scoring search results with profile:', defaultProfile.value.name)
       const scores = await apiService.scoreSearchResults(
         defaultProfile.value.id,
-        searchStore.searchResults
+        searchStore.searchResults,
       )
       // Map scores by search result ID
-      scores.forEach(score => {
+      scores.forEach((score) => {
         qualityScores.value.set(score.searchResult.id, score)
       })
-      console.log('Quality scores loaded:', scores.length)
+      logger.debug('Quality scores loaded:', scores.length)
     } catch (error) {
-      console.warn('Failed to score search results:', error)
+      logger.warn('Failed to score search results:', error)
     }
   }
-  
+
   // Check which results are already in library
-  console.log('Calling checkExistingInLibrary()')
   checkExistingInLibrary()
-  console.log('=== performSearch END ===')
 }
 
+const cancelSearch = () => {
+  searchStore.cancel()
+}
+
+// UI state helpers to ensure only one state is shown at a time
+import { computed } from 'vue'
+const showCancelled = computed(() => {
+  return !!searchStore.isCancelled
+})
+const showResults = computed(() => {
+  return !searchStore.isSearching && !searchStore.isCancelled && searchStore.hasResults
+})
+const showNoResults = computed(() => {
+  return (
+    !!searchQuery.value &&
+    !searchStore.isSearching &&
+    !searchStore.isCancelled &&
+    !searchStore.hasResults
+  )
+})
+
 const checkExistingInLibrary = () => {
-  console.log('checkExistingInLibrary called')
-  console.log('Library audiobooks count:', libraryStore.audiobooks.length)
-  
   // Ensure library is loaded
   if (libraryStore.audiobooks.length === 0) {
-    console.log('Library is empty, fetching...')
     libraryStore.fetchLibrary().then(() => {
-      console.log('Library fetched, count:', libraryStore.audiobooks.length)
       markExistingResults()
     })
   } else {
-    console.log('Library already loaded')
     markExistingResults()
   }
 }
 
 const markExistingResults = () => {
-  console.log('markExistingResults called')
-  console.log('Search results count:', searchStore.searchResults.length)
-  
   const libraryAsins = new Set(
-    libraryStore.audiobooks
-      .filter(book => book.asin)
-      .map(book => book.asin!)
+    libraryStore.audiobooks.filter((book) => book.asin).map((book) => book.asin!),
   )
-  
-  console.log('Library ASINs:', Array.from(libraryAsins))
-  
-  searchStore.searchResults.forEach(result => {
-    console.log('Checking result:', result.id, 'ASIN:', result.asin)
+
+  searchStore.searchResults.forEach((result) => {
     if (result.asin && libraryAsins.has(result.asin)) {
-      console.log('Match found! Adding result ID:', result.id)
       addedResults.value.add(result.id)
     }
   })
-  
-  console.log('Added results:', Array.from(addedResults.value))
 }
 
 // Watch for search results changes to mark existing audiobooks
-watch(() => searchStore.searchResults, (newVal) => {
-  // Keep a developer-friendly reference for debugging
-  try {
-    const w = window as unknown as Record<string, unknown>
-    w.searchResults = newVal
-    w.searchStore = searchStore
-  } catch {}
+watch(
+  () => searchStore.searchResults,
+  (newVal) => {
+    // Keep a developer-friendly reference for debugging
+    try {
+      const w = window as unknown as Record<string, unknown>
+      w.searchResults = newVal
+      w.searchStore = searchStore
+    } catch {}
 
-  if (searchStore.searchResults.length > 0) {
-    checkExistingInLibrary()
-  }
-}, { deep: true })
+    if (searchStore.searchResults.length > 0) {
+      checkExistingInLibrary()
+    }
+  },
+  { deep: true },
+)
 
 const addToLibrary = async (result: SearchResult) => {
-  console.log('addToLibrary called with result:', result)
-  
   if (!result.asin) {
-    console.warn('No ASIN available for result:', result)
+    errorTracking.captureMessage('No ASIN available for result', 'warning', {
+      component: 'SearchView',
+      operation: 'addToLibrary',
+      metadata: { result },
+    })
     toast.warning('Cannot add', 'Cannot add to library: No ASIN available for this result')
     return
   }
 
-  console.log('Adding to library, ASIN:', result.asin)
   isAddingToLibrary.value = true
   try {
     // Fetch full metadata from the backend
-    console.log('Fetching metadata from /api/audible/metadata/' + result.asin)
     const metadata = await apiService.getAudibleMetadata<AudibleBookMetadata>(result.asin)
-    console.log('Metadata fetched:', metadata)
-    
+
     // Add to library
-    console.log('Adding to library via /api/library/add')
     await apiService.addToLibrary(metadata, { searchResult: result })
-    
-  console.log('Successfully added to library')
-  toast.success('Added to library', `"${metadata.title}" has been added to your library!`)
-    
+
+    toast.success('Added to library', `"${metadata.title}" has been added to your library!`)
+
     // Mark this result as added
     addedResults.value.add(result.id)
   } catch (error: unknown) {
-    console.error('Failed to add audiobook:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SearchView',
+      operation: 'addToLibrary',
+      metadata: { resultId: result.id },
+    })
     const errorMessage = error instanceof Error ? error.message : String(error)
-    
+
     // Check if it's a conflict (already exists)
-      if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
+    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
       toast.warning('Already exists', 'This audiobook is already in your library.')
     } else {
       toast.error('Add failed', 'Failed to add audiobook. Please try again.')
@@ -375,7 +427,7 @@ const formatFileSize = (bytes: number): string => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
   if (bytes === 0) return '0 Bytes'
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
+  return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i]
 }
 
 const formatRuntime = (minutes: number): string => {
@@ -398,7 +450,22 @@ const getResultScore = (resultId: string): QualityScore | undefined => {
 function getResultLink(result: SearchResult): string | undefined {
   if (!result) return undefined
   const r = result as unknown as Record<string, unknown>
-  if (typeof r.resultUrl === 'string') return r.resultUrl
+  const src = !result ? '' : (result.downloadType || '').toLowerCase()
+
+  if (src === 'usenet' || src === 'nzb') {
+    // For Usenet results prefer the ID URL if present and looks like a URL (guid/info page), otherwise prefer details page before NZB download
+    if (typeof r.id === 'string' && /^(https?:)?\/\//.test(r.id)) return r.id as string
+    if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+      return r.resultUrl as string
+    if (result.productUrl) return result.productUrl
+    if (typeof r.sourceLink === 'string' && (r.sourceLink as string).trim().length > 0)
+      return r.sourceLink as string
+    if (result.nzbUrl) return result.nzbUrl
+    return undefined
+  }
+
+  if (typeof r.resultUrl === 'string' && (r.resultUrl as string).trim().length > 0)
+    return r.resultUrl as string
   if (result.productUrl) return result.productUrl
   if (result.torrentUrl) return result.torrentUrl
   if (result.nzbUrl) return result.nzbUrl
@@ -411,6 +478,30 @@ const getScoreClass = (score: number): string => {
   if (score >= 60) return 'good'
   if (score >= 40) return 'fair'
   return 'poor'
+}
+
+// Visible score value for the UI: prefer smartScore when available and normalize to 0-100
+import { computeNormalizedSmart } from '@/composables/useScore'
+
+function getVisibleScoreValue(resultId: string): number | undefined {
+  const q = getResultScore(resultId)
+  if (!q) return undefined
+
+  // Prefer breakdown-based normalized total when available
+  if (q.smartScoreBreakdown && Object.keys(q.smartScoreBreakdown).length > 0) {
+    return computeNormalizedSmart(q.smartScoreBreakdown).total
+  }
+
+  // Fallback to smartScore numeric normalization
+  if (typeof q.smartScore === 'number' && !isNaN(q.smartScore))
+    return Math.round(Math.min(100, q.smartScore / 100))
+  if (typeof q.totalScore === 'number') return q.totalScore
+  return undefined
+}
+
+function getVisibleScoreClass(resultId: string): string {
+  const val = getVisibleScoreValue(resultId) ?? 0
+  return getScoreClass(val)
 }
 
 // getScoreBreakdownTooltip is provided by the useScore composable
@@ -435,7 +526,7 @@ const getScoreClass = (score: number): string => {
 .search-form {
   background: white;
   padding: 2rem;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   margin-bottom: 2rem;
 }
@@ -450,7 +541,7 @@ const getScoreClass = (score: number): string => {
   flex: 1;
   padding: 0.75rem;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 1rem;
 }
 
@@ -459,7 +550,7 @@ const getScoreClass = (score: number): string => {
   background-color: #3498db;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
   transition: background-color 0.2s;
@@ -473,6 +564,23 @@ const getScoreClass = (score: number): string => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.search-button.advanced-button {
+  background-color: #9b59b6;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.search-button.advanced-button:hover:not(:disabled) {
+  background-color: #8e44ad;
+}
+.cancel-button {
+  background-color: #e74c3c;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background-color: #c0392b;
+}
 
 .search-filters {
   display: flex;
@@ -482,7 +590,7 @@ const getScoreClass = (score: number): string => {
 .filter-select {
   padding: 0.5rem;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .loading {
@@ -494,6 +602,18 @@ const getScoreClass = (score: number): string => {
 .loading i {
   font-size: 2rem;
   color: #3498db;
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.cancelled {
+  text-align: center;
+  padding: 2rem;
+  color: #e74c3c;
+}
+
+.cancelled i {
+  font-size: 2rem;
   display: block;
   margin-bottom: 1rem;
 }
@@ -511,7 +631,7 @@ const getScoreClass = (score: number): string => {
 
 .result-card {
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 1.5rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   display: flex;
@@ -581,7 +701,7 @@ const getScoreClass = (score: number): string => {
 .result-meta span {
   background-color: #f8f9fa;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #666;
 }
 
@@ -594,7 +714,7 @@ const getScoreClass = (score: number): string => {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -636,6 +756,20 @@ const getScoreClass = (score: number): string => {
 }
 
 .seeders {
+}
+
+.leechers {
+}
+
+.grabs {
+  margin-left: 8px;
+  color: var(--muted);
+}
+
+.files {
+  margin-left: 8px;
+  color: var(--muted);
+}
   color: #27ae60;
   font-weight: 600;
 }
@@ -654,7 +788,7 @@ const getScoreClass = (score: number): string => {
   background-color: #27ae60;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
   transition: background-color 0.2s;
@@ -687,7 +821,7 @@ const getScoreClass = (score: number): string => {
   padding: 2rem;
   color: #666;
   background: white;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 </style>

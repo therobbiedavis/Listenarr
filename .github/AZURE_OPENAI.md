@@ -1,17 +1,39 @@
-````markdown
-# Azure OpenAI usage rules (stub)
+# Azure OpenAI Instructions for Listenarr
 
-Purpose: guidance for integrating Microsoft Azure-hosted OpenAI models while following enterprise controls.
+## Overview
+Listenarr is a C# .NET 8.0 audiobook management system with Vue.js 3 frontend for automated audiobook downloads. See [copilot-instructions.md](copilot-instructions.md) for complete details.
 
-Core rules (see `.github/AGENTS.md`):
+## Quick Start
+- **Run**: `npm run dev` from repository root
+- **Stack**: .NET 8.0 + Vue 3 + TypeScript + Pinia + EF Core + SQLite + SignalR
+- **Database**: `listenarr.api/config/database/listenarr.db`
+- **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
 
-- Use managed identities or Key Vault for storing keys; avoid long-lived credentials in code.
-- Validate and sanitize all model outputs before use.
+## Critical Patterns
 
-Provider specifics:
+### Backend (.NET 8.0)
+1. **Download Status**: Always set `Status = DownloadStatus.Moved` after successful import
+2. **File Checks**: Verify `File.Exists(f.Path)` for wanted status (3 locations)
+3. **Authentication**: Transmission (409/session-id retry), qBittorrent (cookies)
+4. **Jobs**: Reset stuck jobs on startup (`ResetStuckJobsAsync`)
+5. **DI**: Constructor injection for all services
 
-- Authentication: prefer Azure Key Vault + Managed Identity for retrieval of deployment keys.
-- Telemetry & compliance: ensure logs do not contain PII or secrets; follow enterprise compliance settings.
-- Network: restrict outbound network access from services using the model when possible.
+### Frontend (Vue 3 + TypeScript)
+1. **Components**: Use `<script setup>` with TypeScript
+2. **State**: Pinia stores, never mutate directly
+3. **Performance**: Use `v-memo` for large lists
+4. **Types**: TypeScript types for all API responses
+5. **Downloads**: Filter terminal states from active downloads
 
-````
+## Security (Enterprise)
+- Use Azure Key Vault + Managed Identity for secrets
+- Parameterized queries only (EF Core)
+- Validate file paths (prevent traversal)
+- See [AGENTS.md](AGENTS.md) for OWASP/CWE guidance
+
+## Common Issues
+- **Downloads not importing**: Check logs for auth errors, 30s stability window
+- **Multiple databases**: Run from repo root, not `bin/Debug`
+- **Hot reload fails**: Restart `npm run dev`
+
+For detailed architecture, see [copilot-instructions.md](copilot-instructions.md) and [AGENTS.md](AGENTS.md).

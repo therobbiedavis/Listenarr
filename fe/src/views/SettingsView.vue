@@ -1,21 +1,9 @@
 <template>
   <div class="settings-page">
-    <div class="settings-header">
-      <h1>
-        <PhGear />
-        Settings
-      </h1>
-      <p>Configure your APIs, download clients, and application settings</p>
-    </div>
-
     <div class="settings-tabs">
       <!-- Mobile dropdown -->
       <div class="settings-tabs-mobile">
-        <CustomSelect
-          v-model="activeTab"
-          :options="mobileTabOptions"
-          class="tab-dropdown"
-        />
+        <CustomSelect v-model="activeTab" :options="mobileTabOptions" class="tab-dropdown" />
       </div>
 
       <!-- Desktop tabs (turns into a horizontal carousel when overflowing) -->
@@ -31,62 +19,62 @@
         </button>
 
         <div ref="desktopTabsRef" class="settings-tabs-desktop">
-          <button 
-            @click="router.push({ hash: '#indexers' })" 
+          <button
+            @click="router.push({ hash: '#rootfolders' })"
+            :class="{ active: activeTab === 'rootfolders' }"
+            class="tab-button"
+          >
+            <PhFolder />
+            Root Folders
+          </button>
+          <button
+            @click="router.push({ hash: '#indexers' })"
             :class="{ active: activeTab === 'indexers' }"
             class="tab-button"
           >
-    <PhListMagnifyingGlass />
-          Indexers
-        </button>
-        <button 
-          @click="router.push({ hash: '#apis' })" 
-          :class="{ active: activeTab === 'apis' }"
-          class="tab-button"
-        >
-    <PhCloud />
-          Metadata Sources
-        </button>
-        <button 
-          @click="router.push({ hash: '#clients' })" 
-          :class="{ active: activeTab === 'clients' }"
-          class="tab-button"
-        >
-    <PhDownload />
-          Download Clients
-        </button>
-        <button 
-          @click="router.push({ hash: '#quality-profiles' })" 
-          :class="{ active: activeTab === 'quality-profiles' }"
-          class="tab-button"
-        >
-    <PhStar />
-          Quality Profiles
-        </button>
-        <button 
-          @click="router.push({ hash: '#general' })" 
-          :class="{ active: activeTab === 'general' }"
-          class="tab-button"
-        >
-    <PhSliders />
-          General Settings
-        </button>
-        <button 
-          @click="router.push({ hash: '#notifications' })" 
-          :class="{ active: activeTab === 'notifications' }"
-          class="tab-button"
-        >
-    <PhBell />
-          Notifications
-        </button>
-        <button 
-          @click="router.push({ hash: '#requests' })" 
-          :class="{ active: activeTab === 'requests' }"
-          class="tab-button"
-        >
-    <PhGlobe />
-          Requests
-        </button>
+            <PhListMagnifyingGlass />
+            Indexers
+          </button>
+          <button
+            @click="router.push({ hash: '#clients' })"
+            :class="{ active: activeTab === 'clients' }"
+            class="tab-button"
+          >
+            <PhDownload />
+            Download Clients
+          </button>
+          <button
+            @click="router.push({ hash: '#quality-profiles' })"
+            :class="{ active: activeTab === 'quality-profiles' }"
+            class="tab-button"
+          >
+            <PhStar />
+            Quality Profiles
+          </button>
+          <button
+            @click="router.push({ hash: '#notifications' })"
+            :class="{ active: activeTab === 'notifications' }"
+            class="tab-button"
+          >
+            <PhBell />
+            Notifications
+          </button>
+          <button
+            @click="router.push({ hash: '#bot' })"
+            :class="{ active: activeTab === 'bot' }"
+            class="tab-button"
+          >
+            <PhGlobe />
+            Discord Bot
+          </button>
+          <button
+            @click="router.push({ hash: '#general' })"
+            :class="{ active: activeTab === 'general' }"
+            class="tab-button"
+          >
+            <PhSliders />
+            General Settings
+          </button>
         </div>
 
         <button
@@ -101,545 +89,66 @@
       </div>
     </div>
 
-    <div class="settings-content">
-      <!-- Indexers Tab -->
-      <div v-if="activeTab === 'indexers'" class="tab-content">
-        <div class="section-header">
-          <h3>Indexers</h3>
-          <button @click="showIndexerForm = true" class="add-button">
-            <PhPlus />
-            Add Indexer
-          </button>
-        </div>
-
-        <div v-if="indexers.length === 0" class="empty-state">
-          <PhListMagnifyingGlass />
-          <p>No indexers configured. Add Newznab or Torznab indexers to search for audiobooks.</p>
-        </div>
-
-        <div v-else class="indexers-grid">
-          <div 
-            v-for="indexer in indexers" 
-            :key="indexer.id"
-            class="indexer-card"
-            :class="{ disabled: !indexer.isEnabled }"
+    <!-- Settings Toolbar -->
+    <div class="settings-toolbar">
+      <div class="toolbar-content">
+        <div class="toolbar-actions">
+          <!-- Add buttons for each section -->
+          <button
+            v-if="activeTab === 'rootfolders'"
+            @click="openAddRootFolder()"
+            class="add-button"
           >
-            <div class="indexer-header">
-              <div class="indexer-info">
-                <h4>{{ indexer.name }}</h4>
-                <span class="indexer-type" :class="indexer.type.toLowerCase()">
-                  {{ indexer.implementation === 'InternetArchive' ? 'DDL' : indexer.type }}
-                </span>
-              </div>
-              <div class="indexer-actions">
-                <button 
-                  @click="toggleIndexerFunc(indexer.id)" 
-                  class="icon-button"
-                  :title="indexer.isEnabled ? 'Disable' : 'Enable'"
-                >
-                  <template v-if="indexer.isEnabled">
-                    <PhToggleRight />
-                  </template>
-                  <template v-else>
-                    <PhToggleLeft />
-                  </template>
-                </button>
-                <button 
-                  @click="testIndexerFunc(indexer.id)" 
-                  class="icon-button"
-                  title="Test"
-                  :disabled="testingIndexer === indexer.id"
-                >
-                  <template v-if="testingIndexer === indexer.id">
-                    <PhSpinner class="ph-spin" />
-                  </template>
-                  <template v-else>
-                    <PhCheckCircle />
-                  </template>
-                </button>
-                <button 
-                  @click="editIndexer(indexer)" 
-                  class="icon-button"
-                  title="Edit"
-                >
-                  <PhPencil />
-                </button>
-                <button 
-                  @click="confirmDeleteIndexer(indexer)" 
-                  class="icon-button danger"
-                  title="Delete"
-                >
-                  <PhTrash />
-                </button>
-              </div>
-            </div>
-
-            <div class="indexer-details">
-              <div class="detail-row">
-                <PhLink />
-                <span class="detail-label">URL:</span>
-                <span class="detail-value">{{ indexer.url }}</span>
-              </div>
-              <div class="detail-row">
-                <PhListChecks />
-                <span class="detail-label">Features:</span>
-                <div class="feature-badges">
-                  <span v-if="indexer.enableRss" class="badge">RSS</span>
-                  <span v-if="indexer.enableAutomaticSearch" class="badge">Automatic Search</span>
-                  <span v-if="indexer.enableInteractiveSearch" class="badge">Interactive Search</span>
-                </div>
-              </div>
-              <div class="detail-row" v-if="indexer.lastTestedAt">
-                <PhClock />
-                <span class="detail-label">Last Tested:</span>
-                <span class="detail-value" :class="{ success: indexer.lastTestSuccessful, error: indexer.lastTestSuccessful === false }">
-                  {{ formatDate(indexer.lastTestedAt) }}
-                  <template v-if="indexer.lastTestSuccessful">
-                    <PhCheckCircle class="success" />
-                  </template>
-                  <template v-else-if="indexer.lastTestSuccessful === false">
-                    <PhXCircle class="error" />
-                  </template>
-                </span>
-              </div>
-              <div class="detail-row error-row" v-if="indexer.lastTestError">
-                <PhWarning />
-                <span class="detail-value error">{{ indexer.lastTestError }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Metadata Sources Tab -->
-      <div v-if="activeTab === 'apis'" class="tab-content">
-        <div class="section-header">
-          <h3>Metadata Sources</h3>
-          <button @click="showApiForm = true" class="add-button">
             <PhPlus />
-            Add Metadata Source
+            Add Root Folder
           </button>
-        </div>
-
-        <div v-if="configStore.apiConfigurations.length === 0" class="empty-state">
-          <PhCloudSlash />
-          <p>No metadata sources configured. Add one to enrich audiobook information.</p>
-        </div>
-
-        <div v-else class="config-list">
-          <div 
-            v-for="api in configStore.apiConfigurations" 
-            :key="api.id"
-            class="config-card"
-            :class="{ disabled: !api.isEnabled }"
-          >
-            <div class="config-info">
-              <h4>{{ api.name }}</h4>
-              <p class="config-url">{{ api.baseUrl }}</p>
-              <div class="config-meta">
-                <span v-if="api.type !== 'metadata'" class="config-type">{{ api.type.toUpperCase() }}</span>
-                <span class="config-status" :class="{ enabled: api.isEnabled }">
-                  <component :is="api.isEnabled ? PhCheckCircle : PhXCircle" :class="api.isEnabled ? 'success' : 'error'" />
-                  {{ api.isEnabled ? 'Enabled' : 'Disabled' }}
-                </span>
-                <span class="config-priority">
-                  <PhArrowUp />
-                  Priority: {{ api.priority }}
-                </span>
-              </div>
-            </div>
-              <div class="config-actions">
-              <button    
-                @click="toggleApiConfig(api)"
-                class="icon-button"
-                >
-                <template v-if="api.isEnabled">
-                  <PhToggleRight />
-                </template>
-                <template v-else>
-                  <PhToggleLeft />
-                </template>
-              </button>  
-              <button @click="editApiConfig(api)" class="icon-button" title="Edit">
-                <PhPencil />
-              </button>
-              <button @click="confirmDeleteApi(api)" class="icon-button danger" title="Delete">
-                <PhTrash />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Download Clients Tab -->
-      <div v-if="activeTab === 'clients'" class="tab-content">
-        <div class="section-header">
-          <h3>Download Clients</h3>
-          <button @click="showClientForm = true; editingClient = null" class="add-button">
+          <button v-if="activeTab === 'clients'" @click="openAddClient()" class="add-button">
             <PhPlus />
             Add Download Client
           </button>
-        </div>
-
-        <div v-if="configStore.downloadClientConfigurations.length === 0" class="empty-state">
-          <PhDownloadSimple />
-          <p>No download clients configured. Add qBittorrent, Transmission, SABnzbd, or NZBGet to download audiobooks.</p>
-        </div>
-
-        <div v-else class="indexers-grid">
-          <div 
-            v-for="client in configStore.downloadClientConfigurations" 
-            :key="client.id"
-            class="indexer-card"
-            :class="{ disabled: !client.isEnabled }"
+          <button
+            v-if="activeTab === 'clients'"
+            @click="downloadClientsRef?.openAddMapping()"
+            class="add-button"
           >
-            <div class="indexer-header">
-              <div class="indexer-info">
-                <h4>{{ client.name }}</h4>
-                <span class="indexer-type" :class="getClientTypeClass(client.type)">
-                  {{ client.type }}
-                </span>
-              </div>
-              <div class="indexer-actions">
-                <button 
-                  @click="editClientConfig(client)" 
-                  class="icon-button"
-                  title="Edit"
-                >
-                  <PhPencil />
-                </button>
-                <button
-                  @click="testClient(client)"
-                  class="icon-button"
-                  title="Test"
-                  :disabled="testingClient === client.id"
-                >
-                  <template v-if="testingClient === client.id">
-                    <PhSpinner class="ph-spin" />
-                  </template>
-                  <template v-else>
-                    <PhCheckCircle />
-                  </template>
-                </button>
-                <button 
-                  @click="confirmDeleteClient(client)" 
-                  class="icon-button danger"
-                  title="Delete"
-                >
-                  <PhTrash />
-                </button>
-              </div>
-            </div>
-
-            <div class="indexer-details">
-              <div class="detail-row">
-                <PhLink />
-                <span class="detail-label">Host:</span>
-                <span class="detail-value">{{ client.host }}:{{ client.port }}</span>
-              </div>
-              <div class="detail-row">
-                <PhShieldCheck />
-                <span class="detail-label">Security:</span>
-                <div class="feature-badges">
-                  <span class="badge" v-if="client.useSSL">
-                    <PhLock /> SSL
-                  </span>
-                  <span class="badge" v-else>
-                    <PhLockOpen /> No SSL
-                  </span>
-                </div>
-              </div>
-              <div class="detail-row">
-                <PhFolder />
-                <span class="detail-label">Download Path:</span>
-                <span class="detail-value">{{ client.downloadPath || '(client local)' }}</span>
-              </div>
-              <div class="detail-row">
-                <PhLinkSimple />
-                <span class="detail-label">Mappings:</span>
-                <div class="feature-badges">
-                  <span v-for="m in getMappingsForClient(client)" :key="m.id" class="badge">
-                    <PhLink />
-                    {{ m.name || m.remotePath }}
-                  </span>
-                  <span v-if="getMappingsForClient(client).length === 0" class="detail-value">(none)</span>
-                </div>
-              </div>
-              <div class="detail-row">
-                <PhCheckCircle />
-                <span class="detail-label">Status:</span>
-                <span class="detail-value" :class="{ success: client.isEnabled, error: !client.isEnabled }">
-                  {{ client.isEnabled ? 'Enabled' : 'Disabled' }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Remote Path Mappings Section -->
-        <div class="section-header" style="margin-top: 2rem;">
-          <h3>Remote Path Mappings</h3>
-          <button @click="openMappingForm()" class="add-button">
             <PhPlus />
             Add Mapping
           </button>
-        </div>
-
-        <div v-if="remotePathMappings.length === 0" class="empty-state">
-          <PhLinkSimple />
-          <p>No remote path mappings configured. Add a mapping to translate client remote paths to local paths the server can access.</p>
-        </div>
-
-        <div v-else class="config-list">
-          <div v-for="mapping in remotePathMappings" :key="mapping.id" class="config-card">
-            <div class="config-info">
-              <h4>{{ mapping.name || mapping.remotePath }}</h4>
-              <div class="detail-row">
-                <PhBrowser />
-                <span class="detail-label">Remote Path:</span>
-                <span class="detail-value">{{ mapping.remotePath }}</span>
-              </div>
-              <div class="detail-row">
-                <PhFolder />
-                <span class="detail-label">Local Path:</span>
-                <span class="detail-value">{{ mapping.localPath }}</span>
-              </div>
-            </div>
-            <div class="config-actions">
-              <button @click="editMapping(mapping)" class="edit-button" title="Edit">
-                <PhPencil />
-              </button>
-              <button @click="confirmDeleteMapping(mapping)" class="delete-button" title="Delete">
-                <PhTrash />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Remote Path Mapping Modal -->
-        <div v-if="showMappingForm" class="modal-overlay" @click="closeMappingForm()">
-          <div class="modal-content" @click.stop>
-            <div class="modal-header">
-              <h3>{{ mappingToEdit ? 'Edit' : 'Add' }} Remote Path Mapping</h3>
-              <button @click="closeMappingForm()" class="modal-close"><PhX /></button>
-            </div>
-            <div class="modal-body">
-              <div class="form-group">
-                <label>Mapping Name (optional)</label>
-                <input v-model="mappingToEditData.name" type="text" placeholder="Friendly name for this mapping" />
-              </div>
-              <div class="form-group">
-                <label>Download Client</label>
-                <select v-model="mappingToEditData.downloadClientId">
-                  <option v-for="c in configStore.downloadClientConfigurations" :key="c.id" :value="c.id">{{ c.name }} ({{ c.type }})</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Remote Path (from client)</label>
-                <input v-model="mappingToEditData.remotePath" type="text" placeholder="/path/to/complete/downloads" />
-              </div>
-              <div class="form-group">
-                <label>Local Path (server)</label>
-                <FolderBrowser v-model="mappingToEditData.localPath" placeholder="Select a local path..." />
-              </div>
-            </div>
-            <div class="modal-actions">
-              <button @click="closeMappingForm()" class="cancel-button">Cancel</button>
-              <button @click="saveMapping()" class="save-button"><PhCheck /> Save</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Delete Remote Path Mapping Confirmation Modal -->
-        <div v-if="mappingToDelete" class="modal-overlay" @click="mappingToDelete = null">
-          <div class="modal-content" @click.stop>
-            <div class="modal-header">
-              <h3>
-                <PhWarningCircle />
-                Delete Remote Path Mapping
-              </h3>
-              <button @click="mappingToDelete = null" class="modal-close">
-                <PhX />
-              </button>
-            </div>
-            <div class="modal-body">
-              <p>Are you sure you want to delete the remote path mapping <strong>{{ mappingToDelete.name || mappingToDelete.remotePath }}</strong>?</p>
-              <p>This action cannot be undone.</p>
-            </div>
-            <div class="modal-actions">
-              <button @click="mappingToDelete = null" class="cancel-button">
-                Cancel
-              </button>
-              <button @click="executeDeleteMapping()" class="delete-button">
-                <PhTrash />
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Quality Profiles Tab -->
-      <div v-if="activeTab === 'quality-profiles'" class="tab-content">
-        <div class="section-header">
-          <h3>Quality Profiles</h3>
-          <button @click="openQualityProfileForm()" class="add-button">
+          <button
+            v-if="activeTab === 'quality-profiles'"
+            @click="qualityProfilesRef?.openAddProfile()"
+            class="add-button"
+          >
             <PhPlus />
             Add Quality Profile
           </button>
-        </div>
 
-        <!-- Empty State -->
-        <div v-if="qualityProfiles.length === 0" class="empty-state">
-          <PhStar class="empty-icon" />
-          <p>No quality profiles configured yet.</p>
-          <p class="empty-help">Quality profiles define which release qualities you want to download and prefer.</p>
-        </div>
+          <button
+            v-if="activeTab === 'indexers'"
+            @click="indexersRef?.openAddIndexer()"
+            class="add-button"
+          >
+            <PhPlus />
+            Add Indexer
+          </button>
 
-        <!-- Quality Profiles Grid -->
-        <div v-else class="profiles-grid">
-          <div v-for="profile in qualityProfiles" :key="profile.id" class="profile-card">
-            <div class="profile-header">
-              <div class="profile-title-section">
-                <div class="profile-name-row">
-                  <h4>{{ profile.name }}</h4>
-                  <span v-if="profile.isDefault" class="status-badge default">
-                    <PhCheckCircle />
-                    Default
-                  </span>
-                </div>
-                <p v-if="profile.description" class="profile-description">{{ profile.description }}</p>
-              </div>
-              <div class="profile-actions">
-                <button @click="editProfile(profile)" class="icon-button" title="Edit Profile">
-                  <PhPencil />
-                </button>
-                <button 
-                  v-if="!profile.isDefault"
-                  @click="setDefaultProfile(profile)" 
-                  class="icon-button" 
-                  title="Set as Default"
-                >
-                  <PhStar />
-                </button>
-                <button 
-                  @click="confirmDeleteProfile(profile)" 
-                  class="icon-button danger" 
-                  :disabled="profile.isDefault"
-                  :title="profile.isDefault ? 'Cannot delete default profile' : 'Delete Profile'"
-                >
-                  <PhTrash />
-                </button>
-              </div>
-            </div>
+          <button
+            v-if="activeTab === 'notifications'"
+            @click="notificationsRef?.openWebhookForm()"
+            class="add-button"
+          >
+            <PhPlus />
+            Add Webhook
+          </button>
 
-            <div class="profile-content">
-              <!-- Qualities Section -->
-              <div v-if="profile.qualities && profile.qualities.filter(q => q.allowed).length > 0" class="profile-section">
-                <h5><PhCheckSquare /> Allowed Qualities</h5>
-                <div class="quality-badges">
-                  <span 
-                    v-for="quality in profile.qualities.filter(q => q.allowed).sort((a, b) => b.priority - a.priority)"
-                    :key="quality.quality"
-                    class="quality-badge"
-                    :class="{ 'is-cutoff': quality.quality === profile.cutoffQuality }"
-                  >
-                    {{ quality.quality }}
-                      <template v-if="quality.quality === profile.cutoffQuality">
-                        <PhScissors title="Cutoff Quality" />
-                      </template>
-                  </span>
-                </div>
-              </div>
-
-              <!-- Preferences Section -->
-              <div v-if="profile.preferredFormats?.length || profile.preferredLanguages?.length" class="profile-section">
-                <h5><PhSliders /> Preferences</h5>
-                <div class="preferences-grid">
-                  <div v-if="profile.preferredFormats && profile.preferredFormats.length > 0" class="preference-item">
-                    <span class="preference-label">Formats</span>
-                    <span class="preference-value">{{ profile.preferredFormats.join(', ') }}</span>
-                  </div>
-                  <div v-if="profile.preferredLanguages && profile.preferredLanguages.length > 0" class="preference-item">
-                    <span class="preference-label">Languages</span>
-                    <span class="preference-value">{{ profile.preferredLanguages.join(', ') }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Limits Section -->
-              <div v-if="profile.minimumSize || profile.maximumSize || (profile.minimumSeeders && profile.minimumSeeders > 0) || (profile.maximumAge && profile.maximumAge > 0)" class="profile-section">
-                <h5><PhListChecks /> Limits & Requirements</h5>
-                <div class="limits-grid">
-                  <div v-if="profile.minimumSize || profile.maximumSize" class="limit-item">
-                    <PhRuler />
-                    <span class="limit-label">Size</span>
-                    <span class="limit-value">
-                      {{ profile.minimumSize || '0' }} - {{ profile.maximumSize || '∞' }} MB
-                    </span>
-                  </div>
-                  <div v-if="profile.minimumSeeders && profile.minimumSeeders > 0" class="limit-item">
-                    <PhUsers />
-                    <span class="limit-label">Seeders</span>
-                    <span class="limit-value">{{ profile.minimumSeeders }}+ required</span>
-                  </div>
-                  <div v-if="profile.maximumAge && profile.maximumAge > 0" class="limit-item">
-                    <PhClock />
-                    <span class="limit-label">Max Age</span>
-                    <span class="limit-value">{{ profile.maximumAge }} days</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Word Filters Section -->
-              <div v-if="profile.preferredWords?.length || profile.mustContain?.length || profile.mustNotContain?.length" class="profile-section">
-                <h5><PhTextAa /> Word Filters</h5>
-                <div class="word-filters">
-                  <div v-if="profile.preferredWords && profile.preferredWords.length > 0" class="word-filter-group">
-                    <span class="filter-type">
-                      <PhSparkle />
-                      Preferred
-                    </span>
-                    <div class="word-tags">
-                      <span v-for="word in profile.preferredWords" :key="word" class="word-tag positive">
-                        {{ word }}
-                      </span>
-                    </div>
-                  </div>
-                  <div v-if="profile.mustContain && profile.mustContain.length > 0" class="word-filter-group">
-                    <span class="filter-type">
-                      <PhCheck />
-                      Required
-                    </span>
-                    <div class="word-tags">
-                      <span v-for="word in profile.mustContain" :key="word" class="word-tag required">
-                        {{ word }}
-                      </span>
-                    </div>
-                  </div>
-                  <div v-if="profile.mustNotContain && profile.mustNotContain.length > 0" class="word-filter-group">
-                    <span class="filter-type">
-                      <PhX />
-                      Forbidden
-                    </span>
-                    <div class="word-tags">
-                      <span v-for="word in profile.mustNotContain" :key="word" class="word-tag forbidden">
-                        {{ word }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- General Settings Tab -->
-      <div v-if="activeTab === 'general'" class="tab-content">
-        <div class="section-header">
-          <h3>General Settings</h3>
-          <button @click="saveSettings" :disabled="configStore.isLoading" class="save-button" :title="!isFormValid ? 'Please fix invalid fields before saving' : ''">
+          <!-- Save button for sections that need it -->
+          <button
+            v-if="activeTab === 'general' || activeTab === 'bot'"
+            @click="saveSettings"
+            :disabled="configStore.isLoading"
+            class="save-button"
+            :title="!isFormValid ? 'Please fix invalid fields before saving' : ''"
+          >
             <template v-if="configStore.isLoading">
               <PhSpinner class="ph-spin" />
             </template>
@@ -648,646 +157,61 @@
             </template>
             {{ configStore.isLoading ? 'Saving...' : 'Save Settings' }}
           </button>
-        </div>
-        <div v-if="validationErrors.length > 0" class="error-summary" role="alert">
-          <strong>Please fix the following:</strong>
-          <ul>
-            <li v-for="(e, idx) in validationErrors" :key="idx">{{ e }}</li>
-          </ul>
-        </div>
 
-        <div v-if="settings" class="settings-form">
-          <div class="form-section">
-            <h4><PhFolder /> File Management</h4>
-            
-            <div class="form-group">
-              <label>Root Folder / Output Path</label>
-              <FolderBrowser 
-                v-model="settings.outputPath" 
-                placeholder="Select a folder for audiobooks..."
-                inputDataCy="output-path"
-              />
-              <span class="form-help">Root folder where downloaded audiobooks will be saved. This must be set before adding audiobooks.</span>
-            </div>
-
-            <div class="form-group">
-              <label>File Naming Pattern</label>
-              <input v-model="settings.fileNamingPattern" type="text" placeholder="{Author}/{Series}/{Title}">
-              <span class="form-help">
-                Pattern for organizing audiobook files. Available variables:<br>
-                <code>{Author}</code> - Author/narrator name<br>
-                <code>{Series}</code> - Series name<br>
-                <code>{Title}</code> - Book title<br>
-                <code>{SeriesNumber}</code> - Position in series<br>
-                <code>{DiskNumber}</code> or <code>{DiskNumber:00}</code> - Disk/part number (00 = zero-padded)<br>
-                <code>{ChapterNumber}</code> or <code>{ChapterNumber:00}</code> - Chapter number (00 = zero-padded)<br>
-                <code>{Year}</code> - Publication year<br>
-                <code>{Quality}</code> - Audio quality
-              </span>
-            </div>
-
-            <div class="form-group">
-              <label>Completed File Action</label>
-              <select v-model="settings.completedFileAction">
-                <option value="Move">Move (default)</option>
-                <option value="Copy">Copy</option>
-              </select>
-              <span class="form-help">Choose whether completed downloads should be moved into the library output path or copied and left in the client's folder.</span>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4><PhDownload /> Download Settings</h4>
-            
-            <div class="form-group">
-              <label>Max Concurrent Downloads</label>
-              <input v-model.number="settings.maxConcurrentDownloads" type="number" min="1" max="10">
-              <span class="form-help">Maximum number of simultaneous downloads (1-10)</span>
-            </div>
-
-            <div class="form-group">
-              <label>Polling Interval (seconds)</label>
-              <input v-model.number="settings.pollingIntervalSeconds" type="number" min="10" max="300">
-              <span class="form-help">How often to check download status (10-300 seconds)</span>
-            </div>
-
-            <div class="form-group">
-              <label>Download Completion Stability (seconds)</label>
-              <input v-model.number="settings.downloadCompletionStabilitySeconds" type="number" min="1" max="600">
-              <span class="form-help">How long (seconds) a download must be seen as complete on the client before finalization begins. Increase for clients that post-process/extract after completion.</span>
-            </div>
-
-            <div class="form-group">
-              <label>Missing-source Retry Initial Delay (seconds)</label>
-              <input v-model.number="settings.missingSourceRetryInitialDelaySeconds" type="number" min="1" max="600">
-              <span class="form-help">Initial retry delay (seconds) used when files are not yet available at finalization time.</span>
-            </div>
-
-            <div class="form-group">
-              <label>Missing-source Max Retries</label>
-              <input v-model.number="settings.missingSourceMaxRetries" type="number" min="0" max="20">
-              <span class="form-help">Maximum number of retries to attempt if the finalized download's source files are missing.</span>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4><PhToggleLeft /> Features</h4>
-            
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enableMetadataProcessing" type="checkbox">
-                <span>
-                  <strong>Enable Metadata Processing</strong>
-                  <small>Automatically fetch and embed audiobook metadata</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enableCoverArtDownload" type="checkbox">
-                <span>
-                  <strong>Enable Cover Art Download</strong>
-                  <small>Download and embed cover art for audiobooks</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enableNotifications" type="checkbox">
-                <span>
-                  <strong>Enable Notifications</strong>
-                  <small>Receive notifications for downloads and events</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.showCompletedExternalDownloads" type="checkbox">
-                <span>
-                  <strong>Show completed external downloads in Activity</strong>
-                  <small>When enabled, completed torrents/NZBs from external clients will remain visible in the Activity view. When disabled, completed external items will be hidden to reduce clutter.</small>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4><PhMagnifyingGlass /> Search Settings</h4>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enableAmazonSearch" type="checkbox" />
-                <span>
-                  <strong>Enable Amazon Searching</strong>
-                  <small>Include Amazon-based search providers when performing intelligent searches.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enableAudibleSearch" type="checkbox" />
-                <span>
-                  <strong>Enable Audible Searching</strong>
-                  <small>Include Audible provider lookups when performing intelligent searches.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.enableOpenLibrarySearch" type="checkbox" />
-                <span>
-                  <strong>Enable OpenLibrary Searching</strong>
-                  <small>Include OpenLibrary title augmentation and lookups when performing intelligent searches.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label>Candidate Cap (max candidates)</label>
-                <input v-model.number="settings.searchCandidateCap" type="number" min="1" max="200" />
-                <span class="form-help">Maximum number of candidate ASINs/entries to consider when searching (candidateLimit).</span>
-              </div>
-
-              <div class="form-group">
-                <label>Result Cap (max results)</label>
-                <input v-model.number="settings.searchResultCap" type="number" min="1" max="200" />
-                <span class="form-help">Maximum number of results returned to the UI (returnLimit).</span>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label>Fuzzy Threshold</label>
-              <input v-model.number="settings.searchFuzzyThreshold" type="number" step="0.01" min="0" max="1" />
-              <span class="form-help">Fuzzy matching threshold used when comparing titles/authors (0.0-1.0). Higher values require closer matches.</span>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4><PhUserCircle /> Authentication</h4>
-            
-            <div class="form-group">
-              <label>Login Screen</label>
-              <div class="auth-row">
-                <input type="checkbox" id="authToggle" v-model="authEnabled" />
-                <label for="authToggle">Enable login screen</label>
-              </div>
-              <span class="form-help">Toggle to enable the login screen. This setting reflects the server's <code>AuthenticationRequired</code> value from <code>config.json</code>. Changes here are local and will not modify server files — edit <code>config/config.json</code> on the host to persist.</span>
-            </div>
-
-            <div v-if="authEnabled" class="form-group">
-              <label>Admin Account Management</label>
-              <div class="admin-credentials">
-                <input v-model="settings.adminUsername" type="text" placeholder="Admin username" class="admin-input" />
-                <div class="password-field">
-                  <input :type="showPassword ? 'text' : 'password'" v-model="settings.adminPassword" placeholder="New admin password" class="admin-input password-input" />
-                  <button type="button" class="password-toggle" @click.prevent="showPassword = !showPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide password' : 'Show password'">
-                    <template v-if="showPassword">
-                      <PhEyeSlash />
-                    </template>
-                    <template v-else>
-                      <PhEye />
-                    </template>
-                  </button>
-                </div>
-              </div>
-              <span class="form-help">Manage the admin account. Enter a new password to update the admin user's password when you save settings. The username field shows the current admin username. This section is only available when authentication is enabled.</span>
-            </div>
-
-            <div class="form-group">
-              <label>API Key (Server)</label>
-              <div class="input-group">
-                <input type="text" :value="startupConfig?.apiKey || ''" disabled class="input-group-input" />
-                <div class="input-group-append">
-                  <button
-                    type="button"
-                    class="icon-button input-group-btn"
-                    :class="{ 'copied': copiedApiKey }"
-                    @click="copyApiKey"
-                    :disabled="!startupConfig?.apiKey"
-                    title="Copy API key"
-                  >
-                    <template v-if="copiedApiKey">
-                      <PhCheck />
-                    </template>
-                    <template v-else>
-                      <PhFiles />
-                    </template>
-                  </button>
-                  <button
-                    type="button"
-                    class="regenerate-button input-group-btn"
-                    @click="regenerateApiKey"
-                    :disabled="loadingApiKey"
-                    :title="startupConfig?.apiKey ? 'Regenerate API key' : 'Generate API key'"
-                  >
-                    <template v-if="loadingApiKey">
-                      <PhSpinner class="ph-spin" />
-                    </template>
-                    <template v-else-if="startupConfig?.apiKey">
-                      <PhArrowCounterClockwise />
-                    </template>
-                    <template v-else>
-                      <PhPlus />
-                    </template>
-                    <span v-if="!loadingApiKey">{{ startupConfig?.apiKey ? 'Regenerate' : 'Generate' }}</span>
-                  </button>
-                </div>
-              </div>
-              <span class="form-help">API key for authenticating external applications. Generate a new key if needed. Copy it to use with API clients.</span>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4><PhGlobe /> External Requests / US Proxy
-              <button type="button" class="info-inline" @click.prevent="openProxySecurityModal" title="Security recommendations">
-                <PhInfo />
-              </button>
-            </h4>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.preferUsDomain" type="checkbox">
-                <span>
-                  <strong>Prefer US (.com) domain for Audible/Amazon</strong>
-                  <small>When enabled, the server will attempt a retry using the US (.com) domain if a localized or redirect page is detected.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group checkbox-group">
-              <label>
-                <input v-model="settings.useUsProxy" type="checkbox">
-                <span>
-                  <strong>Use HTTP proxy for US requests</strong>
-                  <small>When enabled, Audible/Amazon retries to the US domain will be routed through the proxy configured below.</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label>US Proxy Host</label>
-              <input v-model="settings.usProxyHost" type="text" placeholder="proxy.example.com" :disabled="!settings.useUsProxy" data-cy="us-proxy-host">
-              <div v-if="settings.useUsProxy && (!settings.usProxyHost || String(settings.usProxyHost).trim() === '')" class="form-error">Proxy host is required when using a proxy.</div>
-            </div>
-
-            <div class="form-group">
-              <label>US Proxy Port</label>
-              <input v-model.number="settings.usProxyPort" type="number" min="1" max="65535" :disabled="!settings.useUsProxy" data-cy="us-proxy-port">
-              <div v-if="settings.useUsProxy && (!settings.usProxyPort || Number(settings.usProxyPort) <= 0)" class="form-error">Proxy port must be between 1 and 65535.</div>
-            </div>
-
-            <div class="form-group">
-              <label>US Proxy Username (optional)</label>
-              <input v-model="settings.usProxyUsername" type="text" placeholder="username" :disabled="!settings.useUsProxy">
-            </div>
-
-              <div class="form-group">
-              <label>US Proxy Password (optional)</label>
-              <div class="password-field">
-                <input :type="showPassword ? 'text' : 'password'" v-model="settings.usProxyPassword" placeholder="Proxy password" class="admin-input password-input" :disabled="!settings.useUsProxy" />
-                <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide password' : 'Show password'">
-                  <template v-if="showPassword">
-                    <PhEyeSlash />
-                  </template>
-                  <template v-else>
-                    <PhEye />
-                  </template>
-                </button>
-              </div>
-              <span class="form-help">Store proxy credentials here for convenience. For production, consider using a secrets manager instead of storing passwords in the application database.</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Notifications Tab -->
-      
-  <!-- Requests (Discord Bot) Tab -->
-  <div v-if="activeTab === 'requests' && settings" class="tab-content">
-        <div class="section-header">
-          <h3>Requests (Discord Bot)</h3>
-          <button @click="saveSettings" :disabled="configStore.isLoading" class="save-button">
-            <template v-if="configStore.isLoading">
+          <!-- Test Discord integration (visible when on Discord Bot tab) -->
+          <button
+            v-if="activeTab === 'bot'"
+            @click="testDiscordIntegration"
+            :disabled="testingDiscord || !canTestDiscord"
+            :aria-disabled="!canTestDiscord"
+            :class="{ 'is-disabled': testingDiscord || !canTestDiscord }"
+            class="add-button"
+            :title="canTestDiscord ? 'Test Discord integration' : `Bot status: ${discordBotStatus}. Fill Application ID and Bot Token, and start the bot to enable`"
+          >
+            <template v-if="testingDiscord">
               <PhSpinner class="ph-spin" />
             </template>
             <template v-else>
-              <PhFloppyDisk />
+              <PhCheck />
             </template>
-            Save Settings
+            Test
           </button>
-        </div>
-
-        <div class="form-section">
-          <div class="form-group checkbox-group">
-            <label>
-              <input v-model="settings.discordBotEnabled" type="checkbox">
-              <span>
-                <strong>Enable Discord Bot Integration</strong>
-                <small>Allow an external Discord bot to read these settings and register slash commands.</small>
-              </span>
-            </label>
-          </div>
-
-          <div class="form-group">
-            <label>Discord Application ID</label>
-            <input v-model="settings.discordApplicationId" type="text" placeholder="Discord Application ID (client id)" />
-            <span class="form-help">Used to register application commands. For per-guild testing, set a Guild ID below.</span>
-          </div>
-
-          <div class="form-group">
-            <label>Discord Guild ID (optional)</label>
-            <input v-model="settings.discordGuildId" type="text" placeholder="Optional guild id for testing" />
-            <span class="form-help">If provided, commands will be registered to this guild for faster updates (useful for development).</span>
-          </div>
-
-          <div class="form-group">
-            <label>Discord Channel ID (optional)</label>
-            <input v-model="settings.discordChannelId" type="text" placeholder="Optional channel id to restrict commands" />
-            <span class="form-help">If provided, the bot will only accept request commands from this channel. You can also set this via the bot using the <code>/request-config set-channel</code> command.</span>
-          </div>
-
-          <!-- Invite / Register Controls -->
-          <div v-if="settings.discordApplicationId" class="form-group invite-row">
-            <label>Invite Bot to Server</label>
-            <div class="invite-controls">
-              <button @click="openInviteLink" class="invite-button">Open Invite</button>
-              <button @click="copyInviteLink" class="icon-button">Copy Invite Link</button>
-              <button @click="checkDiscordStatus" class="icon-button" :disabled="checkingDiscord">Check Install</button>
-              <button @click="registerCommands" class="save-button" :disabled="registeringCommands || !settings.discordBotToken">Register commands now</button>
-            </div>
-            <div class="form-help">
-              Use this to invite the bot with the minimal permissions needed for requests. Make sure <strong>Discord Application ID</strong> is filled in above. Optionally set a Guild ID to preselect a server.
-            </div>
-            <div v-if="inviteLinkPreview" class="invite-link-preview">
-              <small>Preview: <a :href="inviteLinkPreview" target="_blank" rel="noopener noreferrer">{{ inviteLinkPreview }}</a></small>
-            </div>
-
-            <div v-if="discordStatus" class="discord-status">
-              <template v-if="discordStatus.installed === true">
-                <span class="status-pill installed">Installed in guild {{ discordStatus.guildId || '' }}</span>
-              </template>
-              <template v-else-if="discordStatus.installed === false">
-                <span class="status-pill not-installed">Not installed in configured guild</span>
-              </template>
-              <template v-else>
-                <span class="status-pill unknown">Token validated</span>
-              </template>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Bot Token</label>
-            <div class="password-field">
-              <input :type="showPassword ? 'text' : 'password'" v-model="settings.discordBotToken" placeholder="Bot token (keep secret)" class="admin-input password-input" />
-              <button type="button" class="password-toggle" @click.prevent="toggleShowPassword" :aria-pressed="!!showPassword" :title="showPassword ? 'Hide token' : 'Show token'">
-                <template v-if="showPassword">
-                  <PhEyeSlash />
-                </template>
-                <template v-else>
-                  <PhEye />
-                </template>
-              </button>
-            </div>
-            <span class="form-help">The bot process will use this token to login. Be careful with this value.</span>
-          </div>
-
-          <div class="form-group">
-            <label>Command Group Name</label>
-            <input v-model="settings.discordCommandGroupName" type="text" placeholder="request" />
-            <span class="form-help">Primary command group (e.g. <code>request</code>)</span>
-          </div>
-
-          <div class="form-group">
-            <label>Subcommand Name</label>
-            <input v-model="settings.discordCommandSubcommandName" type="text" placeholder="audiobook" />
-            <span class="form-help">Subcommand for audiobooks (e.g. <code>audiobook</code>) — results in <code>/request audiobook &lt;title&gt;</code></span>
-          </div>
-
-          <div class="form-group">
-            <label>Bot Username (optional)</label>
-            <input v-model="settings.discordBotUsername" type="text" placeholder="Custom bot username" />
-            <span class="form-help">Optional custom username for the bot. Leave empty to use the default username from Discord.</span>
-          </div>
-
-          <div class="form-group">
-            <label>Bot Avatar URL (optional)</label>
-            <input v-model="settings.discordBotAvatar" type="url" placeholder="https://example.com/avatar.png" />
-            <span class="form-help">Optional avatar image URL for the bot. Leave empty to use the default avatar from Discord.</span>
-          </div>
-        </div>
-
-        <!-- Discord Bot Process Controls -->
-        <div class="form-section">
-          <h4><PhRobot /> Discord Bot Process Control</h4>
-          
-          <div class="bot-status-section">
-            <div class="bot-status-display">
-              <div class="status-indicator" :class="botStatusClass">
-                <PhCircle v-if="botStatus === 'unknown'" />
-                <PhSpinner v-else-if="botStatus === 'checking'" class="ph-spin" />
-                <PhCheckCircle v-else-if="botStatus === 'running'" />
-                <PhXCircle v-else-if="botStatus === 'stopped'" />
-                <PhWarning v-else />
-              </div>
-              <div class="status-text">
-                <strong>Bot Status:</strong> {{ botStatusText }}
-              </div>
-            </div>
-            
-            <div class="bot-controls">
-              <button 
-                @click="checkBotStatus" 
-                class="status-button"
-                :disabled="checkingBotStatus"
-              >
-                <template v-if="checkingBotStatus">
-                  <PhSpinner class="ph-spin" />
-                </template>
-                <template v-else>
-                  <PhArrowClockwise />
-                </template>
-                Refresh Status
-              </button>
-              
-              <button 
-                @click="startBot" 
-                class="start-button"
-                :disabled="startingBot || botStatus === 'running'"
-              >
-                <template v-if="startingBot">
-                  <PhSpinner class="ph-spin" />
-                </template>
-                <template v-else>
-                  <PhPlay />
-                </template>
-                Start Bot
-              </button>
-              
-              <button 
-                @click="stopBot" 
-                class="stop-button"
-                :disabled="stoppingBot || botStatus === 'stopped'"
-              >
-                <template v-if="stoppingBot">
-                  <PhSpinner class="ph-spin" />
-                </template>
-                <template v-else>
-                  <PhStop />
-                </template>
-                Stop Bot
-              </button>
-            </div>
-          </div>
-          
-          <div class="form-help">
-            Control the Discord bot process directly from here. The bot will use the token configured above to connect to Discord and register slash commands.
-          </div>
         </div>
       </div>
+    </div>
 
-      <div v-if="activeTab === 'notifications'" class="tab-content">
-        <div class="section-header">
-          <div class="section-title-wrapper">
-            <h3>Notification Webhooks</h3>
-            <p class="section-subtitle">Configure webhooks to receive real-time notifications about audiobook events</p>
-          </div>
-          <button @click="showWebhookForm = true" class="add-button">
-            <PhPlus />
-            Add Webhook
-          </button>
-        </div>
+    <div class="settings-content">
+      <!-- Indexers Tab -->
+      <IndexersTab v-if="activeTab === 'indexers'" ref="indexersRef" />
 
-        <div v-if="webhooks.length === 0" class="empty-state">
-          <PhBellSlash class="empty-icon" />
-          <h3>No webhooks configured</h3>
-          <p>Webhooks allow you to receive real-time notifications when important events occur.</p>
-          <p class="empty-help">Supported services include Slack, Discord, Telegram, Pushover, and more.</p>
-          <button @click="showWebhookForm = true" class="add-button-large">
-            <PhPlus />
-            Create Your First Webhook
-          </button>
-        </div>
+      <!-- Download Clients Tab -->
+      <DownloadClientsTab v-if="activeTab === 'clients'" ref="downloadClientsRef" />
 
-        <div v-else class="webhooks-grid">
-          <div 
-            v-for="webhook in webhooks" 
-            :key="webhook.id"
-            class="webhook-card"
-            :class="{ disabled: !webhook.isEnabled }"
-          >
-            <div class="webhook-header" @click="toggleWebhookExpanded(webhook.id)">
-              <div class="webhook-title-row">
-                <div class="webhook-icon" :class="`service-${webhook.type.toLowerCase()}`">
-                  <component :is="getWebhookIcon(webhook.type)" />
-                </div>
-                <div class="webhook-info">
-                  <h4>{{ webhook.name }}</h4>
-                  <div class="webhook-meta">
-                    <span class="webhook-type-badge">{{ webhook.type }}</span>
-                    <div class="triggers-preview">
-                      <span 
-                        v-for="trigger in webhook.triggers" 
-                        :key="trigger"
-                        class="trigger-badge-small"
-                        :class="getTriggerClass(trigger)"
-                        :title="formatTriggerName(trigger)"
-                      >
-                        <component :is="getTriggerIcon(trigger)" />
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="webhook-header-actions">
-                <div class="webhook-status-badge" :class="{ active: webhook.isEnabled }">
-                  <component :is="webhook.isEnabled ? PhCheckCircle : PhXCircle" />
-                  {{ webhook.isEnabled ? 'Active' : 'Inactive' }}
-                </div>
-                <button 
-                  class="expand-toggle" 
-                  :class="{ expanded: isWebhookExpanded(webhook.id) }"
-                  :title="isWebhookExpanded(webhook.id) ? 'Collapse details' : 'Expand details'"
-                  @click.stop="toggleWebhookExpanded(webhook.id)"
-                >
-                  <PhCaretDown />
-                </button>
-              </div>
-            </div>
+      <!-- Quality Profiles Tab -->
+      <QualityProfilesTab v-if="activeTab === 'quality-profiles'" ref="qualityProfilesRef" />
 
-            <transition name="expand">
-              <div v-if="isWebhookExpanded(webhook.id)" class="webhook-body">
-                <div class="webhook-url-container">
-                  <PhLink class="url-icon" />
-                  <span class="webhook-url">{{ webhook.url }}</span>
-                </div>
+      <!-- General Settings Tab -->
+      <GeneralSettingsTab
+        v-if="activeTab === 'general' && settings"
+        ref="generalSettingsRef"
+        :settings="settings"
+        :startupConfig="startupConfig"
+        :authEnabled="authEnabled"
+        @update:authEnabled="authEnabled = $event"
+        @update:startupConfig="startupConfig = $event"
+      />
 
-                <div class="webhook-triggers-section">
-                  <div class="triggers-header">
-                    <PhBell />
-                    <span class="triggers-label">Active Triggers ({{ webhook.triggers.length }})</span>
-                  </div>
-                  <div class="triggers-list">
-                    <span 
-                      v-for="trigger in webhook.triggers" 
-                      :key="trigger"
-                      class="trigger-badge"
-                      :class="getTriggerClass(trigger)"
-                    >
-                      <component :is="getTriggerIcon(trigger)" />
-                      {{ formatTriggerName(trigger) }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </transition>
+      <!-- Root Folders Tab -->
+      <RootFoldersTab v-if="activeTab === 'rootfolders'" ref="rootFoldersRef" />
 
-            <div class="webhook-actions">
-              <button 
-                @click="toggleWebhook(webhook)" 
-                class="action-btn toggle-btn"
-                :class="{ active: webhook.isEnabled }"
-                :title="webhook.isEnabled ? 'Disable webhook' : 'Enable webhook'"
-              >
-                <component :is="webhook.isEnabled ? PhToggleRight : PhToggleLeft" />
-                {{ webhook.isEnabled ? 'Enabled' : 'Disabled' }}
-              </button>
-              <button 
-                @click="testWebhook(webhook)" 
-                class="action-btn test-btn"
-                :disabled="testingWebhook === webhook.id || !webhook.isEnabled"
-                :title="!webhook.isEnabled ? 'Enable webhook to test' : 'Send test notification'"
-              >
-                <PhSpinner v-if="testingWebhook === webhook.id" class="ph-spin" />
-                <PhPaperPlaneTilt v-else />
-                <span v-if="testingWebhook !== webhook.id">Test</span>
-                <span v-else>Testing...</span>
-              </button>
-              <button 
-                @click="editWebhook(webhook)" 
-                class="action-btn edit-btn"
-                title="Edit webhook"
-              >
-                <PhPencil />
-                <span>Edit</span>
-              </button>
-              <button 
-                @click="deleteWebhook(webhook.id)" 
-                class="action-btn delete-btn"
-                title="Delete webhook"
-              >
-                <PhTrash />
-                <span>Delete</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Discord Bot Tab -->
+      <DiscordBotTab v-if="activeTab === 'bot' && settings" :settings="settings" @bot-action-completed="checkDiscordBotRunning" />
+
+      <NotificationsTab
+        v-if="activeTab === 'notifications' && settings"
+        ref="notificationsRef"
+        :settings="settings"
+      />
     </div>
 
     <!-- Metadata Source Configuration Modal -->
@@ -1303,32 +227,32 @@
           <form @submit.prevent="saveApiConfig" class="config-form">
             <div class="form-group">
               <label for="api-name">Name *</label>
-              <input 
+              <input
                 id="api-name"
-                v-model="apiForm.name" 
-                type="text" 
-                placeholder="e.g., Audimeta" 
+                v-model="apiForm.name"
+                type="text"
+                placeholder="e.g., Audimeta"
                 required
               />
             </div>
 
             <div class="form-group">
               <label for="api-url">Base URL *</label>
-              <input 
+              <input
                 id="api-url"
-                v-model="apiForm.baseUrl" 
-                type="url" 
-                placeholder="https://api.example.com" 
+                v-model="apiForm.baseUrl"
+                type="url"
+                placeholder="https://api.example.com"
                 required
               />
             </div>
 
             <div class="form-group">
               <label for="api-key">API Key</label>
-              <input 
+              <input
                 id="api-key"
-                v-model="apiForm.apiKey" 
-                type="password" 
+                v-model="apiForm.apiKey"
+                type="password"
                 placeholder="Optional API key"
               />
               <small>Leave empty if not required</small>
@@ -1337,11 +261,11 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="api-priority">Priority</label>
-                <input 
+                <input
                   id="api-priority"
-                  v-model.number="apiForm.priority" 
-                  type="number" 
-                  min="1" 
+                  v-model.number="apiForm.priority"
+                  type="number"
+                  min="1"
                   max="100"
                 />
                 <small>Lower numbers = higher priority</small>
@@ -1349,10 +273,10 @@
 
               <div class="form-group">
                 <label for="api-rate-limit">Rate Limit (per minute)</label>
-                <input 
+                <input
                   id="api-rate-limit"
-                  v-model="apiForm.rateLimitPerMinute" 
-                  type="number" 
+                  v-model="apiForm.rateLimitPerMinute"
+                  type="number"
                   min="0"
                   placeholder="0 = unlimited"
                 />
@@ -1361,10 +285,7 @@
 
             <div class="form-group checkbox-group">
               <label>
-                <input 
-                  v-model="apiForm.isEnabled" 
-                  type="checkbox"
-                />
+                <input v-model="apiForm.isEnabled" type="checkbox" />
                 <span>Enable this metadata source</span>
               </label>
             </div>
@@ -1383,239 +304,31 @@
       </div>
     </div>
 
-  <!-- Webhook Configuration Modal -->
-  <div v-if="showWebhookForm" class="modal-overlay" @click.self="closeWebhookForm" @keydown.esc="closeWebhookForm">
-    <div class="modal-content" @click.stop>
-      <div class="modal-header">
-        <h2>{{ editingWebhook ? 'Edit' : 'Add' }} Webhook</h2>
-        <button @click="closeWebhookForm" class="close-btn" aria-label="Close modal">
-          <PhX />
-        </button>
-      </div>
-      <div class="modal-body">
-        <form @submit.prevent="saveWebhook">
-          
-          <!-- Basic Configuration Section -->
-          <div class="form-section">
-            <h3>Basic</h3>
-            
-            <div class="form-group">
-              <label for="webhook-name">Name *</label>
-              <input 
-                id="webhook-name"
-                v-model="webhookForm.name" 
-                type="text" 
-                placeholder="e.g., Production Slack Channel" 
-                required
-              />
-              <small v-if="getServiceHelp()">{{ getServiceHelp() }}</small>
-            </div>
+    <!-- Webhook Configuration Modal -->
 
-            <div class="form-group">
-              <label for="webhook-type">Type *</label>
-              <select 
-                id="webhook-type"
-                v-model="webhookForm.type" 
-                required
-                @change="onServiceTypeChange"
-              >
-                <option value="" disabled>Select type...</option>
-                <option value="Slack">Slack</option>
-                <option value="Discord">Discord</option>
-                <option value="Telegram">Telegram</option>
-                <option value="Pushover">Pushover</option>
-                <option value="Pushbullet">Pushbullet</option>
-                <option value="NTFY">NTFY</option>
-                <option value="Zapier">Zapier / Generic</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label for="webhook-url">Webhook URL *</label>
-              <input 
-                id="webhook-url"
-                v-model="webhookForm.url" 
-                type="url" 
-                placeholder="https://hooks.example.com/services/your-webhook-url" 
-                required
-              />
-            </div>
-          </div>
-
-          <!-- Triggers Section -->
-          <div class="form-section triggers-section">
-            <h3>Notification Triggers</h3>
-            
-            <div class="checkbox-group">
-              <label for="trigger-book-added">
-                <input id="trigger-book-added" v-model="webhookForm.triggers" value="book-added" type="checkbox">
-                <span>
-                  <strong>Book Added to Library</strong>
-                  <small>Notifies when a new audiobook is added to your library</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="checkbox-group">
-              <label for="trigger-book-downloading">
-                <input id="trigger-book-downloading" v-model="webhookForm.triggers" value="book-downloading" type="checkbox">
-                <span>
-                  <strong>Download Started</strong>
-                  <small>Notifies when an audiobook download begins</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="checkbox-group">
-              <label for="trigger-book-available">
-                <input id="trigger-book-available" v-model="webhookForm.triggers" value="book-available" type="checkbox">
-                <span>
-                  <strong>Download Complete</strong>
-                  <small>Notifies when an audiobook finishes downloading and is ready</small>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <!-- Status Section -->
-          <div class="form-section status-section">
-            <h3>Activation</h3>
-            <div class="checkbox-group">
-              <label for="webhook-enabled">
-                <input id="webhook-enabled" v-model="webhookForm.isEnabled" type="checkbox" />
-                <span>
-                  <strong>Enable</strong>
-                  <small>Enable this webhook to start receiving notifications</small>
-                </span>
-              </label>
-            </div>
-          </div>
-
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button @click="closeWebhookForm" class="btn btn-secondary" type="button">
-          Cancel
-        </button>
-        <button 
-          v-if="webhookForm.url && webhookForm.type && webhookForm.triggers.length > 0 && !editingWebhook"
-          @click="testWebhookConfig" 
-          class="btn btn-info" 
-          type="button"
-          :disabled="testingWebhookConfig"
-        >
-          <PhSpinner v-if="testingWebhookConfig" class="ph-spin" />
-          {{ testingWebhookConfig ? 'Testing...' : 'Test' }}
-        </button>
-        <button 
-          @click="saveWebhook" 
-          class="btn btn-primary" 
-          type="button" 
-          :disabled="!isWebhookFormValid || savingWebhook"
-        >
-          <PhSpinner v-if="savingWebhook" class="ph-spin" />
-          {{ savingWebhook ? 'Saving...' : (editingWebhook ? 'Update' : 'Save') }}
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Download Client Form Modal -->
-  <DownloadClientFormModal 
-    :visible="showClientForm" 
-    :editing-client="editingClient"
-    @close="showClientForm = false; editingClient = null"
-    @saved="configStore.loadDownloadClientConfigurations()"
-    @delete="executeDeleteClient"
-  />
-
-  <!-- Indexer Form Modal -->
-  <IndexerFormModal 
-    :visible="showIndexerForm" 
-    :editing-indexer="editingIndexer"
-    @close="showIndexerForm = false; editingIndexer = null"
-    @saved="loadIndexers()"
-  />
-
-  
-
-  <!-- Delete Client Confirmation Modal -->
-  <div v-if="clientToDelete" class="modal-overlay" @click="clientToDelete = null">
-    <div class="modal-content" @click.stop>
-      <div class="modal-header">
-        <h3>
-          <PhWarningCircle />
-          Delete Download Client
-        </h3>
-        <button @click="clientToDelete = null" class="modal-close">
-          <PhX />
-        </button>
-      </div>
-      <div class="modal-body">
-        <p>Are you sure you want to delete the download client <strong>{{ clientToDelete.name }}</strong>?</p>
-        <p>This action cannot be undone.</p>
-      </div>
-        <div class="modal-actions">
-        <button @click="clientToDelete = null" class="cancel-button">
-          Cancel
-        </button>
-        <button @click="executeDeleteClient()" class="delete-button">
-          <PhTrash />
-          Delete
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete Metadata Source Confirmation Modal -->
-  <div v-if="apiToDelete" class="modal-overlay" @click="apiToDelete = null">
-    <div class="modal-content" @click.stop>
-      <div class="modal-header">
-        <h3>
-          <PhWarningCircle />
-          Delete Metadata Source
-        </h3>
-        <button @click="apiToDelete = null" class="modal-close">
-          <PhX />
-        </button>
-      </div>
-      <div class="modal-body">
-        <p>Are you sure you want to delete the metadata source <strong>{{ apiToDelete.name }}</strong>?</p>
-        <p>This action cannot be undone.</p>
-      </div>
-      <div class="modal-actions">
-        <button @click="apiToDelete = null" class="cancel-button">
-          Cancel
-        </button>
-        <button @click="executeDeleteApi()" class="delete-button">
-          <PhTrash />
-          Delete
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete Indexer Confirmation Modal -->
-  <div v-if="indexerToDelete" class="modal-overlay" @click="indexerToDelete = null">
-    <div class="modal-content" @click.stop>
+    <!-- Delete Metadata Source Confirmation Modal -->
+    <div v-if="apiToDelete" class="modal-overlay" @click="apiToDelete = null">
+      <div class="modal-content" @click.stop>
         <div class="modal-header">
-        <h3>
-          <PhWarningCircle />
-          Delete Indexer
-        </h3>
-        <button @click="indexerToDelete = null" class="modal-close">
-          <PhX />
-        </button>
-      </div>
-      <div class="modal-body">
-        <p>Are you sure you want to delete the indexer <strong>{{ indexerToDelete.name }}</strong>?</p>
-        <p>This action cannot be undone.</p>
-      </div>
-        <div class="modal-actions">
-          <button type="button" @click="indexerToDelete = null" class="cancel-button">
-            Cancel
+          <h3>
+            <PhWarningCircle />
+            Delete Metadata Source
+          </h3>
+          <button @click="apiToDelete = null" class="modal-close">
+            <PhX />
           </button>
-          <button type="button" @click="executeDeleteIndexer()" class="delete-button modal-delete-button">
+        </div>
+        <div class="modal-body">
+          <p>
+            Are you sure you want to delete the metadata source
+            <strong>{{ apiToDelete.name }}</strong
+            >?
+          </p>
+          <p>This action cannot be undone.</p>
+        </div>
+        <div class="modal-actions">
+          <button @click="apiToDelete = null" class="cancel-button">Cancel</button>
+          <button @click="executeDeleteApi()" class="delete-button">
             <PhTrash />
             Delete
           </button>
@@ -1623,118 +336,52 @@
       </div>
     </div>
   </div>
-
-  <!-- Quality Profile Form Modal -->
-  <QualityProfileFormModal
-    :visible="showQualityProfileForm"
-    :profile="editingQualityProfile"
-    @close="showQualityProfileForm = false; editingQualityProfile = null"
-    @save="saveQualityProfile"
-  />
-
-  <!-- Delete Quality Profile Confirmation Modal -->
-  <div v-if="profileToDelete" class="modal-overlay" @click="profileToDelete = null">
-    <div class="modal-content" @click.stop>
-        <div class="modal-header">
-        <h3>
-          <PhWarningCircle />
-          Delete Quality Profile
-        </h3>
-        <button @click="profileToDelete = null" class="modal-close">
-          <PhX />
-        </button>
-      </div>
-      <div class="modal-body">
-        <p>Are you sure you want to delete the quality profile <strong>{{ profileToDelete.name }}</strong>?</p>
-        <p v-if="profileToDelete.isDefault" class="warning-text">
-          <PhWarning />
-          This is the default profile and cannot be deleted. Please set another profile as default first.
-        </p>
-        <p>This action cannot be undone.</p>
-      </div>
-        <div class="modal-actions">
-        <button @click="profileToDelete = null" class="cancel-button">
-          Cancel
-        </button>
-        <button 
-          @click="executeDeleteProfile" 
-          class="delete-button"
-          :disabled="profileToDelete.isDefault"
-        >
-          <PhTrash />
-          Delete
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Proxy Security Modal -->
-      <div v-if="showProxySecurityModal" class="modal-overlay" @click="closeProxySecurityModal()">
-    <div class="modal-content" @click.stop>
-      <div class="modal-header">
-        <h3>
-          <PhShieldCheck />
-          Proxy security recommendations
-        </h3>
-        <button @click="closeProxySecurityModal()" class="modal-close"><PhX /></button>
-      </div>
-      <div class="modal-body">
-        <p>Storing proxy credentials in the application database is convenient but has security implications. Consider the following:</p>
-        <ul>
-          <li>Use an OS-level secrets manager (Vault, Azure Key Vault, AWS Secrets Manager) when possible.</li>
-          <li>Restrict access to the application database and backups.</li>
-          <li>Rotate credentials periodically and prefer short-lived credentials where supported.</li>
-          <li>If you must store secrets in the DB, ensure the server is deployed on trusted infrastructure and consider application-level encryption.</li>
-        </ul>
-        <p>This modal only provides guidance; the current implementation persists the proxy password in ApplicationSettings. For production use, consider integrating a secrets store and referencing credentials instead of storing plaintext.</p>
-      </div>
-      <div class="modal-actions">
-        <button @click="closeProxySecurityModal()" class="save-button">Close</button>
-      </div>
-    </div>
-  </div>
-    
+  <!-- .settings-page -->
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, onUnmounted, watch, computed, nextTick } from 'vue'
 import { apiService } from '@/services/api'
 import { useRoute, useRouter } from 'vue-router'
+import { logger } from '@/utils/logger'
+import { errorTracking } from '@/services/errorTracking'
 import { useConfigurationStore } from '@/stores/configuration'
-import type { ApiConfiguration, DownloadClientConfiguration, ApplicationSettings, Indexer, QualityProfile, RemotePathMapping } from '@/types'
-import FolderBrowser from '@/components/FolderBrowser.vue'
+import type {
+  ApiConfiguration,
+  DownloadClientConfiguration,
+  ApplicationSettings,
+} from '@/types'
+import RootFoldersTab from '@/views/settings/RootFoldersTab.vue'
+import DownloadClientsTab from '@/views/settings/DownloadClientsTab.vue'
+import QualityProfilesTab from '@/views/settings/QualityProfilesTab.vue'
+import DiscordBotTab from '@/views/settings/DiscordBotTab.vue'
+import NotificationsTab from '@/views/settings/NotificationsTab.vue'
+import IndexersTab from '@/views/settings/IndexersTab.vue'
+import GeneralSettingsTab from '@/views/settings/GeneralSettingsTab.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
 import {
-  // Settings & Navigation
-  PhGear, PhListMagnifyingGlass, PhCloud, PhDownload, PhStar, PhSliders, PhPlus, PhMagnifyingGlass,
-  PhArrowUp, PhDownloadSimple, PhCloudSlash, PhGlobe, PhInfo,
-  // Form Controls & Actions
-  PhToggleRight, PhToggleLeft, PhSpinner, PhCheckCircle, PhPencil, PhTrash, PhLink,
-  PhListChecks, PhClock, PhXCircle, PhCheck, PhX, PhCheckSquare, PhRuler, PhSparkle,
-  PhArrowCounterClockwise, PhScissors, PhBell, PhPaperPlaneTilt, PhBellSlash, PhCaretDown,
-  // Security & Authentication
-  PhShieldCheck, PhLock, PhLockOpen, PhWarning, PhWarningCircle,
-  // Files & Folders
-  PhFolder, PhLinkSimple, PhBrowser, PhFloppyDisk, PhFiles,
-  // Users
-  PhUsers, PhUserCircle,
-  // Bot Controls
-  PhRobot, PhPlay, PhStop, PhArrowClockwise, PhCircle,
-  // Misc
-  PhTextAa, PhEye, PhEyeSlash
+  PhFolder,
+  PhListMagnifyingGlass,
+  PhDownload,
+  PhStar,
+  PhBell,
+  PhGlobe,
+  PhSliders,
+  PhPlus,
+  PhSpinner,
+  PhFloppyDisk,
+  PhX,
+  PhCheck,
+  PhWarningCircle,
+  PhTrash,
 } from '@phosphor-icons/vue'
-import IndexerFormModal from '@/components/IndexerFormModal.vue'
-import DownloadClientFormModal from '@/components/DownloadClientFormModal.vue'
-import QualityProfileFormModal from '@/components/QualityProfileFormModal.vue'
-import { showConfirm } from '@/composables/useConfirm'
 import { useToast } from '@/services/toastService'
-import { getIndexers, deleteIndexer, toggleIndexer as apiToggleIndexer, testIndexer as apiTestIndexer, getQualityProfiles, deleteQualityProfile, createQualityProfile, updateQualityProfile, getRemotePathMappings, createRemotePathMapping, updateRemotePathMapping, deleteRemotePathMapping, testDownloadClient as apiTestDownloadClient } from '@/services/api'
 
 // Generate UUID v4 compatible across all browsers
 function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0
-    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
     return v.toString(16)
   })
 }
@@ -1744,23 +391,38 @@ const router = useRouter()
 const configStore = useConfigurationStore()
 const toast = useToast()
 // Debug environment markers (Vitest exposes import.meta.vitest / import.meta.env.VITEST)
-console.debug('[test-debug] import.meta.vitest:', (import.meta as unknown as { vitest?: unknown }).vitest, 'env.VITEST:', (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST, '__vitest_global__:', (globalThis as unknown as { __vitest?: unknown }).__vitest)
-const activeTab = ref<'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'>('indexers')
+logger.debug(
+  '[test-debug] import.meta.vitest:',
+  (import.meta as unknown as { vitest?: unknown }).vitest,
+  'env.VITEST:',
+  (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST,
+  '__vitest_global__:',
+  (globalThis as unknown as { __vitest?: unknown }).__vitest,
+)
+const activeTab = ref<
+  'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
+>('rootfolders')
 
 const mobileTabOptions = computed(() => [
+  { value: 'rootfolders', label: 'Root Folders', icon: PhFolder },
   { value: 'indexers', label: 'Indexers', icon: PhListMagnifyingGlass },
-  { value: 'apis', label: 'Metadata Sources', icon: PhCloud },
   { value: 'clients', label: 'Download Clients', icon: PhDownload },
   { value: 'quality-profiles', label: 'Quality Profiles', icon: PhStar },
-  { value: 'general', label: 'General Settings', icon: PhSliders },
   { value: 'notifications', label: 'Notifications', icon: PhBell },
-  { value: 'requests', label: 'Requests', icon: PhGlobe }
+  { value: 'bot', label: 'Discord Bot', icon: PhGlobe },
+  { value: 'general', label: 'General Settings', icon: PhSliders },
+  // Integrations removed
 ])
 // Desktop tabs carousel refs/state
 const desktopTabsRef = ref<HTMLElement | null>(null)
 const hasTabOverflow = ref(false)
 const showLeftTabChevron = ref(false)
 const showRightTabChevron = ref(false)
+const rootFoldersRef = ref<InstanceType<typeof RootFoldersTab> | null>(null)
+const downloadClientsRef = ref<InstanceType<typeof DownloadClientsTab> | null>(null)
+const qualityProfilesRef = ref<InstanceType<typeof QualityProfilesTab> | null>(null)
+const indexersRef = ref<InstanceType<typeof IndexersTab> | null>(null)
+const notificationsRef = ref<InstanceType<typeof NotificationsTab> | null>(null)
 
 function updateTabOverflow() {
   const el = desktopTabsRef.value
@@ -1824,6 +486,74 @@ function ensureActiveTabVisible() {
   }
 }
 
+function openAddRootFolder() {
+  if (rootFoldersRef.value && typeof rootFoldersRef.value.openAddRootFolder === 'function') {
+    rootFoldersRef.value.openAddRootFolder()
+  }
+}
+
+function openAddClient() {
+  if (downloadClientsRef.value && typeof downloadClientsRef.value.openAddClient === 'function') {
+    downloadClientsRef.value.openAddClient()
+  }
+}
+
+
+// Audible integration removed
+
+const showPassword = ref(false)
+
+const toggleShowPassword = () => {
+  showPassword.value = !showPassword.value
+  if (
+    generalSettingsRef.value &&
+    typeof ((generalSettingsRef.value as unknown) as { toggleShowPassword?: () => void }).toggleShowPassword === 'function'
+  ) {
+    ;((generalSettingsRef.value as unknown) as { toggleShowPassword?: () => void }).toggleShowPassword?.()
+  }
+}
+
+const toggleDownloadClientFunc = async (client: DownloadClientConfiguration) => {
+  if (
+    downloadClientsRef.value &&
+    typeof ((downloadClientsRef.value as unknown) as {
+      toggleDownloadClientFunc?: (c: DownloadClientConfiguration) => Promise<void>
+    }).toggleDownloadClientFunc === 'function'
+  ) {
+    return await ((downloadClientsRef.value as unknown) as {
+      toggleDownloadClientFunc?: (c: DownloadClientConfiguration) => Promise<void>
+    }).toggleDownloadClientFunc!(client)
+  }
+
+  // Fallback: perform the toggle using the configuration store directly when
+  // the child tab isn't mounted or available yet (tests may call the helper
+  // before the child is attached to the parent instance).
+  try {
+    const updatedClient = { ...client, isEnabled: !client.isEnabled }
+    await configStore.saveDownloadClientConfiguration(updatedClient)
+    const idx = configStore.downloadClientConfigurations.findIndex((c) => c.id === client.id)
+    if (idx !== -1) {
+      configStore.downloadClientConfigurations[idx] = updatedClient
+    }
+    toast.success(
+      'Download client',
+      `${client.name} ${updatedClient.isEnabled ? 'enabled' : 'disabled'} successfully`,
+    )
+  } catch (error) {
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'toggleDownloadClient',
+    })
+    const errorMessage = formatApiError(error)
+    toast.error('Toggle failed', errorMessage)
+  }
+}
+
+// Make helpers available on SettingsView instance for tests
+// so unit tests can call wrapper.vm.toggleShowPassword() and
+// wrapper.vm.toggleDownloadClientFunc(...) directly.
+defineExpose({ toggleShowPassword, toggleDownloadClientFunc, showPassword })
+
 watch(activeTab, () => {
   // delay slightly to allow layout updates
   setTimeout(() => {
@@ -1832,13 +562,7 @@ watch(activeTab, () => {
   }, 40)
 })
 const showApiForm = ref(false)
-const showClientForm = ref(false)
-const showIndexerForm = ref(false)
-const showQualityProfileForm = ref(false)
 const editingApi = ref<ApiConfiguration | null>(null)
-const editingClient = ref<DownloadClientConfiguration | null>(null)
-const editingIndexer = ref<Indexer | null>(null)
-const editingQualityProfile = ref<QualityProfile | null>(null)
 const apiForm = reactive({
   id: '',
   name: '',
@@ -1847,207 +571,31 @@ const apiForm = reactive({
   type: 'metadata',
   isEnabled: true,
   priority: 1,
-  rateLimitPerMinute: ''
+  rateLimitPerMinute: '',
 })
 const settings = ref<ApplicationSettings | null>(null)
 const startupConfig = ref<import('@/types').StartupConfig | null>(null)
-const loadingApiKey = ref(false)
-const copiedApiKey = ref(false)
-
-const copyApiKey = async () => {
-  const key = startupConfig.value?.apiKey
-  if (!key) return
-  try {
-    await navigator.clipboard.writeText(key)
-    copiedApiKey.value = true
-    setTimeout(() => {
-      copiedApiKey.value = false
-    }, 2000)
-  } catch (err) {
-    console.error('Failed to copy API key', err)
-    // Could show error notification here if needed
-  }
-}
-
-const regenerateApiKey = async () => {
-  const hasExistingKey = !!(startupConfig.value?.apiKey)
-  
-  // Different confirmation messages based on whether an API key exists
-  const confirmMessage = hasExistingKey 
-    ? 'Regenerating the API key will immediately invalidate the existing key. Continue?'
-    : 'Generate a new API key for this server instance?'
-    
-  // Use in-app confirm dialog instead of window.confirm
-  const okRegenerate = await showConfirm(confirmMessage, 'API Key')
-  if (!okRegenerate) return
-  
-  loadingApiKey.value = true
-  try {
-    let resp: { apiKey: string; message?: string }
-    
-    // Try initial generation first (for setup scenarios or if no key exists)
-    if (!hasExistingKey) {
-      try {
-        resp = await apiService.generateInitialApiKey()
-        startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
-        toast.info('API key', resp.message || 'API key generated - copied to clipboard')
-        try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
-        return
-      } catch (initialErr) {
-        // If initial generation fails (e.g., users exist), try authenticated regeneration
-        console.debug('Initial API key generation failed, trying authenticated regeneration', initialErr)
-      }
-    }
-    
-    // Fall back to authenticated regeneration
-    resp = await apiService.regenerateApiKey()
-    startupConfig.value = { ...(startupConfig.value || {}), apiKey: resp.apiKey }
-    toast.info('API key', 'API key regenerated - copied to clipboard')
-    try { await navigator.clipboard.writeText(resp.apiKey) } catch {}
-  } catch (err) {
-    console.error('Failed to generate/regenerate API key', err)
-    // If server returns 401/403, suggest logging in as admin
-    const status = (err && typeof err === 'object' && err !== null && 'status' in err) ? (err as { status: number }).status : 0
-    if (status === 401 || status === 403) {
-      toast.error('Permission denied', 'You must be logged in as an administrator to regenerate the API key. Please login and try again.')
-    } else {
-      toast.error('API key failed', 'Failed to generate/regenerate API key')
-    }
-  } finally {
-    loadingApiKey.value = false
-  }
-}
 const authEnabled = ref(false)
-const indexers = ref<Indexer[]>([])
-const qualityProfiles = ref<QualityProfile[]>([])
-const remotePathMappings = ref<RemotePathMapping[]>([])
 const testingNotification = ref(false)
-const testingIndexer = ref<number | null>(null)
-const testingClient = ref<string | null>(null)
-const indexerToDelete = ref<Indexer | null>(null)
-const profileToDelete = ref<QualityProfile | null>(null)
 
-// Webhook management
-const showWebhookForm = ref(false)
-const editingWebhook = ref<{
-  id: string
-  name: string
-  url: string
-  type: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier'
-  triggers: string[]
-  isEnabled: boolean
-} | null>(null)
-const testingWebhook = ref<string | null>(null)
-const expandedWebhooks = ref<Set<string>>(new Set())
-const webhooks = ref<Array<{
-  id: string
-  name: string
-  url: string
-  type: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier'
-  triggers: string[]
-  isEnabled: boolean
-}>>([])
-const webhookForm = reactive({
-  id: '',
-  name: '',
-  url: '',
-  type: '' as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier' | '',
-  triggers: [] as string[],
-  isEnabled: true
-})
-const webhookFormErrors = reactive({
-  name: '',
-  url: '',
-  type: '',
-  triggers: ''
-})
-const testingWebhookConfig = ref(false)
-const savingWebhook = ref(false)
-
-const adminUsers = ref<Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>>([])
-  const showPassword = ref(false)
-  const showProxySecurityModal = ref(false)
-  const isProxyConfigValid = computed(() => {
-    if (!settings.value) return true
-    if (!settings.value.useUsProxy) return true
-    const host = (settings.value.usProxyHost || '').toString().trim()
-    const port = Number(settings.value.usProxyPort || 0)
-    return host.length > 0 && port > 0 && port <= 65535
-  })
-
-  const isFormValid = computed(() => {
-    // During unit tests we allow saving to proceed (tests set up inputs manually).
-    // Vitest exposes import.meta.env.VITEST which we can use to relax validation.
+const adminUsers = ref<
+  Array<{ id: number; username: string; email?: string; isAdmin: boolean; createdAt: string }>
+>([])
+const generalSettingsRef = ref<InstanceType<typeof GeneralSettingsTab> | null>(null)
+const isFormValid = computed(() => {
+  // During unit tests we allow saving to proceed (tests set up inputs manually).
+  // Vitest exposes import.meta.env.VITEST which we can use to relax validation.
   const vitestEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITEST
-    if (vitestEnv) return true
+  if (vitestEnv) return true
 
-    // Required output path
-    if (!settings.value) return false
-    const outputPathValid = !!(settings.value.outputPath && String(settings.value.outputPath).trim().length > 0)
-
-    return outputPathValid && isProxyConfigValid.value
-  })
-
-  const validationErrors = computed(() => {
-    const errs: string[] = []
-    if (!settings.value) return errs
-    if (!settings.value.outputPath || String(settings.value.outputPath).trim().length === 0) errs.push('Output path is required')
-    if (settings.value.useUsProxy) {
-      const host = (settings.value.usProxyHost || '').toString().trim()
-      const port = Number(settings.value.usProxyPort || 0)
-      if (!host) errs.push('US proxy host is required when proxy is enabled')
-      if (!port || port <= 0 || port > 65535) errs.push('US proxy port must be between 1 and 65535')
-    }
-    return errs
-  })
-
-  // Bot status computed properties
-  const botStatusClass = computed(() => {
-    switch (botStatus.value) {
-      case 'running': return 'status-running'
-      case 'stopped': return 'status-stopped'
-      case 'checking': return 'status-checking'
-      case 'error': return 'status-error'
-      default: return 'status-unknown'
-    }
-  })
-
-  const botStatusText = computed(() => {
-    switch (botStatus.value) {
-      case 'running': return 'Running'
-      case 'stopped': return 'Stopped'
-      case 'checking': return 'Checking...'
-      case 'error': return 'Error'
-      default: return 'Unknown'
-    }
-  })
-
-  // Expose a toggle function for unit tests and template interactions that
-  // prefer a method instead of inline assignment. Tests call
-  // `wrapper.vm.toggleShowPassword()` so we expose it here.
-  const toggleShowPassword = () => {
-    showPassword.value = !showPassword.value
+  // Delegate validation to GeneralSettingsTab if it's active
+  if (activeTab.value === 'general' && generalSettingsRef.value) {
+    return generalSettingsRef.value.isProxyConfigValid
   }
 
-  const openProxySecurityModal = () => {
-    showProxySecurityModal.value = true
-  }
-
-  const closeProxySecurityModal = () => {
-    showProxySecurityModal.value = false
-  }
-
-  // Make the function available on the component instance for Vue Test Utils
-  // and any external consumers that expect an instance method.
-  // `defineExpose` is a compiler macro available in <script setup>.
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  defineExpose({ toggleShowPassword })
-const showMappingForm = ref(false)
-const mappingToEdit = ref<RemotePathMapping | null>(null)
-const mappingToDelete = ref<RemotePathMapping | null>(null)
-
-
+  // No longer require output path since we use root folders now
+  return true
+})
 
 const formatApiError = (error: unknown): string => {
   // Handle axios-style errors
@@ -2055,23 +603,24 @@ const formatApiError = (error: unknown): string => {
   if (axiosError.response?.data) {
     const responseData = axiosError.response.data
     let errorMessage = 'An unknown error occurred'
-    
+
     if (typeof responseData === 'string') {
       errorMessage = responseData
     } else if (responseData && typeof responseData === 'object') {
       const data = responseData as Record<string, unknown>
-      errorMessage = (data.message as string) || (data.error as string) || JSON.stringify(responseData, null, 2)
+      errorMessage =
+        (data.message as string) || (data.error as string) || JSON.stringify(responseData, null, 2)
     }
-    
+
     // Capitalize first letter and ensure it ends with punctuation
     errorMessage = errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
     if (!errorMessage.match(/[.!?]$/)) {
       errorMessage += '.'
     }
-    
+
     return errorMessage
   }
-  
+
   // Handle native fetch errors (from ApiService)
   const fetchError = error as Error & { status?: number; body?: string }
   if (fetchError.body) {
@@ -2079,14 +628,15 @@ const formatApiError = (error: unknown): string => {
       const parsedBody = JSON.parse(fetchError.body)
       if (parsedBody && typeof parsedBody === 'object') {
         const data = parsedBody as Record<string, unknown>
-        let errorMessage = (data.message as string) || (data.error as string) || JSON.stringify(parsedBody, null, 2)
-        
+        let errorMessage =
+          (data.message as string) || (data.error as string) || JSON.stringify(parsedBody, null, 2)
+
         // Capitalize first letter and ensure it ends with punctuation
         errorMessage = errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
         if (!errorMessage.match(/[.!?]$/)) {
           errorMessage += '.'
         }
-        
+
         return errorMessage
       }
       return fetchError.body
@@ -2094,12 +644,13 @@ const formatApiError = (error: unknown): string => {
       return fetchError.body
     }
   }
-  
+
   // Fallback for other error types
   const errorMessage = error instanceof Error ? error.message : String(error)
   return errorMessage.charAt(0).toUpperCase() + errorMessage.slice(1)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const editApiConfig = (api: ApiConfiguration) => {
   editingApi.value = api
   apiForm.id = api.id
@@ -2127,13 +678,9 @@ const closeApiForm = () => {
   apiForm.rateLimitPerMinute = ''
 }
 
-const editClientConfig = (client: DownloadClientConfiguration) => {
-  editingClient.value = client
-  showClientForm.value = true
-}
-
 const apiToDelete = ref<ApiConfiguration | null>(null)
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const confirmDeleteApi = (api: ApiConfiguration) => {
   apiToDelete.value = api
 }
@@ -2146,9 +693,14 @@ const executeDeleteApi = async (id?: string) => {
     await configStore.deleteApiConfiguration(apiId)
     toast.success('API', 'API configuration deleted successfully')
     // Refresh API list if the store provides a loader
-    try { await configStore.loadApiConfigurations() } catch {}
+    try {
+      await configStore.loadApiConfigurations()
+    } catch {}
   } catch (error) {
-    console.error('Failed to delete API configuration:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'deleteApiConfig',
+    })
     const errorMessage = formatApiError(error)
     toast.error('API delete failed', errorMessage)
   } finally {
@@ -2156,38 +708,23 @@ const executeDeleteApi = async (id?: string) => {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const toggleApiConfig = async (api: ApiConfiguration) => {
   try {
     // Toggle the enabled state
     const updatedApi = { ...api, isEnabled: !api.isEnabled }
     await configStore.saveApiConfiguration(updatedApi)
-    toast.success('Metadata source', `${api.name} ${updatedApi.isEnabled ? 'enabled' : 'disabled'} successfully`)
+    toast.success(
+      'Metadata source',
+      `${api.name} ${updatedApi.isEnabled ? 'enabled' : 'disabled'} successfully`,
+    )
   } catch (error) {
-    console.error('Failed to toggle API configuration:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'toggleApiConfig',
+    })
     const errorMessage = formatApiError(error)
     toast.error('Toggle failed', errorMessage)
-  }
-}
-
-const clientToDelete = ref<DownloadClientConfiguration | null>(null)
-
-const confirmDeleteClient = (client: DownloadClientConfiguration) => {
-  clientToDelete.value = client
-}
-
-const executeDeleteClient = async (id?: string) => {
-  const clientId = id || clientToDelete.value?.id
-  if (!clientId) return
-  
-    try {
-    await configStore.deleteDownloadClientConfiguration(clientId)
-    toast.success('Download client', 'Download client deleted successfully')
-  } catch (error) {
-    console.error('Failed to delete download client:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Delete failed', errorMessage)
-  } finally {
-    clientToDelete.value = null
   }
 }
 
@@ -2208,253 +745,15 @@ const testNotification = async () => {
       toast.error('Test failed', response.message || 'Failed to send test notification')
     }
   } catch (error) {
-    console.error('Failed to test notification:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'testNotification',
+    })
     const errorMessage = formatApiError(error)
     toast.error('Test failed', errorMessage)
   } finally {
     testingNotification.value = false
   }
-}
-
-// Webhook management functions
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const openWebhookForm = () => {
-  editingWebhook.value = null
-  webhookForm.id = ''
-  webhookForm.name = ''
-  webhookForm.url = ''
-  webhookForm.type = ''
-  webhookForm.triggers = []
-  webhookForm.isEnabled = true
-  showWebhookForm.value = true
-}
-
-const closeWebhookForm = () => {
-  showWebhookForm.value = false
-  editingWebhook.value = null
-  webhookForm.id = ''
-  webhookForm.name = ''
-  webhookForm.url = ''
-  webhookForm.type = ''
-  webhookForm.triggers = []
-  webhookForm.isEnabled = true
-  resetWebhookFormErrors()
-}
-
-const editWebhook = (webhook: typeof webhooks.value[0]) => {
-  editingWebhook.value = webhook
-  webhookForm.id = webhook.id
-  webhookForm.name = webhook.name
-  webhookForm.url = webhook.url
-  webhookForm.type = webhook.type
-  webhookForm.triggers = [...webhook.triggers]
-  webhookForm.isEnabled = webhook.isEnabled
-  resetWebhookFormErrors()
-  showWebhookForm.value = true
-}
-
-const saveWebhook = async () => {
-  // Validate all fields
-  validateWebhookField('name')
-  validateWebhookField('url')
-  validateWebhookField('type')
-  validateWebhookField('triggers')
-
-  // Check if form is valid
-  if (!isWebhookFormValid.value) {
-    toast.error('Validation error', 'Please fix the errors before saving')
-    return
-  }
-
-  savingWebhook.value = true
-  try {
-    const webhook = {
-      id: webhookForm.id || generateUUID(),
-      name: webhookForm.name.trim(),
-      url: webhookForm.url.trim(),
-      type: webhookForm.type as 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier',
-      triggers: [...webhookForm.triggers],
-      isEnabled: webhookForm.isEnabled
-    }
-
-    if (editingWebhook.value) {
-      // Update existing webhook
-      const index = webhooks.value.findIndex(w => w.id === webhook.id)
-      if (index !== -1) {
-        webhooks.value[index] = webhook
-      }
-      toast.success('Webhook', 'Webhook updated successfully')
-    } else {
-      // Add new webhook
-      webhooks.value.push(webhook)
-      toast.success('Webhook', 'Webhook added successfully')
-    }
-
-    // Persist webhooks to settings
-    await persistWebhooks()
-
-    closeWebhookForm()
-  } catch (error) {
-    console.error('Failed to save webhook:', error)
-    toast.error('Save failed', 'Failed to save webhook')
-  } finally {
-    savingWebhook.value = false
-  }
-}
-
-const deleteWebhook = async (id: string) => {
-  const webhook = webhooks.value.find(w => w.id === id)
-  if (!webhook) return
-  const ok = await showConfirm(`Are you sure you want to delete the webhook "${webhook.name}"?`, 'Delete Webhook')
-  if (!ok) return
-  webhooks.value = webhooks.value.filter(w => w.id !== id)
-  toast.success('Webhook', 'Webhook deleted successfully')
-  // Persist webhooks to settings
-  await persistWebhooks()
-}
-
-const toggleWebhook = async (webhook: typeof webhooks.value[0]) => {
-  const index = webhooks.value.findIndex(w => w.id === webhook.id)
-  if (index !== -1) {
-    const targetWebhook = webhooks.value[index]
-    if (targetWebhook) {
-      targetWebhook.isEnabled = !targetWebhook.isEnabled
-      toast.success('Webhook', `${webhook.name} ${targetWebhook.isEnabled ? 'enabled' : 'disabled'}`)
-      
-      // Persist webhooks to settings
-      await persistWebhooks()
-    }
-  }
-}
-
-const testWebhook = async (webhook: typeof webhooks.value[0]) => {
-  testingWebhook.value = webhook.id
-  try {
-    // NOTE: Test API exists at POST /api/diagnostics/test-notification
-    // Future enhancement: integrate with DiagnosticsController to send real test notifications
-    // For now, just simulate success
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    toast.success('Test notification', `Test notification sent to ${webhook.name}`)
-  } catch (error) {
-    console.error('Failed to test webhook:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Test failed', errorMessage)
-  } finally {
-    testingWebhook.value = null
-  }
-}
-
-// Migrate old single webhook format to new multiple webhooks format
-const migrateOldWebhookData = async () => {
-  if (!settings.value) return
-  
-  // Check if migration has already been completed
-  const migrationKey = 'webhook_migration_completed'
-  if (localStorage.getItem(migrationKey)) {
-    return // Migration already done
-  }
-  
-  // Check if old format exists and new format is empty
-  if (settings.value.webhookUrl && settings.value.webhookUrl.trim() !== '' && webhooks.value.length === 0) {
-    const oldUrl = settings.value.webhookUrl.trim()
-    const oldTriggers = settings.value.enabledNotificationTriggers || []
-    
-    // Create a webhook from the old data
-    // Try to detect type from URL, default to 'Zapier' for generic webhooks
-    let detectedType: 'Pushbullet' | 'Telegram' | 'Slack' | 'Discord' | 'Pushover' | 'NTFY' | 'Zapier' = 'Zapier'
-    const urlLower = oldUrl.toLowerCase()
-    
-    if (urlLower.includes('pushbullet')) detectedType = 'Pushbullet'
-    else if (urlLower.includes('telegram')) detectedType = 'Telegram'
-    else if (urlLower.includes('slack')) detectedType = 'Slack'
-    else if (urlLower.includes('discord')) detectedType = 'Discord'
-    else if (urlLower.includes('pushover')) detectedType = 'Pushover'
-    else if (urlLower.includes('ntfy')) detectedType = 'NTFY'
-    
-    // Use old triggers if they exist and have valid values, otherwise use all default triggers
-    let triggersToUse = ['book-added', 'book-downloading', 'book-available']
-    
-    if (oldTriggers && oldTriggers.length > 0) {
-      // Filter out any invalid triggers and only use valid ones
-      const validTriggers = oldTriggers.filter(t => 
-        ['book-added', 'book-downloading', 'book-available', 'book-completed'].includes(t)
-      )
-      if (validTriggers.length > 0) {
-        triggersToUse = validTriggers
-      }
-    }
-    
-    webhooks.value = [{
-      id: generateUUID(),
-      name: `Migrated Webhook (${detectedType})`,
-      url: oldUrl,
-      type: detectedType,
-      triggers: triggersToUse,
-      isEnabled: true
-    }]
-    
-    // Persist migrated webhook to backend
-    await persistWebhooks()
-    
-    // Mark migration as completed
-    localStorage.setItem(migrationKey, 'true')
-    
-    toast.info('Webhook Migration', 'Your existing webhook has been migrated to the new format')
-  } else if (webhooks.value.length === 0 && (!settings.value.webhookUrl || settings.value.webhookUrl.trim() === '')) {
-    // No old webhook data and no new webhooks - mark migration as complete to avoid checking again
-    localStorage.setItem(migrationKey, 'true')
-  }
-}
-
-// Persist webhooks to backend settings
-const persistWebhooks = async () => {
-  if (!settings.value) return
-  
-  try {
-    // Update settings with current webhooks
-    settings.value.webhooks = webhooks.value
-    
-    // Save to backend
-    await configStore.saveApplicationSettings(settings.value)
-  } catch (error) {
-    console.error('Failed to persist webhooks:', error)
-    toast.error('Save failed', 'Failed to save webhooks to settings')
-    throw error
-  }
-}
-
-const getClientTypeClass = (type: string): string => {
-  const typeMap: Record<string, string> = {
-    'qbittorrent': 'torrent',
-    'transmission': 'torrent',
-    'sabnzbd': 'usenet',
-    'nzbget': 'usenet'
-  }
-  return typeMap[type.toLowerCase()] || 'torrent'
-}
-
-// Return remote path mappings assigned to a given download client.
-const getMappingsForClient = (client: import('@/types').DownloadClientConfiguration): import('@/types').RemotePathMapping[] => {
-  // Build a set of mapping IDs that should be considered assigned to this client.
-  const assignedIds = new Set<number>()
-
-  // Only use IDs from the client settings (remotePathMappingIds)
-  try {
-    const s = (client as unknown as Record<string, unknown>)?.settings as Record<string, unknown> | undefined
-    const raw = s?.remotePathMappingIds ?? s?.RemotePathMappingIds
-    if (Array.isArray(raw)) {
-      for (const v of raw) {
-        const n = Number(v)
-        if (!Number.isNaN(n)) assignedIds.add(n)
-      }
-    }
-  } catch {
-    // ignore malformed settings
-  }
-
-  // Return only the mappings that match the assigned IDs (preserves order in remotePathMappings)
-  if (assignedIds.size === 0) return []
-  return remotePathMappings.value.filter(m => assignedIds.has(m.id))
 }
 
 const saveApiConfig = async () => {
@@ -2477,16 +776,22 @@ const saveApiConfig = async () => {
       parameters: {},
       rateLimitPerMinute: apiForm.rateLimitPerMinute || undefined,
       createdAt: editingApi.value?.createdAt || new Date().toISOString(),
-      lastUsed: editingApi.value?.lastUsed
+      lastUsed: editingApi.value?.lastUsed,
     }
 
     // Use the single save method which handles both create and update
     await configStore.saveApiConfiguration(apiData)
-    
-    toast.success('Metadata source', `Metadata source ${editingApi.value ? 'updated' : 'added'} successfully`)
+
+    toast.success(
+      'Metadata source',
+      `Metadata source ${editingApi.value ? 'updated' : 'added'} successfully`,
+    )
     closeApiForm()
   } catch (error) {
-    console.error('Failed to save metadata source:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'saveMetadataSource',
+    })
     const errorMessage = formatApiError(error)
     toast.error('Save failed', errorMessage)
   }
@@ -2495,10 +800,15 @@ const saveApiConfig = async () => {
 const saveSettings = async () => {
   if (!settings.value) return
 
-  // Validate proxy fields if proxy usage is enabled
-  if (settings.value.useUsProxy && !isProxyConfigValid.value) {
-    toast.error('Invalid proxy', 'Please provide a valid proxy host and port (1-65535) when using a proxy.')
-    return
+  // Validate proxy fields if proxy usage is enabled (delegate to GeneralSettingsTab if active)
+  if (activeTab.value === 'general' && generalSettingsRef.value) {
+    if (settings.value.useUsProxy && !generalSettingsRef.value.isProxyConfigValid) {
+      toast.error(
+        'Invalid proxy',
+        'Please provide a valid proxy host and port (1-65535) when using a proxy.',
+      )
+      return
+    }
   }
 
   try {
@@ -2522,273 +832,79 @@ const saveSettings = async () => {
 
     // No PascalCase keys are produced anymore; we only send camelCase properties.
 
-  // Resolve the configuration store at call-time to ensure tests that set up Pinia
-  // before mounting (or that replace the store) receive the correct instance.
-  const runtimeConfigStore = useConfigurationStore()
-  // Debug: log when saveSettings is invoked in tests to help diagnose test failures
-  // (will be removed once tests are stable)
-  console.debug('[test-debug] saveSettings invoked', settingsToSave)
-  // Call the runtime store save method. Some test setups replace the store
-  // instance or spy on the store returned from `useConfigurationStore()` at
-  // different times; call both if they differ to ensure the spy is observed.
-  await runtimeConfigStore.saveApplicationSettings(settingsToSave)
-  if (configStore !== runtimeConfigStore && typeof configStore.saveApplicationSettings === 'function') {
-    // If the module-level `configStore` differs (older test setups), call it too
-    // so tests that replaced/observed that instance receive the call.
-    // Avoid failing if the method isn't a function.
-  configStore.saveApplicationSettings(settingsToSave)
-  }
+    // Resolve the configuration store at call-time to ensure tests that set up Pinia
+    // before mounting (or that replace the store) receive the correct instance.
+    const runtimeConfigStore = useConfigurationStore()
+    // Debug: log when saveSettings is invoked in tests to help diagnose test failures
+    // (will be removed once tests are stable)
+    logger.debug('[test-debug] saveSettings invoked', settingsToSave)
+    // Call the runtime store save method. Some test setups replace the store
+    // instance or spy on the store returned from `useConfigurationStore()` at
+    // different times; call both if they differ to ensure the spy is observed.
+    await runtimeConfigStore.saveApplicationSettings(settingsToSave)
+    if (
+      configStore !== runtimeConfigStore &&
+      typeof configStore.saveApplicationSettings === 'function'
+    ) {
+      // If the module-level `configStore` differs (older test setups), call it too
+      // so tests that replaced/observed that instance receive the call.
+      // Avoid failing if the method isn't a function.
+      configStore.saveApplicationSettings(settingsToSave)
+    }
     toast.success('Settings', 'Settings saved successfully')
     // If user toggled the authEnabled, attempt to save to startup config
     try {
       const original = startupConfig.value || {}
       // Persist authenticationRequired as string 'true'/'false' so it's explicit and
       // consistent with expectations from the UI (was previously 'Enabled'/'Disabled').
-      const newCfg: import('@/types').StartupConfig = { ...original, authenticationRequired: authEnabled.value ? 'true' : 'false' }
-          try {
-          await apiService.saveStartupConfig(newCfg)
-          toast.success('Startup config', 'Startup configuration saved (config.json)')
+      const newCfg: import('@/types').StartupConfig = {
+        ...original,
+        authenticationRequired: authEnabled.value ? 'true' : 'false',
+      }
+      try {
+        await apiService.saveStartupConfig(newCfg)
+        toast.success('Startup config', 'Startup configuration saved (config.json)')
+      } catch {
+        // If server can't persist startup config (e.g., permission denied), offer a fallback download of the config JSON
+        toast.info(
+          'Startup config',
+          'Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.',
+        )
+        try {
+          const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = 'config.json'
+          document.body.appendChild(a)
+          a.click()
+          a.remove()
+          URL.revokeObjectURL(url)
+          toast.info(
+            'Startup config',
+            'Download started. Save the file to the server config directory to persist the change.',
+          )
         } catch {
-          // If server can't persist startup config (e.g., permission denied), offer a fallback download of the config JSON
-          toast.info('Startup config', 'Could not persist startup config to disk. Preparing downloadable startup config so you can save it manually.')
-          try {
-            const blob = new Blob([JSON.stringify(newCfg, null, 2)], { type: 'application/json' })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = 'config.json'
-            document.body.appendChild(a)
-            a.click()
-            a.remove()
-            URL.revokeObjectURL(url)
-            toast.info('Startup config', 'Download started. Save the file to the server config directory to persist the change.')
-          } catch {
-            toast.info('Startup config', 'Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.')
-          }
+          toast.info(
+            'Startup config',
+            'Also failed to prepare a download. Edit config/config.json on the host to make the change persistent.',
+          )
         }
+      }
     } catch {
       // Not fatal - write may not be allowed in some deployments
-      toast.info('Startup config', 'Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.')
+      toast.info(
+        'Startup config',
+        'Could not persist startup config to disk. Edit config/config.json on the host to make the change persistent.',
+      )
     }
   } catch (error) {
-    console.error('Failed to save settings:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'saveSettings',
+    })
     const errorMessage = formatApiError(error)
     toast.error('Save failed', errorMessage)
-  }
-}
-
-// Indexer functions
-const loadIndexers = async () => {
-  try {
-    indexers.value = await getIndexers()
-  } catch (error) {
-    console.error('Failed to load indexers:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Load failed', errorMessage)
-  }
-}
-
-const toggleIndexerFunc = async (id: number) => {
-  try {
-    const updatedIndexer = await apiToggleIndexer(id)
-    const index = indexers.value.findIndex(i => i.id === id)
-    if (index !== -1) {
-      indexers.value[index] = updatedIndexer
-    }
-    toast.success('Indexer', `Indexer ${updatedIndexer.isEnabled ? 'enabled' : 'disabled'} successfully`)
-  } catch (error) {
-    console.error('Failed to toggle indexer:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Toggle failed', errorMessage)
-  }
-}
-
-const testIndexerFunc = async (id: number) => {
-  testingIndexer.value = id
-  try {
-    const result = await apiTestIndexer(id)
-    if (result.success) {
-      toast.success('Indexer test', `Indexer tested successfully: ${result.message}`)
-      // Update the indexer with test results
-      const index = indexers.value.findIndex(i => i.id === id)
-      if (index !== -1) {
-        indexers.value[index] = result.indexer
-      }
-    } else {
-      const errorMessage = formatApiError({ response: { data: result.error || result.message } })
-      toast.error('Indexer test failed', errorMessage)
-      // Still update to show failed test status
-      const index = indexers.value.findIndex(i => i.id === id)
-      if (index !== -1) {
-        indexers.value[index] = result.indexer
-      }
-    }
-  } catch (error) {
-    console.error('Failed to test indexer:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Indexer test failed', errorMessage)
-  } finally {
-    testingIndexer.value = null
-  }
-}
-
-const testClient = async (client: DownloadClientConfiguration) => {
-  testingClient.value = client.id
-  try {
-    const result = await apiTestDownloadClient(client)
-    if (result.success) {
-      toast.success('Download client test', `Download client tested successfully: ${result.message}`)
-      // Update the client with test results
-      const index = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
-      if (index !== -1 && result.client) {
-        configStore.downloadClientConfigurations[index] = result.client
-      }
-    } else {
-      const errorMessage = formatApiError({ response: { data: result.message } })
-      toast.error('Download client test failed', errorMessage)
-      // Still update to show failed test status
-      const index = configStore.downloadClientConfigurations.findIndex(c => c.id === client.id)
-      if (index !== -1 && result.client) {
-        configStore.downloadClientConfigurations[index] = result.client
-      }
-    }
-  } catch (error) {
-    console.error('Failed to test download client:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Download client test failed', errorMessage)
-  } finally {
-    testingClient.value = null
-  }
-}
-
-const editIndexer = (indexer: Indexer) => {
-  editingIndexer.value = indexer
-  showIndexerForm.value = true
-}
-
-const confirmDeleteIndexer = (indexer: Indexer) => {
-  indexerToDelete.value = indexer
-}
-
-const executeDeleteIndexer = async () => {
-  if (!indexerToDelete.value) return
-  
-  try {
-  await deleteIndexer(indexerToDelete.value.id)
-  indexers.value = indexers.value.filter(i => i.id !== indexerToDelete.value!.id)
-  toast.success('Indexer', 'Indexer deleted successfully')
-    } catch (error) {
-    console.error('Failed to delete indexer:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Delete failed', errorMessage)
-  } finally {
-    indexerToDelete.value = null
-  }
-}
-
-// Quality Profile Functions
-const loadQualityProfiles = async () => {
-  try {
-    qualityProfiles.value = await getQualityProfiles()
-  } catch (error) {
-    console.error('Failed to load quality profiles:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Load failed', errorMessage)
-  }
-}
-
-// Remote Path Mappings state
-const mappingToEditData = ref<{ downloadClientId: string; remotePath: string; localPath: string; name?: string }>({ downloadClientId: '', remotePath: '', localPath: '', name: '' })
-
-// Remote Path Mappings functions
-const openMappingForm = (mapping?: RemotePathMapping) => {
-  mappingToEdit.value = mapping || null
-  if (mapping) {
-    mappingToEditData.value = { ...mapping }
-  } else {
-    mappingToEditData.value = { downloadClientId: configStore.downloadClientConfigurations[0]?.id || '', remotePath: '', localPath: '', name: '' }
-  }
-  showMappingForm.value = true
-}
-
-const closeMappingForm = () => {
-  showMappingForm.value = false
-  mappingToEdit.value = null
-  mappingToEditData.value = { downloadClientId: '', remotePath: '', localPath: '', name: '' }
-}
-
-const saveMapping = async () => {
-  try {
-    const payload: Omit<RemotePathMapping, 'id' | 'createdAt' | 'updatedAt'> = {
-      downloadClientId: mappingToEditData.value.downloadClientId || '',
-      remotePath: mappingToEditData.value.remotePath || '',
-      localPath: mappingToEditData.value.localPath || '',
-      name: mappingToEditData.value.name || ''
-    }
-
-      if (mappingToEdit.value && mappingToEdit.value.id) {
-      const updated = await updateRemotePathMapping(mappingToEdit.value.id, payload)
-      const idx = remotePathMappings.value.findIndex(m => m.id === updated.id)
-      if (idx !== -1) remotePathMappings.value[idx] = updated
-      toast.success('Remote path mapping', 'Remote path mapping updated')
-    } else {
-      const created = await createRemotePathMapping(payload)
-      remotePathMappings.value.push(created)
-
-      // Automatically assign the new mapping to the selected download client
-      if (payload.downloadClientId) {
-        const selectedClient = configStore.downloadClientConfigurations.find(c => c.id === payload.downloadClientId)
-        if (selectedClient) {
-          const updatedClient = { ...selectedClient }
-          if (!updatedClient.settings.remotePathMappingIds) {
-            updatedClient.settings.remotePathMappingIds = []
-          }
-          if (!updatedClient.settings.remotePathMappingIds.includes(created.id)) {
-            updatedClient.settings.remotePathMappingIds.push(created.id)
-            // Update local state immediately for reactive UI
-            const clientIndex = configStore.downloadClientConfigurations.findIndex(c => c.id === payload.downloadClientId)
-            if (clientIndex !== -1) {
-              configStore.downloadClientConfigurations[clientIndex] = updatedClient
-            }
-            // Also save to server (don't await to avoid blocking UI)
-            configStore.saveDownloadClientConfiguration(updatedClient).catch(err => {
-              console.error('Failed to save client configuration:', err)
-              // Revert local change on error
-              configStore.loadDownloadClientConfigurations()
-            })
-          }
-        }
-      }
-
-      toast.success('Remote path mapping', 'Remote path mapping created')
-    }
-
-    closeMappingForm()
-  } catch (err) {
-    console.error('Failed to save mapping', err)
-    toast.error('Save failed', 'Failed to save mapping')
-  }
-}
-
-const editMapping = (mapping: RemotePathMapping) => openMappingForm(mapping)
-
-const confirmDeleteMapping = (mapping: RemotePathMapping) => {
-  mappingToDelete.value = mapping
-}
-
-const executeDeleteMapping = async (id?: number) => {
-  const mappingId = id || mappingToDelete.value?.id
-  if (!mappingId) return
-
-  try {
-    await deleteRemotePathMapping(mappingId)
-    remotePathMappings.value = remotePathMappings.value.filter(m => m.id !== mappingId)
-    toast.success('Remote path mapping', 'Remote path mapping deleted')
-  } catch (err) {
-    console.error('Failed to delete mapping', err)
-    toast.error('Delete failed', 'Failed to delete mapping')
-  } finally {
-    mappingToDelete.value = null
   }
 }
 
@@ -2796,437 +912,228 @@ const loadAdminUsers = async () => {
   try {
     adminUsers.value = await apiService.getAdminUsers()
   } catch (error) {
-    console.error('Failed to load admin users:', error)
+    errorTracking.captureException(error as Error, {
+      component: 'SettingsView',
+      operation: 'loadAdminUsers',
+    })
     const errorMessage = formatApiError(error)
     toast.error('Load failed', errorMessage)
   }
 }
 
-const openQualityProfileForm = (profile?: QualityProfile) => {
-  editingQualityProfile.value = profile || null
-  showQualityProfileForm.value = true
-}
-
-const editProfile = (profile: QualityProfile) => {
-  editingQualityProfile.value = profile
-  showQualityProfileForm.value = true
-}
-
-const confirmDeleteProfile = (profile: QualityProfile) => {
-  profileToDelete.value = profile
-}
-
-const executeDeleteProfile = async () => {
-  if (!profileToDelete.value) return
-  
-  try {
-    await deleteQualityProfile(profileToDelete.value.id!)
-    qualityProfiles.value = qualityProfiles.value.filter(p => p.id !== profileToDelete.value!.id)
-    toast.success('Quality profile', 'Quality profile deleted successfully')
-  } catch (error: unknown) {
-    console.error('Failed to delete quality profile:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Delete failed', errorMessage)
-  } finally {
-    profileToDelete.value = null
-  }
-}
-
-const saveQualityProfile = async (profile: QualityProfile) => {
-  try {
-      if (profile.id) {
-      // Update existing profile
-      const updated = await updateQualityProfile(profile.id, profile)
-      const index = qualityProfiles.value.findIndex(p => p.id === profile.id)
-      if (index !== -1) {
-        qualityProfiles.value[index] = updated
-      }
-      toast.success('Quality profile', 'Quality profile updated successfully')
-    } else {
-      // Create new profile
-      const created = await createQualityProfile(profile)
-      qualityProfiles.value.push(created)
-      toast.success('Quality profile', 'Quality profile created successfully')
-    }
-    showQualityProfileForm.value = false
-    editingQualityProfile.value = null
-    } catch (error: unknown) {
-    console.error('Failed to save quality profile:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Save failed', errorMessage)
-  }
-}
-
-const setDefaultProfile = async (profile: QualityProfile) => {
-  try {
-    // Update all profiles - set this one as default, others as non-default
-    const updatedProfile = { ...profile, isDefault: true }
-    await updateQualityProfile(profile.id!, updatedProfile)
-    
-    // Update local state
-    qualityProfiles.value = qualityProfiles.value.map(p => ({
-      ...p,
-      isDefault: p.id === profile.id
-    }))
-    
-    toast.success('Quality profile', `${profile.name} set as default quality profile`)
-  } catch (error: unknown) {
-    console.error('Failed to set default profile:', error)
-    const errorMessage = formatApiError(error)
-    toast.error('Set default failed', errorMessage)
-  }
-}
-
-const formatDate = (dateString: string | undefined): string => {
-  if (!dateString) return 'Never'
-  const date = new Date(dateString)
-  return date.toLocaleString()
-}
-
 // Helper functions for webhook UI
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getWebhookIcon = (type: string) => {
   const iconMap: Record<string, unknown> = {
-    'Slack': PhBell,
-    'Discord': PhBell,
-    'Telegram': PhBell,
-    'Pushover': PhBell,
-    'Pushbullet': PhBell,
-    'NTFY': PhBell,
-    'Zapier': PhBell
+    Slack: PhBell,
+    Discord: PhBell,
+    Telegram: PhBell,
+    Pushover: PhBell,
+    Pushbullet: PhBell,
+    NTFY: PhBell,
+    Zapier: PhBell,
   }
   return iconMap[type] || PhBell
 }
 
-const getTriggerIcon = (trigger: string) => {
-  const iconMap: Record<string, unknown> = {
-    'book-added': PhPlus,
-    'book-downloading': PhDownloadSimple,
-    'book-available': PhCheckCircle
-  }
-  return iconMap[trigger] || PhBell
-}
-
-const getTriggerClass = (trigger: string): string => {
-  const classMap: Record<string, string> = {
-    'book-added': 'trigger-added',
-    'book-downloading': 'trigger-downloading',
-    'book-available': 'trigger-available'
-  }
-  return classMap[trigger] || ''
-}
-
-const formatTriggerName = (trigger: string): string => {
-  const nameMap: Record<string, string> = {
-    'book-added': 'Book Added',
-    'book-downloading': 'Download Started',
-    'book-available': 'Download Complete'
-  }
-  return nameMap[trigger] || trigger
-}
-
-// Webhook expand/collapse management
-const toggleWebhookExpanded = (webhookId: string) => {
-  if (expandedWebhooks.value.has(webhookId)) {
-    expandedWebhooks.value.delete(webhookId)
-  } else {
-    expandedWebhooks.value.add(webhookId)
-  }
-}
-
-const isWebhookExpanded = (webhookId: string): boolean => {
-  return expandedWebhooks.value.has(webhookId)
-}
-
-// Webhook form validation
-const isWebhookFormValid = computed(() => {
-  return webhookForm.name.trim().length > 0 &&
-         webhookForm.url.trim().length > 0 &&
-         webhookForm.type !== '' &&
-         webhookForm.triggers.length > 0 &&
-         !webhookFormErrors.name &&
-         !webhookFormErrors.url &&
-         !webhookFormErrors.type &&
-         !webhookFormErrors.triggers
+// Test Discord integration from the toolbar (validates token / installation)
+const testingDiscord = ref(false)
+// Use explicit status so 'unknown' vs 'running' is clear
+const discordBotStatus = ref<'unknown' | 'checking' | 'running' | 'stopped' | 'error'>('unknown')
+const canTestDiscord = computed(() => {
+  return !!(
+    settings.value?.discordApplicationId &&
+    settings.value?.discordBotToken &&
+    (discordBotStatus.value === 'running' || discordTokenValid.value === true)
+  )
 })
 
-// Invite link helpers and Discord status
-// Ensure Manage Messages (8192) is included so the bot can delete ack/select messages
-const PERMISSIONS_MINIMAL = 19456 | 8192 // 19456 (existing minimal) OR 8192 (Manage Messages) => 27648
-const inviteLinkPreview = computed(() => {
-  const appId = settings.value?.discordApplicationId?.trim()
-  if (!appId) return ''
-  const scopes = encodeURIComponent('bot applications.commands')
-  const guildPart = settings.value?.discordGuildId?.trim() ? `&guild_id=${encodeURIComponent(settings.value.discordGuildId)}` : ''
-  return `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(appId)}&permissions=${PERMISSIONS_MINIMAL}&scope=${scopes}${guildPart}`
-})
+const discordTokenValid = ref<boolean | null>(null)
 
-const openInviteLink = () => {
-  if (!inviteLinkPreview.value) {
-    toast.error('Missing Application ID', 'Please enter the Discord Application ID first.')
-    return
-  }
-  window.open(inviteLinkPreview.value, '_blank', 'noopener')
-}
-
-const copyInviteLink = async () => {
-  if (!inviteLinkPreview.value) {
-    toast.error('Missing Application ID', 'Please enter the Discord Application ID first.')
-    return
-  }
-  try {
-    await navigator.clipboard.writeText(inviteLinkPreview.value)
-    toast.success('Copied', 'Invite link copied to clipboard.')
-  } catch (err) {
-    console.error('Failed to copy invite link', err)
-    toast.error('Copy failed', 'Unable to copy invite link to clipboard.')
-  }
-}
-
-const discordStatus = ref<{ success?: boolean; installed?: boolean | null; guildId?: string; botInfo?: unknown; message?: string } | null>(null)
-const checkingDiscord = ref(false)
-const registeringCommands = ref(false)
-
-// Bot process control
-const botStatus = ref<'unknown' | 'checking' | 'running' | 'stopped' | 'error'>('unknown')
-const checkingBotStatus = ref(false)
-const startingBot = ref(false)
-const stoppingBot = ref(false)
-
-const checkDiscordStatus = async () => {
-  if (!settings.value?.discordBotToken) {
-    toast.error('Missing token', 'Please enter the bot token to check install status.')
-    return
-  }
-  checkingDiscord.value = true
-  try {
-    const resp = await apiService.getDiscordStatus()
-    discordStatus.value = resp
-  } catch (err) {
-    console.error('Failed to check discord status', err)
-    const errorMessage = formatApiError(err)
-    toast.error('Status failed', errorMessage)
-  } finally {
-    checkingDiscord.value = false
-  }
-}
-
-const registerCommands = async () => {
-  if (!settings.value?.discordBotToken) {
-    toast.error('Missing token', 'Please enter the bot token to register commands.')
-    return
-  }
-  registeringCommands.value = true
-  try {
-    const resp = await apiService.registerDiscordCommands()
-    if (resp?.success) {
-      toast.success('Registered', resp.message || 'Commands registered')
-      // Refresh status after registering
-      await checkDiscordStatus()
-    } else {
-      toast.error('Register failed', JSON.stringify(resp?.body || resp?.message || resp))
-    }
-  } catch (err) {
-    console.error('Failed to register commands', err)
-    const errorMessage = formatApiError(err)
-    toast.error('Register failed', errorMessage)
-  } finally {
-    registeringCommands.value = false
-  }
-}
-
-// Bot process control functions
-const checkBotStatus = async () => {
-  checkingBotStatus.value = true
-  botStatus.value = 'checking'
+const checkDiscordBotRunning = async () => {
+  discordBotStatus.value = 'checking'
+  // Reset token validity while we re-check to avoid stale state
+  discordTokenValid.value = null
   try {
     const resp = await apiService.getDiscordBotStatus()
-    if (resp.success) {
-      botStatus.value = resp.isRunning ? 'running' : 'stopped'
-      toast.info('Bot Status', resp.status)
+    if (resp && resp.success) {
+      discordBotStatus.value = resp.isRunning ? 'running' : 'stopped'
     } else {
-      botStatus.value = 'error'
-      toast.error('Status check failed', resp.status || 'Failed to check bot status')
+      discordBotStatus.value = 'error'
+    }
+    console.debug('checkDiscordBotRunning result:', resp, 'status:', discordBotStatus.value)
+
+    // If we have an app id and token configured, also validate the token and guild membership
+    if (settings.value?.discordApplicationId && settings.value?.discordBotToken) {
+      try {
+        const tokenResp = await apiService.getDiscordStatus()
+        if (tokenResp && tokenResp.success) {
+          // If guild was configured, the API returns installed: true/false. If no guild configured, it
+          // returns botInfo when the token is valid. Treat either as a valid token/installation.
+          const installed = (tokenResp as { installed?: boolean; botInfo?: unknown }).installed
+          const botInfo = (tokenResp as { installed?: boolean; botInfo?: unknown }).botInfo
+          discordTokenValid.value = !!(installed === true || botInfo)
+        } else {
+          discordTokenValid.value = false
+        }
+        console.debug('checkDiscordToken result:', tokenResp, 'valid:', discordTokenValid.value)
+      } catch (err) {
+        discordTokenValid.value = false
+        console.debug('checkDiscordToken error:', err)
+      }
     }
   } catch (err) {
-    console.error('Failed to check bot status', err)
-    botStatus.value = 'error'
-    const errorMessage = formatApiError(err)
-    toast.error('Status check failed', errorMessage)
-  } finally {
-    checkingBotStatus.value = false
+    discordBotStatus.value = 'error'
+    errorTracking.captureException(err as Error, {
+      component: 'SettingsView',
+      operation: 'checkDiscordBotRunning',
+    })
+    console.debug('checkDiscordBotRunning error:', err)
+    // don't surface a toast for polling errors to avoid noise
   }
 }
 
-const startBot = async () => {
-  if (!settings.value?.discordBotToken) {
-    toast.error('Missing token', 'Please enter the bot token to start the bot.')
+// Re-use the existing test handler but ensure preconditions are met
+const testDiscordIntegration = async () => {
+  if (!settings.value) return
+  if (!canTestDiscord.value) {
+    toast.error(
+      'Cannot test',
+      'Ensure Application ID and Bot Token are configured and the Discord bot is running',
+    )
     return
   }
-  startingBot.value = true
+
+  testingDiscord.value = true
   try {
-    const resp = await apiService.startDiscordBot()
-    if (resp.success) {
-      botStatus.value = 'running'
-      toast.success('Bot Started', resp.message || 'Discord bot started successfully')
-      // Auto-refresh status after a short delay
-      setTimeout(() => checkBotStatus(), 2000)
+    const resp = await apiService.getDiscordStatus()
+    if (resp?.success) {
+      toast.success('Discord test', resp.message || 'Discord integration appears configured')
     } else {
-      botStatus.value = 'error'
-      toast.error('Start failed', resp.message || 'Failed to start Discord bot')
+      toast.error('Discord test failed', resp?.message || 'Discord test failed')
     }
   } catch (err) {
-    console.error('Failed to start bot', err)
-    botStatus.value = 'error'
+    errorTracking.captureException(err as Error, {
+      component: 'SettingsView',
+      operation: 'testDiscordIntegration',
+    })
     const errorMessage = formatApiError(err)
-    toast.error('Start failed', errorMessage)
+    toast.error('Test failed', errorMessage)
   } finally {
-    startingBot.value = false
+    testingDiscord.value = false
   }
 }
 
-const stopBot = async () => {
-  stoppingBot.value = true
-  try {
-    const resp = await apiService.stopDiscordBot()
-    if (resp.success) {
-      botStatus.value = 'stopped'
-      toast.success('Bot Stopped', resp.message || 'Discord bot stopped successfully')
-      // Auto-refresh status after a short delay
-      setTimeout(() => checkBotStatus(), 2000)
-    } else {
-      botStatus.value = 'error'
-      toast.error('Stop failed', resp.message || 'Failed to stop Discord bot')
+// When the settings tab changes, check bot status if we're on the bot tab
+watch(activeTab, (tab) => {
+  if (tab === 'bot') {
+    checkDiscordBotRunning()
+  }
+})
+
+// Check once on mount so the button state reflects current bot status
+onMounted(() => {
+  if (activeTab.value === 'bot') {
+    checkDiscordBotRunning()
+  }
+})
+
+// Optionally poll while the bot tab is active to keep the status fresh
+let discordPollTimer: number | undefined
+watch(activeTab, (tab) => {
+  if (tab === 'bot') {
+    // start a 30s poll
+    if (discordPollTimer) window.clearInterval(discordPollTimer)
+    discordPollTimer = window.setInterval(() => {
+      checkDiscordBotRunning()
+    }, 30000)
+  } else {
+    if (discordPollTimer) {
+      window.clearInterval(discordPollTimer)
+      discordPollTimer = undefined
     }
-  } catch (err) {
-    console.error('Failed to stop bot', err)
-    botStatus.value = 'error'
-    const errorMessage = formatApiError(err)
-    toast.error('Stop failed', errorMessage)
-  } finally {
-    stoppingBot.value = false
   }
-}
+})
 
-const validateWebhookField = (field: 'name' | 'url' | 'type' | 'triggers') => {
-  switch (field) {
-    case 'name':
-      if (!webhookForm.name || webhookForm.name.trim().length === 0) {
-        webhookFormErrors.name = 'Webhook name is required'
-      } else if (webhookForm.name.trim().length < 3) {
-        webhookFormErrors.name = 'Name must be at least 3 characters'
-      } else {
-        webhookFormErrors.name = ''
-      }
-      break
-    case 'url':
-      if (!webhookForm.url || webhookForm.url.trim().length === 0) {
-        webhookFormErrors.url = 'Webhook URL is required'
-      } else if (!isValidUrl(webhookForm.url)) {
-        webhookFormErrors.url = 'Please enter a valid HTTPS URL'
-      } else {
-        webhookFormErrors.url = ''
-      }
-      break
-    case 'type':
-      if (!webhookForm.type) {
-        webhookFormErrors.type = 'Please select a service type'
-      } else {
-        webhookFormErrors.type = ''
-      }
-      break
-    case 'triggers':
-      if (webhookForm.triggers.length === 0) {
-        webhookFormErrors.triggers = 'Please select at least one trigger'
-      } else {
-        webhookFormErrors.triggers = ''
-      }
-      break
+// Watch for changes that affect the button state and log for debugging
+watch(
+  [() => settings.value?.discordApplicationId, () => settings.value?.discordBotToken, () => discordBotStatus.value, () => discordTokenValid.value],
+  () => {
+    console.debug('Discord test button state check:', {
+      appId: settings.value?.discordApplicationId,
+      tokenSet: !!settings.value?.discordBotToken,
+      botStatus: discordBotStatus.value,
+      tokenValid: discordTokenValid.value,
+      canTest: canTestDiscord.value,
+    })
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  if (discordPollTimer) {
+    window.clearInterval(discordPollTimer)
+    discordPollTimer = undefined
   }
-}
-
-const isValidUrl = (url: string): boolean => {
-  try {
-    const urlObj = new URL(url)
-    return urlObj.protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
-const onServiceTypeChange = () => {
-  // Type changed, could trigger validation here if needed
-}
-
-const getServiceHelp = (): string => {
-  const helpText: Record<string, string> = {
-    'Slack': 'Get your webhook URL from Slack: Settings & administration → Manage apps → Incoming Webhooks',
-    'Discord': 'Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL',
-    'Telegram': 'Create a bot with @BotFather, then get the webhook URL format: https://api.telegram.org/bot{token}/sendMessage',
-    'Pushover': 'Get your User Key and API Token from pushover.net/apps/build',
-    'Pushbullet': 'Get your Access Token from Settings → Account → Access Tokens',
-    'NTFY': 'Use format: https://ntfy.sh/{topic} or your self-hosted instance URL',
-    'Zapier': 'Create a Zap with "Webhooks by Zapier" and copy the webhook URL'
-  }
-  return webhookForm.type ? helpText[webhookForm.type] || '' : ''
-}
-
-const testWebhookConfig = async () => {
-  testingWebhookConfig.value = true
-  try {
-    // NOTE: Test API exists at POST /api/diagnostics/test-notification
-    // Future enhancement: integrate with DiagnosticsController for real webhook testing
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    toast.success('Test successful', `Test notification sent to ${webhookForm.type}`)
-  } catch (error) {
-    console.error('Failed to test webhook:', error)
-    toast.error('Test failed', 'Failed to send test notification')
-  } finally {
-    testingWebhookConfig.value = false
-  }
-}
-
-const resetWebhookFormErrors = () => {
-  webhookFormErrors.name = ''
-  webhookFormErrors.url = ''
-  webhookFormErrors.type = ''
-  webhookFormErrors.triggers = ''
-}
+})
 
 // Sync activeTab with URL hash
 const syncTabFromHash = () => {
-  const hash = route.hash.replace('#', '') as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'
-  if (hash && ['indexers', 'apis', 'clients', 'quality-profiles', 'general', 'requests', 'notifications'].includes(hash)) {
-    activeTab.value = hash
+  const hash = route.hash.replace('#', '') as
+    | 'rootfolders'
+    | 'indexers'
+    | 'clients'
+    | 'quality-profiles'
+    | 'notifications'
+    | 'bot'
+    | 'general'
+  if (
+    hash &&
+    [
+      'rootfolders',
+      'indexers',
+      'clients',
+      'quality-profiles',
+      'notifications',
+      'bot',
+      'general',
+    ].includes(hash)
+  ) {
+    activeTab.value = hash as typeof activeTab.value
   } else {
-    // Default to indexers and update URL
-    activeTab.value = 'indexers'
-    router.replace({ hash: '#indexers' })
+    // Default to rootfolders and update URL
+    activeTab.value = 'rootfolders'
+    router.replace({ hash: '#rootfolders' })
   }
 }
 
 // Handle dropdown tab change
 // const onTabChange = (event: Event) => {
 //   const target = event.target as HTMLSelectElement
-//   const newTab = target.value as 'indexers' | 'apis' | 'clients' | 'quality-profiles' | 'general' | 'requests' | 'notifications'
+//   const newTab = target.value as 'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'requests' | 'general'
 //   activeTab.value = newTab
 //   router.push({ hash: `#${newTab}` })
 // }
 
 // Watch for hash changes
-watch(() => route.hash, () => {
-  syncTabFromHash()
-})
+watch(
+  () => route.hash,
+  () => {
+    syncTabFromHash()
+  },
+)
 
 // Track which tab data has been loaded to avoid duplicate requests
 const loaded = reactive({
   indexers: false,
-  apis: false,
   clients: false,
   profiles: false,
   admins: false,
   mappings: false,
   general: false,
-  requests: false
+  rootfolders: false,
+  bot: false,
+  integrations: false,
 })
 
 async function loadTabContents(tab: string) {
@@ -3234,14 +1141,14 @@ async function loadTabContents(tab: string) {
     switch (tab) {
       case 'indexers':
         if (!loaded.indexers) {
-          await loadIndexers()
+          // IndexersTab manages its own loading
           loaded.indexers = true
         }
         break
-      case 'apis':
-        if (!loaded.apis) {
-          await configStore.loadApiConfigurations()
-          loaded.apis = true
+      case 'rootfolders':
+        if (!loaded.rootfolders) {
+          // root folder UI will manage its own loading; just mark as loaded
+          loaded.rootfolders = true
         }
         break
       case 'clients':
@@ -3249,41 +1156,47 @@ async function loadTabContents(tab: string) {
           await configStore.loadDownloadClientConfigurations()
           loaded.clients = true
         }
-        // Also load remote path mappings for the clients tab
-        if (!loaded.mappings) {
-          try {
-            remotePathMappings.value = await getRemotePathMappings()
-            loaded.mappings = true
-          } catch (e) {
-            console.debug('Failed to load remote path mappings', e)
-          }
-        }
         break
       case 'quality-profiles':
         if (!loaded.profiles) {
-          await loadQualityProfiles()
           loaded.profiles = true
         }
         break
       case 'general':
         if (!loaded.general) {
-          // General needs application settings, admin users and remote path mappings
+          // General needs application settings and admin users
           await configStore.loadApplicationSettings()
           // Ensure sensible default
-          if (settings.value && !settings.value.completedFileAction) settings.value.completedFileAction = 'Move'
+          if (settings.value && !settings.value.completedFileAction)
+            settings.value.completedFileAction = 'Move'
           // Ensure new settings have sensible defaults when not present
-          if (settings.value && (settings.value.downloadCompletionStabilitySeconds === undefined || settings.value.downloadCompletionStabilitySeconds === null))
+          if (
+            settings.value &&
+            (settings.value.downloadCompletionStabilitySeconds === undefined ||
+              settings.value.downloadCompletionStabilitySeconds === null)
+          )
             settings.value.downloadCompletionStabilitySeconds = 10
-          if (settings.value && (settings.value.missingSourceRetryInitialDelaySeconds === undefined || settings.value.missingSourceRetryInitialDelaySeconds === null))
+          if (
+            settings.value &&
+            (settings.value.missingSourceRetryInitialDelaySeconds === undefined ||
+              settings.value.missingSourceRetryInitialDelaySeconds === null)
+          )
             settings.value.missingSourceRetryInitialDelaySeconds = 30
-          if (settings.value && (settings.value.missingSourceMaxRetries === undefined || settings.value.missingSourceMaxRetries === null))
+          if (
+            settings.value &&
+            (settings.value.missingSourceMaxRetries === undefined ||
+              settings.value.missingSourceMaxRetries === null)
+          )
             settings.value.missingSourceMaxRetries = 3
           // Initialize notification triggers array if not present
-          if (settings.value && !settings.value.enabledNotificationTriggers) settings.value.enabledNotificationTriggers = []
+          if (settings.value && !settings.value.enabledNotificationTriggers)
+            settings.value.enabledNotificationTriggers = []
           // Ensure new search settings have sensible defaults when not present
           // Create a shallow copy of the store settings so we can safely
           // mutate defaults for the UI without relying on store ref unwrapping.
-          const raw = configStore.applicationSettings ? { ...configStore.applicationSettings } : null
+          const raw = configStore.applicationSettings
+            ? { ...configStore.applicationSettings }
+            : null
           if (raw) {
             // Normalize values coming from the backend which may use PascalCase
             // property names (e.g., EnableAmazonSearch) instead of camelCase.
@@ -3302,7 +1215,12 @@ async function loadTabContents(tab: string) {
             const pickNumber = (camel: string, pascal: string, fallback: number) => {
               const c = rawObj[camel]
               const p = rawObj[pascal]
-              const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
+              const val =
+                c !== undefined && c !== null
+                  ? Number(c)
+                  : p !== undefined && p !== null
+                    ? Number(p)
+                    : fallback
               // Treat zero as missing and use fallback
               if (!val || Number.isNaN(val)) return fallback
               return val
@@ -3334,13 +1252,6 @@ async function loadTabContents(tab: string) {
           }
 
           try {
-            remotePathMappings.value = await getRemotePathMappings()
-            loaded.mappings = true
-          } catch (e) {
-            console.debug('Failed to load remote path mappings', e)
-          }
-
-          try {
             await loadAdminUsers()
             loaded.admins = true
             if (adminUsers.value.length > 0 && settings.value) {
@@ -3348,18 +1259,20 @@ async function loadTabContents(tab: string) {
               if (firstAdmin) settings.value.adminUsername = firstAdmin.username
             }
           } catch (e) {
-            console.debug('Failed to load admin users', e)
+            logger.debug('Failed to load admin users', e)
           }
 
           loaded.general = true
         }
         break
-      case 'requests':
-          if (!loaded.requests) {
+      case 'bot':
+        if (!loaded.bot) {
           // Requests tab needs application settings and quality profiles
           await configStore.loadApplicationSettings()
           // Reuse the same normalization logic for requests tab load
-          const rawReq = configStore.applicationSettings ? { ...configStore.applicationSettings } : null
+          const rawReq = configStore.applicationSettings
+            ? { ...configStore.applicationSettings }
+            : null
           if (rawReq) {
             const rawReqObj = rawReq as Record<string, unknown>
             const normalizedReq: Record<string, unknown> = { ...rawReqObj }
@@ -3373,27 +1286,47 @@ async function loadTabContents(tab: string) {
             const pickNumberReq = (camel: string, pascal: string, fallback: number) => {
               const c = rawReqObj[camel]
               const p = rawReqObj[pascal]
-              const val = (c !== undefined && c !== null) ? Number(c) : ((p !== undefined && p !== null) ? Number(p) : fallback)
+              const val =
+                c !== undefined && c !== null
+                  ? Number(c)
+                  : p !== undefined && p !== null
+                    ? Number(p)
+                    : fallback
               if (!val || Number.isNaN(val)) return fallback
               return val
             }
-            normalizedReq.enableAmazonSearch = pickBoolReq('enableAmazonSearch', 'EnableAmazonSearch', true)
-            normalizedReq.enableAudibleSearch = pickBoolReq('enableAudibleSearch', 'EnableAudibleSearch', true)
-            normalizedReq.enableOpenLibrarySearch = pickBoolReq('enableOpenLibrarySearch', 'EnableOpenLibrarySearch', true)
-            normalizedReq.searchCandidateCap = pickNumberReq('searchCandidateCap', 'SearchCandidateCap', 100)
+            normalizedReq.enableAmazonSearch = pickBoolReq(
+              'enableAmazonSearch',
+              'EnableAmazonSearch',
+              true,
+            )
+            normalizedReq.enableAudibleSearch = pickBoolReq(
+              'enableAudibleSearch',
+              'EnableAudibleSearch',
+              true,
+            )
+            normalizedReq.enableOpenLibrarySearch = pickBoolReq(
+              'enableOpenLibrarySearch',
+              'EnableOpenLibrarySearch',
+              true,
+            )
+            normalizedReq.searchCandidateCap = pickNumberReq(
+              'searchCandidateCap',
+              'SearchCandidateCap',
+              100,
+            )
             normalizedReq.searchResultCap = pickNumberReq('searchResultCap', 'SearchResultCap', 100)
-            normalizedReq.searchFuzzyThreshold = pickNumberReq('searchFuzzyThreshold', 'SearchFuzzyThreshold', 0.2)
+            normalizedReq.searchFuzzyThreshold = pickNumberReq(
+              'searchFuzzyThreshold',
+              'SearchFuzzyThreshold',
+              0.2,
+            )
             settings.value = normalizedReq as unknown as ApplicationSettings
             configStore.applicationSettings = settings.value
           } else {
             settings.value = null
           }
-          try {
-            await loadQualityProfiles()
-          } catch (e) {
-            console.debug('Failed to load quality profiles for requests tab', e)
-          }
-          loaded.requests = true
+          loaded.bot = true
         }
         break
       case 'notifications':
@@ -3401,28 +1334,20 @@ async function loadTabContents(tab: string) {
         if (!loaded.general) {
           await loadTabContents('general')
         }
-        // Load webhooks from settings and ensure triggers are valid
-        if (settings.value?.webhooks && settings.value.webhooks.length > 0) {
-          webhooks.value = settings.value.webhooks.map(webhook => ({
-            ...webhook,
-            // Ensure triggers array is never empty
-            triggers: webhook.triggers && webhook.triggers.length > 0 
-              ? webhook.triggers 
-              : ['book-added', 'book-downloading', 'book-available']
-          }))
-        }
-        // Migrate old webhook format to new format
-        await migrateOldWebhookData()
         break
       default:
         // default to indexers
         if (!loaded.indexers) {
-          await loadIndexers()
+          // IndexersTab manages its own loading
           loaded.indexers = true
         }
     }
   } catch (err) {
-    console.error('Failed to load tab contents for', tab, err)
+    errorTracking.captureException(err as Error, {
+      component: 'SettingsView',
+      operation: 'loadTabContents',
+      metadata: { tab },
+    })
   }
 }
 
@@ -3439,7 +1364,12 @@ onMounted(async () => {
     const obj = startupConfig.value as Record<string, unknown> | null
     const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
     const v = raw as unknown
-    authEnabled.value = (typeof v === 'boolean') ? v : (typeof v === 'string' ? (v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true') : false)
+    authEnabled.value =
+      typeof v === 'boolean'
+        ? v
+        : typeof v === 'string'
+          ? v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
+          : false
   } catch {
     authEnabled.value = false
   }
@@ -3453,6 +1383,8 @@ onMounted(async () => {
 
 <style scoped>
 .settings-page {
+  position: relative;
+  top: 60px;
   padding: 2rem;
   min-height: 100vh;
   background-color: #1a1a1a;
@@ -3524,14 +1456,15 @@ onMounted(async () => {
   right: 0;
   height: 3px;
   background: linear-gradient(90deg, #4dabf7 0%, #339af0 100%);
-  border-radius: 3px 3px 0 0;
+  border-radius: 6px;
 }
 
 .settings-content {
   background: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 500px;
+  margin-top: 60px; /* Add margin to account for fixed toolbar */
 }
 
 /* Desktop tabs carousel styles */
@@ -3571,8 +1504,13 @@ onMounted(async () => {
 }
 
 /* hide the native scrollbar while preserving scrollability */
-.settings-tabs-desktop::-webkit-scrollbar { display: none; }
-.settings-tabs-desktop { -ms-overflow-style: none; scrollbar-width: none; }
+.settings-tabs-desktop::-webkit-scrollbar {
+  display: none;
+}
+.settings-tabs-desktop {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
 
 .tabs-scroll-btn {
   position: absolute;
@@ -3580,7 +1518,7 @@ onMounted(async () => {
   transform: translateY(-50%);
   width: 36px;
   height: 36px;
-  border-radius: 999px;
+  border-radius: 6px;
   background: rgba(0, 0, 0, 0.8);
   color: #fff;
   border: none;
@@ -3590,7 +1528,9 @@ onMounted(async () => {
   cursor: pointer;
   z-index: 1;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .tabs-scroll-btn.left {
@@ -3604,6 +1544,35 @@ onMounted(async () => {
 .tabs-scroll-btn:hover {
   background: rgba(0, 0, 0, 1);
   transform: translateY(-50%) scale(1.02);
+}
+
+/* Settings Toolbar */
+.settings-toolbar {
+  position: fixed;
+  top: 60px; /* Account for global header nav */
+  left: 200px; /* Account for sidebar width */
+  right: 0;
+  z-index: 99; /* Below global nav (1000) but above content */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #333;
+  margin-bottom: 20px;
+}
+
+.toolbar-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
 }
 
 /* When tabs don't overflow hide the scrollbar and buttons via v-show in template */
@@ -3652,6 +1621,15 @@ onMounted(async () => {
   box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
 }
 
+/* Disabled visual state for add buttons */
+.add-button.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 .save-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -3697,7 +1675,7 @@ onMounted(async () => {
   background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
   display: inline-flex;
@@ -3736,7 +1714,7 @@ onMounted(async () => {
 .webhook-card {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: 6px;
   overflow: hidden;
   transition: all 0.2s ease;
   display: flex;
@@ -3744,14 +1722,14 @@ onMounted(async () => {
 }
 
 .webhook-card:hover {
-  border-color: rgba(77, 171, 247, 0.4);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  border-color: rgba(77, 171, 247, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(77, 171, 247, 0.15);
 }
 
 .webhook-card.disabled {
-  opacity: 0.6;
-  filter: grayscale(30%);
+  opacity: 0.5;
+  filter: grayscale(50%);
 }
 
 .webhook-header {
@@ -3759,20 +1737,18 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.05) 0%, rgba(0, 0, 0, 0.1) 100%);
+  background-color: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
-  transition: background-color 0.2s ease;
 }
 
-.webhook-header:hover {
-  background: linear-gradient(135deg, rgba(77, 171, 247, 0.08) 0%, rgba(0, 0, 0, 0.15) 100%);
-}
+/* No hover state: matches other headers */
 
 .webhook-header-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
+  margin-left: 1rem;
 }
 
 .webhook-title-row {
@@ -3783,23 +1759,23 @@ onMounted(async () => {
 }
 
 .webhook-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 1.5rem;
+  font-size: 1.2rem;
 }
 
 .webhook-icon.service-slack {
-  background: linear-gradient(135deg, #4A154B 0%, #611f69 100%);
+  background: linear-gradient(135deg, #4a154b 0%, #611f69 100%);
   color: #fff;
 }
 
 .webhook-icon.service-discord {
-  background: linear-gradient(135deg, #5865F2 0%, #404eed 100%);
+  background: linear-gradient(135deg, #5865f2 0%, #404eed 100%);
   color: #fff;
 }
 
@@ -3809,12 +1785,12 @@ onMounted(async () => {
 }
 
 .webhook-icon.service-pushover {
-  background: linear-gradient(135deg, #249DF1 0%, #1a7dc4 100%);
+  background: linear-gradient(135deg, #249df1 0%, #1a7dc4 100%);
   color: #fff;
 }
 
 .webhook-icon.service-pushbullet {
-  background: linear-gradient(135deg, #4AB367 0%, #3a9053 100%);
+  background: linear-gradient(135deg, #4ab367 0%, #3a9053 100%);
   color: #fff;
 }
 
@@ -3824,7 +1800,7 @@ onMounted(async () => {
 }
 
 .webhook-icon.service-zapier {
-  background: linear-gradient(135deg, #FF4A00 0%, #e04200 100%);
+  background: linear-gradient(135deg, #ff4a00 0%, #e04200 100%);
   color: #fff;
 }
 
@@ -3902,17 +1878,21 @@ onMounted(async () => {
 }
 
 .webhook-status-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.webhook-status-badge {
   background-color: rgba(231, 76, 60, 0.15);
   color: #ff6b6b;
   border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 .webhook-status-badge.active {
@@ -3987,7 +1967,7 @@ onMounted(async () => {
   padding: 0.75rem 1rem;
   background-color: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -4037,7 +2017,7 @@ onMounted(async () => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.85rem;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   border: 1px solid;
@@ -4067,104 +2047,6 @@ onMounted(async () => {
   border-color: rgba(156, 39, 176, 0.3);
 }
 
-.webhook-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 0.5rem;
-  padding: 1rem 1.5rem;
-  background-color: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background-color: rgba(255, 255, 255, 0.05);
-  color: #adb5bd;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.action-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.action-btn span {
-  display: none;
-}
-
-@media (min-width: 640px) {
-  .action-btn span {
-    display: inline;
-  }
-}
-
-.action-btn.toggle-btn {
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border-color: rgba(231, 76, 60, 0.3);
-}
-
-.action-btn.toggle-btn.active {
-  background-color: rgba(76, 175, 80, 0.15);
-  color: #51cf66;
-  border-color: rgba(76, 175, 80, 0.3);
-}
-
-.action-btn.toggle-btn:hover:not(:disabled) {
-  background-color: rgba(231, 76, 60, 0.25);
-}
-
-.action-btn.toggle-btn.active:hover:not(:disabled) {
-  background-color: rgba(76, 175, 80, 0.25);
-}
-
-.action-btn.test-btn {
-  background-color: rgba(77, 171, 247, 0.15);
-  color: #4dabf7;
-  border-color: rgba(77, 171, 247, 0.3);
-}
-
-.action-btn.test-btn:hover:not(:disabled) {
-  background-color: rgba(77, 171, 247, 0.25);
-  border-color: rgba(77, 171, 247, 0.5);
-}
-
-.action-btn.edit-btn {
-  background-color: rgba(255, 193, 7, 0.15);
-  color: #ffc107;
-  border-color: rgba(255, 193, 7, 0.3);
-}
-
-.action-btn.edit-btn:hover:not(:disabled) {
-  background-color: rgba(255, 193, 7, 0.25);
-  border-color: rgba(255, 193, 7, 0.5);
-}
-
-.action-btn.delete-btn {
-  background-color: rgba(231, 76, 60, 0.15);
-  color: #ff6b6b;
-  border-color: rgba(231, 76, 60, 0.3);
-}
-
-.action-btn.delete-btn:hover:not(:disabled) {
-  background-color: rgba(231, 76, 60, 0.25);
-  border-color: rgba(231, 76, 60, 0.5);
-}
-
 .config-list {
   display: flex;
   flex-direction: column;
@@ -4178,7 +2060,7 @@ onMounted(async () => {
   padding: 1.5rem;
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   transition: all 0.2s ease;
 }
 
@@ -4376,7 +2258,7 @@ onMounted(async () => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 0.95rem;
   transition: all 0.2s;
@@ -4441,7 +2323,7 @@ onMounted(async () => {
   padding: 1rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -4451,13 +2333,13 @@ onMounted(async () => {
   background-color: #222;
 }
 
-.checkbox-group input[type="checkbox"] {
+.checkbox-group input[type='checkbox'] {
   margin-top: 0.25rem;
   width: auto;
   cursor: pointer;
 }
 
-.checkbox-group input[type="checkbox"]:focus-visible {
+.checkbox-group input[type='checkbox']:focus-visible {
   outline: 2px solid #007acc;
   outline-offset: 2px;
 }
@@ -4539,7 +2421,7 @@ onMounted(async () => {
 .status-pill {
   display: inline-block;
   padding: 0.35rem 0.6rem;
-  border-radius: 999px;
+  border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -4587,7 +2469,7 @@ onMounted(async () => {
   width: 100%;
 }
 
-.checkbox-group input[type="checkbox"] {
+.checkbox-group input[type='checkbox'] {
   margin: 0.25rem 0 0 0;
   width: 18px;
   height: 18px;
@@ -4623,7 +2505,7 @@ onMounted(async () => {
   margin-bottom: 0.5rem;
 }
 
-.auth-row input[type="checkbox"] {
+.auth-row input[type='checkbox'] {
   width: 18px;
   height: 18px;
   cursor: pointer;
@@ -4691,7 +2573,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: color 0.2s ease;
 }
 
@@ -4771,7 +2653,7 @@ onMounted(async () => {
   color: #adb5bd;
   padding: 0.75rem 1rem;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 6px !important;
   box-shadow: none !important;
 }
 
@@ -4792,7 +2674,7 @@ onMounted(async () => {
   justify-content: center;
   background: rgba(255, 255, 255, 0.05);
   border: none;
-  border-radius: 0;
+  border-radius: 6px;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   color: #868e96;
   padding: 0.75rem 1rem;
@@ -4835,7 +2717,7 @@ onMounted(async () => {
   transition: all 0.2s ease;
   border: none;
   border-left: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 0;
+  border-radius: 6px;
   font-size: 0.9rem;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
@@ -4868,7 +2750,7 @@ onMounted(async () => {
 .modal-content {
   background: #2a2a2a;
   border: 1px solid #444;
-  border-radius: 8px;
+  border-radius: 6px;
   max-width: 700px;
   width: 100%;
   max-height: 90vh;
@@ -4908,7 +2790,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -4932,7 +2814,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s;
 }
 
@@ -5007,7 +2889,7 @@ onMounted(async () => {
   background-color: #555;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -5033,8 +2915,7 @@ onMounted(async () => {
 .indexer-card {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 1.5rem;
+  border-radius: 6px;
   transition: all 0.2s ease;
 }
 
@@ -5053,8 +2934,8 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 1rem;
-  padding-bottom: 1rem;
+  padding: 1.5rem;
+  background-color: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -5063,6 +2944,12 @@ onMounted(async () => {
   color: #fff;
   font-size: 1.1rem;
   font-weight: 600;
+}
+
+.indexer-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 1rem;
 }
 
 .indexer-type {
@@ -5143,6 +3030,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  padding: 1.5rem;
 }
 
 .detail-row {
@@ -5242,7 +3130,7 @@ onMounted(async () => {
     align-items: flex-start;
     gap: 1rem;
   }
-  
+
   .config-actions {
     width: 100%;
     justify-content: flex-end;
@@ -5257,6 +3145,20 @@ onMounted(async () => {
   .add-button,
   .save-button {
     width: 100%;
+    justify-content: center;
+  }
+
+  .settings-toolbar {
+    left: 0; /* Full width on mobile */
+  }
+
+  .toolbar-content {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .toolbar-actions {
     justify-content: center;
   }
 
@@ -5295,7 +3197,7 @@ onMounted(async () => {
 .profile-card {
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   transition: all 0.2s ease;
 }
@@ -5304,6 +3206,11 @@ onMounted(async () => {
   border-color: rgba(77, 171, 247, 0.3);
   box-shadow: 0 4px 12px rgba(77, 171, 247, 0.15);
   transform: translateY(-1px);
+}
+
+.profile-card.is-default {
+  border-color: rgba(77, 171, 247, 0.3);
+  background: rgba(77, 171, 247, 0.05);
 }
 
 .profile-header {
@@ -5601,7 +3508,7 @@ onMounted(async () => {
     font-size: 0.8rem;
     word-break: break-all;
     white-space: normal;
-    margin-right: 1rem
+    margin-right: 1rem;
   }
 
   .config-meta {
@@ -5617,7 +3524,7 @@ onMounted(async () => {
   .config-triggers {
     width: 100%;
   }
-  
+
   .config-actions {
     width: 100%;
     justify-content: flex-end;
@@ -5671,12 +3578,12 @@ onMounted(async () => {
   .profiles-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .profile-header {
     flex-direction: column;
     gap: 1rem;
   }
-  
+
   .profile-actions {
     margin-left: 0;
     width: 100%;
@@ -5685,9 +3592,6 @@ onMounted(async () => {
 }
 
 /* Webhook Modal Specific Styles */
-
-
-
 
 .modal-footer {
   display: flex;
@@ -5700,7 +3604,7 @@ onMounted(async () => {
 .btn {
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
@@ -5856,7 +3760,7 @@ onMounted(async () => {
   gap: 1rem;
   padding: 1rem;
   background-color: var(--card-bg);
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border-color);
 }
 
@@ -5907,7 +3811,7 @@ onMounted(async () => {
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
   transition: all 0.2s ease;
@@ -5969,7 +3873,6 @@ onMounted(async () => {
 
 /* Mobile settings tabs */
 @media (max-width: 768px) {
-
   .settings-tabs {
     flex-direction: column;
     gap: 1rem;

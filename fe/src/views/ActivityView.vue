@@ -16,18 +16,14 @@
     <div class="activity-filters">
       <!-- Mobile dropdown -->
       <div class="activity-filters-mobile">
-        <CustomSelect
-          v-model="selectedTab"
-          :options="mobileTabOptions"
-          class="tab-dropdown"
-        />
+        <CustomSelect v-model="selectedTab" :options="mobileTabOptions" class="tab-dropdown" />
       </div>
 
       <!-- Desktop tabs -->
       <div class="activity-filters-desktop">
         <div class="filter-tabs">
-          <button 
-            v-for="tab in filterTabs" 
+          <button
+            v-for="tab in filterTabs"
             :key="tab.value"
             :class="['tab', { active: selectedTab === tab.value }]"
             @click="selectedTab = tab.value"
@@ -40,72 +36,81 @@
     </div>
 
     <!-- Queue List -->
-    <div v-if="filteredQueue.length > 0" ref="scrollContainer" class="queue-list-container" @scroll="updateVisibleRange">
+    <div
+      v-if="filteredQueue.length > 0"
+      ref="scrollContainer"
+      class="queue-list-container"
+      @scroll="updateVisibleRange"
+    >
       <div class="queue-list-spacer" :style="{ height: `${totalHeight}px` }">
         <div class="queue-list" :style="{ transform: `translateY(${topPadding}px)` }">
-          <div 
-            v-for="item in visibleQueueItems" 
+          <div
+            v-for="item in visibleQueueItems"
             :key="item.id"
             v-memo="[item.id, item.status, item.progress, item.eta]"
             class="queue-item"
           >
-        <div class="queue-icon">
-          <PhDownloadSimple />
-        </div>
-        
-        <div class="queue-info">
-          <div class="queue-title-row">
-            <h3 class="queue-title">{{ item.title }}</h3>
-          </div>
-          
-          <div class="queue-meta">
-            <span v-if="item.downloadClient" class="queue-client">
-              <PhDesktop />
-              {{ item.downloadClient }}
-            </span>
-            <span v-if="item.quality && item.quality !== '*'" class="queue-quality">{{ item.quality }}</span>
-          </div>
+            <div class="queue-icon">
+              <PhDownloadSimple />
+            </div>
 
-          <div class="queue-progress-container">
-            <div class="queue-stats-top">
-              <span class="progress-text">{{ item.progress.toFixed(1) }}%</span>
-              <span class="size-info">{{ formatSize(item.downloaded) }} / {{ formatSize(item.size) }}</span>
-              <span v-if="item.downloadSpeed > 0" class="download-speed">
-                <PhArrowDown />
-                {{ formatSpeed(item.downloadSpeed) }}
-              </span>
-              <span v-if="item.eta" class="eta">
-                <PhClock />
-                {{ formatEta(item.eta) }}
+            <div class="queue-info">
+              <div class="queue-title-row">
+                <h3 class="queue-title">{{ item.title }}</h3>
+              </div>
+
+              <div class="queue-meta">
+                <span v-if="item.downloadClient" class="queue-client">
+                  <PhDesktop />
+                  {{ item.downloadClient }}
+                </span>
+                <span v-if="item.quality && item.quality !== '*'" class="queue-quality">{{
+                  item.quality
+                }}</span>
+              </div>
+
+              <div class="queue-progress-container">
+                <div class="queue-stats-top">
+                  <span class="progress-text">{{ item.progress.toFixed(1) }}%</span>
+                  <span class="size-info"
+                    >{{ formatSize(item.downloaded) }} / {{ formatSize(item.size) }}</span
+                  >
+                  <span v-if="item.downloadSpeed > 0" class="download-speed">
+                    <PhArrowDown />
+                    {{ formatSpeed(item.downloadSpeed) }}
+                  </span>
+                  <span v-if="item.eta" class="eta">
+                    <PhClock />
+                    {{ formatEta(item.eta) }}
+                  </span>
+                </div>
+                <div class="progress-bar">
+                  <div
+                    class="progress-fill"
+                    :style="{ width: `${item.progress}%` }"
+                    :class="getProgressClass(item.status)"
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="queue-status">
+              <span :class="['status-badge', item.status]">
+                {{ formatStatus(item.status) }}
               </span>
             </div>
-            <div class="progress-bar">
-              <div 
-                class="progress-fill" 
-                :style="{ width: `${item.progress}%` }"
-                :class="getProgressClass(item.status)"
-              ></div>
+
+            <div class="queue-actions">
+              <button
+                v-if="item.canRemove"
+                class="btn-icon btn-danger"
+                @click="removeFromQueue(item)"
+                title="Remove from Queue"
+              >
+                <PhX />
+              </button>
             </div>
           </div>
-        </div>
-
-        <div class="queue-status">
-          <span :class="['status-badge', item.status]">
-            {{ formatStatus(item.status) }}
-          </span>
-        </div>
-
-        <div class="queue-actions">
-          <button 
-            v-if="item.canRemove"
-            class="btn-icon btn-danger"
-            @click="removeFromQueue(item)"
-            title="Remove from Queue"
-          >
-            <PhX />
-          </button>
-        </div>
-      </div>
         </div>
       </div>
     </div>
@@ -139,9 +144,12 @@
         </div>
         <div class="modal-body">
           <p v-if="clientHasQueueEntry === null">Are you sure you want to remove this download?</p>
-          <p v-else-if="clientHasQueueEntry === true">Are you sure you want to remove this download?</p>
+          <p v-else-if="clientHasQueueEntry === true">
+            Are you sure you want to remove this download?
+          </p>
           <p v-else>
-            This download was not found in the selected download client's queue. Do you want to remove it from Listenarr only (this will delete the record from Listenarr's downloads)?
+            This download was not found in the selected download client's queue. Do you want to
+            remove it from Listenarr only (this will delete the record from Listenarr's downloads)?
           </p>
           <div class="remove-item-info">
             <strong>{{ itemToRemove?.title }}</strong>
@@ -158,20 +166,26 @@
           </div>
           <p class="warning-text" v-if="clientHasQueueEntry !== false">
             <PhInfo />
-            This will remove the download from your download client. Files may or may not be deleted depending on your client settings.
+            This will remove the download from your download client. Files may or may not be deleted
+            depending on your client settings.
           </p>
           <p class="warning-text" v-else>
             <PhInfo />
-            The download was not found in the remote client's queue. Removing it here will only delete the Listenarr record (no action will be taken against the remote client).
+            The download was not found in the remote client's queue. Removing it here will only
+            delete the Listenarr record (no action will be taken against the remote client).
           </p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showRemoveModal = false">
-            Cancel
-          </button>
+          <button class="btn btn-secondary" @click="showRemoveModal = false">Cancel</button>
           <button class="btn btn-danger" @click="confirmRemove" :disabled="removing">
             <component :is="removing ? PhSpinner : PhTrash" />
-            {{ removing ? 'Removing...' : (clientHasQueueEntry === false ? 'Remove from Listenarr' : 'Remove') }}
+            {{
+              removing
+                ? 'Removing...'
+                : clientHasQueueEntry === false
+                  ? 'Remove from Listenarr'
+                  : 'Remove'
+            }}
           </button>
         </div>
       </div>
@@ -180,9 +194,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { PhActivity, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhDesktop, PhArrowDown, PhClock, PhX, PhQueue, PhWarningCircle, PhInfo, PhChartBar, PhTrash, PhPause, PhList, PhCheckCircle } from '@phosphor-icons/vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, unref } from 'vue'
+import {
+  PhActivity,
+  PhSpinner,
+  PhArrowClockwise,
+  PhDownloadSimple,
+  PhDesktop,
+  PhArrowDown,
+  PhClock,
+  PhX,
+  PhQueue,
+  PhWarningCircle,
+  PhInfo,
+  PhChartBar,
+  PhTrash,
+  PhPause,
+  PhList,
+  PhCheckCircle,
+} from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
+import { errorTracking } from '@/services/errorTracking'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -193,6 +225,7 @@ import CustomSelect from '@/components/CustomSelect.vue'
 const downloadsStore = useDownloadsStore()
 const configStore = useConfigurationStore()
 const selectedTab = ref('all')
+
 const queue = ref<QueueItem[]>([])
 const loading = ref(false)
 const showRemoveModal = ref(false)
@@ -207,11 +240,28 @@ let queueRefreshInterval: ReturnType<typeof setInterval> | null = null
 // Mobile tab options for CustomSelect
 const mobileTabOptions = computed(() => [
   { value: 'all', label: `All (${allActivityItems.value.length})`, icon: PhList },
-  { value: 'downloading', label: `Downloading (${allActivityItems.value.filter(q => q.status === 'downloading').length})`, icon: PhDownloadSimple },
-  { value: 'paused', label: `Paused (${allActivityItems.value.filter(q => q.status === 'paused').length})`, icon: PhPause },
-  { value: 'queued', label: `Queued (${allActivityItems.value.filter(q => q.status === 'queued').length})`, icon: PhClock },
+  {
+    value: 'downloading',
+    label: `Downloading (${allActivityItems.value.filter((q) => q.status === 'downloading').length})`,
+    icon: PhDownloadSimple,
+  },
+  {
+    value: 'paused',
+    label: `Paused (${allActivityItems.value.filter((q) => q.status === 'paused').length})`,
+    icon: PhPause,
+  },
+  {
+    value: 'queued',
+    label: `Queued (${allActivityItems.value.filter((q) => q.status === 'queued').length})`,
+    icon: PhClock,
+  },
+  { value: 'failed', label: `Failed (${failedActivityItems.value.length})`, icon: PhX },
   // Completed: include completed external downloads from the downloads store
-  { value: 'completed', label: `Completed (${completedActivityItems.value.filter(q => q.status === 'completed').length})`, icon: PhCheckCircle }
+  {
+    value: 'completed',
+    label: `Completed (${completedActivityItems.value.filter((q) => q.status === 'completed').length})`,
+    icon: PhCheckCircle,
+  },
 ])
 
 // const onTabChange = () => {
@@ -232,18 +282,21 @@ const visibleQueueItems = computed(() => {
 // Update visible range based on scroll position
 const updateVisibleRange = () => {
   if (!scrollContainer.value) return
-  
+
   const scrollTop = scrollContainer.value.scrollTop
   const viewportHeight = scrollContainer.value.clientHeight
-  
+
   // Calculate which items are visible
   const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
   const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
-  
+
   // Add buffer
   const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
-  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, filteredQueue.value.length)
-  
+  const endIndex = Math.min(
+    firstVisibleIndex + visibleItemCount + BUFFER_ROWS,
+    filteredQueue.value.length,
+  )
+
   visibleRange.value = { start: startIndex, end: endIndex }
 }
 
@@ -265,9 +318,12 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
   else if (download.status === 'Paused') status = 'paused'
   else if (download.status === 'Completed' || download.status === 'Ready') status = 'completed'
   else if (download.status === 'Failed') status = 'failed'
-  else if (download.status === 'Downloading' || download.status === 'Processing') status = 'downloading'
+  else if (download.status === 'Downloading' || download.status === 'Processing')
+    status = 'downloading'
 
-  const clientName = ((download as unknown) as Record<string, unknown>)['downloadClientName'] as string | undefined
+  const clientName = (download as unknown as Record<string, unknown>)['downloadClientName'] as
+    | string
+    | undefined
   return {
     id: download.id,
     title: download.title,
@@ -283,12 +339,14 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
     downloadClientType: download.downloadClientId === 'DDL' ? 'DDL' : 'external',
     addedAt: download.startedAt,
     canPause: false,
-    canRemove: true
+    canRemove: true,
   }
 }
 
 // Read user preference from configuration store: show completed external downloads
-const showCompletedExternalDownloads = computed(() => configStore.applicationSettings?.showCompletedExternalDownloads ?? false)
+const showCompletedExternalDownloads = computed(
+  () => configStore.applicationSettings?.showCompletedExternalDownloads ?? false,
+)
 
 // Merge queue items and active downloads (DDL) into unified list
 // Also expose a version of activity that includes completed external downloads
@@ -297,31 +355,69 @@ const showCompletedExternalDownloads = computed(() => configStore.applicationSet
 const allActivityItems = computed(() => {
   // Get queue items from external clients (these are already filtered by backend to only show Listenarr-managed downloads)
   const queueItems = [...queue.value]
-  
+
   // Get DDL downloads from database (since they don't have corresponding queue items)
-  const ddlDownloadItems = downloadsStore.activeDownloads
-    .filter(d => d.downloadClientId === 'DDL')
+  const activeDownloadsList = unref(downloadsStore.activeDownloads || [])
+  const failedDownloadsList = unref(downloadsStore.failedDownloads || [])
+
+  const ddlDownloadItems = activeDownloadsList
+    .filter((d) => (d.downloadClientId || '').toString() === 'DDL')
     .map(convertDownloadToQueueItem)
-  
-  // Combine queue items (external clients managed by Listenarr) and DDL downloads
-  // Filter out completed items from external download clients (torrents/NZBs)
-  // to avoid cluttering the activity view with finished transfers that are
-  // already processed. Keep completed DDL downloads (internal) visible.
-  const combined = [...queueItems, ...ddlDownloadItems]
+
+  // Include failed DDL downloads so internal failed items can be cleared by users
+  const failedDDLItems = failedDownloadsList.map(convertDownloadToQueueItem)
+
+  // Include external active downloads (not DDL) from the downloads store so
+  // queue-less active items are visible in Activity (e.g., when queue snapshot
+  // doesn't contain corresponding entries). Convert to QueueItem shape.
+  const externalActiveDownloads = activeDownloadsList
+    .filter((d) => d.downloadClientId && d.downloadClientId !== 'DDL')
+    .map(convertDownloadToQueueItem)
+
+  // Combine queue items (external clients managed by Listenarr), DDL downloads,
+  // failed DDL items, and external active downloads
+  let combined = [...queueItems, ...ddlDownloadItems, ...failedDDLItems, ...externalActiveDownloads]
+
   // Read user preference from configuration store: show completed external downloads
   const userPref = showCompletedExternalDownloads.value
-  if (userPref) return combined
 
-  // By default we hide completed external client items from the main
-  // combined list (to avoid clutter). Completed external downloads will
-  // still be surfaced in the Completed tab (see `completedActivityItems`).
-  const filtered = combined.filter(it => {
-    // if item is from external client and completed, omit it
-    if ((it.downloadClientType || '').toString().toLowerCase() !== 'ddl' && it.status === 'completed') return false
-    return true
-  })
+  if (userPref) {
+    // Include completed external downloads from the downloads store
+    const completedExternal = (downloadsStore.completedDownloads || [])
+      .filter((d) => d.downloadClientId && d.downloadClientId !== 'DDL')
+      .map(convertDownloadToQueueItem)
 
-  return filtered
+    // Merge and deduplicate by id (prefer entries that already exist in `combined` which
+    // usually come from the queue snapshot and are more up-to-date for progress fields)
+    const map = new Map<string, QueueItem>()
+    for (const it of combined) map.set(it.id, it)
+    for (const it of completedExternal) {
+      if (!map.has(it.id)) map.set(it.id, it)
+    }
+
+    combined = Array.from(map.values())
+  } else {
+    // By default we hide completed external client items from the main
+    // combined list (to avoid clutter). Completed external downloads will
+    // still be surfaced in the Completed tab (see `completedActivityItems`).
+    combined = combined.filter((it) => {
+      // if item is from external client and completed, omit it
+      if (
+        (it.downloadClientType || '').toString().toLowerCase() !== 'ddl' &&
+        it.status === 'completed'
+      )
+        return false
+      return true
+    })
+  }
+
+  // Deduplicate final combined list preferring queue items when available
+  const finalMap = new Map<string, QueueItem>()
+  for (const it of combined) {
+    if (!finalMap.has(it.id)) finalMap.set(it.id, it)
+  }
+
+  return Array.from(finalMap.values())
 })
 
 // Build a version of the activity list that includes completed external
@@ -334,14 +430,14 @@ const completedActivityItems = computed(() => {
   const base = (() => {
     const queueItems = [...queue.value]
     const ddlDownloadItems = downloadsStore.activeDownloads
-      .filter(d => d.downloadClientId === 'DDL')
+      .filter((d) => d.downloadClientId === 'DDL')
       .map(convertDownloadToQueueItem)
     return [...queueItems, ...ddlDownloadItems]
   })()
 
   // Completed external downloads from the downloads store
   const completedExternal = (downloadsStore.completedDownloads || [])
-    .filter(d => d.downloadClientId && d.downloadClientId !== 'DDL')
+    .filter((d) => d.downloadClientId && d.downloadClientId !== 'DDL')
     .map(convertDownloadToQueueItem)
 
   // Merge and deduplicate by id (prefer queue/base entries where present)
@@ -354,13 +450,44 @@ const completedActivityItems = computed(() => {
   return Array.from(map.values())
 })
 
+// Failed activity items: merge queue snapshot failures and DB failures
+const failedActivityItems = computed(() => {
+  // Items from the queue which are failed (external client snapshot)
+  const queueFailed = queue.value.filter((q) => q.status === 'failed')
+  // Failed downloads stored in DB (DDL or external failures)
+  const failedFromDownloads = (downloadsStore.failedDownloads || []).map(convertDownloadToQueueItem)
+
+  const map = new Map<string, QueueItem>()
+  for (const it of queueFailed) map.set(it.id, it)
+  for (const it of failedFromDownloads) if (!map.has(it.id)) map.set(it.id, it)
+
+  return Array.from(map.values())
+})
+
 const filterTabs = computed(() => [
   { label: 'All', value: 'all', count: allActivityItems.value.length },
-  { label: 'Downloading', value: 'downloading', count: allActivityItems.value.filter(q => q.status === 'downloading').length },
-  { label: 'Paused', value: 'paused', count: allActivityItems.value.filter(q => q.status === 'paused').length },
-  { label: 'Queued', value: 'queued', count: allActivityItems.value.filter(q => q.status === 'queued').length },
+  {
+    label: 'Downloading',
+    value: 'downloading',
+    count: allActivityItems.value.filter((q) => q.status === 'downloading').length,
+  },
+  {
+    label: 'Paused',
+    value: 'paused',
+    count: allActivityItems.value.filter((q) => q.status === 'paused').length,
+  },
+  {
+    label: 'Queued',
+    value: 'queued',
+    count: allActivityItems.value.filter((q) => q.status === 'queued').length,
+  },
+  { label: 'Failed', value: 'failed', count: failedActivityItems.value.length },
   // Completed tab should reflect combined view including completed external downloads
-  { label: 'Completed', value: 'completed', count: completedActivityItems.value.filter(q => q.status === 'completed').length },
+  {
+    label: 'Completed',
+    value: 'completed',
+    count: completedActivityItems.value.filter((q) => q.status === 'completed').length,
+  },
 ])
 
 const filteredQueue = computed(() => {
@@ -370,10 +497,15 @@ const filteredQueue = computed(() => {
 
   if (selectedTab.value === 'completed') {
     // Use the completed-augmented list for the Completed tab
-    return completedActivityItems.value.filter(item => item.status === 'completed')
+    return completedActivityItems.value.filter((item) => item.status === 'completed')
   }
 
-  return allActivityItems.value.filter(item => item.status === selectedTab.value)
+  if (selectedTab.value === 'failed') {
+    // Use the failed-augmented list for the Failed tab so we show DB-failures too
+    return failedActivityItems.value
+  }
+
+  return allActivityItems.value.filter((item) => item.status === selectedTab.value)
 })
 
 const refreshQueue = async () => {
@@ -381,7 +513,10 @@ const refreshQueue = async () => {
   try {
     queue.value = await apiService.getQueue()
   } catch (err) {
-    console.error('Failed to fetch queue:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'ActivityView',
+      operation: 'refreshQueue',
+    })
   } finally {
     loading.value = false
   }
@@ -401,22 +536,24 @@ const removeFromQueue = async (item: QueueItem) => {
   // the remote client still contains the item. If not present, show an
   // alternate modal that asks the user if they want to remove the item
   // from Listenarr only (DB cleanup).
-  const found = queue.value.some(q => q.id === item.id)
+  const found = queue.value.some((q) => q.id === item.id)
   clientHasQueueEntry.value = found
   showRemoveModal.value = true
 }
 
 const confirmRemove = async () => {
   if (!itemToRemove.value) return
-  
+
   removing.value = true
   try {
     // Check if this is a DDL download (from database) or external queue item
-    if (itemToRemove.value.downloadClientId === 'DDL' || itemToRemove.value.downloadClientType === 'DDL') {
+    if (
+      itemToRemove.value.downloadClientId === 'DDL' ||
+      itemToRemove.value.downloadClientType === 'DDL'
+    ) {
       // DDL downloads: Cancel/delete from database
-      console.log('[ActivityView] Canceling DDL download:', itemToRemove.value.id)
       await apiService.cancelDownload(itemToRemove.value.id)
-      
+
       // Refresh downloads from store
       await downloadsStore.loadDownloads()
     } else {
@@ -425,25 +562,26 @@ const confirmRemove = async () => {
       // Listenarr-only removal (DB cleanup). Otherwise perform the normal
       // remove-from-client flow.
       if (clientHasQueueEntry.value === false) {
-        console.log('[ActivityView] Removing external item only from Listenarr (client missing):', itemToRemove.value.id)
         // Removing the DB record for an external item uses cancelDownload
         // since it's a Listenarr-level cleanup.
         await apiService.cancelDownload(itemToRemove.value.id)
         await downloadsStore.loadDownloads()
       } else {
-        console.log('[ActivityView] Removing from external client queue:', itemToRemove.value.id, itemToRemove.value.downloadClientId)
         await apiService.removeFromQueue(itemToRemove.value.id, itemToRemove.value.downloadClientId)
 
         // Refresh queue
         await refreshQueue()
       }
     }
-    
+
     showRemoveModal.value = false
     itemToRemove.value = null
     clientHasQueueEntry.value = null
   } catch (err) {
-    console.error('Failed to remove download:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'ActivityView',
+      operation: 'removeFromQueue',
+    })
     const toast = useToast()
     toast.error('Remove failed', (err as Error).message)
   } finally {
@@ -465,16 +603,16 @@ const formatStatus = (status: string): string => {
 
 const formatSpeed = (bytesPerSecond: number): string => {
   if (bytesPerSecond === 0) return '0 B/s'
-  
+
   const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
   let speed = bytesPerSecond
   let unitIndex = 0
-  
+
   while (speed >= 1024 && unitIndex < units.length - 1) {
     speed /= 1024
     unitIndex++
   }
-  
+
   return `${speed.toFixed(1)} ${units[unitIndex]}`
 }
 
@@ -487,16 +625,16 @@ const formatEta = (seconds: number): string => {
 
 const formatSize = (bytes: number): string => {
   if (!bytes || bytes === 0) return '0 B'
-  
+
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = bytes
   let unitIndex = 0
-  
+
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024
     unitIndex++
   }
-  
+
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
 
@@ -504,18 +642,18 @@ const formatSize = (bytes: number): string => {
 onMounted(async () => {
   // Load initial downloads (includes DDL)
   await downloadsStore.loadDownloads()
-  
+
   // Load application settings to ensure filtering works
   await configStore.loadApplicationSettings()
-  
+
   // Subscribe to queue updates (external clients)
   unsubscribeQueue = signalRService.onQueueUpdate((updatedQueue) => {
     queue.value = updatedQueue
   })
-  
+
   // Load initial queue state
   await refreshQueue()
-  
+
   // Initialize virtual scrolling
   nextTick(() => {
     updateVisibleRange()
@@ -527,7 +665,10 @@ onMounted(async () => {
     try {
       await refreshQueue()
     } catch (err) {
-      console.error('[ActivityView] Failed to refresh queue:', err)
+      errorTracking.captureException(err as Error, {
+        component: 'ActivityView',
+        operation: 'queueRefreshInterval',
+      })
     }
   }, 30000) // 30-second fallback polling (SignalR is primary update mechanism)
 })
@@ -537,7 +678,7 @@ onUnmounted(() => {
   if (unsubscribeQueue) {
     unsubscribeQueue()
   }
-  
+
   // Stop frontend polling when view is unmounted
   if (queueRefreshInterval) {
     clearInterval(queueRefreshInterval)
@@ -675,7 +816,7 @@ onUnmounted(() => {
   color: #adb5bd;
   cursor: pointer;
   padding: 0.875rem 1.5rem;
-  border-radius: 6px 6px 0 0;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -713,7 +854,7 @@ onUnmounted(() => {
 
 .tab-badge {
   background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -738,7 +879,7 @@ onUnmounted(() => {
   gap: 1.25rem;
   padding: 1.25rem;
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border-left: 4px solid #4dabf7;
   transition: all 0.2s;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -759,7 +900,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
-  border-radius: 8px;
+  border-radius: 6px;
   color: white;
   font-size: 1.5rem;
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
@@ -807,7 +948,7 @@ onUnmounted(() => {
   gap: 0.35rem;
   background-color: rgba(255, 255, 255, 0.05);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .queue-client {
@@ -846,7 +987,7 @@ onUnmounted(() => {
   gap: 0.35rem;
   background-color: rgba(81, 207, 102, 0.1);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .download-speed svg {
@@ -861,7 +1002,7 @@ onUnmounted(() => {
   gap: 0.35rem;
   background-color: rgba(255, 212, 59, 0.1);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .eta svg {
@@ -973,7 +1114,7 @@ onUnmounted(() => {
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -1008,7 +1149,7 @@ onUnmounted(() => {
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -1071,7 +1212,7 @@ onUnmounted(() => {
 
 .modal-content {
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   width: 90%;
   max-width: 500px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -1156,7 +1297,7 @@ onUnmounted(() => {
   background-color: rgba(0, 0, 0, 0.3);
   border-left: 4px solid #ffd43b;
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 6px;
   margin-bottom: 1rem;
 }
 
@@ -1195,7 +1336,7 @@ onUnmounted(() => {
   gap: 0.625rem;
   background-color: rgba(255, 212, 59, 0.1);
   padding: 0.875rem;
-  border-radius: 8px;
+  border-radius: 6px;
   margin: 0;
   border: 1px solid rgba(255, 212, 59, 0.25);
   line-height: 1.5;

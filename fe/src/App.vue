@@ -9,14 +9,18 @@
       </div>
       <div class="nav-actions">
         <!-- Mobile menu button -->
-        <button class="nav-btn mobile-menu-btn" @click="toggleMobileMenu" aria-label="Toggle navigation menu">
+        <button
+          class="nav-btn mobile-menu-btn"
+          @click="toggleMobileMenu"
+          aria-label="Toggle navigation menu"
+        >
           <PhList class="mobile-menu-icon" />
         </button>
         <!-- Backend connection indicator moved to System view -->
-  <!-- Mobile backdrop (real DOM element so clicks reliably close the search) -->
-  <div v-if="searchOpen" class="mobile-search-backdrop" @click="closeSearch" />
+        <!-- Mobile backdrop (real DOM element so clicks reliably close the search) -->
+        <div v-if="searchOpen" class="mobile-search-backdrop" @click="closeSearch" />
 
-  <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
+        <div class="nav-search-inline" ref="navSearchRef" :class="{ open: searchOpen }">
           <input
             v-model="searchQuery"
             @input="onSearchInput"
@@ -28,21 +32,40 @@
             placeholder="Search your library..."
             aria-label="Search your audiobooks"
           />
-          <button class="nav-btn" aria-hidden="true"
+          <button
+            class="nav-btn"
+            aria-hidden="true"
             role="button"
             tabindex="0"
             @click="toggleSearch"
             @keydown.enter.prevent="toggleSearch"
           >
-          <PhMagnifyingGlass class="search-inline-icon" />
-        </button>
+            <PhMagnifyingGlass class="search-inline-icon" />
+          </button>
           <div class="inline-spinner" v-if="searching" aria-hidden="true"></div>
           <!-- Results overlay: shows suggestions, or a searching/no-results state with spinner -->
-          <div class="search-results-inline" v-if="searching || suggestions.length > 0 || searchQuery.length > 0">
+          <div
+            class="search-results-inline"
+            v-if="searching || suggestions.length > 0 || searchQuery.length > 0"
+          >
             <ul v-if="suggestions.length > 0" class="search-list">
-              <li v-for="s in suggestions" :key="s.id" class="search-result" @click="selectSuggestion(s)">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <img v-if="s.imageUrl" :src="apiService.getImageUrl(s.imageUrl)" alt="cover" class="result-thumb" />
+              <li
+                v-for="s in suggestions"
+                :key="s.id"
+                class="search-result"
+                @click="selectSuggestion(s)"
+              >
+                <div style="display: flex; align-items: center; gap: 10px">
+                  <img
+                    v-if="s.imageUrl"
+                    :src="apiService.getImageUrl(s.imageUrl) || getPlaceholderUrl()"
+                    @error="handleImageError"
+                    alt="cover"
+                    class="result-thumb"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <img v-else :src="getPlaceholderUrl()" alt="cover" class="result-thumb" />
                   <div>
                     <div class="result-title">{{ s.title }}</div>
                     <div class="result-sub">{{ s.author }}</div>
@@ -59,19 +82,35 @@
           </div>
         </div>
         <div class="notification-wrapper" ref="notificationRef">
-          <button class="nav-btn" @click="toggleNotifications" aria-haspopup="true" :aria-expanded="notificationsOpen">
-            <PhBell class="notification-inline-icon"/>
-            <span class="notification-badge" v-if="notificationCount > 0">{{ notificationCount }}</span>
+          <button
+            class="nav-btn"
+            @click="toggleNotifications"
+            aria-haspopup="true"
+            :aria-expanded="notificationsOpen"
+          >
+            <PhBell class="notification-inline-icon" />
+            <span class="notification-badge" v-if="notificationCount > 0">{{
+              notificationCount
+            }}</span>
           </button>
           <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
             <div class="dropdown-header">
               <strong>Recent Activity</strong>
-              <button class="clear-btn" @click.stop="clearNotifications" title="Clear">Clear</button>
+              <button class="clear-btn" @click.stop="clearNotifications" title="Clear">
+                Clear
+              </button>
             </div>
             <ul class="notification-list">
-              <li v-for="item in recentNotifications.filter(n => !n.dismissed)" :key="item.id" class="notification-item">
+              <li
+                v-for="item in recentNotifications.filter((n) => !n.dismissed)"
+                :key="item.id"
+                class="notification-item"
+              >
                 <div class="notif-icon">
-                  <component v-if="notificationIconComponent(item.icon)" :is="notificationIconComponent(item.icon)" />
+                  <component
+                    v-if="notificationIconComponent(item.icon)"
+                    :is="notificationIconComponent(item.icon)"
+                  />
                   <i v-else :class="item.icon"></i>
                 </div>
                 <div class="notif-content">
@@ -80,15 +119,26 @@
                   <div class="notif-time">{{ formatTime(item.timestamp) }}</div>
                 </div>
                 <div class="notif-actions">
-                  <button class="dismiss-btn" @click.stop="dismissNotification(item.id)" title="Dismiss">
+                  <button
+                    class="dismiss-btn"
+                    @click.stop="dismissNotification(item.id)"
+                    title="Dismiss"
+                  >
                     <PhX />
                   </button>
                 </div>
               </li>
-              <li v-if="recentNotifications.filter(n => !n.dismissed).length === 0" class="notification-empty">No recent activity</li>
+              <li
+                v-if="recentNotifications.filter((n) => !n.dismissed).length === 0"
+                class="notification-empty"
+              >
+                No recent activity
+              </li>
             </ul>
             <div class="dropdown-footer">
-              <RouterLink to="/activity" class="view-all-link" @click="notificationsOpen = false">View all activity</RouterLink>
+              <RouterLink to="/activity" class="view-all-link" @click="notificationsOpen = false"
+                >View all activity</RouterLink
+              >
             </div>
           </div>
         </div>
@@ -117,16 +167,78 @@
       </div>
     </header>
 
-  <div :class="['app-layout', { 'no-top': hideLayout }]">
+    <div :class="['app-layout', { 'no-top': hideLayout }]">
       <!-- Sidebar Navigation -->
-      <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }">
+      <aside v-if="!hideLayout" class="sidebar" :class="{ open: mobileMenuOpen }" ref="sidebarRef">
         <nav class="sidebar-nav">
           <div class="nav-section">
-            <RouterLink to="/" class="nav-item" @mouseenter="preload('home')" @focus="preload('home')" @touchstart.passive="preload('home')" @click="closeMobileMenu">
+            <RouterLink
+              :to="{ path: '/audiobooks', query: { group: 'books' } }"
+              class="nav-item"
+              @mouseenter="preload('home'); onNavMouseEnter('audiobooks')"
+              @mouseleave="onNavMouseLeave('audiobooks')"
+              @focus="preload('home'); onNavFocus('audiobooks')"
+              @blur="onNavBlur('audiobooks')"
+              @touchstart.passive="preload('home')"
+              @click="
+                () => {
+                  onNavClick('audiobooks')
+                  closeMobileMenu()
+                }
+              "
+            >
               <PhBooks />
               <span>Audiobooks</span>
             </RouterLink>
-            <RouterLink to="/add-new" class="nav-item" @mouseenter="preload('add-new')" @focus="preload('add-new')" @touchstart.passive="preload('add-new')" @click="closeMobileMenu">
+            <!-- Sub-navigation for Audiobooks grouping (stacked under Audiobooks) -->
+            <div
+              class="nav-sub"
+              @mouseenter="onNavMouseEnter('audiobooks')"
+              @mouseleave="onNavMouseLeave('audiobooks')"
+              @focusin="onNavFocus('audiobooks')"
+              @focusout="onNavBlur('audiobooks')"
+              :class="{
+                open:
+                  hoverNav === 'audiobooks' ||
+                  persistentNav === 'audiobooks' ||
+                  route.path.startsWith('/audiobooks') ||
+                  route.name === 'home' ||
+                  route.name === 'audiobooks',
+              }"
+            >
+              <RouterLink
+                :to="{ path: '/audiobooks', query: { group: 'books' } }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.query.group === 'books' }"
+              >
+                <span>Books</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/audiobooks', query: { group: 'authors' } }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.query.group === 'authors' }"
+              >
+                <span>Authors</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/audiobooks', query: { group: 'series' } }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.query.group === 'series' }"
+              >
+                <span>Series</span>
+              </RouterLink>
+            </div>
+            <RouterLink
+              to="/add-new"
+              class="nav-item"
+              @mouseenter="preload('add-new')"
+              @focus="preload('add-new')"
+              @touchstart.passive="preload('add-new')"
+              @click="closeMobileMenu"
+            >
               <PhPlus />
               <span>Add New</span>
             </RouterLink>
@@ -135,19 +247,33 @@
               <span>Library Import</span>
             </RouterLink> -->
           </div>
-          
+
           <div class="nav-section">
             <!-- Calendar temporarily hidden -->
             <!-- <RouterLink to="/calendar" class="nav-item">
               <PhCalendar />
               <span>Calendar</span>
             </RouterLink> -->
-            <RouterLink to="/activity" class="nav-item" @mouseenter="preload('activity')" @focus="preload('activity')" @touchstart.passive="preload('activity')" @click="closeMobileMenu">
+            <RouterLink
+              to="/activity"
+              class="nav-item"
+              @mouseenter="preload('activity')"
+              @focus="preload('activity')"
+              @touchstart.passive="preload('activity')"
+              @click="closeMobileMenu"
+            >
               <PhActivity />
               <span>Activity</span>
               <span class="badge" v-if="activityCount > 0">{{ activityCount }}</span>
             </RouterLink>
-            <RouterLink to="/wanted" class="nav-item" @mouseenter="preload('wanted')" @focus="preload('wanted')" @touchstart.passive="preload('wanted')" @click="closeMobileMenu">
+            <RouterLink
+              to="/wanted"
+              class="nav-item"
+              @mouseenter="preload('wanted')"
+              @focus="preload('wanted')"
+              @touchstart.passive="preload('wanted')"
+              @click="closeMobileMenu"
+            >
               <PhHeart />
               <span>Wanted</span>
               <span class="badge" v-if="wantedCount > 0">{{ wantedCount }}</span>
@@ -155,11 +281,103 @@
           </div>
 
           <div class="nav-section">
-            <RouterLink to="/settings" class="nav-item" @mouseenter="preload('settings')" @focus="preload('settings')" @touchstart.passive="preload('settings')" @click="closeMobileMenu">
+            <RouterLink
+              to="/settings"
+              class="nav-item"
+              @mouseenter="preload('settings'); onNavMouseEnter('settings')"
+              @mouseleave="onNavMouseLeave('settings')"
+              @focus="preload('settings'); onNavFocus('settings')"
+              @blur="onNavBlur('settings')"
+              @touchstart.passive="preload('settings')"
+              @click="
+                () => {
+                  onNavClick('settings')
+                  closeMobileMenu()
+                }
+              "
+            >
               <PhGear />
               <span>Settings</span>
             </RouterLink>
-            <RouterLink to="/system" class="nav-item" @mouseenter="preload('system')" @focus="preload('system')" @touchstart.passive="preload('system')" @click="closeMobileMenu">
+            <!-- Sub-navigation for Settings tabs -->
+            <div
+              class="nav-sub"
+              @mouseenter="onNavMouseEnter('settings')"
+              @mouseleave="onNavMouseLeave('settings')"
+              @focusin="onNavFocus('settings')"
+              @focusout="onNavBlur('settings')"
+              :class="{
+                open:
+                  hoverNav === 'settings' ||
+                  persistentNav === 'settings' ||
+                  route.path === '/settings',
+              }"
+            >
+              <RouterLink
+                :to="{ path: '/settings', hash: '#rootfolders' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#rootfolders' }"
+              >
+                <span>Root Folders</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/settings', hash: '#indexers' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#indexers' }"
+              >
+                <span>Indexers</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/settings', hash: '#clients' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#clients' }"
+              >
+                <span>Clients</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/settings', hash: '#quality-profiles' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#quality-profiles' }"
+              >
+                <span>Quality Profiles</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/settings', hash: '#notifications' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#notifications' }"
+              >
+                <span>Notifications</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/settings', hash: '#bot' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#bot' }"
+              >
+                <span>Discord Bot</span>
+              </RouterLink>
+              <RouterLink
+                :to="{ path: '/settings', hash: '#general' }"
+                class="nav-subitem"
+                @click="closeMobileMenu"
+                :class="{ active: route.hash === '#general' }"
+              >
+                <span>General</span>
+              </RouterLink>
+            </div>
+            <RouterLink
+              to="/system"
+              class="nav-item"
+              @mouseenter="preload('system')"
+              @focus="preload('system')"
+              @touchstart.passive="preload('system')"
+              @click="closeMobileMenu"
+            >
               <PhMonitor />
               <span>System</span>
               <span class="badge error" v-if="systemIssues > 0">{{ systemIssues }}</span>
@@ -206,8 +424,23 @@
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
-import { PhMagnifyingGlass, PhBell, PhX, PhUsers, PhBooks, PhPlus, PhActivity, PhHeart, PhGear, PhMonitor, PhFileMinus, PhDownload, PhCheckCircle, PhList } from '@phosphor-icons/vue'
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import {
+  PhMagnifyingGlass,
+  PhBell,
+  PhX,
+  PhUsers,
+  PhBooks,
+  PhPlus,
+  PhActivity,
+  PhHeart,
+  PhGear,
+  PhMonitor,
+  PhFileMinus,
+  PhDownload,
+  PhCheckCircle,
+  PhList,
+} from '@phosphor-icons/vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { preloadRoute } from '@/router'
 // SignalR indicator moved to System view; session token handled where needed
@@ -219,6 +452,9 @@ import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
+import { handleImageError } from '@/utils/imageFallback'
+import { getPlaceholderUrl } from '@/utils/placeholder'
+import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
 import { signalRService } from '@/services/signalr'
 import type { QueueItem } from '@/types'
 import { ref as vueRef2, reactive } from 'vue'
@@ -230,6 +466,80 @@ const { notification, close: closeNotification } = useNotification()
 const downloadsStore = useDownloadsStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
+// Hover and persistence state for sidebar subnavs
+const hoverNav = ref<string | null>(null)
+const persistentNav = ref<string | null>(null)
+const hoverTimeout = ref<number | null>(null)
+const HOVER_CLOSE_DELAY = 200
+const sidebarRef = ref<HTMLElement | null>(null)
+const hoverSupported = ref(false)
+const isTouchDevice = ref(false)
+
+onMounted(() => {
+  try {
+    hoverSupported.value = !!(
+      window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+    )
+  } catch {
+    hoverSupported.value = false
+  }
+  try {
+    isTouchDevice.value =
+      'ontouchstart' in window || (((navigator as unknown) as { maxTouchPoints?: number }).maxTouchPoints ?? 0) > 0
+  } catch {
+    isTouchDevice.value = false
+  }
+})
+
+function onNavMouseEnter(name: string) {
+  // Only use hover behavior on pointer-capable devices (prevents touch-only devices from triggering)
+  if (!hoverSupported.value) return
+  if (hoverTimeout.value) {
+    clearTimeout(hoverTimeout.value)
+    hoverTimeout.value = null
+  }
+  hoverNav.value = name
+}
+
+function onNavMouseLeave(name: string) {
+  if (!hoverSupported.value) return
+  if (hoverTimeout.value) clearTimeout(hoverTimeout.value)
+  hoverTimeout.value = window.setTimeout(() => {
+    // if this nav is persistently open, keep it open
+    if (persistentNav.value === name) {
+      hoverNav.value = name
+    } else {
+      hoverNav.value = null
+    }
+    hoverTimeout.value = null
+  }, HOVER_CLOSE_DELAY)
+}
+
+function onNavFocus(name: string) {
+  // Focus should open immediately for keyboard users
+  hoverNav.value = name
+}
+
+function onNavBlur(name: string) {
+  // Blur should behave like mouseleave
+  onNavMouseLeave(name)
+}
+
+function onNavClick(name: string) {
+  // Toggle persistent open state
+  persistentNav.value = persistentNav.value === name ? null : name
+  hoverNav.value = persistentNav.value || null
+}
+
+// Close persistent nav when clicking outside sidebar
+useEventListener(document, 'click', (e: MouseEvent) => {
+  const target = e.target as Node
+  if (!sidebarRef.value) return
+  if (!sidebarRef.value.contains(target)) {
+    persistentNav.value = null
+    hoverNav.value = null
+  }
+})
 
 // Version from API
 const version = ref('')
@@ -242,7 +552,7 @@ const confirmVisible = computed<boolean>({
   set: (v: boolean) => {
     // when consumer sets visible=false via v-model, treat as cancel
     if (!v) confirm.cancel()
-  }
+  },
 })
 const confirmTitle = computed(() => confirm.title.value)
 const confirmMessage = computed(() => confirm.message.value)
@@ -252,14 +562,18 @@ const confirmDanger = computed(() => confirm.danger.value)
 
 // Preload helper for route components on user intent (hover/focus/touch)
 function preload(name: string) {
-  try { preloadRoute(name) } catch { }
+  try {
+    preloadRoute(name)
+  } catch {}
 }
 
 // Idle prefetch: warm up non-critical routes when the browser is idle.
 // Respects Data Saver and slow connections to avoid wasting bandwidth.
 function scheduleIdlePrefetch(names: string[]) {
   try {
-    const connection = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+    const connection = (
+      navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }
+    ).connection
     if (connection && (connection.saveData || /2g/.test(connection.effectiveType || ''))) {
       // Device on data-saver or very slow network: skip prefetch
       return
@@ -270,11 +584,17 @@ function scheduleIdlePrefetch(names: string[]) {
 
   const doPrefetch = () => {
     for (const n of names) {
-      try { preload(n) } catch { }
+      try {
+        preload(n)
+      } catch {}
     }
   }
 
-  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => void }).requestIdleCallback
+  const ric = (
+    window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => void
+    }
+  ).requestIdleCallback
   if (typeof ric === 'function') {
     try {
       ric(doPrefetch, { timeout: 3000 })
@@ -312,7 +632,7 @@ const closeMobileMenu = () => {
 }
 
 // Reactive state for badges and counters
-const notificationCount = computed(() => recentNotifications.filter(n => !n.dismissed).length)
+const notificationCount = computed(() => recentNotifications.filter((n) => !n.dismissed).length)
 const queueItems = ref<QueueItem[]>([])
 const wantedCount = ref(0)
 const systemIssues = ref(0)
@@ -333,36 +653,38 @@ const activeDownloads = computed(() => {
 })
 
 // Step 2: Count active queue items (memoized)
-const activeQueueCount = computed(() => 
-  queueItems.value.filter(item => {
-    const status = (item.status || '').toString().toLowerCase()
-    return status === 'downloading' || status === 'paused' || status === 'queued'
-  }).length
+const activeQueueCount = computed(
+  () =>
+    queueItems.value.filter((item) => {
+      const status = (item.status || '').toString().toLowerCase()
+      return status === 'downloading' || status === 'paused' || status === 'queued'
+    }).length,
 )
 
 // Step 3: Count DDL downloads separately (memoized)
-const ddlDownloadsCount = computed(() => 
-  activeDownloads.value.filter(d => d.downloadClientId === 'DDL').length
+const ddlDownloadsCount = computed(
+  () => activeDownloads.value.filter((d) => d.downloadClientId === 'DDL').length,
 )
 
 // Step 4: Count external client downloads (memoized)
-const externalDownloadsCount = computed(() => 
-  activeDownloads.value.length - ddlDownloadsCount.value
+const externalDownloadsCount = computed(
+  () => activeDownloads.value.length - ddlDownloadsCount.value,
 )
 
 // Step 5: Final activity count (uses cached intermediate results)
 const activityCount = computed(() => {
   // Total = DDL (unique) + max(external in downloads, external in queue)
   // This avoids double-counting external clients that appear in both places
-  const count = ddlDownloadsCount.value + Math.max(externalDownloadsCount.value, activeQueueCount.value)
-  
+  const count =
+    ddlDownloadsCount.value + Math.max(externalDownloadsCount.value, activeQueueCount.value)
+
   logger.debug('App Badge - Activity count calculated', {
     ddl: ddlDownloadsCount.value,
     external: externalDownloadsCount.value,
     queue: activeQueueCount.value,
-    total: count
+    total: count,
   })
-  
+
   return count
 })
 
@@ -404,7 +726,7 @@ function clearNotifications() {
 }
 
 function dismissNotification(id: string) {
-  const notification = recentNotifications.find(n => n.id === id)
+  const notification = recentNotifications.find((n) => n.id === id)
   if (notification) {
     notification.dismissed = true
   }
@@ -486,7 +808,7 @@ const refreshWantedBadge = async () => {
     // Wanted badge: rely exclusively on the server-provided `wanted` flag.
     // Treat only audiobooks where server returns wanted === true as wanted.
     const library = await apiService.getLibrary()
-    wantedCount.value = library.filter(book => {
+    wantedCount.value = library.filter((book) => {
       const serverWanted = (book as unknown as Record<string, unknown>)['wanted']
       return serverWanted === true
     }).length
@@ -502,7 +824,9 @@ const refreshWantedBadge = async () => {
 import { ref as vueRef } from 'vue'
 const router = useRouter()
 const searchQuery = vueRef('')
-const suggestions = vueRef<Array<{ id: number; title: string; author?: string; imageUrl?: string }>>([])
+const suggestions = vueRef<
+  Array<{ id: number; title: string; author?: string; imageUrl?: string }>
+>([])
 const searching = vueRef(false)
 const searchInputRef = vueRef<HTMLInputElement | null>(null)
 
@@ -548,14 +872,18 @@ const onSearchInput = async () => {
       // First try to match local library entries
       const lib = await apiService.getLibrary()
       const lower = q.toLowerCase()
-      const localMatches = lib.filter(b => (b.title || '').toLowerCase().includes(lower) || (Array.isArray(b.authors) ? (b.authors.join(' ').toLowerCase()) : '').includes(lower))
+      const localMatches = lib.filter(
+        (b) =>
+          (b.title || '').toLowerCase().includes(lower) ||
+          (Array.isArray(b.authors) ? b.authors.join(' ').toLowerCase() : '').includes(lower),
+      )
       if (localMatches.length > 0) {
         // Only show local library matches in the header search
-        suggestions.value = localMatches.slice(0, 8).map(b => ({
+        suggestions.value = localMatches.slice(0, 8).map((b) => ({
           id: b.id!,
           title: b.title || 'Unknown',
-          author: Array.isArray(b.authors) ? (b.authors[0] || '') : '',
-          imageUrl: b.imageUrl || ''
+          author: Array.isArray(b.authors) ? b.authors[0] || '' : '',
+          imageUrl: b.imageUrl || '',
         }))
       } else {
         // No fallback to indexers from header search; leave suggestions empty
@@ -588,18 +916,22 @@ const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
 }
 
+watch(
+  () => suggestions.value.length,
+  () => {
+    // Native lazy loading covers search suggestions automatically
+  },
+)
+
 // (notificationRef and click-outside handler are declared earlier)
 
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
   logger.debug('Initializing real-time updates via SignalR...')
-  
-  // Import session debugging utilities
-  const { logSessionState, clearAllAuthData } = await import('@/utils/sessionDebug')
-  
-  // Log initial session state for debugging
+
+  // Session debugging utilities
   logSessionState('App Mount - Initial State')
-  
+
   // Verify session is valid before proceeding
   logger.debug('Verifying session state...')
   try {
@@ -609,7 +941,10 @@ onMounted(async () => {
   } catch (sessionError) {
     logger.warn('Session verification failed:', String(sessionError))
     // If we get 401/403, clear any stale auth state
-    const status = (sessionError && typeof sessionError === 'object' && 'status' in sessionError) ? sessionError.status : 0
+    const status =
+      sessionError && typeof sessionError === 'object' && 'status' in sessionError
+        ? sessionError.status
+        : 0
     if (status === 401 || status === 403) {
       logger.debug('Clearing stale authentication state due to session error')
       auth.user.authenticated = false
@@ -617,7 +952,7 @@ onMounted(async () => {
       clearAllAuthData()
     }
   }
-  
+
   // Load current auth state before touching protected endpoints
   await auth.loadCurrentUser()
 
@@ -628,12 +963,12 @@ onMounted(async () => {
   } catch (e) {
     logger.debug('SignalR connect after auth failed (will retry):', e)
   }
-  
+
   // Log session state after authentication attempt
   logSessionState('App Mount - After Auth Load')
 
   // If authenticated, load protected resources and enable real-time updates
-    if (auth.user.authenticated) {
+  if (auth.user.authenticated) {
     // Load initial downloads
     await downloadsStore.loadDownloads()
 
@@ -649,8 +984,9 @@ onMounted(async () => {
     // Subscribe to files-removed notifications so we can inform the user
     unsubscribeFilesRemoved = signalRService.onFilesRemoved((payload) => {
       try {
-        const removed = Array.isArray(payload?.removed) ? payload.removed.map(r => r.path) : []
-        const display = removed.length > 0 ? removed.join(', ') : 'Files were removed from a library item.'
+        const removed = Array.isArray(payload?.removed) ? payload.removed.map((r) => r.path) : []
+        const display =
+          removed.length > 0 ? removed.join(', ') : 'Files were removed from a library item.'
         toast.info('Files removed', display, 6000)
         // Refresh wanted badge in case monitored items lost files
         refreshWantedBadge()
@@ -660,7 +996,7 @@ onMounted(async () => {
           title: 'Files removed',
           message: display,
           icon: 'ph ph-file-remove',
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         })
       } catch (err) {
         logger.error('Error handling FilesRemoved payload', err)
@@ -678,7 +1014,18 @@ onMounted(async () => {
         else if (lvl === 'warning') toast.warning(title, msg, timeout)
         else if (lvl === 'error') toast.error(title, msg, timeout)
         else toast.info(title, msg, timeout)
-      } catch (e) { logger.error('Toast dispatch error', e) }
+      } catch (e) {
+        logger.error('Toast dispatch error', e)
+      }
+    })
+
+    // Subscribe to notifications (for dropdown/bell icon)
+    signalRService.onNotification((notification) => {
+      try {
+        pushNotification(notification)
+      } catch (e) {
+        logger.error('Notification dispatch error', e)
+      }
     })
 
     // Subscribe to audiobook updates (for wanted badge refresh only, no notifications)
@@ -695,7 +1042,9 @@ onMounted(async () => {
             refreshWantedBadge()
           }
         } catch {}
-      } catch (err) { logger.error('AudiobookUpdate error', err) }
+      } catch (err) {
+        logger.error('AudiobookUpdate error', err)
+      }
     })
 
     // Subscribe to download updates for notification purposes.
@@ -709,14 +1058,14 @@ onMounted(async () => {
           // Normalize status (some backends may use different casing)
           const status = (d.status || '').toString().toLowerCase()
           const title = d.title || 'Unknown'
-          
+
           if (status === 'queued' || status === 'queued' /* start */) {
             pushNotification({
               id: `dl-start-${d.id}-${Date.now()}`,
               title: title || 'Download started',
               message: `Download started: ${title}`,
               icon: 'ph ph-download',
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
             })
           } else if (status === 'completed' || status === 'ready') {
             // Avoid spamming notifications for the same title
@@ -727,7 +1076,7 @@ onMounted(async () => {
                 title: title || 'Download complete',
                 message: `Download completed: ${title}`,
                 icon: 'ph ph-check-circle',
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
               })
               // Track this title and clear it after 30 seconds
               recentDownloadTitles.value.add(title)
@@ -739,7 +1088,9 @@ onMounted(async () => {
             // Ignore progress/other transient updates
           }
         }
-      } catch (err) { logger.error('DownloadUpdate notif error', err) }
+      } catch (err) {
+        logger.error('DownloadUpdate notif error', err)
+      }
     })
 
     // Fetch initial queue state
@@ -752,19 +1103,37 @@ onMounted(async () => {
   } else {
     logger.debug('User not authenticated; skipping protected resource loads')
   }
-  
+
+  // Fallback: if queueItems still empty after the protected load above (tests or edge cases), try a direct fetch.
+  try {
+    if (!queueItems.value || queueItems.value.length === 0) {
+      const fallbackQueue = await apiService.getQueue()
+      if (Array.isArray(fallbackQueue) && fallbackQueue.length > 0) {
+        queueItems.value = fallbackQueue
+        logger.debug('Fallback fetched initial queue items', { count: fallbackQueue.length })
+      }
+    }
+  } catch (err) {
+    logger.debug('Fallback queue fetch failed (non-fatal)', err)
+  }
+
   // Only poll "Wanted" badge (library changes infrequently)
   startWantedBadgePolling()
-  
+
   logger.info('✅ Real-time updates enabled - Activity badge updates automatically via SignalR!')
   // Fetch startup config (do this regardless of auth so header/login visibility can be known)
-    try {
+  try {
     const cfg = await apiService.getStartupConfig()
-  // Accept both camelCase and PascalCase variants from backend (some responses use PascalCase)
-  const obj = cfg as Record<string, unknown> | null
-  const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
-  const v = raw as unknown
-    authEnabled.value = (typeof v === 'boolean') ? v : (typeof v === 'string' ? (v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true') : false)
+    // Accept both camelCase and PascalCase variants from backend (some responses use PascalCase)
+    const obj = cfg as Record<string, unknown> | null
+    const raw = obj ? (obj['authenticationRequired'] ?? obj['AuthenticationRequired']) : undefined
+    const v = raw as unknown
+    authEnabled.value =
+      typeof v === 'boolean'
+        ? v
+        : typeof v === 'string'
+          ? v.toLowerCase() === 'enabled' || v.toLowerCase() === 'true'
+          : false
     logger.debug('Startup config fetched', { authEnabled: authEnabled.value, cfg })
   } catch {
     authEnabled.value = false
@@ -797,9 +1166,9 @@ onUnmounted(() => {
   if (unsubscribeQueue) {
     unsubscribeQueue()
   }
-    if (unsubscribeFilesRemoved) {
-      unsubscribeFilesRemoved()
-    }
+  if (unsubscribeFilesRemoved) {
+    unsubscribeFilesRemoved()
+  }
   stopWantedBadgePolling()
   // Event listeners are automatically cleaned up by VueUse
 })
@@ -827,15 +1196,14 @@ const hideLayout = computed(() => {
 // Note: Backend connection indicator was moved to the System view.
 </script>
 
-/* Self-hosted Figtree @font-face declarations. Place font files in `fe/public/fonts/`.
-   Recommended files: Figtree-VariableFont_wght.woff2 (preferred), Figtree-Regular.woff, Figtree-SemiBold.woff
-   If these are not present, the Google Fonts import in `fe/index.html` will be used as a fallback. */
+/* Self-hosted Figtree @font-face declarations. Place font files in `fe/public/fonts/`. Recommended
+files: Figtree-VariableFont_wght.woff2 (preferred), Figtree-Regular.woff, Figtree-SemiBold.woff If
+these are not present, the Google Fonts import in `fe/index.html` will be used as a fallback. */
 <style>
 @font-face {
   font-family: 'Figtree';
-  src: url('/fonts/Figtree-VariableFont_wght.woff2') format('woff2'),
-       url('/fonts/Figtree-VariableFont_wght.woff') format('woff'),
-       url('/fonts/Figtree-VariableFont_wght.ttf') format('truetype');
+  /* Only include font formats that are present in repo to avoid unresolved asset warnings during build */
+  src: url('/fonts/Figtree-VariableFont_wght.ttf') format('truetype');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -878,7 +1246,8 @@ const hideLayout = computed(() => {
   width: 40px;
   height: 40px;
   transition: transform 0.2s;
-  filter: brightness(0) saturate(100%) invert(51%) sepia(56%) saturate(3237%) hue-rotate(184deg) brightness(97%) contrast(97%);
+  filter: brightness(0) saturate(100%) invert(51%) sepia(56%) saturate(3237%) hue-rotate(184deg)
+    brightness(97%) contrast(97%);
 }
 
 .brand-logo:hover {
@@ -889,15 +1258,23 @@ const hideLayout = computed(() => {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 600;
-  color: #FFF;
+  color: #fff;
   /* Use Figtree for the brand heading when available */
-  font-family: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family:
+    'Figtree',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
 }
 
 .version {
   background-color: #555;
   padding: 0.2rem 0.5rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.75rem;
   color: #ccc;
 }
@@ -932,7 +1309,7 @@ const hideLayout = computed(() => {
   border: 1px solid #3a3a3a;
   border-radius: 6px;
   min-width: 160px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
   z-index: 1200;
   padding: 0.25rem 0;
 }
@@ -963,7 +1340,7 @@ const hideLayout = computed(() => {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   position: relative;
   transition: background-color 0.2s;
 }
@@ -989,12 +1366,25 @@ const hideLayout = computed(() => {
   height: 10px;
   border-radius: 50%;
   display: inline-block;
-  box-shadow: 0 0 6px rgba(0,0,0,0.6);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
 }
-.signalr-dot.connected { background: #4caf50; box-shadow: 0 0 6px rgba(76,175,80,0.4); }
-.signalr-dot.disconnected { background: #9e9e9e; opacity: 0.6 }
-.signalr-text { font-size: 12px; color: #bfc8cf }
-.signalr-auth { font-size: 11px; color: #9aa0a6; margin-left: 6px }
+.signalr-dot.connected {
+  background: #4caf50;
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+}
+.signalr-dot.disconnected {
+  background: #9e9e9e;
+  opacity: 0.6;
+}
+.signalr-text {
+  font-size: 12px;
+  color: #bfc8cf;
+}
+.signalr-auth {
+  font-size: 11px;
+  color: #9aa0a6;
+  margin-left: 6px;
+}
 
 .avatar {
   width: 32px;
@@ -1066,22 +1456,42 @@ const hideLayout = computed(() => {
 }
 
 /* Icons */
-.icon-audiobooks::before { content: '�'; }
-.icon-plus::before { content: '+'; }
-.icon-import::before { content: '📁'; }
-.icon-calendar::before { content: '📅'; }
-.icon-activity::before { content: '⏱️'; }
-.icon-wanted::before { content: '⚠️'; }
-.icon-settings::before { content: '⚙️'; }
-.icon-system::before { content: '💻'; }
-.icon-search::before { content: '🔍'; }
-.icon-bell::before { content: '🔔'; }
+.icon-audiobooks::before {
+  content: '�';
+}
+.icon-plus::before {
+  content: '+';
+}
+.icon-import::before {
+  content: '📁';
+}
+.icon-calendar::before {
+  content: '📅';
+}
+.icon-activity::before {
+  content: '⏱️';
+}
+.icon-wanted::before {
+  content: '⚠️';
+}
+.icon-settings::before {
+  content: '⚙️';
+}
+.icon-system::before {
+  content: '💻';
+}
+.icon-search::before {
+  content: '🔍';
+}
+.icon-bell::before {
+  content: '🔔';
+}
 
 /* Badges */
 .badge {
   background-color: #f39c12;
   color: white;
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 0.2rem 0.5rem;
   font-size: 0.75rem;
   font-weight: bold;
@@ -1091,7 +1501,7 @@ const hideLayout = computed(() => {
 .notification-badge {
   background-color: #f39c12;
   color: white;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 0.1rem 0.3rem;
   font-size: 0.65rem;
   font-weight: bold;
@@ -1108,6 +1518,20 @@ const hideLayout = computed(() => {
 
 .badge.error {
   background-color: #e74c3c;
+}
+
+/* Sidebar-specific badge: branded blue */
+.sidebar .badge {
+  background-color: #007acc;
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.sidebar .badge:hover,
+.sidebar .badge:focus {
+  background-color: #005fa3;
+  box-shadow: 0 6px 18px rgba(0, 122, 204, 0.12);
 }
 
 /* Main Content */
@@ -1159,28 +1583,28 @@ const hideLayout = computed(() => {
     transform: translateX(-100%);
     transition: transform 0.3s;
   }
-  
+
   .sidebar.open {
     transform: translateX(0);
   }
-  
+
   .main-content {
     margin-left: 0;
     width: 100%;
   }
-  
+
   .nav-brand h1 {
     font-size: 1.2rem;
   }
-  
+
   .top-nav .nav-btn.mobile-menu-btn {
     display: block !important;
   }
-  
+
   .mobile-menu-icon {
     font-size: 20px;
   }
-  
+
   /* Ensure nav stays above all content on mobile */
   .top-nav {
     z-index: 2000 !important;
@@ -1188,7 +1612,7 @@ const hideLayout = computed(() => {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
-  
+
   /* Ensure sidebar stays above images and is completely opaque on mobile */
   .sidebar {
     z-index: 1500 !important;
@@ -1210,9 +1634,8 @@ const hideLayout = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 6px;
 }
-
 
 .nav-search-inline {
   position: relative;
@@ -1227,7 +1650,10 @@ const hideLayout = computed(() => {
 }
 
 .search-input-inline {
-  transition: transform 220ms cubic-bezier(.2,.9,.2,1), width 220ms ease, opacity 180ms ease;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    width 220ms ease,
+    opacity 180ms ease;
   position: absolute;
   top: 50%;
   right: 40px; /* leave space for the icon */
@@ -1259,7 +1685,7 @@ const hideLayout = computed(() => {
   color: #c7cfd6;
   font-size: 20px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1274,7 +1700,7 @@ const hideLayout = computed(() => {
   color: #c7cfd6;
   font-size: 20px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1295,7 +1721,7 @@ const hideLayout = computed(() => {
   height: 48px;
   font-size: 32px;
   color: #c7cfd6; /* slightly brighter than default */
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .top-nav .nav-btn.mobile-menu-btn {
@@ -1324,12 +1750,65 @@ const hideLayout = computed(() => {
   color: #c7cfd6;
 }
 
+/* Sub-navigation under main nav items */
+.sidebar .nav-sub {
+  display: flex;
+  flex-direction: column;
+  padding-left: 36px;
+  margin-bottom: 0.5rem;
+  /* collapse layout space when closed */
+  max-height: 0;
+  overflow: hidden;
+  /* Use transform-scale for smooth animation */
+  transform-origin: top;
+  transform: scaleY(0);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-height 220ms ease,
+    transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1),
+    opacity 120ms ease;
+}
+
+.sidebar .nav-sub.open {
+  max-height: 400px; /* large enough to contain items */
+  transform: scaleY(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar .nav-sub,
+  .sidebar .nav-sub.open {
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+    max-height: none !important;
+  }
+}
+
+.sidebar .nav-subitem {
+  display: block;
+  font-size: 0.9rem;
+  color: #cfcfcf;
+  padding: 6px 0;
+  text-decoration: none;
+  border-left: 3px solid rgba(255, 255, 255, 0.1); /* Muted border for all */
+  padding-left: 8px; /* Adjust for border */
+}
+
+.sidebar .nav-subitem.active {
+  color: #ffffff;
+  font-weight: 600;
+  border-left: 3px solid #2196f3; /* Highlighted border for active */
+}
+
 .inline-spinner {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.08);
-  border-top-color: #2196F3;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  border-top-color: #2196f3;
   animation: spin 800ms linear infinite;
   margin-left: 6px;
 }
@@ -1338,7 +1817,7 @@ const hideLayout = computed(() => {
   width: 340px;
   max-width: 50vw;
   padding: 8px 12px 8px 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #424242;
   background: #222;
   color: #fff;
@@ -1352,8 +1831,8 @@ const hideLayout = computed(() => {
 }
 
 .search-input:focus {
-  border-color: #2196F3;
-  box-shadow: 0 4px 14px rgba(33,150,243,0.12);
+  border-color: #2196f3;
+  box-shadow: 0 4px 14px rgba(33, 150, 243, 0.12);
 }
 
 .search-results-inline {
@@ -1375,7 +1854,7 @@ const hideLayout = computed(() => {
   right: 0;
   background: #1f1f1f;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 6px;
   z-index: 1400;
 }
@@ -1408,13 +1887,15 @@ const hideLayout = computed(() => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.08);
-  border-top-color: #2196F3;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  border-top-color: #2196f3;
   animation: spin 800ms linear infinite;
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .search-result {
@@ -1428,10 +1909,8 @@ const hideLayout = computed(() => {
 }
 
 .search-result:hover {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.03);
 }
-
-
 
 .result-title {
   font-weight: 600;
@@ -1461,7 +1940,7 @@ const hideLayout = computed(() => {
     max-width: 400px;
     z-index: 2001;
     background-color: #1e1e1e;
-    border-radius: 8px;
+    border-radius: 6px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     border: 1px solid #3a3a3a;
   }
@@ -1505,7 +1984,7 @@ const hideLayout = computed(() => {
     border: none;
     color: #ccc;
     padding: 0.5rem;
-    border-radius: 4px;
+    border-radius: 6px;
     z-index: 1;
     width: 44px;
     height: 44px;
@@ -1567,10 +2046,10 @@ const hideLayout = computed(() => {
   right: 0;
   background: #252525;
   border: 1px solid #3a3a3a;
-  border-radius: 8px;
+  border-radius: 6px;
   min-width: 320px;
   max-width: 400px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   z-index: 1300;
   max-height: 400px;
   overflow: hidden;
@@ -1600,7 +2079,7 @@ const hideLayout = computed(() => {
   font-size: 12px;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: background-color 0.2s;
 }
 
@@ -1641,7 +2120,7 @@ const hideLayout = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #2196F3;
+  color: #2196f3;
   font-size: 16px;
 }
 
@@ -1685,7 +2164,7 @@ const hideLayout = computed(() => {
   font-size: 12px;
   cursor: pointer;
   padding: 2px;
-  border-radius: 2px;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -1721,7 +2200,7 @@ const hideLayout = computed(() => {
 
 .view-all-link {
   display: inline-block;
-  color: #2196F3;
+  color: #2196f3;
   text-decoration: none;
   font-size: 12px;
   font-weight: 500;

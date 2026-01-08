@@ -6,7 +6,11 @@
         Wanted
       </h1>
       <div class="wanted-actions">
-        <button class="btn btn-primary" @click="searchMissing" :disabled="categorizedWanted.missing.length === 0">
+        <button
+          class="btn btn-primary"
+          @click="searchMissing"
+          :disabled="categorizedWanted.missing.length === 0"
+        >
           <PhRobot />
           Automatic Search All
         </button>
@@ -20,18 +24,14 @@
     <div class="wanted-filters">
       <!-- Mobile dropdown -->
       <div class="filter-tabs-mobile">
-        <CustomSelect
-          v-model="selectedTab"
-          :options="mobileTabOptions"
-          class="tab-dropdown"
-        />
+        <CustomSelect v-model="selectedTab" :options="mobileTabOptions" class="tab-dropdown" />
       </div>
 
       <!-- Desktop tabs -->
       <div class="filter-tabs-desktop">
         <div class="filter-tabs">
-          <button 
-            v-for="tab in filterTabs" 
+          <button
+            v-for="tab in filterTabs"
             :key="tab.value"
             :class="['tab', { active: selectedTab === tab.value }]"
             @click="selectedTab = tab.value"
@@ -50,83 +50,99 @@
     </div>
 
     <!-- Wanted List -->
-    <div v-else-if="filteredWanted.length > 0" ref="scrollContainer" class="wanted-list-container" @scroll="updateVisibleRange">
+    <div
+      v-else-if="filteredWanted.length > 0"
+      ref="scrollContainer"
+      class="wanted-list-container"
+      @scroll="updateVisibleRange"
+    >
       <div class="wanted-list-spacer" :style="{ height: `${totalHeight}px` }">
         <div class="wanted-list" :style="{ transform: `translateY(${topPadding}px)` }">
-          <div 
-            v-for="item in visibleWanted" 
+          <div
+            v-for="item in visibleWanted"
             :key="item.id"
-            v-memo="[item.id, item.monitored, item.filePath]"
+            v-memo="[item.id, item.monitored, item.filePath, hasActiveDownload(item)]"
             class="wanted-item"
           >
-        <div class="wanted-poster">
-          <img 
-            :src="apiService.getImageUrl(item.imageUrl) || `https://via.placeholder.com/60x90?text=No+Image`" 
-            :alt="item.title"
-            loading="lazy"
-          />
-        </div>
-        <div class="wanted-info">
-          <h3>{{ safeText(item.title) }}</h3>
-          <h4 v-if="item.authors?.length">by {{ item.authors.map(author => safeText(author)).join(', ') }}</h4>
-          <div class="wanted-meta">
-            <span v-if="item.series">{{ safeText(item.series) }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span>
-            <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
-            <span v-if="item.runtime">{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span>
+            <div class="wanted-poster">
+              <img
+                :src="apiService.getImageUrl(item.imageUrl) || getPlaceholderUrl()"
+                :alt="item.title"
+                loading="lazy"
+                decoding="async"
+                @error="handleImageError"
+              />
+            </div>
+            <div class="wanted-info">
+              <h3>
+                <span v-if="hasActiveDownload(item)" class="download-indicator" title="Downloading">
+                  <PhDownloadSimple :size="20" weight="fill" />
+                </span>
+                {{ safeText(item.title) }}
+              </h3>
+              <h4 v-if="item.authors?.length">
+                by {{ item.authors.map((author) => safeText(author)).join(', ') }}
+              </h4>
+              <div class="wanted-meta">
+                <span v-if="item.series"
+                  >{{ safeText(item.series)
+                  }}<span v-if="item.seriesNumber"> #{{ item.seriesNumber }}</span></span
+                >
+                <span v-if="item.publishYear">Released: {{ formatDate(item.publishYear) }}</span>
+                <span v-if="item.runtime"
+                  >{{ Math.floor(item.runtime / 60) }}h {{ item.runtime % 60 }}m</span
+                >
+              </div>
+              <div class="wanted-quality">
+                <template v-if="getQualityProfileForAudiobook(item)">
+                  Wanted Quality:
+                  <span class="profile-name">{{
+                    getQualityProfileForAudiobook(item)?.name ?? 'Unknown'
+                  }}</span>
+                </template>
+                <template v-else-if="item.quality"> Wanted Quality: {{ item.quality }} </template>
+                <template v-else> Wanted Quality: Any </template>
+              </div>
+              <div v-if="searchResults[item.id]" class="search-status">
+                <template v-if="searching[item.id]">
+                  <PhSpinner class="ph-spin" />
+                </template>
+                {{ searchResults[item.id] }}
+              </div>
+            </div>
+            <div class="wanted-status">
+              <span :class="['status-badge', getStatusClass(item)]">
+                {{ getStatusText(item) }}
+              </span>
+            </div>
+            <div class="wanted-actions-cell">
+              <button
+                class="btn-icon"
+                @click="searchAudiobook(item)"
+                :disabled="searching[item.id]"
+                title="Automatic Search"
+              >
+                <PhRobot />
+              </button>
+              <button class="btn-icon" @click="openManualSearch(item)" title="Manual Search">
+                <PhMagnifyingGlass />
+              </button>
+              <button
+                class="btn-icon"
+                @click="markAsSkipped(item)"
+                :disabled="searching[item.id]"
+                title="Unmonitor Audiobook"
+              >
+                <PhX />
+              </button>
+            </div>
           </div>
-          <div class="wanted-quality">
-            <template v-if="getQualityProfileForAudiobook(item)">
-              Wanted Quality:
-              <span class="profile-name">{{ getQualityProfileForAudiobook(item)?.name ?? 'Unknown' }}</span>
-            </template>
-            <template v-else-if="item.quality">
-              Wanted Quality: {{ item.quality }}
-            </template>
-            <template v-else>
-              Wanted Quality: Any
-            </template>
-          </div>
-          <div v-if="searchResults[item.id]" class="search-status">
-            <template v-if="searching[item.id]">
-              <PhSpinner class="ph-spin" />
-            </template>
-            {{ searchResults[item.id] }}
-          </div>
         </div>
-        <div class="wanted-status">
-          <span :class="['status-badge', getStatusClass(item)]">
-            {{ getStatusText(item) }}
-          </span>
-        </div>
-        <div class="wanted-actions-cell">
-          <button 
-            class="btn-icon" 
-            @click="searchAudiobook(item)"
-            :disabled="searching[item.id]"
-            title="Automatic Search"
-          >
-            <PhRobot />
-          </button>
-          <button 
-            class="btn-icon" 
-            @click="openManualSearch(item)"
-            title="Manual Search"
-          >
-            <PhMagnifyingGlass />
-          </button>
-          <button 
-            class="btn-icon" 
-            @click="markAsSkipped(item)"
-            :disabled="searching[item.id]"
-            title="Unmonitor Audiobook"
-          >
-            <PhX />
-          </button>
-        </div>
+        <!-- Close wanted-list -->
       </div>
-        </div>  <!-- Close wanted-list -->
-      </div>    <!-- Close wanted-list-spacer -->
-    </div>      <!-- Close wanted-list-container -->
+      <!-- Close wanted-list-spacer -->
+    </div>
+    <!-- Close wanted-list-container -->
 
     <!-- Empty State -->
     <div v-else class="empty-state">
@@ -155,17 +171,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
+import { errorTracking } from '@/services/errorTracking'
+import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
 import ManualImportModal from '@/components/ManualImportModal.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
-import type { Audiobook, SearchResult } from '@/types'
+import type { Audiobook, SearchResult, Download } from '@/types'
 import { safeText } from '@/utils/textUtils'
-import { PhHeart, PhRobot, PhFolderPlus, PhSpinner, PhMagnifyingGlass, PhX, PhCheckCircle, PhBooks, PhQuestion, PhXCircle, PhSkipForward } from '@phosphor-icons/vue'
+import {
+  PhHeart,
+  PhRobot,
+  PhFolderPlus,
+  PhSpinner,
+  PhMagnifyingGlass,
+  PhX,
+  PhCheckCircle,
+  PhBooks,
+  PhQuestion,
+  PhXCircle,
+  PhSkipForward,
+  PhDownloadSimple,
+} from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
+import { useDownloadsStore } from '@/stores/downloads'
+
+const downloadsStore = useDownloadsStore()
 
 const libraryStore = useLibraryStore()
 
@@ -178,17 +212,38 @@ const BUFFER_ROWS = 3
 
 const visibleRange = ref({ start: 0, end: 20 })
 
+// Update visible range for virtual scrolling (defined early to avoid TDZ when called from onMounted)
+const updateVisibleRange = () => {
+  if (!scrollContainer.value) return
+
+  const scrollTop = scrollContainer.value.scrollTop
+  const viewportHeight = scrollContainer.value.clientHeight
+
+  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
+  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
+
+  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
+  // filteredWanted may not be initialized yet; guard with optional chaining
+  const endIndex = Math.min(
+    firstVisibleIndex + visibleItemCount + BUFFER_ROWS,
+    filteredWanted?.value?.length || 0,
+  )
+
+  visibleRange.value = { start: startIndex, end: endIndex }
+}
+
 const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
   if (!audiobook || !audiobook.qualityProfileId) {
     return null
   }
   const profile = configurationStore.qualityProfiles.find(
-    (profile) => profile.id === audiobook.qualityProfileId
+    (profile) => profile.id === audiobook.qualityProfileId,
   )
   return profile || null
 }
 
 const selectedTab = ref('all')
+import { getPlaceholderUrl } from '@/utils/placeholder'
 const loading = ref(false)
 const searching = ref<Record<number, boolean>>({})
 const searchResults = ref<Record<number, string>>({})
@@ -201,7 +256,7 @@ const mobileTabOptions = computed(() => [
   { value: 'missing', label: 'Missing', icon: PhQuestion },
   { value: 'searching', label: 'Searching', icon: PhMagnifyingGlass },
   { value: 'failed', label: 'Failed', icon: PhXCircle },
-  { value: 'skipped', label: 'Skipped', icon: PhSkipForward }
+  { value: 'skipped', label: 'Skipped', icon: PhSkipForward },
 ])
 
 onMounted(async () => {
@@ -209,19 +264,26 @@ onMounted(async () => {
   await libraryStore.fetchLibrary()
   await configurationStore.loadQualityProfiles()
   loading.value = false
-  
+
   // Initialize virtual scrolling
-  nextTick(() => {
-    updateVisibleRange()
-  })
+  await nextTick()
+  updateVisibleRange()
 })
+
+// Watch the visible range (virtual scroll) to lazy-load images when the viewport changes
+watch(
+  () => visibleRange.value,
+  () => {
+    // No-op: native lazy loading handles image work, but we keep the watcher to retain potential hooks
+  },
+)
 
 // Filter audiobooks that are monitored and missing files
 // Prefer the server-provided `wanted` flag when present. If the server
 // does not include the flag (migration / older records), fall back to a
 // local computation: monitored && no files (or no primary filePath).
 const wantedAudiobooks = computed(() => {
-  return libraryStore.audiobooks.filter(audiobook => {
+  return libraryStore.audiobooks.filter((audiobook) => {
     const serverWanted = (audiobook as unknown as Record<string, unknown>)['wanted']
 
     // If server explicitly provided true/false, honor it
@@ -239,12 +301,23 @@ const wantedAudiobooks = computed(() => {
 // Categorize wanted audiobooks by their current search state
 const categorizedWanted = computed(() => {
   const all = wantedAudiobooks.value
-  const searchingItems = all.filter(a => searching.value[a.id])
-  const failedItems = all.filter(a => searchResults.value[a.id] && searchResults.value[a.id] !== 'Searching...' && !searching.value[a.id])
-  const missingItems = all.filter(a => !searching.value[a.id] && !searchResults.value[a.id])
+  const searchingItems = all.filter((a) => searching.value[a.id])
+  const failedItems = all.filter(
+    (a) =>
+      searchResults.value[a.id] &&
+      searchResults.value[a.id] !== 'Searching...' &&
+      !searching.value[a.id],
+  )
+  const missingItems = all.filter((a) => !searching.value[a.id] && !searchResults.value[a.id])
   const skippedItems: Audiobook[] = [] // For future use, currently empty
 
-  return { all, searching: searchingItems, failed: failedItems, missing: missingItems, skipped: skippedItems }
+  return {
+    all,
+    searching: searchingItems,
+    failed: failedItems,
+    missing: missingItems,
+    skipped: skippedItems,
+  }
 })
 
 // Count by status
@@ -253,7 +326,7 @@ const filterTabs = computed(() => [
   { label: 'Missing', value: 'missing', count: categorizedWanted.value.missing.length },
   { label: 'Searching', value: 'searching', count: categorizedWanted.value.searching.length },
   { label: 'Failed', value: 'failed', count: categorizedWanted.value.failed.length },
-  { label: 'Skipped', value: 'skipped', count: categorizedWanted.value.skipped.length }
+  { label: 'Skipped', value: 'skipped', count: categorizedWanted.value.skipped.length },
 ])
 
 const filteredWanted = computed(() => {
@@ -277,21 +350,6 @@ const visibleWanted = computed(() => {
   return filteredWanted.value.slice(visibleRange.value.start, visibleRange.value.end)
 })
 
-const updateVisibleRange = () => {
-  if (!scrollContainer.value) return
-  
-  const scrollTop = scrollContainer.value.scrollTop
-  const viewportHeight = scrollContainer.value.clientHeight
-  
-  const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT)
-  const visibleItemCount = Math.ceil(viewportHeight / ROW_HEIGHT)
-  
-  const startIndex = Math.max(0, firstVisibleIndex - BUFFER_ROWS)
-  const endIndex = Math.min(firstVisibleIndex + visibleItemCount + BUFFER_ROWS, filteredWanted.value.length)
-  
-  visibleRange.value = { start: startIndex, end: endIndex }
-}
-
 const totalHeight = computed(() => {
   return filteredWanted.value.length * ROW_HEIGHT
 })
@@ -300,7 +358,31 @@ const topPadding = computed(() => {
   return visibleRange.value.start * ROW_HEIGHT
 })
 
+// Map audiobook IDs to active downloads (exclude terminal/completed states)
+const activeDownloadsByAudiobook = computed(() => {
+  const map = new Map<number, Download>()
+  const terminalStates = ['Completed', 'Failed', 'Ready', 'Moved']
+  
+  downloadsStore.downloads.forEach((download) => {
+    if (download.audiobookId && !terminalStates.includes(download.status)) {
+      map.set(download.audiobookId, download)
+    }
+  })
+  return map
+})
+
+function hasActiveDownload(item: Audiobook): boolean {
+  return activeDownloadsByAudiobook.value.has(item.id)
+}
+
+function getActiveDownload(item: Audiobook): Download | undefined {
+  return activeDownloadsByAudiobook.value.get(item.id)
+}
+
 function getStatusClass(item: Audiobook): string {
+  if (hasActiveDownload(item)) {
+    return 'downloading'
+  }
   if (searching.value[item.id]) {
     return 'searching'
   }
@@ -311,6 +393,13 @@ function getStatusClass(item: Audiobook): string {
 }
 
 function getStatusText(item: Audiobook): string {
+  const download = getActiveDownload(item)
+  if (download) {
+    if (download.status === 'Downloading') {
+      return `Downloading (${download.progress.toFixed(0)}%)`
+    }
+    return download.status
+  }
   if (searching.value[item.id]) {
     return 'Searching'
   }
@@ -357,7 +446,11 @@ function getEmptyStateMessage(): string {
 const formatDate = (date: string | undefined): string => {
   if (!date) return 'Unknown'
   try {
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    return new Date(date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
   } catch {
     return date
   }
@@ -365,12 +458,12 @@ const formatDate = (date: string | undefined): string => {
 
 const searchMissing = async () => {
   logger.debug('Automatic search for all missing audiobooks')
-  
+
   // Search all missing audiobooks sequentially
   for (const audiobook of categorizedWanted.value.missing) {
     await searchAudiobook(audiobook)
     // Add a small delay between searches to avoid overwhelming indexers
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise((resolve) => setTimeout(resolve, 1000))
   }
 }
 
@@ -401,8 +494,13 @@ function closeManualSearch() {
 
 function handleDownloaded(result: SearchResult) {
   logger.debug('Downloaded:', result)
-  // Refresh library after successful download
+  // Refresh downloads and library after successful manual download so Activity/Downloads show the new item
   setTimeout(async () => {
+    try {
+      await downloadsStore.loadDownloads()
+    } catch (e) {
+      logger.warn('Failed to refresh downloads after manual download:', e)
+    }
     await libraryStore.fetchLibrary()
     closeManualSearch()
   }, 2000)
@@ -410,18 +508,23 @@ function handleDownloaded(result: SearchResult) {
 
 const searchAudiobook = async (item: Audiobook) => {
   logger.debug('Searching audiobook:', item.title)
-  
+
   searching.value[item.id] = true
   searchResults.value[item.id] = 'Searching...'
-  
+
   try {
     const result = await apiService.searchAndDownload(item.id)
-    
+
     if (result.success) {
       searchResults.value[item.id] = `Found on ${result.indexerUsed}, downloading...`
-      
-      // Refresh library to update status
+
+      // Refresh downloads and library to update status (ensure DDL downloads show up immediately)
       setTimeout(async () => {
+        try {
+          await downloadsStore.loadDownloads()
+        } catch (e) {
+          logger.warn('Failed to refresh downloads after search:', e)
+        }
         await libraryStore.fetchLibrary()
         delete searching.value[item.id]
         delete searchResults.value[item.id]
@@ -434,7 +537,11 @@ const searchAudiobook = async (item: Audiobook) => {
       }, 5000)
     }
   } catch (err) {
-    console.error('Search failed:', err)
+    errorTracking.captureException(err as Error, {
+      component: 'WantedView',
+      operation: 'searchWanted',
+      metadata: { itemId: item.id },
+    })
     searchResults.value[item.id] = 'Search failed'
     setTimeout(() => {
       delete searching.value[item.id]
@@ -445,7 +552,7 @@ const searchAudiobook = async (item: Audiobook) => {
 
 const markAsSkipped = async (item: Audiobook) => {
   logger.debug('Mark as skipped:', item.title)
-  
+
   try {
     await apiService.updateAudiobook(item.id, { monitored: false })
     await libraryStore.fetchLibrary()
@@ -479,7 +586,7 @@ const markAsSkipped = async (item: Audiobook) => {
   height: calc(100vh - 291px);
   overflow-y: auto;
   position: relative;
-  padding: 0 .5em 0 0;
+  padding: 0 0.5em 0 0;
   scrollbar-gutter: stable; /* Reserve space for scrollbar to prevent layout shifts */
   width: calc(100% + 0.5em); /* Leaves space for scrollbar without cutting off content */
 }
@@ -629,7 +736,7 @@ const markAsSkipped = async (item: Audiobook) => {
   color: #adb5bd;
   cursor: pointer;
   padding: 0.875rem 1.5rem;
-  border-radius: 6px 6px 0 0;
+  border-radius: 6px;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -668,7 +775,7 @@ const markAsSkipped = async (item: Audiobook) => {
 
 .tab-badge {
   background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 0.15rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -686,7 +793,7 @@ const markAsSkipped = async (item: Audiobook) => {
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -727,7 +834,7 @@ const markAsSkipped = async (item: Audiobook) => {
   align-items: center;
   padding: 1.25rem;
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   border-left: 4px solid #fa5252;
   transition: all 0.2s ease;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -773,6 +880,25 @@ const markAsSkipped = async (item: Audiobook) => {
   font-size: 1.1rem;
   font-weight: 600;
   line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.download-indicator {
+  color: #51cf66;
+  display: inline-flex;
+  align-items: center;
+  animation: bounce 2s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
 }
 
 .wanted-info h4 {
@@ -794,11 +920,11 @@ const markAsSkipped = async (item: Audiobook) => {
 .wanted-meta span {
   background-color: rgba(255, 255, 255, 0.05);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .wanted-meta span span {
-background-color: unset;
+  background-color: unset;
   padding: 0;
   border-radius: unset;
 }
@@ -809,7 +935,7 @@ background-color: unset;
   font-weight: 500;
   background-color: rgba(255, 212, 59, 0.1);
   padding: 0.25rem 0.6rem;
-  border-radius: 4px;
+  border-radius: 6px;
   display: inline-block;
 }
 
@@ -827,7 +953,7 @@ background-color: unset;
   gap: 0.5rem;
   background-color: rgba(77, 171, 247, 0.1);
   padding: 0.35rem 0.7rem;
-  border-radius: 4px;
+  border-radius: 6px;
   display: inline-flex;
 }
 
@@ -862,6 +988,22 @@ background-color: unset;
   border: 1px solid rgba(77, 171, 247, 0.3);
 }
 
+.status-badge.downloading {
+  background-color: rgba(81, 207, 102, 0.15);
+  color: #51cf66;
+  border: 1px solid rgba(81, 207, 102, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
 .status-badge.failed {
   background-color: rgba(134, 142, 150, 0.15);
   color: #868e96;
@@ -885,7 +1027,7 @@ background-color: unset;
   padding: 4rem 2rem;
   color: #adb5bd;
   background-color: #2a2a2a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -920,18 +1062,18 @@ background-color: unset;
     flex-direction: column;
     align-items: flex-start;
   }
-  
+
   .wanted-poster {
     margin-bottom: 1rem;
     margin-right: 0;
   }
-  
+
   .wanted-status,
   .wanted-actions-cell {
     margin: 1rem 0 0 0;
     align-self: stretch;
   }
-  
+
   .wanted-actions-cell {
     justify-content: flex-end;
     gap: 0.75rem;

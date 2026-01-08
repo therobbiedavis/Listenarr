@@ -1,7 +1,7 @@
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2025 Robbie Davis
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
@@ -28,40 +28,48 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
+import { useToast } from './services/toastService'
+import { errorTracking } from './services/errorTracking'
 
 const app = createApp(App)
 
 // Global error handler - prevents white screen of death
 app.config.errorHandler = (err, instance, info) => {
-  console.error('[Vue Error]', err, info)
-  
+  // Track error for debugging and monitoring
+  errorTracking.captureException(err, {
+    component: instance?.$options?.name || 'Unknown',
+    operation: 'vueErrorHandler',
+    metadata: { info },
+  })
+
   // Show user-friendly error message
-  import('./services/toastService').then(({ useToast }) => {
+  try {
     const toast = useToast()
     toast.error('Unexpected Error', 'Something went wrong. Please refresh the page.')
-  }).catch(() => {
+  } catch {
     // Fallback if toast service fails
     alert('An unexpected error occurred. Please refresh the page.')
-  })
-  
-  // TODO: Send to error tracking service (e.g., Sentry)
-  // if (import.meta.env.PROD) {
-  //   trackError(err, { component: instance?.$options.name, info })
-  // }
+  }
 }
 
 // Handle unhandled promise rejections
 window.addEventListener('unhandledrejection', (event) => {
-  console.error('[Unhandled Promise]', event.reason)
+  errorTracking.captureException(event.reason, {
+    component: 'Global',
+    operation: 'unhandledRejection',
+  })
   event.preventDefault()
-  
-  import('./services/toastService').then(({ useToast }) => {
+
+  try {
     const toast = useToast()
     toast.error('Error', 'An unexpected error occurred.')
-  }).catch(() => {
+  } catch (err) {
     // Fallback if toast service fails
-    console.error('Toast service unavailable for unhandled rejection')
-  })
+    errorTracking.captureException(err as Error, {
+      component: 'Global',
+      operation: 'toastServiceFallback',
+    })
+  }
 })
 
 app.use(createPinia())
@@ -70,35 +78,57 @@ app.use(router)
 app.mount('#app')
 
 // Web Vitals - Performance monitoring (production only)
+// NOTE: Analytics integration point - when adding analytics service (Google Analytics, Plausible, etc.),
+// send these metrics to your analytics platform for performance tracking.
 if (import.meta.env.PROD) {
-  import('web-vitals').then(({ onCLS, onINP, onFCP, onLCP, onTTFB }) => {
-    // Core Web Vitals
-    onCLS((metric) => {
-      console.log('[Web Vitals] CLS (Cumulative Layout Shift):', metric.value)
-      // TODO: Send to analytics service
+  import('web-vitals')
+    .then(({ onCLS, onINP, onFCP, onLCP, onTTFB }) => {
+      // Core Web Vitals - Good thresholds: CLS < 0.1, INP < 200ms, LCP < 2.5s
+      onCLS((metric) => {
+        // Cumulative Layout Shift - measures visual stability
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] CLS:', metric.value)
+        }
+        // Analytics integration: analyticsService.trackMetric('CLS', metric.value)
+      })
+
+      onINP((metric) => {
+        // Interaction to Next Paint - measures responsiveness
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] INP:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('INP', metric.value)
+      })
+
+      onLCP((metric) => {
+        // Largest Contentful Paint - measures loading performance
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] LCP:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('LCP', metric.value)
+      })
+
+      // Additional metrics
+      onFCP((metric) => {
+        // First Contentful Paint - measures perceived load speed
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] FCP:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('FCP', metric.value)
+      })
+
+      onTTFB((metric) => {
+        // Time to First Byte - measures server response time
+        if (import.meta.env.DEV) {
+          console.log('[Web Vitals] TTFB:', metric.value, 'ms')
+        }
+        // Analytics integration: analyticsService.trackMetric('TTFB', metric.value)
+      })
     })
-    
-    onINP((metric) => {
-      console.log('[Web Vitals] INP (Interaction to Next Paint):', metric.value, 'ms')
-      // TODO: Send to analytics service
+    .catch((err) => {
+      errorTracking.captureException(err as Error, {
+        component: 'WebVitals',
+        operation: 'loadModule',
+      })
     })
-    
-    onLCP((metric) => {
-      console.log('[Web Vitals] LCP (Largest Contentful Paint):', metric.value, 'ms')
-      // TODO: Send to analytics service
-    })
-    
-    // Additional metrics
-    onFCP((metric) => {
-      console.log('[Web Vitals] FCP (First Contentful Paint):', metric.value, 'ms')
-      // TODO: Send to analytics service
-    })
-    
-    onTTFB((metric) => {
-      console.log('[Web Vitals] TTFB (Time to First Byte):', metric.value, 'ms')
-      // TODO: Send to analytics service
-    })
-  }).catch((err) => {
-    console.warn('[Web Vitals] Failed to load:', err)
-  })
 }

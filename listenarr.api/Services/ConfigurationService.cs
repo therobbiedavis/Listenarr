@@ -206,7 +206,8 @@ namespace Listenarr.Api.Services
             try
             {
                 // Try to get from database first
-                var settings = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
+                // Ensure a deterministic selection of the singleton application settings row
+                var settings = await _dbContext.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
 
                 if (settings == null)
                 {
@@ -237,7 +238,7 @@ namespace Listenarr.Api.Services
                 // Ensure Id is always 1 (singleton pattern)
                 settings.Id = 1;
 
-                var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync();
+                var existing = await _dbContext.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
 
                 if (existing != null)
                 {
@@ -322,6 +323,21 @@ namespace Listenarr.Api.Services
             {
                 _logger.LogError(ex, "Error saving startup configuration");
                 throw;
+            }
+        }
+
+        // Webhook Configuration methods
+        public async Task<List<WebhookConfiguration>> GetWebhookConfigurationsAsync()
+        {
+            try
+            {
+                var settings = await GetApplicationSettingsAsync();
+                return settings?.Webhooks ?? new List<WebhookConfiguration>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving webhook configurations");
+                return new List<WebhookConfiguration>();
             }
         }
     }

@@ -234,7 +234,8 @@ namespace Listenarr.Api.Services.Adapters
                 }
 
                 _logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", LogRedaction.SanitizeText(result.Title), queueId, LogRedaction.SanitizeText(droneId));
-                return droneId;
+                // Return the NZBID so it can be stored and used for removal later
+                return queueId.ToString();
             }
             catch (Exception ex)
             {
@@ -248,26 +249,133 @@ namespace Listenarr.Api.Services.Adapters
             if (client == null) throw new ArgumentNullException(nameof(client));
             if (string.IsNullOrWhiteSpace(id)) throw new ArgumentNullException(nameof(id));
 
-            var command = deleteFiles ? "GroupDeleteFinal" : "GroupDelete";
+            // First try to parse as numeric NZBID (for queue removal)
             var numericId = TryParseId(id);
+            
+            // If it's not a numeric ID, it might be a droneId (GUID from Listenarr)
+            // Try to find it in history first
             if (!numericId.HasValue)
             {
-                _logger.LogWarning("Cannot remove NZB {Id} - invalid ID format", LogRedaction.SanitizeText(id));
+                _logger.LogInformation("ID {Id} is not numeric, searching NZBGet history for matching download", LogRedaction.SanitizeText(id));
+                
+                try
+                {
+                    // Get history to find the NZBID by matching droneId
+                    var historyResult = await CallXmlRpcAsync(client, "history", false);
+                    var arrayData = historyResult.Element("array")?.Element("data");
+                    
+                    var historyCount = arrayData?.Elements("value").Count() ?? 0;
+                    _logger.LogInformation("NZBGet history contains {Count} entries", historyCount);
+                    
+                    if (arrayData != null)
+                    {
+                        foreach (var valueElement in arrayData.Elements("value"))
+                        {
+                            var structElement = valueElement.Element("struct");
+                            if (structElement != null)
+                            {
+                                var members = structElement.Elements("member").ToDictionary(
+                                    m => m.Element("name")?.Value ?? string.Empty,
+                                    m => m.Element("value")?.Elements().FirstOrDefault()
+                                );
+                                
+                                // Log what fields this history entry has
+                                _logger.LogInformation("History entry has fields: {Fields}", string.Join(", ", members.Keys));
+                                
+                                // Check if this history entry has matching droneId in parameters
+                                if (members.TryGetValue("Parameters", out var paramsElement))
+                                {
+                                    var paramsArray = paramsElement?.Element("array")?.Element("data");
+                                    var paramCount = paramsArray?.Elements("value").Count() ?? 0;
+                                    _logger.LogInformation("History entry has {Count} parameters", paramCount);
+                                    
+                                    if (paramsArray != null)
+                                    {
+                                        foreach (var paramValueElement in paramsArray.Elements("value"))
+                                        {
+                                            var paramStruct = paramValueElement.Element("struct");
+                                            if (paramStruct != null)
+                                            {
+                                                var paramMembers = paramStruct.Elements("member").ToDictionary(
+                                                    m => m.Element("name")?.Value ?? string.Empty,
+                                                    m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
+                                                );
+                                                
+                                                // Log all parameters for debugging
+                                                foreach (var pm in paramMembers)
+                                                {
+                                                    _logger.LogDebug("NZBGet History Parameter: Name={Name}, Value={Value}", pm.Key, LogRedaction.SanitizeText(pm.Value));
+                                                }
+                                                
+                                                if (paramMembers.TryGetValue("Name", out var paramName) && 
+                                                    paramMembers.TryGetValue("Value", out var paramValue) &&
+                                                    paramName == "*drone" && paramValue == id)
+                                                {
+                                                    // Found matching droneId, get the NZBID
+                                                    if (members.TryGetValue("ID", out var idElement))
+                                                    {
+                                                        var foundId = idElement?.Value;
+                                                        if (int.TryParse(foundId, out var foundNumericId))
+                                                        {
+                                                            _logger.LogDebug("Found NZBID {NzbId} for droneId {DroneId} in history", foundNumericId, LogRedaction.SanitizeText(id));
+                                                            numericId = foundNumericId;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if (numericId.HasValue) break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception histEx)
+                {
+                    _logger.LogDebug(histEx, "Failed to search NZBGet history for download {Id}", LogRedaction.SanitizeText(id));
+                }
+            }
+
+            if (!numericId.HasValue)
+            {
+                _logger.LogWarning("Cannot remove NZB {Id} - not found in queue or history", LogRedaction.SanitizeText(id));
                 return false;
             }
 
+            // Try to remove from history first (for completed downloads)
             try
             {
+                var historyDeleteResult = await CallXmlRpcAsync(client, "editqueue", "HistoryDelete", 0, string.Empty, new[] { numericId.Value });
+                var historySuccess = historyDeleteResult.Element("boolean")?.Value == "1";
+                
+                if (historySuccess)
+                {
+                    _logger.LogInformation("Removed NZB {Id} from NZBGet history (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
+                    return true;
+                }
+            }
+            catch (Exception histEx)
+            {
+                _logger.LogDebug(histEx, "Could not remove {Id} from NZBGet history (may not be in history)", LogRedaction.SanitizeText(id));
+            }
+
+            // Fall back to queue removal (for active downloads)
+            try
+            {
+                var command = deleteFiles ? "GroupDeleteFinal" : "GroupDelete";
                 var editResult = await CallXmlRpcAsync(client, "editqueue", command, 0, string.Empty, new[] { numericId.Value });
                 var success = editResult.Element("boolean")?.Value == "1";
                 
                 if (success)
                 {
-                    _logger.LogInformation("Removed NZB {Id} from NZBGet (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
+                    _logger.LogInformation("Removed NZB {Id} from NZBGet queue (deleteFiles={DeleteFiles})", LogRedaction.SanitizeText(id), deleteFiles);
                     return true;
                 }
 
-                _logger.LogWarning("NZBGet reported failure when removing {Id}", LogRedaction.SanitizeText(id));
+                _logger.LogWarning("NZBGet reported failure when removing {Id} from both history and queue", LogRedaction.SanitizeText(id));
                 return false;
             }
             catch (Exception ex)
@@ -421,6 +529,14 @@ namespace Listenarr.Api.Services.Adapters
                 }
             }
 
+            // For NZBGet, construct ContentPath from destDir + title
+            var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
+                ? Path.Combine(destDir, title)
+                : destDir;
+            var localContentPath = !string.IsNullOrEmpty(contentPath)
+                ? _pathMappingService.TranslatePathAsync(client.Id, contentPath).GetAwaiter().GetResult()
+                : contentPath;
+
             var addedAt = DateTime.UtcNow;
 
             return new QueueItem
@@ -441,7 +557,8 @@ namespace Listenarr.Api.Services.Adapters
                 CanPause = status is "downloading" or "queued",
                 CanRemove = true,
                 RemotePath = destDir,
-                LocalPath = localPath
+                LocalPath = localPath,
+                ContentPath = localContentPath
             };
         }
 
@@ -609,18 +726,45 @@ namespace Listenarr.Api.Services.Adapters
         {
             try
             {
+                _logger.LogDebug("Downloading NZB from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
+                
                 var httpClient = _httpClientFactory.CreateClient();
                 using var request = new HttpRequestMessage(HttpMethod.Get, nzbUrl);
 
-                if (!string.IsNullOrWhiteSpace(indexerApiKey))
-                {
-                    request.Headers.Add("X-Api-Key", indexerApiKey);
-                }
+                // Note: Newznab/Torznab APIs include the API key in the URL query string (e.g., &apikey=xxx)
+                // We should NOT add an X-Api-Key header as it may conflict with URL-based authentication
+                // and cause the API to return error responses instead of the actual NZB file
+                
+                // Set User-Agent header - many indexers require this and will reject requests without it
+                request.Headers.Add("User-Agent", "Listenarr/1.0");
 
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                
+                _logger.LogDebug("NZB download response: StatusCode={StatusCode}, ContentType={ContentType}, ContentLength={ContentLength}",
+                    response.StatusCode,
+                    response.Content.Headers.ContentType?.ToString() ?? "null",
+                    response.Content.Headers.ContentLength?.ToString() ?? "unknown");
+                
                 response.EnsureSuccessStatusCode();
 
                 var contentBytes = await response.Content.ReadAsByteArrayAsync(ct);
+                
+                _logger.LogInformation("Downloaded NZB content: {Size} bytes", contentBytes.Length);
+                
+                // If the content is suspiciously small, log it to see if it's an error message
+                if (contentBytes.Length > 0 && contentBytes.Length < 500)
+                {
+                    var contentText = System.Text.Encoding.UTF8.GetString(contentBytes);
+                    _logger.LogWarning("NZB content is suspiciously small ({Size} bytes). Content: {Content}", 
+                        contentBytes.Length, contentText);
+                }
+                
+                if (contentBytes.Length == 0)
+                {
+                    _logger.LogError("Downloaded NZB file is empty (0 bytes) from {Url}", LogRedaction.SanitizeUrl(nzbUrl));
+                    throw new InvalidOperationException($"Downloaded NZB file is empty from {nzbUrl}");
+                }
+                
                 return contentBytes;
             }
             catch (Exception ex)
@@ -649,6 +793,92 @@ namespace Listenarr.Api.Services.Adapters
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Resolves the actual import item for a completed download.
+        /// Queries NZBGet history for FinalDir or DestDir.
+        /// EXACTLY matches Sonarr's NzbGet.GetImportItem pattern.
+        /// </summary>
+        public async Task<QueueItem> GetImportItemAsync(
+            DownloadClientConfiguration client,
+            Download download,
+            QueueItem queueItem,
+            QueueItem? previousAttempt = null,
+            CancellationToken ct = default)
+        {
+            // Clone to avoid mutating the original
+            var result = queueItem.Clone();
+
+            // If ContentPath is already set and exists, use it
+            if (!string.IsNullOrEmpty(result.ContentPath))
+            {
+                var localPath = await _pathMappingService.TranslatePathAsync(client.Id, result.ContentPath);
+                if (!string.IsNullOrEmpty(localPath) && (File.Exists(localPath) || Directory.Exists(localPath)))
+                {
+                    result.ContentPath = localPath;
+                    return result;
+                }
+            }
+
+            try
+            {
+                // Query NZBGet history for the download
+                var historyResult = await CallXmlRpcAsync(client, "history", false);
+                var arrayData = historyResult.Element("array")?.Element("data");
+
+                if (arrayData == null)
+                {
+                    _logger.LogWarning("Failed to query NZBGet history for download {NzbId}", queueItem.Id);
+                    return result;
+                }
+
+                // Find the history entry matching our download ID
+                foreach (var valueElement in arrayData.Elements("value"))
+                {
+                    var structElement = valueElement.Element("struct");
+                    if (structElement == null) continue;
+
+                    var members = structElement.Elements("member").ToDictionary(
+                        m => m.Element("name")?.Value ?? string.Empty,
+                        m => m.Element("value")?.Elements().FirstOrDefault()?.Value ?? string.Empty
+                    );
+
+                    var entryId = members.GetValueOrDefault("NZBID", string.Empty);
+                    if (entryId != queueItem.Id) continue;
+
+                    // Found matching entry - extract path
+                    // FinalDir is preferred (post-processing destination), fallback to DestDir
+                    var finalDir = members.GetValueOrDefault("FinalDir", string.Empty);
+                    var destDir = members.GetValueOrDefault("DestDir", string.Empty);
+                    var contentPath = !string.IsNullOrEmpty(finalDir) ? finalDir : destDir;
+
+                    if (string.IsNullOrEmpty(contentPath))
+                    {
+                        _logger.LogWarning("No FinalDir or DestDir found for NZB {NzbId}", queueItem.Id);
+                        return result;
+                    }
+
+                    // Apply path mapping
+                    var localContentPath = await _pathMappingService.TranslatePathAsync(client.Id, contentPath);
+                    result.ContentPath = localContentPath;
+
+                    _logger.LogDebug(
+                        "Resolved NZBGet content path for {NzbId}: {ContentPath}",
+                        queueItem.Id,
+                        localContentPath);
+
+                    return result;
+                }
+
+                _logger.LogWarning("Download {NzbId} not found in NZBGet history", queueItem.Id);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error resolving import item for NZBGet download {NzbId}", queueItem.Id);
+                return result;
+            }
         }
     }
 }

@@ -1,4 +1,5 @@
-﻿using Listenarr.Domain.Models;
+﻿using AsyncKeyedLock;
+using Listenarr.Domain.Models;
 using Listenarr.Infrastructure.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -10,6 +11,7 @@ public class RemotePathMappingService : IRemotePathMappingService
     private readonly ListenArrDbContext _context;
     private readonly ILogger<RemotePathMappingService> _logger;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
+    private static readonly AsyncKeyedLocker<string> _locker = new();
 
     public RemotePathMappingService(
         ListenArrDbContext context,
@@ -39,10 +41,17 @@ public class RemotePathMappingService : IRemotePathMappingService
         if (string.IsNullOrEmpty(downloadClientId)) return new List<RemotePathMapping>();
         var cacheKey = $"rpm_client_{downloadClientId}";
 
-        // Use GetOrCreateAsync to prevent multiple concurrent requests from
+        if (_cache.TryGetValue<List<RemotePathMapping>>(cacheKey, out var mappings))
+        {
+            return mappings ?? [];
+        }
+
+        // Lock by key to prevent multiple concurrent requests from
         // issuing duplicate DB queries (cache stampede). Also use AsNoTracking
         // so we don't cache tracked EF entities tied to a specific DbContext.
-        var mappings = await _cache.GetOrCreateAsync(cacheKey, async entry =>
+        using var _ = await _locker.LockAsync(cacheKey);
+
+        mappings = await _cache.GetOrCreateAsync(cacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60);
 
@@ -55,7 +64,7 @@ public class RemotePathMappingService : IRemotePathMappingService
             return list;
         });
 
-        return mappings ?? new List<RemotePathMapping>();
+        return mappings ?? [];
     }
 
     public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)

@@ -50,6 +50,14 @@ namespace Listenarr.Infrastructure.Models.Configurations
                 .HasColumnType("TEXT");
             narratorsProp.Metadata.SetValueComparer(narratorsComparer);
 
+            // Author ASINs (resolve/cached author images rely on stored ASINs)
+            var authorAsinsConverter = (Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>?, string>) new Listenarr.Infrastructure.Persistence.Converters.JsonValueConverter<List<string>?>();
+            var authorAsinsComparer = Listenarr.Infrastructure.Persistence.Converters.JsonValueComparer.Create<List<string>?>();
+            var authorAsinsProp = builder.Property(e => e.AuthorAsins)
+                .HasConversion(authorAsinsConverter)
+                .HasColumnType("TEXT");
+            authorAsinsProp.Metadata.SetValueComparer(authorAsinsComparer);
+
             // One-to-many: Audiobook -> AudiobookFiles
             builder.HasMany(a => a.Files)
                 .WithOne(f => f.Audiobook)

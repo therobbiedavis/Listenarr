@@ -47,6 +47,32 @@ namespace Listenarr.Api.Controllers
                 return BadRequest("Identifier is required");
             }
 
+            // Strip any query parameters from the identifier (e.g., "B0CQZ5167B?access_token=..." -> "B0CQZ5167B")
+            var queryIndex = identifier.IndexOf('?');
+            if (queryIndex >= 0)
+            {
+                identifier = identifier.Substring(0, queryIndex);
+            }
+
+            // Check for url parameter to download on demand
+            var url = Request.Query["url"].ToString();
+            if (!string.IsNullOrWhiteSpace(url) && (url.StartsWith("http://") || url.StartsWith("https://")))
+            {
+                // Try to download and cache the image
+                try
+                {
+                    var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(url, identifier);
+                    if (!string.IsNullOrWhiteSpace(downloaded))
+                    {
+                        _logger.LogInformation("Downloaded image on demand for identifier: {Identifier}", identifier);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to download image on demand for identifier: {Identifier}", identifier);
+                }
+            }
+
             try
             {
                 // Get the cached image path (checks library first, then temp)
@@ -55,6 +81,33 @@ namespace Listenarr.Api.Controllers
                 if (relativePath == null)
                 {
                     _logger.LogWarning("Image not found for identifier: {Identifier}", identifier);
+                    // Attempt to serve the frontend placeholder first (fe/public/placeholder.svg)
+                    try
+                    {
+                        var frontendPlaceholder = Path.Combine(_environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
+                        if (System.IO.File.Exists(frontendPlaceholder))
+                        {
+                            _logger.LogInformation("Serving frontend placeholder image for missing identifier: {Identifier}", identifier);
+                            Response.Headers["Cache-Control"] = "public, max-age=300";
+                            return PhysicalFile(frontendPlaceholder, "image/svg+xml");
+                        }
+
+                        // Fallback to backend wwwroot placeholder if frontend file not present
+                        var placeholderPath = Path.Combine(_environment.ContentRootPath, "wwwroot", "placeholder.svg");
+                        if (System.IO.File.Exists(placeholderPath))
+                        {
+                            _logger.LogInformation("Serving backend placeholder image for missing identifier: {Identifier}", identifier);
+                            Response.Headers["Cache-Control"] = "public, max-age=300";
+                            return PhysicalFile(placeholderPath, "image/svg+xml");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to serve placeholder for missing image {Identifier}", identifier);
+                    }
+
+                    // Return NotFound with short caching to reduce repeated filesystem lookups by other clients
+                    Response.Headers["Cache-Control"] = "public, max-age=300";
                     return NotFound(new { message = "Image not found" });
                 }
 
@@ -64,6 +117,31 @@ namespace Listenarr.Api.Controllers
                 if (!System.IO.File.Exists(fullPath))
                 {
                     _logger.LogWarning("Image file does not exist at path: {Path}", fullPath);
+                    // Try to serve the frontend placeholder first, then backend placeholder
+                    try
+                    {
+                        var frontendPlaceholder = Path.Combine(_environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
+                        if (System.IO.File.Exists(frontendPlaceholder))
+                        {
+                            _logger.LogInformation("Serving frontend placeholder image for missing file at path: {Path}", fullPath);
+                            Response.Headers["Cache-Control"] = "public, max-age=300";
+                            return PhysicalFile(frontendPlaceholder, "image/svg+xml");
+                        }
+
+                        var placeholderPath = Path.Combine(_environment.ContentRootPath, "wwwroot", "placeholder.svg");
+                        if (System.IO.File.Exists(placeholderPath))
+                        {
+                            _logger.LogInformation("Serving backend placeholder image for missing file at path: {Path}", fullPath);
+                            Response.Headers["Cache-Control"] = "public, max-age=300";
+                            return PhysicalFile(placeholderPath, "image/svg+xml");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to serve placeholder for missing file {Path}", fullPath);
+                    }
+
+                    Response.Headers["Cache-Control"] = "public, max-age=300";
                     return NotFound(new { message = "Image file not found" });
                 }
 
@@ -75,6 +153,7 @@ namespace Listenarr.Api.Controllers
                     ".png" => "image/png",
                     ".gif" => "image/gif",
                     ".webp" => "image/webp",
+                    ".svg" => "image/svg+xml",
                     _ => "application/octet-stream"
                 };
 

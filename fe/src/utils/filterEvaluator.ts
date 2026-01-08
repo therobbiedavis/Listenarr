@@ -22,30 +22,50 @@ function evalSingleRule(rule: Rule, b: Record<string, unknown>): boolean {
 
   let left = ''
   switch (field) {
-    case 'monitored': left = String(Boolean((b as Record<string, unknown>)['monitored'])); break
-    case 'title': left = String((b as Record<string, unknown>)['title'] ?? ''); break
+    case 'monitored':
+      left = String(Boolean((b as Record<string, unknown>)['monitored']))
+      break
+    case 'title':
+      left = String((b as Record<string, unknown>)['title'] ?? '')
+      break
     case 'author': {
       const authors = ((b as Record<string, unknown>)['authors'] as unknown[]) || []
-      left = authors.map(a => String(a)).join(' ')
+      left = authors.map((a) => String(a)).join(' ')
       break
     }
     case 'narrator': {
       const narrators = ((b as Record<string, unknown>)['narrators'] as unknown[]) || []
-      left = narrators.map(n => String(n)).join(' ')
+      left = narrators.map((n) => String(n)).join(' ')
       break
     }
-    case 'language': left = String((b as Record<string, unknown>)['language'] ?? ''); break
-    case 'publisher': left = String((b as Record<string, unknown>)['publisher'] ?? ''); break
-    case 'qualityProfileId': left = String((b as Record<string, unknown>)['qualityProfileId'] ?? ''); break
-    case 'publishYear': left = String((b as Record<string, unknown>)['publishYear'] ?? ''); break
-    case 'publishedYear': left = String((b as Record<string, unknown>)['publishYear'] ?? ''); break
-    case 'path': left = String((b as Record<string, unknown>)['filePath'] ?? (b as Record<string, unknown>)['path'] ?? '') ; break
+    case 'language':
+      left = String((b as Record<string, unknown>)['language'] ?? '')
+      break
+    case 'publisher':
+      left = String((b as Record<string, unknown>)['publisher'] ?? '')
+      break
+    case 'qualityProfileId':
+      left = String((b as Record<string, unknown>)['qualityProfileId'] ?? '')
+      break
+    case 'publishYear':
+      left = String((b as Record<string, unknown>)['publishYear'] ?? '')
+      break
+    case 'publishedYear':
+      left = String((b as Record<string, unknown>)['publishYear'] ?? '')
+      break
+    case 'path':
+      left = String(
+        (b as Record<string, unknown>)['filePath'] ?? (b as Record<string, unknown>)['path'] ?? '',
+      )
+      break
     case 'files': {
       const files = ((b as Record<string, unknown>)['files'] as unknown[]) || []
       left = String(files.length)
       break
     }
-    case 'filesize': left = String((b as Record<string, unknown>)['fileSize'] ?? ''); break
+    case 'filesize':
+      left = String((b as Record<string, unknown>)['fileSize'] ?? '')
+      break
     default:
       left = String((b as Record<string, unknown>)[field] ?? '')
       break
@@ -59,24 +79,38 @@ function evalSingleRule(rule: Rule, b: Record<string, unknown>): boolean {
     const valNum = Number(val)
     if (isNaN(leftNum) || isNaN(valNum)) return false
     switch (op) {
-      case 'eq': return leftNum === valNum
-      case 'ne': return leftNum !== valNum
-      case 'lt': return leftNum < valNum
-      case 'lte': return leftNum <= valNum
-      case 'gt': return leftNum > valNum
-      case 'gte': return leftNum >= valNum
-      case 'is': return leftNum === valNum
-      case 'is_not': return leftNum !== valNum
-      default: return true
+      case 'eq':
+        return leftNum === valNum
+      case 'ne':
+        return leftNum !== valNum
+      case 'lt':
+        return leftNum < valNum
+      case 'lte':
+        return leftNum <= valNum
+      case 'gt':
+        return leftNum > valNum
+      case 'gte':
+        return leftNum >= valNum
+      case 'is':
+        return leftNum === valNum
+      case 'is_not':
+        return leftNum !== valNum
+      default:
+        return true
     }
   }
 
   switch (op) {
-    case 'is': return left === val
-    case 'is_not': return left !== val
-    case 'contains': return l.includes(v)
-    case 'not_contains': return !l.includes(v)
-    default: return true
+    case 'is':
+      return left === val
+    case 'is_not':
+      return left !== val
+    case 'contains':
+      return l.includes(v)
+    case 'not_contains':
+      return !l.includes(v)
+    default:
+      return true
   }
 }
 
@@ -97,7 +131,10 @@ export function evaluateNode(node: Rule, b: Record<string, unknown>): boolean {
   return evalSingleRule(node, b)
 }
 
-export function matchesFilter(b: Record<string, unknown>, filter: CustomFilter | undefined | null): boolean {
+export function matchesFilter(
+  b: Record<string, unknown>,
+  filter: CustomFilter | undefined | null,
+): boolean {
   if (!filter || !filter.rules || filter.rules.length === 0) return true
   const rules = filter.rules
   return rules.reduce((acc: boolean | null, r, idx) => {

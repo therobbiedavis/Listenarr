@@ -143,13 +143,14 @@ namespace Listenarr.Api.Tests
                 var config = sp.GetService<IConfigurationService>();
                 var scopeFactory = sp.GetService<IServiceScopeFactory>();
                 var importService = sp.GetService<Listenarr.Api.Services.IImportService>();
+                var archiveExtractor = sp.GetService<Listenarr.Api.Services.IArchiveExtractor>();
                 var downloadQueue = sp.GetService<Listenarr.Api.Services.IDownloadQueueService>();
                 var hubContext = sp.GetService<IHubContext<Listenarr.Api.Hubs.DownloadHub>>();
                 var logger = sp.GetService<ILogger<Listenarr.Api.Services.CompletedDownloadProcessor>>();
 
-                if (downloadRepo != null && fileFinalizer != null && config != null && scopeFactory != null && importService != null && downloadQueue != null && hubContext != null && logger != null)
+                if (downloadRepo != null && fileFinalizer != null && config != null && scopeFactory != null && importService != null && archiveExtractor != null && downloadQueue != null && hubContext != null && logger != null)
                 {
-                    return new Listenarr.Api.Services.CompletedDownloadProcessor(downloadRepo, fileFinalizer, config, scopeFactory, importService, downloadQueue, hubContext, logger);
+                    return new Listenarr.Api.Services.CompletedDownloadProcessor(downloadRepo, fileFinalizer, config, scopeFactory, importService, archiveExtractor, downloadQueue, hubContext, logger);
                 }
 
                 // Fallback: lightweight test processor that simply marks downloads completed in the repo
@@ -206,6 +207,9 @@ internal class TestConfigurationService : Listenarr.Api.Services.IConfigurationS
 
     public Task SaveStartupConfigAsync(Listenarr.Domain.Models.StartupConfig config)
         => Task.CompletedTask;
+
+    public Task<List<Listenarr.Domain.Models.WebhookConfiguration>> GetWebhookConfigurationsAsync()
+        => Task.FromResult(new List<Listenarr.Domain.Models.WebhookConfiguration>());
 
     // Other IConfigurationService members (if added later) should be implemented here with sensible defaults.
 }

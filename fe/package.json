@@ -1,6 +1,6 @@
 {
   "name": "listenarr-fe",
-  "version": "0.2.41",
+  "version": "0.2.46",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "prepare": "cypress install",
+    "postinstall": "patch-package",
     "test:e2e": "start-server-and-test preview http://localhost:4173 'cypress run --e2e'",
     "test:e2e:dev": "start-server-and-test 'vite dev --port 4173' http://localhost:4173 'cypress open --e2e'",
     "build-only": "vite build",
@@ -22,7 +23,7 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
-    "@microsoft/signalr": "^9.0.6",
+    "@microsoft/signalr": "^10.0.0",
     "@phosphor-icons/vue": "^2.2.1",
     "@vueuse/core": "^14.0.0",
     "pinia": "^3.0.3",
@@ -56,6 +57,7 @@
     "vite": "^7.1.11",
     "vite-plugin-vue-devtools": "^8.0.5",
     "vitest": "^4.0.13",
-    "vue-tsc": "^3.1.0"
+    "vue-tsc": "^3.1.0",
+    "patch-package": "^6.5.0"
   }
 }

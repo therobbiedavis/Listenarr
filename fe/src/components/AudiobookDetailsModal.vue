@@ -7,28 +7,34 @@
           <PhX />
         </button>
       </div>
-      
+
       <div class="modal-body">
         <div class="book-layout">
           <!-- Book Image -->
           <div class="book-image">
-            <img v-if="book.imageUrl" :src="apiService.getImageUrl(book.imageUrl)" :alt="book.title" loading="lazy" />
+            <img
+              v-if="book.imageUrl"
+              :src="apiService.getImageUrl(book.imageUrl)"
+              :alt="book.title"
+              loading="lazy"
+              @error="handleImageError"
+            />
             <div v-else class="placeholder-cover">
               <PhImage />
               <span>No Cover</span>
             </div>
           </div>
-          
+
           <!-- Book Details -->
           <div class="book-details">
             <div class="detail-section">
               <h3>
                 {{ book.title }}
-                <span v-if="assignedProfileName" class="profile-badge">{{ assignedProfileName }}</span>
+                <span v-if="assignedProfileName" class="profile-badge">{{
+                  assignedProfileName
+                }}</span>
               </h3>
-              <p v-if="book.authors?.length" class="authors">
-                by {{ book.authors.join(', ') }}
-              </p>
+              <p v-if="book.authors?.length" class="authors">by {{ book.authors.join(', ') }}</p>
               <p v-if="book.narrators?.length" class="narrators">
                 Narrated by {{ book.narrators.join(', ') }}
               </p>
@@ -68,12 +74,9 @@
             <div class="detail-section">
               <h4>Identifiers</h4>
               <div class="detail-grid">
-                <div v-if="book.source" class="detail-item metadata-source-item">
+                <div v-if="book.source" class="detail-item">
                   <span class="label">Metadata Source:</span>
-                  <span class="value metadata-source-badge">
-                    <i class="ph ph-cloud"></i>
-                    {{ book.source }}
-                  </span>
+                  <span class="value">{{ book.source }}</span>
                 </div>
                 <div v-if="book.asin" class="detail-item">
                   <span class="label">ASIN:</span>
@@ -107,10 +110,6 @@
                   <span class="label">Series:</span>
                   <span class="value">{{ book.series }}</span>
                 </div>
-                <div v-if="book.seriesNumber" class="detail-item">
-                  <span class="label">Book Number:</span>
-                  <span class="value">{{ book.seriesNumber }}</span>
-                </div>
                 <div v-if="book.genres?.length" class="detail-item">
                   <span class="label">Genres:</span>
                   <span class="value">{{ book.genres.join(', ') }}</span>
@@ -131,37 +130,34 @@
               <div class="quality-profile-selector">
                 <select v-model="selectedQualityProfileId" class="profile-select">
                   <option :value="null">Use Default Profile</option>
-                  <option 
-                    v-for="profile in qualityProfiles" 
-                    :key="profile.id" 
-                    :value="profile.id"
-                  >
+                  <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
                     {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
                   </option>
                 </select>
                 <small class="profile-help">
-                  Select the quality profile to use for this audiobook. The quality profile determines which releases to download and prefer.
+                  Select the quality profile to use for this audiobook. The quality profile
+                  determines which releases to download and prefer.
                 </small>
               </div>
             </div>
           </div>
         </div>
       </div>
-      
-            <div class="modal-footer">
-              <button class="btn btn-secondary" @click="closeModal">
-                <PhX />
-                Close
-              </button>
-              <button
-                :class="['btn', isAdded ? 'btn-success' : 'btn-primary']"
-                @click="addToLibrary"
-                :disabled="isAdded"
-              >
-                <component :is="isAdded ? PhCheck : PhPlus" />
-                {{ isAdded ? 'Added' : 'Add to Library' }}
-              </button>
-            </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" @click="closeModal">
+          <PhX />
+          Close
+        </button>
+        <button
+          :class="['btn', isAdded ? 'btn-success' : 'btn-primary']"
+          @click="addToLibrary"
+          :disabled="isAdded"
+        >
+          <component :is="isAdded ? PhCheck : PhPlus" />
+          {{ isAdded ? 'Added' : 'Add to Library' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -170,6 +166,7 @@
 import { ref, computed, watch } from 'vue'
 import type { AudibleBookMetadata, QualityProfile } from '@/types'
 import { getQualityProfiles, apiService } from '@/services/api'
+import { handleImageError } from '@/utils/imageFallback'
 import { useLibraryStore } from '@/stores/library'
 import { PhX, PhImage, PhStar, PhCheck, PhPlus } from '@phosphor-icons/vue'
 
@@ -192,8 +189,12 @@ const libraryStore = useLibraryStore()
 
 const isAdded = computed(() => {
   try {
-    const asins = new Set(libraryStore.audiobooks.map(b => b.asin).filter((x): x is string => !!x))
-    const olids = new Set(libraryStore.audiobooks.map(b => b.openLibraryId).filter((x): x is string => !!x))
+    const asins = new Set(
+      libraryStore.audiobooks.map((b) => b.asin).filter((x): x is string => !!x),
+    )
+    const olids = new Set(
+      libraryStore.audiobooks.map((b) => b.openLibraryId).filter((x): x is string => !!x),
+    )
     if (props.book?.asin && asins.has(props.book.asin)) return true
     if (props.book?.openLibraryId && olids.has(props.book.openLibraryId)) return true
     return false
@@ -205,7 +206,7 @@ const isAdded = computed(() => {
 const assignedProfileName = computed(() => {
   const id = props.book?.qualityProfileId
   if (!id) return null
-  const p = qualityProfiles.value.find(q => q.id === id)
+  const p = qualityProfiles.value.find((q) => q.id === id)
   return p ? p.name : 'Unknown'
 })
 
@@ -226,7 +227,7 @@ const loadQualityProfiles = async () => {
   try {
     qualityProfiles.value = await getQualityProfiles()
     // Select the default profile
-    const defaultProfile = qualityProfiles.value.find(p => p.isDefault)
+    const defaultProfile = qualityProfiles.value.find((p) => p.isDefault)
     if (defaultProfile) {
       selectedQualityProfileId.value = defaultProfile.id || null
     }
@@ -235,13 +236,16 @@ const loadQualityProfiles = async () => {
   }
 }
 
-watch(() => props.visible, async (val) => {
-  if (val) {
-    await loadQualityProfiles()
-    // If the audiobook has an assigned profile, reflect it in the selector
-    selectedQualityProfileId.value = props.book?.qualityProfileId ?? null
-  }
-})
+watch(
+  () => props.visible,
+  async (val) => {
+    if (val) {
+      await loadQualityProfiles()
+      // If the audiobook has an assigned profile, reflect it in the selector
+      selectedQualityProfileId.value = props.book?.qualityProfileId ?? null
+    }
+  },
+)
 
 const formatRuntime = (minutes: number): string => {
   if (!minutes) return 'Unknown'
@@ -273,7 +277,7 @@ const capitalizeFirst = (str: string): string => {
 
 .modal-content {
   background-color: #1a1a1a;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid #333;
   max-width: 900px;
   width: 100%;
@@ -303,7 +307,7 @@ const capitalizeFirst = (str: string): string => {
   color: #ccc;
   cursor: pointer;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 1.25rem;
   display: flex;
   align-items: center;
@@ -336,7 +340,7 @@ const capitalizeFirst = (str: string): string => {
 .book-image img {
   width: 100%;
   height: auto;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
 
@@ -344,7 +348,7 @@ const capitalizeFirst = (str: string): string => {
   width: 100%;
   aspect-ratio: 2/3;
   background-color: #333;
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -435,7 +439,7 @@ const capitalizeFirst = (str: string): string => {
 
 .flag {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 0.8rem;
   font-weight: 500;
 }
@@ -512,26 +516,26 @@ const capitalizeFirst = (str: string): string => {
     margin: 0.5rem;
     max-height: 95vh;
   }
-  
+
   .book-layout {
     grid-template-columns: 1fr;
     gap: 1.5rem;
   }
-  
+
   .book-image {
     position: static;
     max-width: 200px;
     margin: 0 auto;
   }
-  
+
   .detail-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .modal-footer {
     flex-direction: column-reverse;
   }
-  
+
   .btn {
     justify-content: center;
   }
@@ -541,17 +545,17 @@ const capitalizeFirst = (str: string): string => {
   .modal-overlay {
     padding: 0.5rem;
   }
-  
+
   .modal-header,
   .modal-body,
   .modal-footer {
     padding: 1rem;
   }
-  
+
   .modal-header h2 {
     font-size: 1.25rem;
   }
-  
+
   .detail-section h3 {
     font-size: 1.5rem;
   }
@@ -569,7 +573,7 @@ const capitalizeFirst = (str: string): string => {
   padding: 0.75rem;
   background-color: #1a1a1a;
   border: 1px solid #444;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #fff;
   font-size: 1rem;
   cursor: pointer;

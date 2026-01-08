@@ -47,6 +47,16 @@ namespace Listenarr.Api.Services
         {
             _logger.LogInformation("Download Processing Background Service started");
 
+            // On startup, reset any jobs stuck in Processing status (from previous crash/restart)
+            try
+            {
+                await ResetStuckJobsAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reset stuck jobs on startup");
+            }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -81,6 +91,7 @@ namespace Listenarr.Api.Services
         {
             using var scope = _serviceScopeFactory.CreateScope();
             var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
+            var importItemResolution = scope.ServiceProvider.GetRequiredService<IImportItemResolutionService>();
 
             var job = await queueService.GetNextJobAsync();
             if (job == null) return;
@@ -123,6 +134,34 @@ namespace Listenarr.Api.Services
             await queueService.UpdateJobAsync(job);
         }
 
+        /// <summary>
+        /// Reset jobs that were stuck in Processing status from a previous session (e.g., after crash or restart).
+        /// This prevents orphaned jobs from blocking new finalization attempts.
+        /// </summary>
+        private async Task ResetStuckJobsAsync(CancellationToken cancellationToken)
+        {
+            using var scope = _serviceScopeFactory.CreateScope();
+            var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+
+            // Find jobs stuck in Processing status (not updated recently)
+            var stuckJobs = await dbContext.DownloadProcessingJobs
+                .Where(j => j.Status == ProcessingJobStatus.Processing)
+                .ToListAsync(cancellationToken);
+
+            if (stuckJobs.Any())
+            {
+                _logger.LogInformation("Found {Count} stuck jobs in Processing status, resetting to Pending", stuckJobs.Count);
+                foreach (var job in stuckJobs)
+                {
+                    job.Status = ProcessingJobStatus.Pending;
+                    job.AddLogEntry("Reset from stuck Processing state after service restart");
+                    _logger.LogInformation("Reset stuck job {JobId} for download {DownloadId}", job.Id, job.DownloadId);
+                }
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+
         private async Task ProcessRetryJobsAsync(CancellationToken cancellationToken)
         {
             using var scope = _serviceScopeFactory.CreateScope();
@@ -156,6 +195,7 @@ namespace Listenarr.Api.Services
                 var dbContext = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 var queueService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingQueueService>();
                 var pathMapping = scope.ServiceProvider.GetService<IRemotePathMappingService>();
+                var importItemResolution = scope.ServiceProvider.GetRequiredService<IImportItemResolutionService>();
 
                 // Find recent completed downloads that have not yet been processed into jobs
                 var candidates = await dbContext.Downloads
@@ -189,52 +229,52 @@ namespace Listenarr.Api.Services
                             continue;
                         }
 
-                        // Determine a plausible source path to process
-                        var possiblePaths = new List<string?>();
-                        if (!string.IsNullOrEmpty(dl.FinalPath)) possiblePaths.Add(dl.FinalPath);
-                        if (!string.IsNullOrEmpty(dl.DownloadPath)) possiblePaths.Add(dl.DownloadPath);
-                        if (dl.Metadata != null && dl.Metadata.TryGetValue("ClientContentPath", out var clientObj))
+                        // Use V2 pattern: Call GetImportItem to resolve the accurate path
+                        // Build a basic QueueItem from the download data
+                        var preliminaryItem = new QueueItem
                         {
-                            var clientPath = clientObj?.ToString();
-                            if (!string.IsNullOrEmpty(clientPath)) possiblePaths.Add(clientPath);
-                        }
+                            Id = dl.Id,
+                            Title = dl.Title ?? "Unknown",
+                            Status = "completed",
+                            ContentPath = dl.FinalPath ?? dl.DownloadPath,
+                            DownloadClientId = dl.DownloadClientId
+                        };
 
-                        string? found = null;
+                        // Resolve the import item via the download client adapter
+                        var resolvedItem = await importItemResolution.ResolveImportItemAsync(
+                            dl,
+                            preliminaryItem,
+                            previousAttempt: null,
+                            cancellationToken);
 
-                        foreach (var p in possiblePaths.Where(p => !string.IsNullOrEmpty(p)))
+                        var resolvedPath = resolvedItem.ContentPath;
+
+                        // Apply path mapping if needed
+                        if (pathMapping != null && !string.IsNullOrEmpty(dl.DownloadClientId) && !string.IsNullOrEmpty(resolvedPath))
                         {
-                            var testPath = p!;
-
-                            // If path mapping service exists, try translating
-                            if (pathMapping != null && !string.IsNullOrEmpty(dl.DownloadClientId))
+                            try
                             {
-                                try
+                                var translated = await pathMapping.TranslatePathAsync(dl.DownloadClientId, resolvedPath);
+                                if (!string.IsNullOrEmpty(translated))
                                 {
-                                    var translated = await pathMapping.TranslatePathAsync(dl.DownloadClientId, testPath);
-                                    if (!string.IsNullOrEmpty(translated) && File.Exists(translated))
-                                    {
-                                        found = translated;
-                                        break;
-                                    }
-                                }
-                                catch
-                                {
-                                    // ignore and fallback to raw path
+                                    resolvedPath = translated;
                                 }
                             }
-
-                            if (File.Exists(testPath))
+                            catch (Exception ex)
                             {
-                                found = testPath;
-                                break;
+                                _logger.LogDebug(ex, "Path mapping failed for {Path}", resolvedPath);
                             }
                         }
 
-                        if (!string.IsNullOrEmpty(found))
+                        if (!string.IsNullOrEmpty(resolvedPath) && (File.Exists(resolvedPath) || Directory.Exists(resolvedPath)))
                         {
-                            // Queue for processing
-                            await queueService.QueueDownloadProcessingAsync(dl.Id, found!, dl.DownloadClientId);
-                            _logger.LogInformation("Enqueued existing completed download {DownloadId} for processing: {Source}", dl.Id, found);
+                            // Queue for processing using the resolved path
+                            await queueService.QueueDownloadProcessingAsync(dl.Id, resolvedPath, dl.DownloadClientId);
+                            _logger.LogInformation("Enqueued completed download {DownloadId} for processing: {Source}", dl.Id, resolvedPath);
+                        }
+                        else if (!string.IsNullOrEmpty(resolvedPath))
+                        {
+                            _logger.LogDebug("Resolved path does not exist yet for download {DownloadId}: {Path}", dl.Id, resolvedPath);
                         }
                     }
                     catch (Exception ex)
@@ -279,7 +319,7 @@ namespace Listenarr.Api.Services
 
             job.AddLogEntry($"Starting file processing: {job.SourcePath}");
 
-            if (string.IsNullOrEmpty(job.SourcePath) || !File.Exists(job.SourcePath))
+            if (string.IsNullOrEmpty(job.SourcePath) || (!File.Exists(job.SourcePath) && !Directory.Exists(job.SourcePath)))
             {
                 // Apply path mapping if needed
                 var localPath = job.SourcePath ?? "";
@@ -300,14 +340,14 @@ namespace Listenarr.Api.Services
                     }
                 }
 
-                if (!File.Exists(localPath))
+                if (!File.Exists(localPath) && !Directory.Exists(localPath))
                 {
                     // Source missing at processing-time. Schedule a retry instead of throwing so transient
                     // races (file still being moved by another process) don't permanently fail the job.
-                    job.AddLogEntry($"Source file not found at processing time: {localPath}");
+                    job.AddLogEntry($"Source path not found at processing time: {localPath}");
                     _metrics?.Increment("processing.source_missing");
                     job.ScheduleRetry();
-                    job.ErrorMessage = $"Source file not found at processing time: {localPath}";
+                    job.ErrorMessage = $"Source path not found at processing time: {localPath}";
                     return;
                 }
             }

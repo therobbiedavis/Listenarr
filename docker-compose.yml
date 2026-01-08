@@ -7,6 +7,9 @@ services:
     ports:
       - "5000:5000"
     environment:
+      # OPTIONAL: set logging level at runtime (overrides config file). Valid values: Verbose, Debug, Information, Warning, Error, Fatal
+      # e.g. to enable debug logs in Docker: LISTENARR_LOG_LEVEL=Debug
+      - LISTENARR_LOG_LEVEL=Information
       - LISTENARR_PUBLIC_URL=https://your-domain.com ## OPTIONAL: Used by Discord Bot
     volumes:
       - listenarr_data:/app/config

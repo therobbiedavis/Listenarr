@@ -1,8 +1,35 @@
+# Listenarr Coding Conventions
+
+> **Note**: This file contains legacy security conventions. For comprehensive development guidance, see:
+> - **[copilot-instructions.md](copilot-instructions.md)** - Complete project documentation
+> - **[.cursorrules](.cursorrules)** - Coding standards and patterns
+> - **[AGENTS.md](AGENTS.md)** - Security-focused OWASP/CWE guidance
+
+---
+
 As a security-aware developer, generate secure .NET code using ASP.NET Core that inherently prevents top security weaknesses.
 Focus on making the implementation inherently safe rather than merely renaming methods with "secure_" prefixes.
 Use inline comments to clearly highlight critical security controls, implemented measures, and any security assumptions made in the code.
 Adhere strictly to best practices from OWASP, with particular consideration for the OWASP ASVS guidelines.
 **Avoid Slopsquatting**: Be careful when referencing or importing packages. Do not guess if a package exists. Comment on any low reputation or uncommon packages you have included.
+
+## Listenarr-Specific Patterns
+
+### Critical Backend Patterns
+1. **Download Status**: Always set `Status = DownloadStatus.Moved` after successful import (8 locations in CompletedDownloadProcessor.cs)
+2. **File Existence**: Check `File.Exists(f.Path)` for wanted status (3 locations: LibraryController x2, ScanBackgroundService)
+3. **Authentication**: Transmission (409/session-id retry), qBittorrent (cookies)
+4. **Jobs**: Reset stuck jobs on startup (`ResetStuckJobsAsync`)
+
+### Critical Frontend Patterns
+1. **Components**: Use `<script setup>` with TypeScript
+2. **State**: Pinia stores, never mutate directly
+3. **Performance**: Use `v-memo` for large lists
+4. **Downloads**: Filter terminal states from active downloads
+
+---
+
+## Security Guidelines (OWASP)
 
 ### CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
 **Summary:** The software does not neutralize or incorrectly neutralizes user-controllable input before it is placed in an output that is used as a web page, leading to the execution of arbitrary script code in a user's browser.

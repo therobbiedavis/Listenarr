@@ -1,7 +1,7 @@
 <template>
   <div class="logs-view">
     <div class="page-header">
-        <div class="header-content">
+      <div class="header-content">
         <h1><PhFileText /> Application Logs</h1>
         <p>View and search application log entries</p>
       </div>
@@ -38,18 +38,13 @@
         <label>Search</label>
         <div class="search-input">
           <PhMagnifyingGlass />
-          <input 
-            type="text" 
-            v-model="searchQuery" 
+          <input
+            type="text"
+            v-model="searchQuery"
             @input="applyFilters"
             placeholder="Search log messages..."
-          >
-          <button 
-            v-if="searchQuery" 
-            class="clear-button" 
-            @click="clearSearch"
-            title="Clear search"
-          >
+          />
+          <button v-if="searchQuery" class="clear-button" @click="clearSearch" title="Clear search">
             <PhX />
           </button>
         </div>
@@ -74,8 +69,8 @@
     <!-- Logs Container -->
     <div v-else-if="filteredLogs.length > 0" class="logs-wrapper">
       <div class="logs-container">
-        <div 
-          v-for="log in paginatedLogs" 
+        <div
+          v-for="log in paginatedLogs"
           :key="log.id"
           :class="['log-entry', log.level.toLowerCase()]"
         >
@@ -92,15 +87,15 @@
           Showing {{ startIndex + 1 }} - {{ endIndex }} of {{ filteredLogs.length }} logs
         </div>
         <div class="pagination-controls">
-          <button 
-            class="page-button" 
-            @click="previousPage" 
+          <button
+            class="page-button"
+            @click="previousPage"
             :disabled="currentPage === 1"
             title="Previous page"
           >
             <PhCaretLeft />
           </button>
-          
+
           <button
             v-for="page in visiblePages"
             :key="page"
@@ -110,9 +105,9 @@
             {{ page }}
           </button>
 
-          <button 
-            class="page-button" 
-            @click="nextPage" 
+          <button
+            class="page-button"
+            @click="nextPage"
             :disabled="currentPage === totalPages"
             title="Next page"
           >
@@ -143,7 +138,21 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { PhFileText, PhSpinner, PhArrowClockwise, PhDownloadSimple, PhMagnifyingGlass, PhX, PhWarningCircle, PhWarning, PhBug, PhInfo, PhCaretLeft, PhCaretRight } from '@phosphor-icons/vue'
+import {
+  PhFileText,
+  PhSpinner,
+  PhArrowClockwise,
+  PhDownloadSimple,
+  PhMagnifyingGlass,
+  PhX,
+  PhWarningCircle,
+  PhWarning,
+  PhBug,
+  PhInfo,
+  PhCaretLeft,
+  PhCaretRight,
+} from '@phosphor-icons/vue'
+import { errorTracking } from '@/services/errorTracking'
 import { getLogs, downloadLogs as downloadLogsApi } from '@/services/api'
 import type { LogEntry } from '@/types'
 
@@ -159,13 +168,13 @@ const pageSize = ref(25)
 const loadLogs = async () => {
   loading.value = true
   error.value = null
-  
+
   try {
     const data = await getLogs(1000) // Get up to 1000 logs
     logs.value = data
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load logs'
-    console.error('Error loading logs:', err)
+    errorTracking.captureException(err as Error, { component: 'LogsView', operation: 'loadLogs' })
   } finally {
     loading.value = false
   }
@@ -174,24 +183,25 @@ const loadLogs = async () => {
 // Filter logs
 const filteredLogs = computed(() => {
   let filtered = [...logs.value]
-  
+
   // Filter by level
   if (selectedLevel.value) {
-    filtered = filtered.filter(log => 
-      log.level.toLowerCase() === selectedLevel.value.toLowerCase()
+    filtered = filtered.filter(
+      (log) => log.level.toLowerCase() === selectedLevel.value.toLowerCase(),
     )
   }
-  
+
   // Filter by search query
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase()
-    filtered = filtered.filter(log => 
-      log.message.toLowerCase().includes(query) ||
-      log.source?.toLowerCase().includes(query) ||
-      log.exception?.toLowerCase().includes(query)
+    filtered = filtered.filter(
+      (log) =>
+        log.message.toLowerCase().includes(query) ||
+        log.source?.toLowerCase().includes(query) ||
+        log.exception?.toLowerCase().includes(query),
     )
   }
-  
+
   return filtered
 })
 
@@ -199,7 +209,9 @@ const filteredLogs = computed(() => {
 const totalPages = computed(() => Math.ceil(filteredLogs.value.length / pageSize.value))
 
 const startIndex = computed(() => (currentPage.value - 1) * pageSize.value)
-const endIndex = computed(() => Math.min(startIndex.value + pageSize.value, filteredLogs.value.length))
+const endIndex = computed(() =>
+  Math.min(startIndex.value + pageSize.value, filteredLogs.value.length),
+)
 
 const paginatedLogs = computed(() => {
   return filteredLogs.value.slice(startIndex.value, endIndex.value)
@@ -210,15 +222,15 @@ const visiblePages = computed(() => {
   const maxVisible = 5
   let start = Math.max(1, currentPage.value - Math.floor(maxVisible / 2))
   const end = Math.min(totalPages.value, start + maxVisible - 1)
-  
+
   if (end - start < maxVisible - 1) {
     start = Math.max(1, end - maxVisible + 1)
   }
-  
+
   for (let i = start; i <= end; i++) {
     pages.push(i)
   }
-  
+
   return pages
 })
 
@@ -272,7 +284,7 @@ const formatTimestamp = (timestamp: string): string => {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
+    second: '2-digit',
   })
 }
 
@@ -385,7 +397,7 @@ onMounted(() => {
   padding: 1.25rem;
   background: #1e1e1e;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .filter-group {
@@ -465,7 +477,7 @@ onMounted(() => {
   background: transparent;
   color: #666;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -492,7 +504,7 @@ onMounted(() => {
   padding: 1rem;
   background: rgba(231, 76, 60, 0.1);
   border: 1px solid rgba(231, 76, 60, 0.3);
-  border-radius: 8px;
+  border-radius: 6px;
   color: #e74c3c;
   margin-bottom: 2rem;
 }
@@ -532,7 +544,7 @@ onMounted(() => {
 .logs-wrapper {
   background: #1e1e1e;
   border: 1px solid #333;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -608,7 +620,7 @@ onMounted(() => {
   font-weight: 700;
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 6px;
   letter-spacing: 0.5px;
 }
 
@@ -643,12 +655,12 @@ onMounted(() => {
 
 .logs-container::-webkit-scrollbar-track {
   background: #1e1e1e;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .logs-container::-webkit-scrollbar-thumb {
   background: #444;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .logs-container::-webkit-scrollbar-thumb:hover {

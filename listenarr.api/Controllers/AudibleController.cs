@@ -54,14 +54,20 @@ namespace Listenarr.Api.Controllers
             {
                 _logger.LogInformation("Received request for ASIN: {Asin}", asin);
 
-                // First, scrape the product page metadata
-                var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin);
+                // First, scrape the product page metadata (pass cancellation token)
+                var metadata = await _audibleMetadataService.ScrapeAudibleMetadataAsync(asin, HttpContext.RequestAborted);
+                
+                if (metadata == null)
+                {
+                    _logger.LogWarning("No metadata found for ASIN: {Asin}", asin);
+                    return NotFound($"No metadata found for ASIN: {asin}");
+                }
 
                 // Then try to enrich with search result data (runtime, series, etc.)
                 try
                 {
-                    // Search by ASIN to get the search result with metadata
-                    var searchResults = await _audibleSearchService.SearchAudiobooksAsync(asin);
+                    // Search by ASIN to get the search result with metadata (pass cancellation token)
+                    var searchResults = await _audibleSearchService.SearchAudiobooksAsync(asin, HttpContext.RequestAborted);
                     var matchingResult = searchResults.FirstOrDefault(r =>
                         r.Asin?.Equals(asin, System.StringComparison.OrdinalIgnoreCase) == true);
 
@@ -78,14 +84,14 @@ namespace Listenarr.Api.Controllers
                                 int hours = int.Parse(match.Groups[1].Value);
                                 int minutes = int.Parse(match.Groups[2].Value);
                                 metadata.Runtime = hours * 60 + minutes;
-                                _logger.LogInformation("Enriched runtime: {Runtime} minutes", metadata.Runtime);
+                                _logger.LogInformation("Enriched runtime: {Runtime} minutes", metadata.Runtime ?? 0);
                             }
                         }
 
                         if (!string.IsNullOrEmpty(matchingResult.Series))
                         {
                             metadata.Series = matchingResult.Series;
-                            metadata.SeriesNumber = matchingResult.SeriesNumber;
+                            metadata.SeriesNumber = matchingResult.SeriesNumber ?? "";
                             _logger.LogInformation("Enriched series: {Series} #{SeriesNumber}", metadata.Series, metadata.SeriesNumber);
                         }
 
@@ -96,7 +102,7 @@ namespace Listenarr.Api.Controllers
                             {
                                 var year = int.Parse(yearMatch.Groups[3].Value);
                                 metadata.PublishYear = (2000 + year).ToString();
-                                _logger.LogInformation("Enriched publish year: {Year}", metadata.PublishYear);
+                                _logger.LogInformation("Enriched publish year: {Year}", metadata.PublishYear ?? "Unknown");
                             }
                         }
                     }

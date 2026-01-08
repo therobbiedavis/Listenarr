@@ -147,31 +147,11 @@ namespace Listenarr.Api.Services
                 }
 
                 // Attempt to resolve the full path to the npx executable (handles Windows .cmd/.exe wrappers)
-                string? npxFullPath = FindExecutableOnPath("npx");
+                string? npxFullPath = ProcessHelpers.FindExecutableOnPath("npx");
                 if (string.IsNullOrEmpty(npxFullPath))
                 {
-                    _logger.LogDebug("Could not find 'npx' on PATH for the current process. Ensure Node.js/npx is available to the service environment.");
-                    // Try cmd.exe fallback anyway to get a clearer error
-                    var cmdPsi = new ProcessStartInfo
-                    {
-                        FileName = "cmd.exe",
-                        Arguments = "/C npx playwright install chromium",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    if (_processRunner != null)
-                    {
-                        var prCmd = await _processRunner.RunAsync(cmdPsi, timeoutMs: 10 * 60 * 1000, cancellationToken: ct).ConfigureAwait(false);
-                        return (prCmd.ExitCode == 0 && !prCmd.TimedOut, prCmd.Stdout ?? string.Empty, prCmd.Stderr ?? string.Empty, prCmd.ExitCode);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("IProcessRunner is not available; skipping cmd.exe npx Playwright install fallback.");
-                        return (false, string.Empty, "IProcessRunner unavailable", -1);
-                    }
+                    _logger.LogInformation("Could not find 'npx' on PATH for the current process; skipping 'npx playwright install' fallback.");
+                    return (false, string.Empty, "npx not found", -1);
                 }
 
                 var psiResolved = new ProcessStartInfo

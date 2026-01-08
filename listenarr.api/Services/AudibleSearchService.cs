@@ -19,6 +19,7 @@ namespace Listenarr.Api.Services
         public string? Subtitle { get; set; }
         public string? ReleaseDate { get; set; }
         public string? Language { get; set; }
+        public string? Publisher { get; set; }
     }
 
     public class AudibleSearchService : IAudibleSearchService
@@ -65,7 +66,7 @@ namespace Listenarr.Api.Services
             _configurationService = configurationService;
         }
 
-        public async Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query)
+        public async Task<List<AudibleSearchResult>> SearchAudiobooksAsync(string query, CancellationToken ct = default)
         {
             var results = new List<AudibleSearchResult>();
 
@@ -77,7 +78,7 @@ namespace Listenarr.Api.Services
 
                 _logger.LogInformation("Searching Audible: {SearchUrl}", searchUrl);
 
-                var html = await GetHtmlAsync(searchUrl);
+                var html = await GetHtmlAsync(searchUrl, ct);
                 if (string.IsNullOrEmpty(html))
                 {
                     _logger.LogWarning("Empty HTML response from Audible search");
@@ -129,12 +130,14 @@ namespace Listenarr.Api.Services
                     // Per-provider cap for unique ASINs (align with SearchService default)
                     var providerUniqueCap = 50;
                     var seenAsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var seenImageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     // Increase processing limit to capture more nodes but stop when we've collected enough unique ASINs
                     foreach (var node in nodesWithLinks.Take(200))
                     {
+                        ct.ThrowIfCancellationRequested();
                         processed++;
-                        var result = ExtractAudibleSearchResult(node);
+                        var result = ExtractAudibleSearchResult(node, seenImageIds);
                         if (result != null && !string.IsNullOrEmpty(result.Asin))
                         {
                             // Deduplicate early by ASIN to avoid emitting the same ASIN multiple times
@@ -154,7 +157,8 @@ namespace Listenarr.Api.Services
                             // Clean noisy titles
                             if (IsHeaderNoise(result.Title))
                             {
-                                var fetched = await TryFetchProductTitle(result.ProductUrl, result.Asin!);
+                                ct.ThrowIfCancellationRequested();
+                                var fetched = await TryFetchProductTitle(result.ProductUrl, result.Asin!, ct);
                                 if (!string.IsNullOrWhiteSpace(fetched)) result.Title = fetched;
                             }
                             if (!IsHeaderNoise(result.Title))
@@ -216,7 +220,8 @@ namespace Listenarr.Api.Services
 
                                 if (IsHeaderNoise(result.Title))
                                 {
-                                    var fetched = await TryFetchProductTitle(result.ProductUrl, result.Asin!);
+                                    ct.ThrowIfCancellationRequested();
+                                    var fetched = await TryFetchProductTitle(result.ProductUrl, result.Asin!, ct);
                                     if (!string.IsNullOrWhiteSpace(fetched)) result.Title = fetched;
                                 }
                                 if (!IsHeaderNoise(result.Title))
@@ -275,12 +280,13 @@ namespace Listenarr.Api.Services
             return false;
         }
 
-        internal async Task<string?> TryFetchProductTitle(string? productUrl, string asin)
+        internal async Task<string?> TryFetchProductTitle(string? productUrl, string asin, CancellationToken ct = default)
         {
             if (string.IsNullOrEmpty(productUrl)) return null;
             try
             {
-                var html = await GetHtmlAsync(productUrl);
+            ct.ThrowIfCancellationRequested();
+            var html = await GetHtmlAsync(productUrl, ct);
                 if (string.IsNullOrEmpty(html)) return null;
                 // If the fetched HTML contains known redirect/locale messages, treat as noise and skip
                 var lowerHtml = html.ToLowerInvariant();
@@ -324,7 +330,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        private AudibleSearchResult? ExtractAudibleSearchResult(HtmlNode node)
+        private AudibleSearchResult? ExtractAudibleSearchResult(HtmlNode node, HashSet<string> seenImageIds)
         {
             try
             {
@@ -381,7 +387,31 @@ namespace Listenarr.Api.Services
 
                 // Extract image
                 var imageNode = node.SelectSingleNode(".//img");
-                var imageUrl = imageNode?.GetAttributeValue("src", "") ?? imageNode?.GetAttributeValue("data-lazy", "");
+                var rawImageUrl = imageNode?.GetAttributeValue("src", "") ?? imageNode?.GetAttributeValue("data-lazy", "");
+                _logger.LogDebug("Raw image URL for ASIN {Asin}: {RawUrl}", extractedAsin, rawImageUrl);
+                // Clean and upgrade to high-resolution image URL
+                var imageUrl = CleanImageUrl(rawImageUrl);
+                _logger.LogDebug("Cleaned image URL for ASIN {Asin}: {CleanUrl}", extractedAsin, imageUrl);
+
+                // Extract image id and ensure we only upgrade/log each image once per page
+                if (!string.IsNullOrWhiteSpace(imageUrl))
+                {
+                    var idMatch = System.Text.RegularExpressions.Regex.Match(imageUrl, @"/images/I/([A-Za-z0-9_-]+)\.");
+                    if (idMatch.Success)
+                    {
+                        var imageId = idMatch.Groups[1].Value;
+                        if (seenImageIds.Contains(imageId))
+                        {
+                            _logger.LogDebug("Skipping duplicate image upgrade for image id {ImageId}", imageId);
+                            imageUrl = null;
+                        }
+                        else
+                        {
+                            seenImageIds.Add(imageId);
+                            _logger.LogInformation("Upgraded image URL to high-res: {ImageId} -> {CleanUrl}", imageId, imageUrl);
+                        }
+                    }
+                }
 
                 // Extract duration/runtime from runtimeLabel
                 var durationNode = node.SelectSingleNode(
@@ -439,6 +469,30 @@ namespace Listenarr.Api.Services
                 );
                 var language = languageNode?.InnerText?.Replace("Language:", "").Trim();
 
+                // Extract publisher from publisherLabel or publisherSummary with comprehensive selectors
+                var publisherNode = node.SelectSingleNode(
+                    ".//li[contains(@class,'publisherLabel')] | " +
+                    ".//span[contains(@class,'publisherLabel')] | " +
+                    ".//li[contains(@class,'publisherSummary')] | " +
+                    ".//span[contains(@class,'publisherSummary')] | " +
+                    ".//li[contains(@class,'publisher')] | " +
+                    ".//span[contains(@class,'publisher')] | " +
+                    ".//span[contains(text(),'By:')]/following-sibling::span | " +
+                    ".//span[contains(text(),'Publisher:')]/following-sibling::span | " +
+                    ".//li[contains(text(),'Publisher:')]"
+                );
+                var publisher = publisherNode?.InnerText?
+                    .Replace("By:", "")
+                    .Replace("Publisher:", "")
+                    .Replace("©", "")
+                    .Trim();
+                
+                // Log if publisher extraction fails for debugging
+                if (string.IsNullOrWhiteSpace(publisher))
+                {
+                    _logger.LogDebug("Publisher not found for result with title: {Title}, ASIN: {Asin}", title, extractedAsin);
+                }
+
                 // Extract price
                 var priceNode = node.SelectSingleNode(
                     ".//span[contains(@class,'price')] | " +
@@ -461,7 +515,8 @@ namespace Listenarr.Api.Services
                     SeriesNumber = seriesNumber,
                     Subtitle = subtitle,
                     ReleaseDate = releaseDate,
-                    Language = language
+                    Language = language,
+                    Publisher = publisher
                 };
             }
             catch (Exception ex)
@@ -511,7 +566,7 @@ namespace Listenarr.Api.Services
             }
         }
 
-        internal async Task<string?> GetHtmlAsync(string url)
+        internal async Task<string?> GetHtmlAsync(string url, CancellationToken ct = default)
         {
             try
             {
@@ -529,7 +584,7 @@ namespace Listenarr.Api.Services
                 request.Headers.Add("Sec-Fetch-Mode", "navigate");
                 request.Headers.Add("Sec-Fetch-Site", "none");
 
-                var response = await _httpClient.SendAsync(request);
+                var response = await _httpClient.SendAsync(request, ct);
                 response.EnsureSuccessStatusCode();
 
                 var html = await response.Content.ReadAsStringAsync();
@@ -575,7 +630,7 @@ namespace Listenarr.Api.Services
                                     usClient = _httpClient;
                                 }
 
-                                var retryResp = await usClient.SendAsync(retryReq);
+                                var retryResp = await usClient.SendAsync(retryReq, ct);
                                 if (retryResp.IsSuccessStatusCode)
                                     return await retryResp.Content.ReadAsStringAsync();
                             }
@@ -619,6 +674,46 @@ namespace Listenarr.Api.Services
             {
                 return false;
             }
+        }
+
+        private string? CleanImageUrl(string? imgUrl)
+        {
+            if (string.IsNullOrWhiteSpace(imgUrl))
+            {
+                _logger.LogDebug("CleanImageUrl: Empty or null image URL");
+                return null;
+            }
+
+            // Filter out logos, navigation images, and batch processing URLs
+            if (imgUrl.Contains("/navigation/") ||
+                imgUrl.Contains("logo") ||
+                imgUrl.Contains("/batch/") ||
+                imgUrl.Contains("fls-na.amazon") ||
+                imgUrl.StartsWith("data:"))
+            {
+                _logger.LogDebug("Filtered out non-product image: {Url}", imgUrl);
+                return null;
+            }
+
+            // Clean up social share overlay URLs and upgrade to high-resolution
+            // Example: https://m.media-amazon.com/images/I/61D7uTS7-TL._SL400_.jpg
+            // Should become: https://m.media-amazon.com/images/I/61D7uTS7-TL._SL500_.jpg
+            var cleanUrl = imgUrl;
+            
+            // Extract image ID and create high-res URL
+            var match = System.Text.RegularExpressions.Regex.Match(imgUrl, @"/images/I/([A-Za-z0-9_-]+)\.");
+                if (match.Success)
+            {
+                var imageId = match.Groups[1].Value;
+                cleanUrl = $"https://m.media-amazon.com/images/I/{imageId}._SL500_.jpg";
+                _logger.LogDebug("Upgraded image URL to high-res (deferred log): {ImageId} -> {CleanUrl}", imageId, cleanUrl);
+            }
+            else
+            {
+                _logger.LogWarning("Could not extract image ID from URL: {Url}", imgUrl);
+            }
+
+            return cleanUrl;
         }
 
         internal static string ForceToUSDomain(string url)

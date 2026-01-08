@@ -1,24 +1,36 @@
 <template>
   <div class="login-page">
     <div class="login-card" role="main" aria-labelledby="login-title">
-  <img :src="logoUrl" alt="Listenarr" class="login-logo" />
+      <img :src="logoUrl" alt="Listenarr" class="login-logo" />
       <h2 id="login-title" class="title">Sign in</h2>
 
       <form class="login-form" @submit.prevent="onSubmit" aria-live="polite">
         <div class="form-row">
           <label class="form-label" for="username">Username</label>
-          <input id="username" class="form-input" v-model="username" autocomplete="username" autofocus aria-required="true" />
+          <input
+            id="username"
+            class="form-input"
+            v-model="username"
+            autocomplete="username"
+            autofocus
+            aria-required="true"
+          />
         </div>
 
         <div class="form-row">
           <label class="form-label" for="password">Password</label>
-          <input id="password" class="form-input" type="password" v-model="password" autocomplete="current-password" aria-required="true" />
+          <input
+            id="password"
+            class="form-input"
+            type="password"
+            v-model="password"
+            autocomplete="current-password"
+            aria-required="true"
+          />
         </div>
 
         <div class="form-row form-remember">
-          <label>
-            <input type="checkbox" v-model="rememberMe" /> Remember me
-          </label>
+          <label> <input type="checkbox" v-model="rememberMe" /> Remember me </label>
         </div>
 
         <div class="form-row">
@@ -31,7 +43,9 @@
       </form>
 
       <div v-if="error" class="error" role="alert">{{ error }}</div>
-      <div v-if="retrySeconds" class="info">Too many attempts. Try again in {{ retrySeconds }} seconds.</div>
+      <div v-if="retrySeconds" class="info">
+        Too many attempts. Try again in {{ retrySeconds }} seconds.
+      </div>
     </div>
   </div>
 </template>
@@ -54,9 +68,9 @@ export default defineComponent({
     const retrySeconds = ref<number | null>(null)
     const router = useRouter()
 
-  const auth = useAuthStore()
-  // The logo is placed in `fe/public/logo.png` and served from the app root.
-  const logoUrl = '/logo.png'
+    const auth = useAuthStore()
+    // The logo is placed in `fe/public/logo.png` and served from the app root.
+    const logoUrl = '/logo.png'
 
     async function onSubmit() {
       error.value = null
@@ -73,7 +87,8 @@ export default defineComponent({
         // Prefer explicit query param redirect (survives reload). If missing, try the
         // fallback stored in sessionStorage by the ApiService when it had to perform
         // a full-page redirect. Always sanitize the redirect target.
-        const rawQueryRedirect = (router.currentRoute.value.query?.redirect as string | undefined) ?? undefined
+        const rawQueryRedirect =
+          (router.currentRoute.value.query?.redirect as string | undefined) ?? undefined
         const { normalizeRedirect } = await import('@/utils/redirect')
         let queryRedirect = normalizeRedirect(rawQueryRedirect)
 
@@ -87,11 +102,18 @@ export default defineComponent({
           } catch {}
         }
 
-        const dest = queryRedirect && queryRedirect !== '/' ? { path: queryRedirect } : (auth.redirectTo ?? { name: 'home' })
+        const dest =
+          queryRedirect && queryRedirect !== '/'
+            ? { path: queryRedirect }
+            : (auth.redirectTo ?? { name: 'home' })
         auth.redirectTo = null
         await router.push(dest)
       } catch (err) {
-        interface LoginError { status?: number; retryAfter?: number; message?: string }
+        interface LoginError {
+          status?: number
+          retryAfter?: number
+          message?: string
+        }
         const e = err as LoginError
         if (e?.status === 429) {
           retrySeconds.value = e.retryAfter ?? 0
@@ -105,8 +127,8 @@ export default defineComponent({
       }
     }
 
-  return { username, password, rememberMe, onSubmit, error, retrySeconds, loading, logoUrl }
-  }
+    return { username, password, rememberMe, onSubmit, error, retrySeconds, loading, logoUrl }
+  },
 })
 </script>
 
@@ -126,7 +148,7 @@ export default defineComponent({
   max-width: 420px;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 2rem;
   color: white;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -143,7 +165,7 @@ export default defineComponent({
 .title {
   text-align: center;
   margin: 0 0 1.5rem;
-  color: #2196F3;
+  color: #2196f3;
   font-size: 1.5rem;
   font-weight: bold;
 }
@@ -168,7 +190,7 @@ export default defineComponent({
 .form-input {
   padding: 0.75rem;
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   background-color: #1a1a1a;
   color: white;
   font-size: 1rem;
@@ -176,7 +198,7 @@ export default defineComponent({
 
 .form-input:focus {
   outline: none;
-  border-color: #2196F3;
+  border-color: #2196f3;
 }
 
 .form-remember {
@@ -188,33 +210,38 @@ export default defineComponent({
 }
 
 /* Styled checkbox to match app theme */
-.form-remember input[type="checkbox"] {
+.form-remember input[type='checkbox'] {
   width: 18px;
   height: 18px;
   margin: 0;
   padding: 0;
   appearance: auto; /* allow native look unless accent-color supported */
-  accent-color: #2196F3; /* modern browsers: sets the checked color */
+  accent-color: #2196f3; /* modern browsers: sets the checked color */
   border: 1px solid #3a3a3a;
-  border-radius: 4px;
+  border-radius: 6px;
   background-color: #1a1a1a;
   display: inline-block;
 }
 
-.form-remember input[type="checkbox"]:focus {
-  outline: 2px solid rgba(33,150,243,0.18);
+.form-remember input[type='checkbox']:focus {
+  outline: 2px solid rgba(33, 150, 243, 0.18);
   outline-offset: 2px;
 }
 
 /* Fallback for older browsers: slightly enlarge the hit area via label */
-.form-remember label { cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; }
+.form-remember label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 
 .btn-primary {
   padding: 0.75rem;
-  background-color: #2196F3;
+  background-color: #2196f3;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 1rem;
   font-weight: bold;
   cursor: pointer;
@@ -251,16 +278,22 @@ export default defineComponent({
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255,255,255,0.15);
+  border: 2px solid rgba(255, 255, 255, 0.15);
   border-top-color: white;
   border-radius: 50%;
   margin-right: 0.5rem;
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 @media (max-width: 480px) {
-  .login-card { padding: 1.5rem; }
+  .login-card {
+    padding: 1.5rem;
+  }
 }
 </style>
