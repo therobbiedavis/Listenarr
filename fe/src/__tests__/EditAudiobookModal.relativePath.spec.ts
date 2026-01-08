@@ -71,4 +71,71 @@ describe('EditAudiobookModal relative path calculation', () => {
     expect(input.exists()).toBe(true)
     expect((input.element as HTMLInputElement).value).toBe('Some Author\\Some Title')
   })
+
+  it('normalizes absolute path to relative when Done is clicked', async () => {
+    const wrapper = mount(EditAudiobookModal, {
+      props: {
+        isOpen: true,
+        audiobook,
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [(await import('pinia')).createPinia()],
+      },
+    })
+
+    // allow async init
+    await new Promise((r) => setTimeout(r, 10))
+
+    // Enter edit mode
+    await wrapper.find('.btn-edit-destination').trigger('click')
+
+    const input = wrapper.find('input.relative-input')
+    expect(input.exists()).toBe(true)
+
+    // Simulate user typing a full absolute path into the relative input
+    await input.setValue('C:\\root\\New Author\\New Title')
+
+    // Click Done (should normalize to relative path)
+    await wrapper.find('button.btn-primary.btn-sm').trigger('click')
+
+    // Re-open editor
+    await wrapper.find('.btn-edit-destination').trigger('click')
+    const reopened = wrapper.find('input.relative-input')
+    expect(reopened.exists()).toBe(true)
+    expect((reopened.element as HTMLInputElement).value).toBe('New Author\\New Title')
+  })
+
+  it('preserves a user-typed relative path after Done and reopen', async () => {
+    const wrapper = mount(EditAudiobookModal, {
+      props: {
+        isOpen: true,
+        audiobook,
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [(await import('pinia')).createPinia()],
+      },
+    })
+
+    // allow async init
+    await new Promise((r) => setTimeout(r, 10))
+
+    // Enter edit mode
+    await wrapper.find('.btn-edit-destination').trigger('click')
+    const input = wrapper.find('input.relative-input')
+    expect(input.exists()).toBe(true)
+
+    // Type a relative path
+    await input.setValue('My Author\\My Title')
+
+    // Click Done
+    await wrapper.find('button.btn-primary.btn-sm').trigger('click')
+
+    // Re-open editor
+    await wrapper.find('.btn-edit-destination').trigger('click')
+    const reopened = wrapper.find('input.relative-input')
+    expect(reopened.exists()).toBe(true)
+    expect((reopened.element as HTMLInputElement).value).toBe('My Author\\My Title')
+  })
 })

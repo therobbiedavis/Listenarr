@@ -120,7 +120,7 @@
                   <button
                     type="button"
                     class="btn btn-primary btn-sm"
-                    @click="editingDestination = false"
+                    @click="finishEditingDestination"
                   >
                     Done
                   </button>
@@ -623,9 +623,45 @@ function previewPath() {
 }
 
 function startEditingDestination() {
-  // Ensure we have the latest relative path derived before showing the edit controls
-  previewPath()
+  // Only derive/overwrite the relative path if there isn't already a user-provided
+  // unsaved relative path. This preserves what the user typed when toggling Done
+  // and Edit back and forth before saving the whole audiobook.
+  if (!formData.value.relativePath) {
+    previewPath()
+  }
   editingDestination.value = true
+}
+
+/**
+ * Normalize the relative path when the user clicks Done so that the input
+ * shows a path relative to the selected root (when possible) instead of
+ * an absolute/full path. This makes the UI stable when toggling edit mode.
+ */
+function finishEditingDestination() {
+  try {
+    const chosenRoot = resolveSelectedRootPath() || rootPath.value
+    let val = (formData.value.relativePath || '').trim()
+
+    if (!chosenRoot) {
+      // No root available — nothing to do
+      editingDestination.value = false
+      return
+    }
+
+    const isAbsolute = /^([a-zA-Z]:[\\/]|[\\/])/.test(val)
+
+    // If user typed an absolute path or included the chosen root prefix, derive a relative path
+    if (isAbsolute || (val && val.toLowerCase().startsWith((chosenRoot || '').toLowerCase()))) {
+      formData.value.relativePath = deriveRelativeFromBase(val || formData.value.basePath || '', chosenRoot)
+    } else {
+      // Keep the value as-is (user provided a relative path)
+      formData.value.relativePath = val
+    }
+  } catch (err) {
+    console.debug('Failed to normalize relative path on Done:', err)
+  } finally {
+    editingDestination.value = false
+  }
 }
 
 async function handleSave() {
