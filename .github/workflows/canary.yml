@@ -348,6 +348,23 @@ jobs:
           echo "Listing publish/tools contents"
           ls -la listenarr.api/publish/tools || echo "publish/tools missing"
 
+      - name: Copy tools into publish and verify
+        run: |
+          echo "Ensuring tools are present in listenarr.api/publish"
+          if [ ! -d "listenarr.api/publish/tools" ]; then
+            echo "publish/tools missing — copying from listenarr.api/tools"
+            cp -r listenarr.api/tools listenarr.api/publish/ || true
+          else
+            echo "publish/tools already present"
+          fi
+          echo "Verifying publish/tools exists"
+          if [ ! -d "listenarr.api/publish/tools" ]; then
+            echo "ERROR: publish/tools missing after copy"
+            ls -la listenarr.api/publish || true
+            exit 1
+          fi
+          ls -la listenarr.api/publish/tools
+
       - name: Fail if tools missing in publish (quick fail)
         run: |
           if [ ! -d "listenarr.api/publish/tools" ]; then
@@ -362,23 +379,6 @@ jobs:
         with:
           name: listenarr-publish-folder
           path: listenarr.api/publish
-
-      - name: Copy tools into publish and verify
-        run: |
-          echo "Ensuring tools are present in listenarr.api/publish"
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "publish/tools missing — copying from repo"
-            cp -r tools listenarr.api/publish/
-          else
-            echo "publish/tools already present"
-          fi
-          echo "Verifying publish/tools exists"
-          if [ ! -d "listenarr.api/publish/tools" ]; then
-            echo "ERROR: publish/tools missing after copy"
-            ls -la listenarr.api/publish || true
-            exit 1
-          fi
-          ls -la listenarr.api/publish/tools
 
       - name: Build and push API image (canary + sha)
         uses: docker/build-push-action@v4

@@ -217,12 +217,12 @@ The `permissions=27648` value requests the View Channels, Send Messages, Manage 
 - Optionally set **Discord Guild ID** and **Discord Channel ID** so the bot registers commands in a specific guild and limits responses to one channel.
 - Enable the Discord integration and Save.
 
-When the Listenarr server has the bot token and application ID saved, the server will register the slash command and manage the bot. The `tools/discord-bot` helper is provided for local development or troubleshooting.
+When the Listenarr server has the bot token and application ID saved, the server will register the slash command and manage the bot. The `listenarr.api/tools/discord-bot` helper is provided for local development or troubleshooting.
 
 Run the bot standalone (development):
 
 ```bash
-cd tools/discord-bot
+cd listenarr.api/tools/discord-bot
 npm install
 # Point the helper at your running Listenarr instance (defaults to http://localhost:5000)
 LISTENARR_URL=http://localhost:5000 npm start
@@ -231,7 +231,7 @@ LISTENARR_URL=http://localhost:5000 npm start
 Windows (PowerShell):
 
 ```powershell
-cd tools\discord-bot
+cd listenarr.api\tools\discord-bot
 npm install
 $env:LISTENARR_URL = 'http://localhost:5000'
 npm start
@@ -254,11 +254,11 @@ Auto-persist Listenarr URL
 To make the helper easier to run, it will automatically persist the Listenarr base URL when first started interactively. Order of precedence:
 
 1. `LISTENARR_URL` environment variable (explicit)
-2. `tools/discord-bot/.env` file with `LISTENARR_URL=` (created automatically on first run)
+2. `listenarr.api/tools/discord-bot/.env` file with `LISTENARR_URL=` (created automatically on first run)
 3. Interactive prompt on first run (saved to `.env`)
 4. Fallback `http://localhost:5000`
 
-This means you can run the helper once and enter your public domain (for example `https://listenarr.example.com`) when prompted. The URL is saved to `tools/discord-bot/.env` so you don't need to export environment variables on subsequent runs.
+This means you can run the helper once and enter your public domain (for example `https://listenarr.example.com`) when prompted. The URL is saved to `listenarr.api/tools/discord-bot/.env` so you don't need to export environment variables on subsequent runs.
 
 
 ## CI/CD

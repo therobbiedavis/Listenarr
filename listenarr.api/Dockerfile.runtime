@@ -22,7 +22,8 @@ COPY listenarr.api/publish/ /app/
 
 # Explicitly copy tools directory from source if not already in publish output
 # This ensures the Discord bot and any other tools are available at runtime
-COPY tools/ /app/tools/
+# Tools were moved into the listenarr.api directory; prefer that path
+COPY listenarr.api/tools/ /app/tools/
 
 # Install Discord bot dependencies
 # We do this in the runtime image to ensure npm packages are available when the bot runs
