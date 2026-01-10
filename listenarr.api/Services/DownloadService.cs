@@ -39,6 +39,8 @@ namespace Listenarr.Api.Services
         private const int QueueCacheExpirationSeconds = 10;
         private const int ClientStatusCacheExpirationSeconds = 30;
         private const int DirectDownloadTimeoutHours = 2;
+        // Don't purge downloads that were added less than this many seconds ago to avoid races with client indexing
+        private const int PurgeDelaySeconds = 30;
 
         private readonly IHubContext<DownloadHub> _hubContext;
         private readonly Listenarr.Application.Services.IHubBroadcaster _hubBroadcaster;
@@ -211,6 +213,10 @@ namespace Listenarr.Api.Services
         public async Task ProcessCompletedDownloadAsync(string downloadId, string finalPath)
         {
             _logger.LogInformation("ProcessCompletedDownloadAsync called for {DownloadId} (finalPath: {FinalPath})", downloadId, finalPath);
+            // AUTOIMPORT marker - entry into ProcessCompletedDownloadAsync
+            _logger.LogInformation("AUTOIMPORT-ENTRY: DownloadService.ProcessCompletedDownloadAsync entry for {DownloadId} (finalPath: {FinalPath})", downloadId, finalPath);
+            // Diagnostic marker for entry into the processing flow
+            _logger.LogInformation("AUTOIMPORT-PROCESS: ProcessCompletedDownloadAsync entry for {DownloadId} (finalPath: {FinalPath})", downloadId, finalPath);
 
             try
             {
@@ -2068,14 +2074,23 @@ namespace Listenarr.Api.Services
                 }
 
                 // For external clients, we'll filter based on what's actually in their queues
-                // Exclude downloads that are already completed/moved to avoid duplicate queue entries
+                // Exclude downloads that are already moved to avoid duplicate queue entries.
+                // However, include Completed downloads that are missing a FinalPath so they can still be
+                // matched to a client queue item and processed (auto-import of completed items).
                 var externalDownloads = allDownloads
                     .Where(d => d.DownloadClientId != "DDL" &&
-                                d.Status != DownloadStatus.Completed &&
-                                d.Status != DownloadStatus.Moved)
+                                d.Status != DownloadStatus.Moved &&
+                                (d.Status != DownloadStatus.Completed || string.IsNullOrWhiteSpace(d.FinalPath)))
                     .ToList();
 
                 listenarrDownloads = ddlToShow.Concat(externalDownloads).ToList();
+
+                // Log extra diagnostic info when Completed external downloads without FinalPath are being included
+                var completedWithoutFinal = externalDownloads.Count(d => d.Status == DownloadStatus.Completed && string.IsNullOrWhiteSpace(d.FinalPath));
+                if (completedWithoutFinal > 0)
+                {
+                    _logger.LogWarning("Including {Count} Completed external downloads without FinalPath in filtering so they can be auto-imported", completedWithoutFinal);
+                }
 
                 _logger.LogDebug("Final filtering result: {FinalCount} downloads to include in queue filtering ({DdlCount} DDL, {ExternalCount} external)",
                     listenarrDownloads.Count, ddlToShow.Count, externalDownloads.Count);
@@ -2151,25 +2166,22 @@ namespace Listenarr.Api.Services
                         {
                             var idMatch = download.Id == queueItem.Id;
 
-                            // For qBittorrent, also check if queue item ID matches stored torrent hash
+                            // Also check if queue item ID matches stored torrent hash (any client)
                             var hashMatch = false;
-                            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
+                            try
                             {
-                                try
+                                if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
                                 {
-                                    if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                    var storedHash = hashObj?.ToString();
+                                    if (!string.IsNullOrEmpty(storedHash))
                                     {
-                                        var storedHash = hashObj?.ToString();
-                                        if (!string.IsNullOrEmpty(storedHash))
-                                        {
-                                            hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
-                                        }
+                                        hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
                                     }
                                 }
-                                catch
-                                {
-                                    hashMatch = false;
-                                }
+                            }
+                            catch
+                            {
+                                hashMatch = false;
                             }
 
                             // Enhanced title match using robust normalization
@@ -2201,22 +2213,91 @@ namespace Listenarr.Api.Services
 
                     // Map each filtered queue item to the Listenarr DB download id so the UI won't show duplicates
                     var mappedFiltered = new List<QueueItem>();
+                    // Track original client-provided ids that were mapped to Listenarr downloads
+                    var mappedClientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                     foreach (var queueItem in initialFiltered)
                     {
                         try
                         {
+                            var originalId = queueItem.Id;
+
                             var matchedDownload = listenarrDownloads.FirstOrDefault(download =>
                                 download.DownloadClientId == client.Id && (
-                                    download.Id == queueItem.Id ||
-                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title) && IsMatchingTitle(download.Title, queueItem.Title))
+                                    download.Id == originalId ||
+                                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(originalId, StringComparison.OrdinalIgnoreCase)) ||
+                                    (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title) && IsMatchingTitle(download.Title, queueItem.Title))
                                 )
                             );
 
                             if (matchedDownload != null)
                             {
+                                // Remember original id to avoid later adding a duplicate completed entry
+                                mappedClientIds.Add(originalId);
+
                                 // Normalize the queue item id to the Listenarr DB id so the front-end treats them as the same
                                 queueItem.Id = matchedDownload.Id;
+
+                                // If the client reports this item as completed, mark the Listenarr DB download as Completed
+                                try
+                                {
+                                    if ((queueItem.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        // Use a fresh DbContext for this write to avoid scope issues
+                                        var updateContext = await _dbContextFactory.CreateDbContextAsync();
+                                        var dbDownload = await updateContext.Downloads.FindAsync(matchedDownload.Id);
+                                        if (dbDownload != null && dbDownload.Status != DownloadStatus.Moved)
+                                        {
+                                            var wasUpdated = false;
+
+                                            if (dbDownload.Status != DownloadStatus.Completed)
+                                            {
+                                                dbDownload.Status = DownloadStatus.Completed;
+                                                dbDownload.Progress = 100M;
+                                                dbDownload.DownloadedSize = dbDownload.TotalSize;
+                                                updateContext.Downloads.Update(dbDownload);
+                                                await updateContext.SaveChangesAsync();
+                                                _logger.LogInformation("Marked Listenarr download {DownloadId} as Completed due to client observation", matchedDownload.Id);
+                                                wasUpdated = true;
+                                            }
+
+                                            // If the download is not yet fully processed (no FinalPath) or we just updated it,
+                                            // trigger the completed-download import workflow in background so Deluge-completed items
+                                            // are imported automatically (do not await here to avoid blocking queue retrieval)
+                                            if (wasUpdated || string.IsNullOrWhiteSpace(dbDownload.FinalPath))
+                                            {
+                                                try
+                                                {
+                                                    var finalPath = queueItem.ContentPath ?? queueItem.LocalPath ?? dbDownload.DownloadPath ?? dbDownload.FinalPath ?? string.Empty;
+                                                    // Diagnostic marker: higher-severity log to make trigger visible in filtered logs
+                                                    _logger.LogInformation("AUTOIMPORT-TRIGGER: Scheduling ProcessCompletedDownloadAsync for {DownloadId} (source: {Source})", matchedDownload.Id, finalPath);
+                                                    _ = Task.Run(async () => {
+                                                        try
+                                                        {
+                                                            _logger.LogInformation("AUTOIMPORT-TRIGGER: Starting background ProcessCompletedDownloadAsync for {DownloadId} (source: {Source})", matchedDownload.Id, finalPath);
+                                                            _logger.LogInformation("Triggering ProcessCompletedDownloadAsync for {DownloadId} (source: {Source})", matchedDownload.Id, finalPath);
+                                                            await ProcessCompletedDownloadAsync(matchedDownload.Id, finalPath);
+                                                            _logger.LogInformation("AUTOIMPORT-TRIGGER: Background ProcessCompletedDownloadAsync completed for {DownloadId}", matchedDownload.Id);
+                                                        }
+                                                        catch (Exception procEx)
+                                                        {
+                                                            _logger.LogWarning(procEx, "Background ProcessCompletedDownloadAsync failed for {DownloadId}", matchedDownload.Id);
+                                                        }
+                                                    });
+                                                }
+                                                catch (Exception bgEx)
+                                                {
+                                                    // Make this visible for diagnostics
+                                                    _logger.LogWarning(bgEx, "Failed to queue ProcessCompletedDownloadAsync for {DownloadId} (non-fatal)", matchedDownload.Id);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to update DB status for matched download {DownloadId} (non-fatal)", matchedDownload.Id);
+                                }
                             }
 
                             mappedFiltered.Add(queueItem);
@@ -2230,6 +2311,11 @@ namespace Listenarr.Api.Services
 
                     queueItems.AddRange(mappedFiltered);
 
+                    // Capture mappedClientIds into local scope for use when adding unmatched completed items
+                    // (we'll union this set into existingIds when checking unmatchedCompleted)
+                    // Note: declared above
+                    
+
                     // If configured, also include completed items that appear in the
                     // client queue but are not tracked in Listenarr's DB (user wants
                     // to see completed torrents/NZBs even when the client has removed
@@ -2238,9 +2324,17 @@ namespace Listenarr.Api.Services
                     {
                         var existingIds = queueItems.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+                        // Exclude completed items that correspond to original client ids that were already mapped to Listenarr downloads
+                        try { existingIds.UnionWith(mappedClientIds); } catch { }
+
                         var unmatchedCompleted = clientQueue
                             .Where(q => (q.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
                             .Where(q => !existingIds.Contains(q.Id))
+                            .Where(q => !listenarrDownloads.Any(d => d.DownloadClientId == client.Id && (
+                                d.Id == q.Id ||
+                                (d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var hh) && (hh?.ToString() ?? string.Empty).Equals(q.Id, StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrEmpty(d.Title) && !string.IsNullOrEmpty(q.Title) && IsMatchingTitle(d.Title, q.Title))
+                            )))
                             .ToList();
 
                         foreach (var uc in unmatchedCompleted)
@@ -2477,6 +2571,61 @@ namespace Listenarr.Api.Services
                             // may only register an IDbContextFactory.
                             var purgeScopedDbContext = await _dbContextFactory.CreateDbContextAsync();
 
+                            // Before purging, defer purge for recently-created downloads and attempt discovery retries to avoid premature deletion
+                            try
+                            {
+                                var now = DateTime.UtcNow;
+                                var recentlyAdded = toPurge.Where(d => (now - d.StartedAt).TotalSeconds < PurgeDelaySeconds).ToList();
+                                if (recentlyAdded.Any())
+                                {
+                                    _logger.LogDebug("Deferring purge of {Count} recently-added downloads (added < {Seconds}s) for client {ClientName}", recentlyAdded.Count, PurgeDelaySeconds, client.Name ?? client.Id);
+                                    toPurge = toPurge.Except(recentlyAdded).ToList();
+                                }
+
+                                for (int attempt = 1; attempt <= 5 && toPurge.Any(); attempt++)
+                                {
+                                    _logger.LogDebug("Re-checking client queue before purge (attempt {Attempt}) for client {ClientName}", attempt, client.Name ?? client.Id);
+                                    try { await Task.Delay(500 * attempt); } catch { }
+
+                                    var refreshedQueue = await (_clientGateway?.GetQueueAsync(client) ?? Task.FromResult(new List<QueueItem>()));
+                                    var refreshedIds = new HashSet<string>(refreshedQueue.Select(q => q.Id), StringComparer.OrdinalIgnoreCase);
+
+                                    // Also consider title similarity and size as a heuristic match (helps with Deluge timing/ID differences)
+                                    toPurge = toPurge.Where(d =>
+                                    {
+                                        try
+                                        {
+                                            if (refreshedIds.Contains(d.Id)) return false;
+                                            if (d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                            {
+                                                var hashStr = hashObj?.ToString() ?? string.Empty;
+                                                if (!string.IsNullOrEmpty(hashStr) && refreshedIds.Contains(hashStr)) return false;
+                                            }
+
+                                            if (!string.IsNullOrEmpty(d.Title))
+                                            {
+                                                var titleMatch = refreshedQueue.Any(q => !string.IsNullOrEmpty(q.Title) && AreTitlesSimilar(d.Title, q.Title));
+                                                if (titleMatch)
+                                                {
+                                                    var sizeMatch = refreshedQueue.Any(q => q.Size > 0 && d.TotalSize > 0 && q.Size == d.TotalSize);
+                                                    if (sizeMatch || refreshedQueue.Any(q => !string.IsNullOrEmpty(q.Title) && AreTitlesSimilar(d.Title, q.Title)))
+                                                        return false;
+                                                }
+                                            }
+
+                                            return true;
+                                        }
+                                        catch { return true; }
+                                    }).ToList();
+
+                                    _logger.LogDebug("After recheck attempt {Attempt}, toPurge count is {Count}", attempt, toPurge.Count);
+                                }
+                            }
+                            catch (Exception exRetry)
+                            {
+                                _logger.LogDebug(exRetry, "Discovery retries before purge failed for client {ClientName} (non-fatal)", client.Name ?? client.Id);
+                            }
+
                             foreach (var orphanedDownload in toPurge)
                             {
                                 var trackedDownload = await purgeScopedDbContext.Downloads.FindAsync(orphanedDownload.Id);
@@ -2490,8 +2639,7 @@ namespace Listenarr.Api.Services
                             }
 
                             await purgeScopedDbContext.SaveChangesAsync();
-                            _logger.LogInformation("Purged {Count} orphaned download records from {ClientName}",
-                                toPurge.Count, client.Name);
+                            _logger.LogInformation("Purged {Count} orphaned download records from {ClientName}", toPurge.Count, client.Name);
                         }
                     }
                     catch (Exception purgeEx)

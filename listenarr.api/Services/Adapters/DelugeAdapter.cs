@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Listenarr.Api.Services;
@@ -129,7 +130,58 @@ namespace Listenarr.Api.Services.Adapters
                     var filename = string.IsNullOrEmpty(result.TorrentFileName) ? "listenarr.torrent" : result.TorrentFileName;
                     var filedump = Convert.ToBase64String(result.TorrentFileContent);
                     var res = await InvokeAsync(client, "core.add_torrent_file", new object[] { filename, filedump, options }, ct);
+                    try
+                    {
+                        _logger.LogDebug("Deluge add (file) response for client {ClientName}: {Kind} - {Response}", client.Name ?? client.Id, res.ValueKind, res.ToString());
+                    }
+                    catch { }
+
                     var id = res.ValueKind == JsonValueKind.String ? res.GetString() : null;
+                    if (string.IsNullOrEmpty(id))
+                    {
+                        // Log raw response to assist debugging (non-sensitive)
+                        try { _logger.LogWarning("Deluge add (core.add_torrent_file) returned non-string/empty result for client {ClientName}: {Response}", client.Name ?? client.Id, res.ToString()); } catch { }
+
+                        _logger.LogWarning("Deluge add returned no id for client {ClientName} after core.add_torrent_file. Attempting discovery retries.", client.Name ?? client.Id);
+                        var discoveredId = await DiscoverAddedTorrentAsync(client, result.Title, result.Size > 0 ? result.Size : (long?)null, ct);
+                        if (!string.IsNullOrEmpty(discoveredId))
+                        {
+                            _logger.LogInformation("Discovered torrent after add for client {ClientName}: {Id} (Title: {Title})", client.Name ?? client.Id, discoveredId, result.Title);
+                            return discoveredId;
+                        }
+
+                        _logger.LogDebug("Discovery retries did not find the torrent after add for client {ClientName}", client.Name ?? client.Id);
+
+                        // Fallback: try adding via URL (some indexer endpoints behave better when instructing Deluge to fetch the URL)
+                        if (!string.IsNullOrEmpty(result.TorrentUrl))
+                        {
+                            try
+                            {
+                                _logger.LogDebug("Attempting fallback add via core.add_torrent_url for client {ClientName}", client.Name ?? client.Id);
+                                var fallbackUrlRes1 = await InvokeAsync(client, "core.add_torrent_url", new object[] { result.TorrentUrl, options }, ct);
+                                try { _logger.LogDebug("Deluge fallback add (url) response for client {ClientName}: {Kind} - {Response}", client.Name ?? client.Id, fallbackUrlRes1.ValueKind, fallbackUrlRes1.ToString()); } catch { }
+                                var fallbackUrlId1 = fallbackUrlRes1.ValueKind == JsonValueKind.String ? fallbackUrlRes1.GetString() : null;
+                                if (!string.IsNullOrEmpty(fallbackUrlId1))
+                                {
+                                    _logger.LogInformation("Deluge fallback add by URL succeeded for '{Title}' id: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(fallbackUrlId1));
+                                    return fallbackUrlId1;
+                                }
+
+                                // Try discovery again after fallback attempt
+                                var discoveredAfterUrl = await DiscoverAddedTorrentAsync(client, result.Title, result.Size > 0 ? result.Size : (long?)null, ct);
+                                if (!string.IsNullOrEmpty(discoveredAfterUrl))
+                                {
+                                    _logger.LogInformation("Discovered torrent after fallback URL add for client {ClientName}: {Id} (Title: {Title})", client.Name ?? client.Id, discoveredAfterUrl, result.Title);
+                                    return discoveredAfterUrl;
+                                }
+                            }
+                            catch (Exception exFallback)
+                            {
+                                _logger.LogDebug(exFallback, "Fallback add via URL failed for client {ClientName} (non-fatal)", client.Name ?? client.Id);
+                            }
+                        }
+                    }
+
                     _logger.LogInformation("Deluge successfully added torrent '{Title}' with id: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(id));
                     return id;
                 }
@@ -141,14 +193,133 @@ namespace Listenarr.Api.Services.Adapters
                 if (!string.IsNullOrEmpty(result.MagnetLink))
                 {
                     var res = await InvokeAsync(client, "core.add_torrent_magnet", new object[] { torrentUrl, options }, ct);
+                    try { _logger.LogDebug("Deluge add (magnet) response for client {ClientName}: {Kind} - {Response}", client.Name ?? client.Id, res.ValueKind, res.ToString()); } catch { }
                     var id = res.ValueKind == JsonValueKind.String ? res.GetString() : null;
+                    if (string.IsNullOrEmpty(id))
+                    {
+                        _logger.LogWarning("Deluge add returned no id for client {ClientName} after core.add_torrent_magnet. Attempting discovery retries.", client.Name ?? client.Id);
+                        var discoveredId = await DiscoverAddedTorrentAsync(client, result.Title, result.Size > 0 ? result.Size : (long?)null, ct);
+                        if (!string.IsNullOrEmpty(discoveredId))
+                        {
+                            _logger.LogInformation("Discovered torrent after add (magnet) for client {ClientName}: {Id} (Title: {Title})", client.Name ?? client.Id, discoveredId, result.Title);
+                            return discoveredId;
+                        }
+
+                        _logger.LogDebug("Discovery retries did not find the torrent after magnet add for client {ClientName}", client.Name ?? client.Id);
+                    }
                     _logger.LogInformation("Deluge added magnet for '{Title}' id: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(id));
                     return id;
                 }
 
-                // Torrent URL - add by URL (no custom headers supported)
+                // Torrent URL - attempt to download the torrent file server-side and add as a file if possible.
+                try
+                {
+                    var http = _httpClientFactory.CreateClient("deluge");
+                    using var getReq = new HttpRequestMessage(HttpMethod.Get, torrentUrl);
+
+                    var getResp = await http.SendAsync(getReq, ct);
+                    if (getResp.IsSuccessStatusCode)
+                    {
+                        var contentBytes = await getResp.Content.ReadAsByteArrayAsync(ct);
+                        var mediaType = getResp.Content.Headers.ContentType?.MediaType ?? string.Empty;
+                        var looksLikeTorrent = (!string.IsNullOrEmpty(mediaType) && mediaType.Contains("torrent", StringComparison.OrdinalIgnoreCase))
+                                              || (contentBytes != null && contentBytes.Length > 0 && Encoding.ASCII.GetString(contentBytes, 0, Math.Min(128, contentBytes.Length)).Contains("announce", StringComparison.OrdinalIgnoreCase));
+
+                        if (looksLikeTorrent)
+                        {
+                            var uri = new Uri(torrentUrl);
+                            var filename = Path.GetFileName(uri.LocalPath);
+                            if (string.IsNullOrEmpty(filename))
+                            {
+                                try
+                                {
+                                    var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+                                    if (query.TryGetValue("file", out var fileVal) && !string.IsNullOrEmpty(fileVal))
+                                    {
+                                        filename = fileVal.ToString();
+                                    }
+                                }
+                                catch { /* ignore parsing issues */ }
+                            }
+
+                            if (string.IsNullOrEmpty(filename)) filename = "listenarr.torrent";
+                            var filedump = Convert.ToBase64String(contentBytes!);
+                            var res = await InvokeAsync(client, "core.add_torrent_file", new object[] { filename, filedump, options }, ct);
+                            try { _logger.LogDebug("Deluge add (file from URL) response for client {ClientName}: {Kind} - {Response}", client.Name ?? client.Id, res.ValueKind, res.ToString()); } catch { }
+                            var fileId = res.ValueKind == JsonValueKind.String ? res.GetString() : null;
+                            if (string.IsNullOrEmpty(fileId))
+                            {
+                                // Log raw response for diagnostics
+                                try { _logger.LogWarning("Deluge add (file from URL) returned non-string/empty result for client {ClientName}: {Response}", client.Name ?? client.Id, res.ToString()); } catch { }
+
+                                _logger.LogWarning("Deluge add (file from URL) returned no id for client {ClientName}. Attempting discovery retries.", client.Name ?? client.Id);
+                                var discoveredId = await DiscoverAddedTorrentAsync(client, result.Title, result.Size, ct);
+                                if (!string.IsNullOrEmpty(discoveredId))
+                                {
+                                    _logger.LogInformation("Discovered torrent after add (file from URL) for client {ClientName}: {Id} (Title: {Title})", client.Name ?? client.Id, discoveredId, result.Title);
+                                    return discoveredId;
+                                }
+                                _logger.LogDebug("Discovery retries did not find the torrent after add (file from URL) for client {ClientName}", client.Name ?? client.Id);
+
+                                // Fallback to URL add in case the file upload path is unreliable for this indexer link
+                                try
+                                {
+                                    _logger.LogDebug("Attempting fallback add via core.add_torrent_url for client {ClientName}", client.Name ?? client.Id);
+                                    var fallbackUrlRes2 = await InvokeAsync(client, "core.add_torrent_url", new object[] { torrentUrl, options }, ct);
+                                    try { _logger.LogDebug("Deluge fallback add (url) response for client {ClientName}: {Kind} - {Response}", client.Name ?? client.Id, fallbackUrlRes2.ValueKind, fallbackUrlRes2.ToString()); } catch { }
+                                    var fallbackUrlId2 = fallbackUrlRes2.ValueKind == JsonValueKind.String ? fallbackUrlRes2.GetString() : null;
+                                    if (!string.IsNullOrEmpty(fallbackUrlId2))
+                                    {
+                                        _logger.LogInformation("Deluge fallback add by URL succeeded for '{Url}' id: {Id}", LogRedaction.SanitizeUrl(torrentUrl), LogRedaction.SanitizeText(fallbackUrlId2));
+                                        return fallbackUrlId2;
+                                    }
+
+                                    var discoveredAfterUrl = await DiscoverAddedTorrentAsync(client, result.Title, result.Size, ct);
+                                    if (!string.IsNullOrEmpty(discoveredAfterUrl))
+                                    {
+                                        _logger.LogInformation("Discovered torrent after fallback URL add for client {ClientName}: {Id} (Title: {Title})", client.Name ?? client.Id, discoveredAfterUrl, result.Title);
+                                        return discoveredAfterUrl;
+                                    }
+                                }
+                                catch (Exception exFallback)
+                                {
+                                    _logger.LogDebug(exFallback, "Fallback add via URL failed for client {ClientName} (non-fatal)", client.Name ?? client.Id);
+                                }
+                            }
+                            _logger.LogInformation("Deluge added torrent file for URL '{Url}' id: {Id}", LogRedaction.SanitizeUrl(torrentUrl), LogRedaction.SanitizeText(fileId));
+                            return fileId;
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Fetched URL {Url} but content did not appear to be a torrent (content-type={ContentType}, length={Length})", LogRedaction.SanitizeUrl(torrentUrl), mediaType, contentBytes?.Length ?? 0);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Failed to fetch torrent URL {Url} (status={Status})", LogRedaction.SanitizeUrl(torrentUrl), getResp.StatusCode);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to fetch torrent URL for client {ClientName} (non-fatal)", client.Name ?? client.Id);
+                }
+
+                // Fallback to add by URL if file fetch didn't succeed or didn't look like a torrent
                 var urlRes = await InvokeAsync(client, "core.add_torrent_url", new object[] { torrentUrl, options }, ct);
+                try { _logger.LogDebug("Deluge add (url) response for client {ClientName}: {Kind} - {Response}", client.Name ?? client.Id, urlRes.ValueKind, urlRes.ToString()); } catch { }
                 var urlId = urlRes.ValueKind == JsonValueKind.String ? urlRes.GetString() : null;
+                if (string.IsNullOrEmpty(urlId))
+                {
+                    _logger.LogWarning("Deluge add (url) returned no id for client {ClientName}. Attempting discovery retries.", client.Name ?? client.Id);
+                    var discoveredId = await DiscoverAddedTorrentAsync(client, result.Title, result.Size > 0 ? result.Size : (long?)null, ct);
+                    if (!string.IsNullOrEmpty(discoveredId))
+                    {
+                        _logger.LogInformation("Discovered torrent after add (url) for client {ClientName}: {Id} (Title: {Title})", client.Name ?? client.Id, discoveredId, result.Title);
+                        return discoveredId;
+                    }
+
+                    _logger.LogDebug("Discovery retries did not find the torrent after add (url) for client {ClientName}", client.Name ?? client.Id);
+                }
                 _logger.LogInformation("Deluge added torrent URL for '{Title}' id: {Id}", LogRedaction.SanitizeText(result.Title), LogRedaction.SanitizeText(urlId));
                 return urlId;
             }
@@ -197,20 +368,84 @@ namespace Listenarr.Api.Services.Adapters
 
                 if (res.ValueKind == JsonValueKind.Object)
                 {
-                    foreach (var prop in res.EnumerateObject())
+                    var count = res.EnumerateObject().Count();
+                    _logger.LogDebug("Deluge queue response for client {ClientName} contains {Count} entries", client.Name ?? client.Id, count);
+                    try { _logger.LogInformation("Deluge raw queue object for client {ClientName}: {Response}", client.Name ?? client.Id, res.ToString()); } catch { }
+
+                    var fallbackHandled = false;
+
+                    if (count == 0)
                     {
+                        // Log the returned JSON for debugging (non-sensitive info)
                         try
                         {
-                            var torrentId = prop.Name;
-                            var data = prop.Value;
-                            var q = await MapTorrentAsync(client, torrentId, data, ct);
-                            items.Add(q);
+                            _logger.LogDebug("Deluge queue returned empty object for client {ClientName}: {Response}", client.Name ?? client.Id, res.ToString());
+                        }
+                        catch { /* swallow logging errors */ }
+
+                        // If the first call returned nothing, wait briefly and retry the same call once (with keys) to handle delayed population
+                        try
+                        {
+                            await Task.Delay(250, ct);
+                            var retryRes = await InvokeAsync(client, "core.get_torrents_status", new object[] { new Dictionary<string, object>(), keys }, ct);
+                            if (retryRes.ValueKind == JsonValueKind.Object)
+                            {
+                                var count2 = retryRes.EnumerateObject().Count();
+                                _logger.LogDebug("Deluge retry queue response for client {ClientName} contains {Count} entries", client.Name ?? client.Id, count2);
+                                if (count2 > 0)
+                                {
+                                    foreach (var prop2 in retryRes.EnumerateObject())
+                                    {
+                                        try
+                                        {
+                                            var torrentId = prop2.Name;
+                                            var data = prop2.Value;
+                                            var q = await MapTorrentAsync(client, torrentId, data, ct);
+                                            items.Add(q);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Failed to map Deluge torrent entry from retry (non-fatal)");
+                                        }
+                                    }
+
+                                    // Mark that retry returned entries so we skip primary enumeration below
+                                    fallbackHandled = true;
+                                }
+                            }
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogDebug(ex, "Failed to map Deluge torrent entry (non-fatal)");
+                            _logger.LogDebug(ex, "Deluge queue retry failed for client {ClientName} (non-fatal)", client.Name ?? client.Id);
                         }
                     }
+
+                    if (!fallbackHandled)
+                    {
+                        foreach (var prop in res.EnumerateObject())
+                        {
+                            try
+                            {
+                                var torrentId = prop.Name;
+                                var data = prop.Value;
+                                var q = await MapTorrentAsync(client, torrentId, data, ct);
+                                items.Add(q);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Failed to map Deluge torrent entry (non-fatal)");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Unexpected response type - log for troubleshooting
+                    try
+                    {
+                        _logger.LogDebug("Deluge queue response had kind {Kind} for client {ClientName}: {Response}", res.ValueKind, client.Name ?? client.Id, res.ToString());
+                    }
+                    catch { /* swallow logging errors */ }
                 }
             }
             catch (Exception ex)
@@ -272,8 +507,13 @@ namespace Listenarr.Api.Services.Adapters
         private async Task<QueueItem> MapTorrentAsync(DownloadClientConfiguration client, string id, JsonElement data, CancellationToken ct)
         {
             var name = data.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty;
-            var progress = data.TryGetProperty("progress", out var progProp) ? progProp.GetDouble() : 0d;
+            var progress = data.TryGetProperty("progress", out var progProp) ? (progProp.ValueKind == JsonValueKind.Number ? progProp.GetDouble() : 0d) : 0d;
             var total = data.TryGetProperty("total_size", out var sizeProp) ? sizeProp.GetInt64() : 0L;
+            // Deluge returns progress either as fraction (0.0..1.0) or as percentage (0..100). Normalize to 0..100
+            double progressPercent = progress;
+            if (progressPercent <= 1.01) // likely a fraction
+                progressPercent = progressPercent * 100.0;
+            progressPercent = Math.Max(0.0, Math.Min(100.0, progressPercent));
             var state = data.TryGetProperty("state", out var stateProp) ? stateProp.GetString() ?? string.Empty : string.Empty;
             var savePath = data.TryGetProperty("save_path", out var spProp) ? spProp.GetString() ?? string.Empty : string.Empty;
             var added = data.TryGetProperty("time_added", out var taProp) ? (taProp.ValueKind == JsonValueKind.Number ? taProp.GetInt64() : 0L) : 0L;
@@ -289,7 +529,7 @@ namespace Listenarr.Api.Services.Adapters
                 _ => "unknown"
             };
 
-            if (progress >= 100.0 && (status == "seeding" || status == "queued" || status == "paused"))
+            if (progressPercent >= 100.0 && (status == "seeding" || status == "queued" || status == "paused") && (progress > 1.01 || Math.Abs(progress - 100.0) < 0.0001))
             {
                 status = "completed";
             }
@@ -319,9 +559,9 @@ namespace Listenarr.Api.Services.Adapters
                 Title = name,
                 Quality = "Unknown",
                 Status = status,
-                Progress = progress * 100.0,
+                Progress = progressPercent,
                 Size = total,
-                Downloaded = Math.Max(0, total - 0),
+                Downloaded = total > 0 ? (long)Math.Round(total * (progressPercent / 100.0)) : 0L,
                 DownloadSpeed = dl,
                 Eta = null,
                 DownloadClient = client.Name ?? client.Id ?? "Deluge",
@@ -336,6 +576,7 @@ namespace Listenarr.Api.Services.Adapters
                 ContentPath = localContentPath
             };
 
+            try { _logger.LogInformation("Mapped Deluge torrent {TorrentId}: state={State}, progressRaw={RawProgress}, progressPercent={ProgressPercent}, total={Total}", id, state, progress, progressPercent, total); } catch { }
             return queueItem;
         }
 
@@ -344,7 +585,7 @@ namespace Listenarr.Api.Services.Adapters
         /// (named "jsonrpc" style and the array RPC-style used by some Deluge versions) for maximum
         /// compatibility with different Deluge/Web versions.
         /// </summary>
-        private async Task<JsonElement> InvokeAsync(DownloadClientConfiguration client, string method, object[] args, CancellationToken ct)
+        private async Task<JsonElement> InvokeAsync(DownloadClientConfiguration client, string method, object[] args, CancellationToken ct, bool hasAttemptedAuth = false)
         {
             var http = _httpClientFactory.CreateClient("deluge");
             var baseUrl = BuildBaseUrl(client);
@@ -387,8 +628,48 @@ namespace Listenarr.Api.Services.Adapters
                     {
                         using var doc = JsonDocument.Parse(body);
                         var root = doc.RootElement;
+
+                        // If Deluge returned an error (e.g., Not authenticated), attempt a single auth.login and retry once
+                        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var errorProp))
+                        {
+                            string? msg = null;
+                            int? code = null;
+                            try { if (errorProp.TryGetProperty("message", out var m)) msg = m.GetString(); } catch { }
+                            try { if (errorProp.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.Number) code = c.GetInt32(); } catch { }
+
+                            if (!hasAttemptedAuth && (msg?.IndexOf("Not authenticated", StringComparison.OrdinalIgnoreCase) >= 0 || code == 1))
+                            {
+                                _logger.LogWarning("Deluge returned authentication error for client {ClientName}; attempting auth.login and retrying once", client.Name ?? client.Id);
+                                if (!string.IsNullOrEmpty(client.Password))
+                                {
+                                    try
+                                    {
+                                        var authRes = await InvokeAsync(client, "auth.login", new object[] { client.Password }, ct, true);
+                                        if (authRes.ValueKind == JsonValueKind.True || (authRes.ValueKind == JsonValueKind.String && authRes.GetString() == "True"))
+                                        {
+                                            _logger.LogInformation("Deluge auth.login succeeded for client {ClientName}; retrying method {Method}", client.Name ?? client.Id, method);
+                                            return await InvokeAsync(client, method, args, ct, true);
+                                        }
+                                        else
+                                        {
+                                            _logger.LogWarning("Deluge auth.login did not succeed for client {ClientName}", client.Name ?? client.Id);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Deluge auth.login attempt failed for client {ClientName} (non-fatal)", client.Name ?? client.Id);
+                                    }
+                                }
+                            }
+                        }
+
                         if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("result", out var resultProp))
                         {
+                            // If this is an 'add' RPC and the result is not a string (id), log request/response for diagnosis
+                            if (method.StartsWith("core.add", StringComparison.OrdinalIgnoreCase) && resultProp.ValueKind != JsonValueKind.String)
+                            {
+                                try { _logger.LogWarning("Deluge add RPC returned non-string result. Request: {RequestBody} Response: {ResponseBody}", serialized, body); } catch { }
+                            }
                             return resultProp.Clone();
                         }
 
@@ -440,6 +721,11 @@ namespace Listenarr.Api.Services.Adapters
                     if (first.ValueKind == JsonValueKind.Array && first.GetArrayLength() >= 3)
                     {
                         var rv = first[2];
+                        // If this is an 'add' RPC and the return value is not a string id, log details for diagnosis
+                        if (method.StartsWith("core.add", StringComparison.OrdinalIgnoreCase) && rv.ValueKind != JsonValueKind.String)
+                        {
+                            try { _logger.LogWarning("Deluge add RPC (array-style) returned non-string result. Request: {RequestBody} Response: {ResponseBody}", serializedArray, body2); } catch { }
+                        }
                         // If return value is array, try to return first item if single
                         if (rv.ValueKind == JsonValueKind.Array && rv.GetArrayLength() == 1)
                             return rv[0].Clone();
@@ -456,6 +742,79 @@ namespace Listenarr.Api.Services.Adapters
         {
             var scheme = client.UseSSL ? "https" : "http";
             return $"{scheme}://{client.Host}:{client.Port}/json";
+        }
+
+        private async Task<string?> DiscoverAddedTorrentAsync(DownloadClientConfiguration client, string? title, long? size, CancellationToken ct)
+        {
+            const int maxAttempts = 6;
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                if (attempt > 0)
+                {
+                    var delay = 500 * attempt; // 500ms, 1000ms, ...
+                    try { await Task.Delay(delay, ct); } catch { /* swallow */ }
+                }
+
+                try
+                {
+                    var queue = await GetQueueAsync(client, ct);
+                    if (queue == null || queue.Count == 0)
+                    {
+                        _logger.LogDebug("Discovery attempt {Attempt} found empty queue for client {ClientName}", attempt + 1, client.Name ?? client.Id);
+                        continue;
+                    }
+
+                    _logger.LogDebug("Discovery attempt {Attempt} found {Count} queue items for client {ClientName}", attempt + 1, queue.Count, client.Name ?? client.Id);
+
+                    foreach (var q in queue)
+                    {
+                        try
+                        {
+                            // Use fuzzy title matching to be tolerant of minor variations
+                            if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(q.Title) && AreTitlesSimilar(title, q.Title))
+                                return q.Id;
+
+                            // Allow exact size match as another heuristic
+                            if (size.HasValue && q.Size > 0 && q.Size == size.Value)
+                                return q.Id;
+
+                            // Allow size matches within 1% or 1MB margin
+                            if (size.HasValue && q.Size > 0)
+                            {
+                                var diff = Math.Abs(q.Size - size.Value);
+                                if (diff <= Math.Max(1024 * 1024, (long)Math.Ceiling(size.Value * 0.01)))
+                                    return q.Id;
+                            }
+                        }
+                        catch { /* non-fatal */ }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Discovery attempt {Attempt} failed for client {ClientName} (non-fatal)", attempt + 1, client.Name ?? client.Id);
+                }
+            }
+
+            return null;
+        }
+
+        private bool AreTitlesSimilar(string a, string b)
+        {
+            try
+            {
+                var An = NormalizeTitle(a);
+                var Bn = NormalizeTitle(b);
+                return An.Contains(Bn) || Bn.Contains(An) || An == Bn;
+            }
+            catch { return false; }
+        }
+
+        private string NormalizeTitle(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            var lower = s.ToLowerInvariant();
+            var cleaned = new string(lower.Where(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch)).ToArray());
+            return string.Join(' ', cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
         }
     }
 }

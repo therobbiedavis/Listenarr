@@ -140,9 +140,9 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     const completedTab = vm.filterTabs.find((t) => t.value === 'completed')
     expect(completedTab!.count).toBe(4)
 
-    // All tab should not include these completed external items by default (unless user pref set)
-    const allCount = vm.filterTabs.find((t) => t.value === 'all')!.count
-    expect(allCount).toBeGreaterThanOrEqual(0)
+    // All tab should include DB-backed completed items even when preference is false
+    const allItems = (wrapper.vm as any).allActivityItems as ActivityItem[]
+    expect(allItems.some((i) => i.id === 'd1')).toBe(true)
   }, 20000)
 
   it('All tab includes completed external downloads when preference enabled', async () => {
@@ -299,7 +299,18 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
 
     vi.doMock('@/stores/downloads', () => ({
       useDownloadsStore: () => ({
-        activeDownloads: [],
+        activeDownloads: [
+          {
+            id: 'q1',
+            status: 'Downloading',
+            progress: 50,
+            downloadClientId: 'qbittorrent',
+            startedAt: new Date().toISOString(),
+            title: 'Queue Item',
+            downloadedSize: 500,
+            totalSize: 1000,
+          },
+        ],
         completedDownloads: [],
         loadDownloads: vi.fn(async () => undefined),
       }),
@@ -515,6 +526,69 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     await vm.confirmRemove()
 
     expect(removeFromQueueMock).toHaveBeenCalledWith('q1', 'SABnzbd')
+  })
+
+  it('hides queue-only items from the All tab (only show DB-backed downloads)', async () => {
+    vi.resetModules()
+
+    const queueItem = {
+      id: 'q-only',
+      title: 'Queue Only Item',
+      status: 'downloading',
+      progress: 10,
+      totalSize: 1000,
+      downloaded: 100,
+      downloadClientId: 'qbittorrent',
+      downloadClient: 'qbittorrent',
+      downloadClientType: 'external',
+    }
+
+    vi.doMock('@/services/signalr', () => ({
+      signalRService: {
+        connect: vi.fn(async () => undefined),
+        onQueueUpdate: vi.fn(() => () => undefined),
+        onFilesRemoved: vi.fn(() => () => undefined),
+        onToast: vi.fn(() => () => undefined),
+        onAudiobookUpdate: vi.fn(() => () => undefined),
+        onDownloadUpdate: vi.fn(() => () => undefined),
+        onDownloadsList: vi.fn(() => () => undefined),
+      },
+    }))
+
+    vi.doMock('@/services/api', () => ({
+      apiService: {
+        getQueue: async () => [queueItem],
+        getServiceHealth: async () => ({ version: '0.0.0' }),
+        getStartupConfig: async () => ({ authenticationRequired: false }),
+        getLibrary: async () => [],
+      },
+    }))
+
+    vi.doMock('@/stores/configuration', () => ({
+      useConfigurationStore: () => ({
+        applicationSettings: { showCompletedExternalDownloads: false },
+        loadApplicationSettings: vi.fn(async () => undefined),
+      }),
+    }))
+
+    // No matching DB downloads
+    vi.doMock('@/stores/downloads', () => ({
+      useDownloadsStore: () => ({
+        activeDownloads: [],
+        completedDownloads: [],
+        loadDownloads: vi.fn(async () => undefined),
+      }),
+    }))
+
+    const { default: ActivityViewComponent } = await import('@/views/ActivityView.vue')
+    const wrapper = mount(ActivityViewComponent, { global: { stubs: ['CustomSelect'] } })
+
+    await new Promise((r) => setTimeout(r, 10))
+
+    const vm = wrapper.vm as unknown as { allActivityItems: ActivityItem[] }
+
+    // The queue-only item should NOT appear in the All tab list
+    expect(vm.allActivityItems.some((i) => i.id === 'q-only')).toBe(false)
   })
 
   it('removes an external item from Listenarr (DB) when it is not in the remote queue', async () => {
@@ -811,8 +885,20 @@ describe('ActivityView Completed tab shows completed downloads from downloads st
     }))
     vi.doMock('@/stores/downloads', () => ({
       useDownloadsStore: () => ({
+        // Provide a failed DB download with matching id so failed queue item is DB-backed
         activeDownloads: [],
-        failedDownloads: [],
+        failedDownloads: [
+          {
+            id: 'q2',
+            status: 'Failed',
+            progress: 0,
+            downloadClientId: 'qbittorrent',
+            startedAt: new Date().toISOString(),
+            title: 'Queue Failed Q2',
+            downloadedSize: 0,
+            totalSize: 0,
+          },
+        ],
         loadDownloads: vi.fn(async () => undefined),
       }),
     }))

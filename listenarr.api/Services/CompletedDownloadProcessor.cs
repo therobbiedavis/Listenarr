@@ -56,6 +56,8 @@ namespace Listenarr.Api.Services
         public async Task ProcessCompletedDownloadAsync(string downloadId, string finalPath)
         {
             _logger.LogInformation("ProcessCompletedDownloadAsync called for {DownloadId} (finalPath: {FinalPath})", downloadId, finalPath);
+            // Diagnostic marker to indicate the processor entry (visible in filtered logs)
+            _logger.LogInformation("AUTOIMPORT-PROCESSOR-ENTRY: CompletedDownloadProcessor.ProcessCompletedDownloadAsync called for {DownloadId} (finalPath: {FinalPath})", downloadId, finalPath);
 
             try
             {

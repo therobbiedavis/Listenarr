@@ -26,6 +26,8 @@ namespace Listenarr.Api.Services
 
         private const int QueueCacheExpirationSeconds = 10;
         private const int ClientStatusCacheExpirationSeconds = 30;
+        // Don't purge downloads that were added less than this many seconds ago to avoid races with client indexing
+        private const int PurgeDelaySeconds = 30;
 
         public DownloadQueueService(
             IMemoryCache cache,
@@ -133,22 +135,20 @@ namespace Listenarr.Api.Services
                         listenarrDownloads.Any(download =>
                         {
                             var idMatch = download.Id == queueItem.Id;
+                            // Also check if queue item ID matches stored torrent hash (any client)
                             var hashMatch = false;
-                            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase))
+                            try
                             {
-                                try
+                                if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
                                 {
-                                    if (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                    var storedHash = hashObj?.ToString();
+                                    if (!string.IsNullOrEmpty(storedHash))
                                     {
-                                        var storedHash = hashObj?.ToString();
-                                        if (!string.IsNullOrEmpty(storedHash))
-                                        {
-                                            hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
-                                        }
+                                        hashMatch = storedHash.Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase);
                                     }
                                 }
-                                catch { hashMatch = false; }
                             }
+                            catch { hashMatch = false; }
 
                             var titleMatch = false;
                             try
@@ -167,21 +167,49 @@ namespace Listenarr.Api.Services
                     ).ToList();
 
                     var mappedFiltered = new List<QueueItem>();
+                    // Track original client-provided ids that were mapped to Listenarr downloads
+                    var mappedClientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                     foreach (var queueItem in initialFiltered)
                     {
                         try
                         {
+                            var originalId = queueItem.Id;
+
                             var matchedDownload = listenarrDownloads.FirstOrDefault(download =>
                                 download.DownloadClientId == client.Id && (
-                                    download.Id == queueItem.Id ||
-                                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(queueItem.Id, StringComparison.OrdinalIgnoreCase)) ||
+                                    download.Id == originalId ||
+                                    (download.Metadata != null && download.Metadata.TryGetValue("TorrentHash", out var h) && (h?.ToString() ?? string.Empty).Equals(originalId, StringComparison.OrdinalIgnoreCase)) ||
                                     (!string.IsNullOrEmpty(download.Title) && !string.IsNullOrEmpty(queueItem.Title) && AreTitlesSimilar(download.Title, queueItem.Title))
                                 )
                             );
 
                             if (matchedDownload != null)
                             {
+                                mappedClientIds.Add(originalId);
                                 queueItem.Id = matchedDownload.Id;
+
+                                // If the client reports this item as completed, mark the Listenarr DB download as Completed so
+                                // the UI does not show a duplicate 'queued' entry for the same torrent.
+                                try
+                                {
+                                    if ((queueItem.Status ?? string.Empty).Equals("completed", System.StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        var dbDownload = await _downloadRepository.FindAsync(matchedDownload.Id);
+                                        if (dbDownload != null && dbDownload.Status != DownloadStatus.Completed && dbDownload.Status != DownloadStatus.Moved)
+                                        {
+                                            dbDownload.Status = DownloadStatus.Completed;
+                                            dbDownload.Progress = 100M;
+                                            dbDownload.DownloadedSize = dbDownload.TotalSize;
+                                            await _downloadRepository.UpdateAsync(dbDownload);
+                                            _logger.LogInformation("Marked Listenarr download {DownloadId} as Completed due to client observation", matchedDownload.Id);
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Failed to update DB status for matched download {DownloadId} (non-fatal)", matchedDownload.Id);
+                                }
                             }
 
                             mappedFiltered.Add(queueItem);
@@ -195,13 +223,23 @@ namespace Listenarr.Api.Services
 
                     queueItems.AddRange(mappedFiltered);
 
+
                     if (includeCompletedExternal)
                     {
                         var existingIds = queueItems.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+                        // Exclude completed items that correspond to original client ids that were already mapped to Listenarr downloads
+                        // (mappedClientIds is populated above while mapping)
+                        try { existingIds.UnionWith(mappedClientIds); } catch { }
+
                         var unmatchedCompleted = clientQueue
                             .Where(q => (q.Status ?? string.Empty).Equals("completed", StringComparison.OrdinalIgnoreCase))
                             .Where(q => !existingIds.Contains(q.Id))
+                            .Where(q => !listenarrDownloads.Any(d => d.DownloadClientId == client.Id && (
+                                d.Id == q.Id ||
+                                (d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var hh) && (hh?.ToString() ?? string.Empty).Equals(q.Id, StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrEmpty(d.Title) && !string.IsNullOrEmpty(q.Title) && AreTitlesSimilar(d.Title, q.Title))
+                            )))
                             .ToList();
 
                         foreach (var uc in unmatchedCompleted)
@@ -258,6 +296,68 @@ namespace Listenarr.Api.Services
                             {
                                 _logger.LogDebug("Skipped purge of {SkippedCount} NZBGet downloads (may be in history)", 
                                     orphanedDownloads.Count - toPurge.Count);
+                            }
+
+                            // Before purging, avoid purging downloads that were just created (race with client indexing)
+                            try
+                            {
+                                var now = DateTime.UtcNow;
+                                var recentlyAdded = toPurge.Where(d => (now - d.StartedAt).TotalSeconds < PurgeDelaySeconds).ToList();
+                                if (recentlyAdded.Any())
+                                {
+                                    _logger.LogDebug("Deferring purge of {Count} recently-added downloads (added < {Seconds}s) for client {ClientName}", recentlyAdded.Count, PurgeDelaySeconds, client.Name ?? client.Id);
+                                    toPurge = toPurge.Except(recentlyAdded).ToList();
+                                }
+
+                                for (int attempt = 1; attempt <= 5 && toPurge.Any(); attempt++)
+                                {
+                                    _logger.LogDebug("Re-checking queue before purge (attempt {Attempt}) for client {ClientName}", attempt, client.Name ?? client.Id);
+                                    try { await Task.Delay(500 * attempt); } catch { }
+
+                                    var refreshedQueue = await _clientGateway.GetQueueAsync(client);
+                                    var refreshedIds = new HashSet<string>(refreshedQueue.Select(q => q.Id), StringComparer.OrdinalIgnoreCase);
+
+                                    // Also prepare normalized titles and sizes for fuzzy matching
+                                    var refreshedTitles = refreshedQueue.Where(q => !string.IsNullOrEmpty(q.Title)).Select(q => q.Title).ToList();
+                                    var refreshedSizes = refreshedQueue.Where(q => q.Size > 0).Select(q => q.Size).ToList();
+
+                                    // Remove any orphaned download that now appears in refreshed queue (by id, TorrentHash, or similar title/size match)
+                                    toPurge = toPurge.Where(d =>
+                                    {
+                                        try
+                                        {
+                                            // Exact id match or TorrentHash match keeps it in the queue
+                                            if (refreshedIds.Contains(d.Id)) return false;
+                                            if (d.Metadata != null && d.Metadata.TryGetValue("TorrentHash", out var hashObj))
+                                            {
+                                                var hashStr = hashObj?.ToString() ?? string.Empty;
+                                                if (!string.IsNullOrEmpty(hashStr) && refreshedIds.Contains(hashStr)) return false;
+                                            }
+
+                                            // Also consider title similarity and size as a heuristic match (helps with Deluge timing/ID differences)
+                                            if (!string.IsNullOrEmpty(d.Title))
+                                            {
+                                                var titleMatch = refreshedQueue.Any(q => !string.IsNullOrEmpty(q.Title) && AreTitlesSimilar(d.Title, q.Title));
+                                                if (titleMatch)
+                                                {
+                                                    // If sizes are known, prefer matching sizes as well when available
+                                                    var sizeMatch = refreshedQueue.Any(q => q.Size > 0 && d.TotalSize > 0 && q.Size == d.TotalSize);
+                                                    if (sizeMatch || refreshedQueue.Any(q => !string.IsNullOrEmpty(q.Title) && AreTitlesSimilar(d.Title, q.Title)))
+                                                        return false;
+                                                }
+                                            }
+
+                                            return true;
+                                        }
+                                        catch { return true; }
+                                    }).ToList();
+
+                                    _logger.LogDebug("After recheck attempt {Attempt}, toPurge count is {Count}", attempt, toPurge.Count);
+                                }
+                            }
+                            catch (Exception exRetry)
+                            {
+                                _logger.LogDebug(exRetry, "Recheck before purge failed for client {ClientName} (non-fatal)", client.Name ?? client.Id);
                             }
 
                             foreach (var orphanedDownload in toPurge)

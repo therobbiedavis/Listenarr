@@ -125,7 +125,7 @@
     </div>
 
     <!-- Loading State -->
-    <div class="loading-state" v-if="loading && queue.length === 0">
+    <div class="loading-state" v-if="loading && filteredQueue.length === 0">
       <PhSpinner class="ph-spin" />
       <p>Loading queue...</p>
     </div>
@@ -352,9 +352,19 @@ const showCompletedExternalDownloads = computed(
 // Also expose a version of activity that includes completed external downloads
 // from the downloads store so the "Completed" tab can show completion candidates
 // observed by the backend monitor (these are saved in the downloads table).
+// Filter queue items so we only show items that have matching Listenarr DB entries
+const dbDownloadIds = computed(() => {
+  const ids = new Set<string>()
+  const active = unref(downloadsStore.activeDownloads || [])
+  const completed = unref(downloadsStore.completedDownloads || [])
+  const failed = unref(downloadsStore.failedDownloads || [])
+  for (const d of [...active, ...completed, ...failed]) if (d && d.id) ids.add(d.id)
+  return ids
+})
+
 const allActivityItems = computed(() => {
-  // Get queue items from external clients (these are already filtered by backend to only show Listenarr-managed downloads)
-  const queueItems = [...queue.value]
+  // Get queue items from external clients but only include items backed by DB downloads
+  const queueItems = [...queue.value].filter((q) => dbDownloadIds.value.has(q.id))
 
   // Get DDL downloads from database (since they don't have corresponding queue items)
   const activeDownloadsList = unref(downloadsStore.activeDownloads || [])
@@ -381,30 +391,31 @@ const allActivityItems = computed(() => {
   // Read user preference from configuration store: show completed external downloads
   const userPref = showCompletedExternalDownloads.value
 
-  if (userPref) {
-    // Include completed external downloads from the downloads store
-    const completedExternal = (downloadsStore.completedDownloads || [])
-      .filter((d) => d.downloadClientId && d.downloadClientId !== 'DDL')
-      .map(convertDownloadToQueueItem)
+  // Always include completed downloads from the Downloads store (DB entries)
+  // so DB-backed completed items appear in the All tab regardless of user preference.
+  const completedExternal = (downloadsStore.completedDownloads || [])
+    .filter((d) => d.downloadClientId && d.downloadClientId !== 'DDL')
+    .map(convertDownloadToQueueItem)
 
-    // Merge and deduplicate by id (prefer entries that already exist in `combined` which
-    // usually come from the queue snapshot and are more up-to-date for progress fields)
-    const map = new Map<string, QueueItem>()
-    for (const it of combined) map.set(it.id, it)
-    for (const it of completedExternal) {
-      if (!map.has(it.id)) map.set(it.id, it)
-    }
+  // Merge and deduplicate by id (prefer entries that already exist in `combined` which
+  // usually come from the queue snapshot and are more up-to-date for progress fields)
+  const map = new Map<string, QueueItem>()
+  for (const it of combined) map.set(it.id, it)
+  for (const it of completedExternal) {
+    if (!map.has(it.id)) map.set(it.id, it)
+  }
 
-    combined = Array.from(map.values())
-  } else {
-    // By default we hide completed external client items from the main
-    // combined list (to avoid clutter). Completed external downloads will
-    // still be surfaced in the Completed tab (see `completedActivityItems`).
+  combined = Array.from(map.values())
+
+  if (!userPref) {
+    // If user preference is false, hide completed external client items that are
+    // NOT backed by the Listenarr DB (i.e., external-only completed entries).
     combined = combined.filter((it) => {
-      // if item is from external client and completed, omit it
+      // if item is from external client and completed and NOT DB-backed, omit it
       if (
         (it.downloadClientType || '').toString().toLowerCase() !== 'ddl' &&
-        it.status === 'completed'
+        it.status === 'completed' &&
+        !dbDownloadIds.value.has(it.id)
       )
         return false
       return true
@@ -428,7 +439,7 @@ const completedActivityItems = computed(() => {
   // Start with the main combined set but allow completed external items
   // from the downloads store to be shown in the Completed tab.
   const base = (() => {
-    const queueItems = [...queue.value]
+    const queueItems = [...queue.value].filter((q) => dbDownloadIds.value.has(q.id))
     const ddlDownloadItems = downloadsStore.activeDownloads
       .filter((d) => d.downloadClientId === 'DDL')
       .map(convertDownloadToQueueItem)
@@ -452,8 +463,8 @@ const completedActivityItems = computed(() => {
 
 // Failed activity items: merge queue snapshot failures and DB failures
 const failedActivityItems = computed(() => {
-  // Items from the queue which are failed (external client snapshot)
-  const queueFailed = queue.value.filter((q) => q.status === 'failed')
+  // Items from the queue which are failed (external client snapshot) but only DB-backed
+  const queueFailed = queue.value.filter((q) => q.status === 'failed' && dbDownloadIds.value.has(q.id))
   // Failed downloads stored in DB (DDL or external failures)
   const failedFromDownloads = (downloadsStore.failedDownloads || []).map(convertDownloadToQueueItem)
 
