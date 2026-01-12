@@ -409,6 +409,8 @@ export interface Indexer {
   categories?: string
   animeCategories?: string
   tags?: string
+  addedByProwlarr?: boolean
+  prowlarrIndexerId?: number
   enableRss: boolean
   enableAutomaticSearch: boolean
   enableInteractiveSearch: boolean

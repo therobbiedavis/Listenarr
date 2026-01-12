@@ -618,6 +618,27 @@ namespace Listenarr.Infrastructure.Migrations
                     b.Property<string>("AdditionalSettings")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ConfigContract")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApiPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("AddedByProwlarr")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ProwlarrIndexerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastSyncedFromProwlarr")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProwlarrSyncStatus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tags")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AnimeCategories")
                         .HasColumnType("TEXT");
 

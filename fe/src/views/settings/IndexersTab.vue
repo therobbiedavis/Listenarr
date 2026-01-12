@@ -19,7 +19,7 @@
         >
           <div class="indexer-header">
             <div class="indexer-info">
-              <h4>{{ indexer.name }}</h4>
+              <h4>{{ indexer.name }} <span v-if="indexer.addedByProwlarr || indexer.name?.toLowerCase().includes('(prowlarr)')" class="badge prowlarr">Prowlarr</span></h4>
               <span class="indexer-type" :class="indexer.type.toLowerCase()">
                 {{ indexer.implementation === 'InternetArchive' ? 'DDL' : indexer.type }}
               </span>
@@ -458,6 +458,17 @@ defineExpose({ openAddIndexer })
 .indexer-type.ddl {
   background: #8b5cf6;
   color: white;
+}
+
+/* Prowlarr badge */
+.badge.prowlarr {
+  background: #3b82f6;
+  margin-left: 0.5rem;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  color: white;
+  vertical-align: middle;
 }
 
 .indexer-actions {

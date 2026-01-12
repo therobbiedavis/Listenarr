@@ -63,11 +63,6 @@ namespace Listenarr.Domain.Models
         public string? AnimeCategories { get; set; }
 
         /// <summary>
-        /// Tags for filtering (comma-separated)
-        /// </summary>
-        public string? Tags { get; set; }
-
-        /// <summary>
         /// Whether to enable RSS sync
         /// </summary>
         public bool EnableRss { get; set; } = true;
@@ -116,6 +111,41 @@ namespace Listenarr.Domain.Models
         /// Additional configuration settings (JSON)
         /// </summary>
         public string? AdditionalSettings { get; set; }
+
+        /// <summary>
+        /// Config contract (e.g., NewznabSettings) - used when Prowlarr posts indexers
+        /// </summary>
+        public string? ConfigContract { get; set; }
+
+        /// <summary>
+        /// API path for the indexer (e.g., /api)
+        /// </summary>
+        public string? ApiPath { get; set; }
+
+        /// <summary>
+        /// Whether this indexer was added by Prowlarr
+        /// </summary>
+        public bool AddedByProwlarr { get; set; } = false;
+
+        /// <summary>
+        /// External indexer id from Prowlarr (if set)
+        /// </summary>
+        public int? ProwlarrIndexerId { get; set; }
+
+        /// <summary>
+        /// When the indexer was last synced from Prowlarr
+        /// </summary>
+        public DateTime? LastSyncedFromProwlarr { get; set; }
+
+        /// <summary>
+        /// Prowlarr sync status (e.g., synced, error, pending)
+        /// </summary>
+        public string? ProwlarrSyncStatus { get; set; }
+
+        /// <summary>
+        /// Tags for filtering (comma-separated)
+        /// </summary>
+        public string? Tags { get; set; }
 
         /// <summary>
         /// When the indexer was created

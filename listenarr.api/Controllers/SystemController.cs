@@ -20,11 +20,13 @@ using Listenarr.Domain.Models;
 using Listenarr.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using System.Diagnostics;
 
 namespace Listenarr.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Route("api/v3/[controller]")]
     public class SystemController : ControllerBase
     {
         private readonly ISystemService _systemService;
@@ -180,6 +182,26 @@ namespace Listenarr.Api.Controllers
                 _logger.LogError(ex, "Error downloading logs");
                 return StatusCode(500, new { error = "Failed to download logs" });
             }
+        }
+
+        [HttpGet("status")]
+        [AllowAnonymous]
+        public ActionResult<object> GetStatus()
+        {
+            var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+            return Ok(new
+            {
+                version = version,
+                appName = "Listenarr",
+                instanceName = Environment.MachineName,
+                startTime = Process.GetCurrentProcess().StartTime,
+                isDebug =
+#if DEBUG
+                    true
+#else
+                    false
+#endif
+            });
         }
     }
 }

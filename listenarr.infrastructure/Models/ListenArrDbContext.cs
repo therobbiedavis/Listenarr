@@ -21,7 +21,7 @@ namespace Listenarr.Infrastructure.Models
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; }
         public DbSet<ProcessExecutionLog> ProcessExecutionLogs { get; set; }
         public DbSet<RootFolder> RootFolders { get; set; }
-
+        public DbSet<Tag> Tags { get; set; }
         public ListenArrDbContext(DbContextOptions<ListenArrDbContext> options)
             : base(options)
         {

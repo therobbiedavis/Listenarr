@@ -259,13 +259,19 @@ namespace Listenarr.Api.Controllers
         }
 
         /// <summary>
-        /// Create a new indexer
+        /// Create a new indexer (standard domain shape)
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] Indexer indexer)
         {
             indexer.CreatedAt = DateTime.UtcNow;
             indexer.UpdatedAt = DateTime.UtcNow;
+
+            // Mark as added by Prowlarr when name contains the marker
+            if (!string.IsNullOrEmpty(indexer.Name) && indexer.Name.Contains("(Prowlarr)", StringComparison.OrdinalIgnoreCase))
+            {
+                indexer.AddedByProwlarr = true;
+            }
 
             _dbContext.Indexers.Add(indexer);
             await _dbContext.SaveChangesAsync();
@@ -274,6 +280,186 @@ namespace Listenarr.Api.Controllers
                 indexer.Name, indexer.Id, indexer.Type);
 
             return CreatedAtAction(nameof(GetById), new { id = indexer.Id }, indexer);
+        }
+
+        /// <summary>
+        /// Create indexer from Prowlarr payload (supports /api/indexer and /api/v3/indexer)
+        /// </summary>
+        [HttpPost]
+        [Route("/api/indexer")]
+        [Route("/api/v3/indexer")]
+        public async Task<IActionResult> CreateFromProwlarr([FromBody] System.Text.Json.JsonElement body)
+        {
+            try
+            {
+                // Map common properties
+                var indexer = new Indexer();
+
+                if (body.TryGetProperty("name", out var nameElem)) indexer.Name = nameElem.GetString() ?? string.Empty;
+                if (body.TryGetProperty("implementation", out var implElem)) indexer.Implementation = implElem.GetString() ?? indexer.Implementation;
+                if (body.TryGetProperty("configContract", out var contractElem)) indexer.ConfigContract = contractElem.GetString() ?? indexer.ConfigContract;
+                if (body.TryGetProperty("protocol", out var protoElem)) indexer.Type = protoElem.GetString() ?? indexer.Type;
+                if (body.TryGetProperty("priority", out var priorityElem) && priorityElem.ValueKind == JsonValueKind.Number && priorityElem.TryGetInt32(out var prio)) indexer.Priority = prio;
+
+                // Fields array: baseUrl, apiPath, apiKey, categories, tags
+                if (body.TryGetProperty("fields", out var fields) && fields.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var f in fields.EnumerateArray())
+                    {
+                        if (f.ValueKind != JsonValueKind.Object) continue;
+                        var fname = f.GetProperty("name").GetString()?.ToLowerInvariant();
+                        switch (fname)
+                        {
+                            case "baseurl":
+                            case "url":
+                                indexer.Url = f.GetProperty("value").GetString() ?? indexer.Url;
+                                break;
+                            case "apipath":
+                                indexer.ApiPath = f.GetProperty("value").GetString() ?? indexer.ApiPath;
+                                break;
+                            case "apikey":
+                                indexer.ApiKey = f.GetProperty("value").GetString() ?? indexer.ApiKey;
+                                break;
+                            case "categories":
+                                if (f.GetProperty("value").ValueKind == JsonValueKind.Array)
+                                {
+                                    var cats = new List<string>();
+                                    foreach (var c in f.GetProperty("value").EnumerateArray()) cats.Add(c.ToString());
+                                    indexer.Categories = string.Join(',', cats);
+                                }
+                                else
+                                {
+                                    indexer.Categories = f.GetProperty("value").ToString();
+                                }
+                                break;
+                            case "tags":
+                                if (f.GetProperty("value").ValueKind == JsonValueKind.Array)
+                                {
+                                    var t = new List<string>();
+                                    foreach (var c in f.GetProperty("value").EnumerateArray()) t.Add(c.ToString());
+                                    indexer.Tags = string.Join(',', t);
+                                }
+                                else
+                                {
+                                    indexer.Tags = f.GetProperty("value").ToString();
+                                }
+                                break;
+                        }
+                    }
+                }
+
+                // Prowlarr id
+                if (body.TryGetProperty("id", out var idElem) && idElem.ValueKind == JsonValueKind.Number && idElem.TryGetInt32(out var pid))
+                {
+                    indexer.ProwlarrIndexerId = pid;
+                }
+
+                indexer.AddedByProwlarr = true;
+                indexer.CreatedAt = DateTime.UtcNow;
+                indexer.UpdatedAt = DateTime.UtcNow;
+
+                _dbContext.Indexers.Add(indexer);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Created indexer from Prowlarr '{Name}' (ID: {Id})", indexer.Name, indexer.Id);
+                return CreatedAtAction(nameof(GetById), new { id = indexer.Id }, indexer);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create indexer from Prowlarr payload");
+                return BadRequest(new { message = "Failed to parse Prowlarr payload", error = ex.Message });
+            }
+        }
+
+        // GET /api/indexer (Prowlarr compatibility)
+        [HttpGet]
+        [Route("/api/indexer")]
+        [Route("/api/v3/indexer")]
+        public async Task<IActionResult> GetFromProwlarr()
+        {
+            var indexers = await _dbContext.Indexers
+                .OrderBy(i => i.Priority)
+                .ThenBy(i => i.Name)
+                .ToListAsync();
+
+            var result = indexers.Select(i => new
+            {
+                id = i.ProwlarrIndexerId ?? i.Id,
+                name = i.Name,
+                implementation = i.Implementation,
+                configContract = i.ConfigContract ?? "NewznabSettings",
+                protocol = i.Type?.ToLowerInvariant() ?? "torrent",
+                enableRss = i.EnableRss,
+                enableAutomaticSearch = i.EnableAutomaticSearch,
+                enableInteractiveSearch = i.EnableInteractiveSearch,
+                priority = i.Priority,
+                fields = new List<object>
+                {
+                    new { name = "baseUrl", value = i.Url },
+                    new { name = "apiPath", value = i.ApiPath },
+                    new { name = "apiKey", value = i.ApiKey },
+                    new { name = "categories", value = !string.IsNullOrEmpty(i.Categories) ? i.Categories.Split(',').Select(s => s.Trim()).ToArray() : new string[]{} }
+                },
+                tags = !string.IsNullOrEmpty(i.Tags) ? i.Tags.Split(',').Select(s => s.Trim()).ToArray() : new string[] {},
+                addedByProwlarr = i.AddedByProwlarr,
+                prowlarrIndexerId = i.ProwlarrIndexerId
+            });
+
+            return Ok(result);
+        }
+
+        [HttpPut]
+        [Route("/api/indexer/{id}")]
+        [Route("/api/v3/indexer/{id}")]
+        public async Task<IActionResult> UpdateFromProwlarr(int id, [FromBody] System.Text.Json.JsonElement body)
+        {
+            // Allow matching by either Listenarr ID or Prowlarr id
+            var indexer = await _dbContext.Indexers.FirstOrDefaultAsync(i => i.Id == id || i.ProwlarrIndexerId == id);
+            if (indexer == null) return NotFound(new { message = "Indexer not found" });
+
+            try
+            {
+                if (body.TryGetProperty("name", out var nameElem)) indexer.Name = nameElem.GetString() ?? indexer.Name;
+                if (body.TryGetProperty("implementation", out var implElem)) indexer.Implementation = implElem.GetString() ?? indexer.Implementation;
+                if (body.TryGetProperty("protocol", out var protoElem)) indexer.Type = protoElem.GetString() ?? indexer.Type;
+                if (body.TryGetProperty("priority", out var priorityElem) && priorityElem.ValueKind == JsonValueKind.Number && priorityElem.TryGetInt32(out var prio)) indexer.Priority = prio;
+
+                if (body.TryGetProperty("fields", out var fields) && fields.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var f in fields.EnumerateArray())
+                    {
+                        if (f.ValueKind != JsonValueKind.Object) continue;
+                        var fname = f.GetProperty("name").GetString()?.ToLowerInvariant();
+                        if (fname == "baseurl" || fname == "url") indexer.Url = f.GetProperty("value").GetString() ?? indexer.Url;
+                        if (fname == "apikey") indexer.ApiKey = f.GetProperty("value").GetString() ?? indexer.ApiKey;
+                        if (fname == "apipath") indexer.ApiPath = f.GetProperty("value").GetString() ?? indexer.ApiPath;
+                        if (fname == "categories") indexer.Categories = f.GetProperty("value").ToString();
+                        if (fname == "tags") indexer.Tags = f.GetProperty("value").ToString();
+                    }
+                }
+
+                indexer.UpdatedAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+                return Ok(indexer);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update indexer from Prowlarr payload");
+                return BadRequest(new { message = "Failed to update indexer", error = ex.Message });
+            }
+        }
+
+        [HttpDelete]
+        [Route("/api/indexer/{id}")]
+        [Route("/api/v3/indexer/{id}")]
+        public async Task<IActionResult> DeleteFromProwlarr(int id)
+        {
+            var indexer = await _dbContext.Indexers.FirstOrDefaultAsync(i => i.Id == id || i.ProwlarrIndexerId == id);
+            if (indexer == null) return NotFound(new { message = "Indexer not found" });
+
+            _dbContext.Indexers.Remove(indexer);
+            await _dbContext.SaveChangesAsync();
+            return NoContent();
         }
 
         /// <summary>
