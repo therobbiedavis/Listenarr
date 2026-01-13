@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.47] - 2026-01-13
+
+### Added
+- **Prowlarr → Notifications**: When indexers are imported via the Prowlarr-compatible API, the server now broadcasts `IndexersUpdated` and also publishes a toast and persistent `Notification` so the activity bell dropdown shows the import (includes created indexer names).
+- **Settings hub auto-connect**: The frontend now automatically establishes a dedicated Settings hub connection (when the downloads hub's downloads connection is established) so the SPA reliably receives settings and indexer broadcasts.
+- **Debugging**: Added debug endpoints `GET /api/v1/debug/settings/clients` and `POST /api/v1/debug/indexers/publish` to help verify hub connectivity.
+
+### Fixed
+- **SignalR**: Fixed missing SettingsHub client connections and ensured notifications are published when indexers are created.
+
 ## [0.2.46] - 2026-01-07
 
 ### Added
