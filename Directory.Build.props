@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <EFVersion>8.0.22</EFVersion>
+    <EFVersion>8.0.23</EFVersion>
   </PropertyGroup>
 
   <ItemGroup>

@@ -5,6 +5,7 @@ using Moq;
 using Xunit;
 using Listenarr.Api.Controllers;
 using Listenarr.Infrastructure.Models;
+using Listenarr.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System;
@@ -35,7 +36,8 @@ namespace Listenarr.Api.Tests
             mockHubContext.SetupGet(h => h.Clients).Returns(mockHubClients.Object);
 
             var mockLogger = new Mock<ILogger<ProwlarrCompatController>>();
-            var controller = new ProwlarrCompatController(mockLogger.Object, db, mockHubContext.Object);
+            var mockToastService = new Mock<IToastService>();
+            var controller = new ProwlarrCompatController(mockLogger.Object, db, mockHubContext.Object, mockToastService.Object);
 
             var newIndexer = new { name = "Unit Test Indexer", implementation = "Newznab", baseUrl = "http://localhost", apiPath = "api", apiKey = "KEY" };
             var arr = JsonSerializer.Serialize(new[] { newIndexer });
