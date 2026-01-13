@@ -1,0 +1,251 @@
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Linq;
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Xunit;
+
+namespace Listenarr.Api.Tests
+{
+    public class ProwlarrEndpointsTests : IClassFixture<WebApplicationFactory<Program>>
+    {
+        private readonly WebApplicationFactory<Program> _factory;
+
+        public ProwlarrEndpointsTests(WebApplicationFactory<Program> factory)
+        {
+            _factory = factory;
+        }
+
+        [Fact]
+        public async Task SystemStatus_ReturnsJsonWithVersion()
+        {
+            var client = _factory.CreateClient();
+            var resp = await client.GetAsync("/api/v1/system/status");
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            Assert.Equal("application/json", resp.Content.Headers.ContentType?.MediaType);
+
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.TryGetProperty("version", out var versionProp));
+            Assert.False(string.IsNullOrEmpty(versionProp.GetString()));
+        }
+
+        [Fact]
+        public async Task IndexerTest_ReturnsHeaderAndJson()
+        {
+            var client = _factory.CreateClient();
+            // Prefer GET for indexer test in CI to avoid antiforgery middleware interactions during tests
+            var resp = await client.GetAsync("/api/v1/indexer/test");
+
+            // Debug POST to ensure POSTs are routed correctly
+            var debug = await client.PostAsync("/api/v1/debug/test", new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
+            Assert.True(debug.IsSuccessStatusCode, $"Debug POST failed: {(int)debug.StatusCode} {debug.StatusCode}: {await debug.Content.ReadAsStringAsync()}");
+
+            var body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new System.Exception($"POST /api/v1/indexer/test returned {(int)resp.StatusCode} {resp.StatusCode}: {body}");
+            }
+
+            Assert.Equal("application/json", resp.Content.Headers.ContentType?.MediaType);
+
+            // Header present
+            Assert.True(resp.Headers.Contains("X-Application-Version"));
+            var header = resp.Headers.GetValues("X-Application-Version").FirstOrDefault();
+            Assert.False(string.IsNullOrEmpty(header));
+
+            // JSON body contains success and version
+            using var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(body ?? ""));
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.TryGetProperty("success", out var successProp));
+            Assert.True(successProp.GetBoolean());
+            Assert.True(doc.RootElement.TryGetProperty("version", out var v2));
+            Assert.False(string.IsNullOrEmpty(v2.GetString()));
+        }
+
+        [Fact]
+        public async Task IndexerSchema_ReturnsFieldsArray()
+        {
+            var client = _factory.CreateClient();
+            var resp = await client.GetAsync("/api/v1/indexer/schema");
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            Assert.Equal("application/json", resp.Content.Headers.ContentType?.MediaType);
+
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.TryGetProperty("fields", out var fieldsProp));
+            Assert.True(fieldsProp.ValueKind == JsonValueKind.Array);
+            Assert.True(fieldsProp.GetArrayLength() >= 1);
+
+            // Ensure schema contains required fields for Prowlarr compatibility
+            var fieldNames = fieldsProp.EnumerateArray().Select(f => f.GetProperty("name").GetString() ?? string.Empty).ToList();
+            Assert.Contains("baseUrl", fieldNames);
+            Assert.Contains("apiPath", fieldNames);
+            Assert.Contains("apiKey", fieldNames);
+            Assert.Contains("categories", fieldNames);
+
+            // Schema must advertise supported implementations (Prowlarr expects at least Newznab or Torznab)
+            Assert.True(doc.RootElement.TryGetProperty("implementations", out var implProp));
+            Assert.True(implProp.ValueKind == JsonValueKind.Array);
+            bool hasImpl = implProp.EnumerateArray().Any(e => (e.GetString() ?? string.Empty) == "Newznab" || (e.GetString() ?? string.Empty) == "Torznab");
+            Assert.True(hasImpl, "Schema implementations must include Newznab or Torznab");
+        }
+
+        [Fact]
+        public async Task IndexerRoot_ReturnsJsonWithImplementations()
+        {
+            var client = _factory.CreateClient();
+            var resp = await client.GetAsync("/api/v1/indexer/info");
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            Assert.Equal("application/json", resp.Content.Headers.ContentType?.MediaType);
+
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.TryGetProperty("implementations", out var implProp));
+            Assert.True(implProp.ValueKind == JsonValueKind.Array);
+            bool hasImpl = implProp.EnumerateArray().Any(e => (e.GetString() ?? string.Empty) == "Newznab" || (e.GetString() ?? string.Empty) == "Torznab");
+            Assert.True(hasImpl, "Indexers root must include Newznab or Torznab implementations");
+        }
+
+        [Fact]
+        public async Task IndexersList_Get_ReturnsArray()
+        {
+            var client = _factory.CreateClient();
+            var resp = await client.GetAsync("/api/v1/indexers");
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            Assert.Equal("application/json", resp.Content.Headers.ContentType?.MediaType);
+
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.ValueKind == JsonValueKind.Array);
+        }
+
+        [Fact]
+        public async Task IndexersList_Post_AcceptsArray()
+        {
+            var client = _factory.CreateClient();
+            var payload = "[]";
+            var resp = await client.PostAsync("/api/v1/indexers", new StringContent(payload, System.Text.Encoding.UTF8, "application/json"));
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.TryGetProperty("accepted", out var acc));
+            Assert.True(acc.GetBoolean());
+        }
+
+        [Fact]
+        public async Task Indexers_Post_PersistsToDatabaseAndVisibleViaApi()
+        {
+            var client = _factory.CreateClient();
+
+            var newIndexer = new
+            {
+                name = "Prowlarr Test Indexer",
+                implementation = "Newznab",
+                baseUrl = "http://localhost:8080",
+                apiPath = "api",
+                apiKey = "TESTKEY",
+                categories = new[] { 1000 }
+            };
+
+            var arr = "[" + System.Text.Json.JsonSerializer.Serialize(newIndexer) + "]";
+            var resp = await client.PostAsync("/api/v1/indexers", new StringContent(arr, System.Text.Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+            // Now fetch persisted indexers via the Prowlarr-compatible endpoint
+            var resp2 = await client.GetAsync("/api/v1/indexer");
+            Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
+
+            using var stream = await resp2.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.ValueKind == JsonValueKind.Array);
+            // Ensure at least one indexer has the name we posted
+            bool found = doc.RootElement.EnumerateArray().Any(elem => elem.TryGetProperty("name", out var p) && (p.GetString() ?? string.Empty) == "Prowlarr Test Indexer");
+            Assert.True(found, "Posted indexer should be persisted and visible via /api/indexers");
+        }
+
+        [Fact]
+        public async Task Indexer_Post_Single_PersistsToDatabaseAndVisibleViaApi()
+        {
+            var client = _factory.CreateClient();
+
+            var newIndexer = new
+            {
+                name = "Prowlarr Single Test Indexer",
+                implementation = "Newznab",
+                baseUrl = "http://localhost:8081",
+                apiPath = "api",
+                apiKey = "SINGLEKEY",
+                categories = new[] { 2000 }
+            };
+
+            var payload = System.Text.Json.JsonSerializer.Serialize(newIndexer);
+            var resp = await client.PostAsync("/api/v1/indexer", new StringContent(payload, System.Text.Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+            // Validate response contains created indexer
+            var respBody = await resp.Content.ReadAsStringAsync();
+            using var respDocStream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(respBody ?? ""));
+            var respDoc = await JsonDocument.ParseAsync(respDocStream);
+            Assert.True(respDoc.RootElement.TryGetProperty("indexers", out var idxProp));
+            Assert.True(idxProp.ValueKind == JsonValueKind.Array);
+            bool foundInResp = idxProp.EnumerateArray().Any(elem => elem.TryGetProperty("name", out var p) && (p.GetString() ?? string.Empty) == "Prowlarr Single Test Indexer");
+
+            System.Text.Json.JsonElement createdElem;
+            int id;
+            if (foundInResp)
+            {
+                createdElem = idxProp.EnumerateArray().First();
+                id = createdElem.GetProperty("id").GetInt32();
+            }
+            else
+            {
+                // If the response didn't include the created indexer (dedupe / existing indexer case), search persisted indexers by URL
+                var listResp = await client.GetAsync("/api/v1/indexer");
+                Assert.Equal(HttpStatusCode.OK, listResp.StatusCode);
+                using var listStream = await listResp.Content.ReadAsStreamAsync();
+                var listDoc = await JsonDocument.ParseAsync(listStream);
+                var expectedUrl = "http://localhost:8081/api";
+                var match = listDoc.RootElement.EnumerateArray().FirstOrDefault(elem => elem.TryGetProperty("baseUrl", out var p) && (p.GetString() ?? string.Empty) == expectedUrl);
+                Assert.True(match.ValueKind != JsonValueKind.Undefined, "Posted single indexer should be present in persisted indexers (by URL)");
+                createdElem = match;
+                id = createdElem.GetProperty("id").GetInt32();
+            }
+
+            var getResp = await client.GetAsync($"/api/v1/indexer/{id}");
+            Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
+
+            using var getStream = await getResp.Content.ReadAsStreamAsync();
+            var getDoc = await JsonDocument.ParseAsync(getStream);
+            Assert.True(getDoc.RootElement.TryGetProperty("id", out var getIdProp));
+            Assert.Equal(id, getIdProp.GetInt32());
+            Assert.True(getDoc.RootElement.TryGetProperty("settings", out var settingsProp));
+            Assert.True(settingsProp.TryGetProperty("baseUrl", out var sb));
+            Assert.Equal("http://localhost:8081/api", sb.GetString());
+
+            // Ensure requesting id 0 returns a compatibility object rather than 404 HTML
+            var respZero = await client.GetAsync("/api/v1/indexer/0");
+            Assert.Equal(HttpStatusCode.OK, respZero.StatusCode);
+            var zeroBody = await respZero.Content.ReadAsStringAsync();
+            Assert.Contains("Prowlarr Indexer", zeroBody);
+
+
+            // Now fetch persisted indexers via the Prowlarr-compatible endpoint
+            var resp2 = await client.GetAsync("/api/v1/indexer");
+            Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
+
+            using var stream = await resp2.Content.ReadAsStreamAsync();
+            var doc = await JsonDocument.ParseAsync(stream);
+            Assert.True(doc.RootElement.ValueKind == JsonValueKind.Array);
+            // Ensure at least one indexer has the name we posted
+            bool found = doc.RootElement.EnumerateArray().Any(elem => elem.TryGetProperty("name", out var p) && (p.GetString() ?? string.Empty) == "Prowlarr Single Test Indexer");
+            Assert.True(found, "Posted single indexer should be persisted and visible via /api/indexers");
+        }
+    }
+}

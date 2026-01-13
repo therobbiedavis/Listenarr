@@ -15,7 +15,7 @@
           v-for="indexer in indexers"
           :key="indexer.id"
           class="indexer-card"
-          :class="{ disabled: !indexer.isEnabled }"
+          :class="{ disabled: !indexer.isEnabled, highlight: isNew(indexer.id) }"
         >
           <div class="indexer-header">
             <div class="indexer-info">
@@ -152,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import {
   PhListMagnifyingGlass,
   PhToggleRight,
@@ -179,6 +179,7 @@ import {
   testIndexer as apiTestIndexer,
   deleteIndexer,
 } from '@/services/api'
+import { signalRService } from '@/services/signalr'
 
 // State
 const toast = useToast()
@@ -302,8 +303,44 @@ const executeDeleteIndexer = async () => {
 }
 
 // Lifecycle
+const newlyAddedIds = ref<Set<number>>(new Set())
+
+function isNew(id: number) {
+  return newlyAddedIds.value.has(id)
+}
+
 onMounted(() => {
   loadIndexers()
+  // Subscribe to IndexersUpdated messages so external changes (eg. Prowlarr sync) refresh the list
+  const unsub = signalRService.onIndexersUpdated((payload) => {
+    // If the payload contains created indexer details, highlight and list them
+    if (payload?.indexers && payload.indexers.length > 0) {
+      const names = payload.indexers.map((i: any) => i.name).join(', ')
+      const ids = payload.indexers.map((i: any) => i.id)
+
+      ids.forEach((id: number) => newlyAddedIds.value.add(id))
+
+      // Refresh list and show names
+      loadIndexers()
+      toast.success('Indexers', `Imported ${payload.indexers.length} indexer(s): ${names}`)
+
+      // Clear highlights after 10 seconds
+      setTimeout(() => {
+        newlyAddedIds.value.clear()
+      }, 10000)
+
+      return
+    }
+
+    // Fallback: keep previous behavior for payload with counts only
+    loadIndexers()
+    if (payload?.created) {
+      toast.success('Indexers', `Imported ${payload.created} indexer(s) successfully`)
+    }
+  })
+
+  // Cleanup on unmount
+  onUnmounted(() => unsub())
 })
 
 const openAddIndexer = () => {
@@ -404,6 +441,18 @@ defineExpose({ openAddIndexer })
 .indexer-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.indexer-card.highlight {
+  border-color: var(--success);
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.12);
+  animation: highlightPulse 1.2s ease-in-out 2;
+}
+
+@keyframes highlightPulse {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
 }
 
 .indexer-card.disabled {

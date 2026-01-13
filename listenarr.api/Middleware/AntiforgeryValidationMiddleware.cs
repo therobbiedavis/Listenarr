@@ -20,24 +20,32 @@ namespace Listenarr.Api.Middleware
 
         public async Task InvokeAsync(HttpContext context)
         {
+            var method = context.Request.Method;
+            var path = context.Request.Path.Value ?? string.Empty;
+            _logger?.LogDebug("AntiforgeryMiddleware: incoming request {Method} {Path}", method, path);
+
             // Only validate for unsafe HTTP methods
             if (HttpMethods.IsPost(context.Request.Method)
                 || HttpMethods.IsPut(context.Request.Method)
                 || HttpMethods.IsDelete(context.Request.Method)
                 || HttpMethods.IsPatch(context.Request.Method))
             {
+                _logger?.LogDebug("AntiforgeryMiddleware: request method is considered unsafe; checking endpoint metadata and path whitelist");
                 var endpoint = context.GetEndpoint();
                 // Skip if endpoint allows anonymous access
                 if (endpoint?.Metadata?.GetMetadata<Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute>() != null)
                 {
+                    _logger?.LogDebug("AntiforgeryMiddleware: endpoint allows anonymous, skipping antiforgery validation");
                     await _next(context);
                     return;
                 }
 
                 // Allow some public endpoints without antiforgery (startup config reads, token request itself, login/register)
-                var path = context.Request.Path.Value ?? string.Empty;
-                if (path.StartsWith("/api/antiforgery") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register") || path.StartsWith("/api/account/logout") || path.StartsWith("/api/startupconfig") || path.StartsWith("/hubs/"))
+                if (path.StartsWith("/api/antiforgery") || path.StartsWith("/api/account/login") || path.StartsWith("/api/account/register") || path.StartsWith("/api/account/logout") || path.StartsWith("/api/startupconfig") || path.StartsWith("/hubs/")
+                    // Also allow Prowlarr-compatible indexer endpoints and system status
+                    || path.StartsWith("/api/v1/indexer") || path.StartsWith("/api/v1/system"))
                 {
+                    _logger?.LogDebug("AntiforgeryMiddleware: path is whitelisted, skipping antiforgery validation");
                     await _next(context);
                     return;
                 }
@@ -92,7 +100,7 @@ namespace Listenarr.Api.Middleware
                         }
                         catch { }
 
-                        _logger?.LogWarning(ex, "Antiforgery validation failed. HeaderLength={HeaderLength}, CookieNames={CookieNames}, HeaderPrefix={HeaderPrefix}, CookiePrefix={CookiePrefix}, PrefixesEqual={PrefixesEqual}, PrincipalAuthenticated={PrincipalAuthenticated}, PrincipalNameMask={PrincipalNameMask}, PrincipalClaims={PrincipalClaims}", hdrLen, cookieNames, headerPrefix, cookiePrefix, equalPrefixes, principalAuthenticated, principalNameMask, principalClaims);
+                        _logger?.LogWarning(ex, "Antiforgery validation failed. Method={Method}, Path={Path}, HeaderLength={HeaderLength}, CookieNames={CookieNames}, HeaderPrefix={HeaderPrefix}, CookiePrefix={CookiePrefix}, PrefixesEqual={PrefixesEqual}, PrincipalAuthenticated={PrincipalAuthenticated}, PrincipalNameMask={PrincipalNameMask}, PrincipalClaims={PrincipalClaims}", method, path, hdrLen, cookieNames, headerPrefix, cookiePrefix, equalPrefixes, principalAuthenticated, principalNameMask, principalClaims);
                     }
                     catch { /* ignore logging errors */ }
 

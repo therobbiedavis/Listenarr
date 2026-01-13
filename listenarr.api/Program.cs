@@ -22,6 +22,7 @@ using Listenarr.Api.Services.Search.Filters;
 using Listenarr.Api.Services.Search.Strategies;
 using Listenarr.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using System.Linq;
 using Listenarr.Api.Middleware;
 using System.Net;
 using Listenarr.Infrastructure.Models;
@@ -592,26 +593,13 @@ builder.Services.AddSwaggerGen(options =>
     // avoid collisions between nested controller DTOs and top-level DTOs that share
     // the same simple type name (e.g. TranslatePathRequest).
     options.CustomSchemaIds(type => (type.FullName ?? type.Name).Replace('+', '.'));
-});
 
-// Authentication: Session-based (default)
-// No additional authentication scheme configuration needed for sessions
+        // Resolve conflicting actions (ambiguous HTTP method actions) by selecting the first
+        // description. This prevents Swagger generation failures when multiple action descriptors
+        // map to similar routes. If more complex disambiguation is needed in future, refine here.
+        options.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
+    });
 
-// Configure forwarded headers - required for apps behind reverse proxy
-// This allows the app to see the real client IP and original protocol (HTTP/HTTPS)
-builder.Services.Configure<ForwardedHeadersOptions>(options =>
-{
-    // Only forward the essential headers needed for proper operation
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-
-    // Trust any proxy since this app runs in a controlled Docker/reverse proxy environment
-    // Users are responsible for configuring their reverse proxy securely
-    options.KnownNetworks.Clear();
-    options.KnownProxies.Clear();
-});
-
-// Antiforgery (CSRF) protection for SPA: expect token in X-XSRF-TOKEN header
-// The cookie SecurePolicy defaults to SameAsRequest so TLS-terminating reverse proxies can control
 // whether the cookie is marked secure by forwarding the original scheme (X-Forwarded-Proto).
 // Override via configuration: Antiforgery:Cookie:SecurePolicy = None|SameAsRequest|Always
 var antiforgeryCookiePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
@@ -1167,6 +1155,9 @@ if (Directory.Exists(cacheImagesPath))
 // Ensure routing middleware is enabled so endpoint routing features (CORS, Authorization)
 // can be applied by subsequent middleware. This must run before UseCors()/UseAuthorization().
 app.UseRouting();
+
+// Log incoming request bodies for POST/PUT/PATCH to aid debugging of client integrations
+app.UseMiddleware<Listenarr.Api.Middleware.RequestBodyLoggingMiddleware>();
 
 // Enable CORS only in development (production should use reverse proxy for CORS)
 if (app.Environment.IsDevelopment())
