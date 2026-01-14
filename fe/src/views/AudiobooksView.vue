@@ -109,13 +109,6 @@
             class="toolbar-custom-select"
             aria-label="Sort by"
           />
-          <input
-            type="search"
-            v-model="searchQuery"
-            class="toolbar-search"
-            placeholder="Search title or author"
-            aria-label="Search audiobooks"
-          />
         </div>
       </div>
     </div>

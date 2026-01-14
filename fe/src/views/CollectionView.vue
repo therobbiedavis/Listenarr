@@ -1,9 +1,20 @@
 <template>
   <div class="collection-view">
-    <!-- Toolbar -->
+    <!-- Top Navigation Bar -->
+    <div class="top-nav">
+      <div class="nav-title">
+        <h1>
+          <PhUser v-if="type === 'author'" />
+          <PhBooks v-else />
+          {{ type === 'author' ? 'Author' : 'Series' }}: {{ name }}
+        </h1>
+      </div>
+    </div>
+
+    <!-- Top Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <button class="nav-btn" @click="goBack">
+        <button class="toolbar-btn" @click="goBack">
           <PhArrowLeft />
           Back
         </button>
@@ -20,6 +31,9 @@
         >
           <PhInfo />
         </button>
+        <span class="count-badge" v-if="audiobooks.length > 0">
+          {{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}
+        </span>
         <button class="toolbar-btn" @click="refreshLibrary">
           <PhArrowClockwise />
           Refresh
@@ -53,28 +67,7 @@
             class="toolbar-custom-select"
             aria-label="Sort by"
           />
-          <input
-            type="search"
-            v-model="searchQuery"
-            class="toolbar-search"
-            placeholder="Search title"
-            aria-label="Search audiobooks"
-          />
         </div>
-      </div>
-    </div>
-
-    <!-- Top Navigation Bar -->
-    <div class="top-nav">
-      <div class="nav-title">
-        <h1>
-          <PhUser v-if="type === 'author'" />
-          <PhBooks v-else />
-          {{ type === 'author' ? 'Author' : 'Series' }}: {{ name }}
-        </h1>
-        <span class="count-badge"
-          >{{ audiobooks.length }} book{{ audiobooks.length !== 1 ? 's' : '' }}</span
-        >
       </div>
     </div>
 
@@ -817,7 +810,6 @@ defineExpose({
 
 <style scoped>
 .collection-view {
-  margin-top: 60px; /* Add margin to account for fixed toolbar */
   background-color: #1a1a1a;
   min-height: calc(100vh - 120px);
 }
@@ -826,10 +818,14 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 1rem;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
-  padding: 12px 20px;
+  margin-bottom: 0; /* toolbar provides separation */
+  padding: 10px 20px;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #333;
+  position: sticky; /* stick below global top nav */
+  top: 60px; /* account for fixed global top-nav height */
+  z-index: 100; /* sit above content but below global top nav */
+  height: 52px;
 }
 
 .nav-btn {
@@ -876,21 +872,6 @@ defineExpose({
 .count-badge:hover,
 .count-badge:focus {
   background-color: #005fa3;
-  right: 0;
-  z-index: 99; /* Below global nav (1000) but above content */
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 20px;
-  background-color: #2a2a2a;
-  border-bottom: 1px solid #333;
-  margin-bottom: 20px;
-}
-
-@media (max-width: 768px) {
-  .toolbar {
-    left: 0; /* Full width on mobile */
-  }
 }
 
 .toolbar-left,
@@ -992,16 +973,187 @@ defineExpose({
 .toolbar-filters {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-left: 8px;
 }
+
 .toolbar-search {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.04);
   color: #e6eef8;
-  padding: 8px 8px;
+  padding: 8px 10px;
   border-radius: 6px;
-  min-width: 180px;
+  min-width: 220px; /* wider to match Audiobooks view */
+}
+.toolbar-select {
+  background-color: #2a2a2a; /* match CustomSelect trigger */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e6eef8;
+  padding: 8px 10px;
+  border-radius: 6px;
+  min-height: 36px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, 0.12) 50%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(1em + 2px),
+    calc(100% - 10px) calc(1em + 2px);
+  background-size:
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+}
+
+.toolbar-custom-select {
+  width: auto;
+  display: inline-block;
+}
+.toolbar-select option {
+  background: #2a2a2a;
+  color: #e6eef8;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 52px; /* consistent toolbar height with Audiobooks view */
+  padding: 8px 20px;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #333;
+  margin-bottom: 16px;
+  position: sticky; /* stick below collection top-nav */
+  top: calc(60px + 52px); /* below global top-nav + collection top-nav */
+  z-index: 99; /* below .top-nav */
+}
+
+@media (max-width: 768px) {
+  .toolbar {
+    left: 0; /* Full width on mobile */
+    gap: 8px;
+    align-items: stretch;
+    height: auto;
+    padding: 12px;
+  }
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto; /* push filters to the right */
+  justify-content: flex-end;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px; /* slightly tighter */
+  min-height: 36px;
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  color: #e6eef8;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    transform 0.08s ease,
+    box-shadow 0.12s ease;
+}
+
+.toolbar-btn:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.toolbar-btn.active {
+  background-color: #2196f3;
+  border-color: #2196f3;
+  color: #fff;
+}
+
+.toolbar-btn.edit-btn {
+  background-color: #2196f3;
+  border-color: #1976d2;
+  color: #fff;
+}
+
+.toolbar-btn.edit-btn:hover {
+  background-color: #1976d2;
+}
+
+.toolbar-btn.delete-btn {
+  background-color: #e74c3c;
+  border-color: #c0392b;
+  color: #fff;
+}
+
+.toolbar-btn.delete-btn:hover {
+  background-color: #c0392b;
+}
+
+/* Accessibility: strong focus ring for keyboard users */
+.toolbar-btn:focus-visible {
+  outline: 3px solid rgba(33, 150, 243, 0.18);
+  outline-offset: 2px;
+}
+
+/* Mobile-friendly toolbar: hide text, show only icons on screens 1024px and below */
+@media (max-width: 1024px) {
+  .toolbar-btn {
+    padding: 8px;
+    min-width: 36px;
+    justify-content: center;
+    font-size: 0;
+    gap: unset;
+  }
+
+  .toolbar-btn svg {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .count-badge {
+    display: none;
+  }
+
+  .toolbar-search {
+    min-width: 120px;
+  }
+
+  .select-trigger {
+    width: fit-content;
+  }
+
+  .select-dropdown {
+    min-width: 120px;
+    max-width: 160px;
+  }
+}
+
+.toolbar-filters {
+  display: inline-flex;
+  align-items: center;
+}
+
+.toolbar-search {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  color: #e6eef8;
+  padding: 8px 10px;
+  border-radius: 6px;
+  min-width: 220px; /* wider to match Audiobooks view */
 }
 .toolbar-select {
   background-color: #2a2a2a; /* match CustomSelect trigger */
@@ -2117,14 +2269,17 @@ defineExpose({
 }
 
 @media (max-width: 768px) {
-  .toolbar {
+  .title-bar {
     flex-direction: column;
-    gap: 1rem;
     align-items: stretch;
+    gap: 1rem;
   }
 
-  .toolbar-left,
-  .toolbar-right {
+  .nav-title {
+    justify-content: center;
+  }
+
+  .title-filters {
     justify-content: center;
   }
 

@@ -8,9 +8,10 @@
     >
       <div class="select-content">
         <component :is="selectedOption?.icon" v-if="selectedOption?.icon" class="option-icon" />
+        <PhArrowsDownUp class="dropdown-arrow" :class="{ rotated: isOpen }" />
         <span class="option-text">{{ selectedOption?.label || placeholder }}</span>
       </div>
-      <PhArrowsDownUp class="dropdown-arrow" :class="{ rotated: isOpen }" />
+
     </div>
 
     <div v-if="isOpen" class="select-dropdown" ref="dropdown">
@@ -146,15 +147,16 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 6px 12px; /* match toolbar button horizontal padding */
   background-color: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   color: #fff;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-height: 20px;
-  font-size: 12px;
+  min-height: 36px; /* same height as toolbar buttons */
+  font-size: 13px; /* match toolbar font size */
+  display: inline-flex;
 }
 
 .select-trigger:focus {
@@ -175,7 +177,7 @@ defineExpose({
 .select-content {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
   flex: 1;
   min-width: 0;
 }
