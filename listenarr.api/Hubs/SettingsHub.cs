@@ -33,15 +33,24 @@ namespace Listenarr.Api.Hubs
             _logger = logger;
         }
 
+            // Track connected clients for debugging/health checks
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _connectedClients = new();
+
+        public static IReadOnlyCollection<string> ConnectedClientIds => _connectedClients.Keys.ToArray();
+
         public override async Task OnConnectedAsync()
         {
-            _logger.LogInformation("Settings client connected: {ConnectionId}", Context.ConnectionId);
+            _connectedClients[Context.ConnectionId] = DateTime.UtcNow;
+            _logger.LogInformation("Settings client connected: {ConnectionId}. ConnectedCount={Count}", Context.ConnectionId, _connectedClients.Count);
+
             await base.OnConnectedAsync();
         }
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            _logger.LogInformation("Settings client disconnected: {ConnectionId}", Context.ConnectionId);
+            _connectedClients.TryRemove(Context.ConnectionId, out _);
+            _logger.LogInformation("Settings client disconnected: {ConnectionId}. ConnectedCount={Count}", Context.ConnectionId, _connectedClients.Count);
+
             await base.OnDisconnectedAsync(exception);
         }
 

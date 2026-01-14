@@ -53,7 +53,7 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
 
       // Get API base URL - SignalR needs direct backend connection in dev
       const apiBaseUrl = import.meta.env.DEV
-        ? 'http://localhost:5000' // In dev, SignalR connects directly to backend (bypasses Vite proxy)
+        ? 'http://localhost:4545' // In dev, SignalR connects directly to backend (bypasses Vite proxy)
         : import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || ''
       const hubUrl = `${apiBaseUrl}/hubs/logs`
 
@@ -128,7 +128,7 @@ export function useSystemLogs(maxLogs = 100, autoConnect = true) {
     try {
       // Use the same base URL logic as the SignalR connection
       const apiBaseUrl = import.meta.env.DEV
-        ? 'http://localhost:5000'
+        ? 'http://localhost:4545'
         : import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || ''
 
       const response = await fetch(`${apiBaseUrl}/api/system/logs?limit=100`)

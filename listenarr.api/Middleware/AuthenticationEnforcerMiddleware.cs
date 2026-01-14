@@ -20,6 +20,10 @@ namespace Listenarr.Api.Middleware
 
         public async Task InvokeAsync(HttpContext context)
         {
+            var method = context.Request.Method;
+            var path = context.Request.Path.Value ?? string.Empty;
+            _logger?.LogDebug("AuthenticationEnforcer: incoming request {Method} {Path}", method, path);
+
             var cfg = _startupConfigService.GetConfig();
             var authRequired = false;
             if (cfg != null && cfg.AuthenticationRequired != null)
@@ -29,7 +33,6 @@ namespace Listenarr.Api.Middleware
             }
 
             // Log logout requests specifically and include masked principal diagnostics
-            var path = context.Request.Path.Value ?? string.Empty;
             if (path.StartsWith("/api/account/logout"))
             {
                 try

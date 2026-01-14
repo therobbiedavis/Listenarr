@@ -199,6 +199,7 @@
         :authEnabled="authEnabled"
         @update:authEnabled="authEnabled = $event"
         @update:startupConfig="startupConfig = $event"
+        @update:settings="(v) => { settings = v; configStore.applicationSettings = v }"
       />
 
       <!-- Root Folders Tab -->

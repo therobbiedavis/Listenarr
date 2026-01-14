@@ -35,7 +35,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:4545',
         changeOrigin: true,
         // Rewrite cookie domains coming from the backend so the browser will
         // accept Set-Cookie when the backend sets cookies for its own host.

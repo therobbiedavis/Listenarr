@@ -199,6 +199,60 @@ describe('SettingsView', () => {
     expect(Number(calledWith.usProxyPort)).toBe(3128)
   })
 
+  it('applies child updates (via events) to settings and includes them when saving', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const wrapper = mount(SettingsView, {
+      global: { plugins: [pinia, router], stubs: ['FolderBrowser'] },
+    })
+
+    // Activate General Settings tab and provide initial settings
+    const generalTab = wrapper
+      .findAll('button.tab-button')
+      .find((b) => b.text().includes('General Settings'))
+    expect(generalTab).toBeTruthy()
+    await generalTab!.trigger('click')
+
+    const vm = wrapper.vm as unknown as { settings?: Settings }
+    vm.settings = {
+      preferUsDomain: false,
+      fileNamingPattern: '{Author}/{Title}',
+    } as unknown as Settings
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Find the File Naming Pattern input inside the child and change it
+    const fileNamingInput = wrapper.find('input[placeholder="{Author}/{Series}/{Title}"]')
+    expect(fileNamingInput.exists()).toBe(true)
+    await fileNamingInput.setValue('{Author}/{Series}/{Title}/{DiskNumber}')
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Spy on the configuration store save method
+    const { useConfigurationStore } = await import('@/stores/configuration')
+    const cfgStore = useConfigurationStore()
+    cfgStore.saveApplicationSettings = vi.fn().mockResolvedValue(undefined)
+
+    // Save settings and assert that the updated value from the child is included
+    const saveBtn = wrapper
+      .findAll('button.save-button')
+      .find((b) => b.text().includes('Save Settings'))
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+
+    expect(cfgStore.saveApplicationSettings).toHaveBeenCalled()
+    const calledWith = (cfgStore.saveApplicationSettings as Mock).mock.calls[0][0]
+    expect(calledWith.fileNamingPattern).toBe('{Author}/{Series}/{Title}/{DiskNumber}')
+  })
+
   it('toggles download client enabled state', async () => {
     const router = createRouter({
       history: createMemoryHistory(),

@@ -25,7 +25,7 @@ Listenarr is a C# .NET 8.0 Web API backend with Vue.js 3 frontend for automated 
 - **Run**: `npm run dev` from repository root
 - **Database**: `listenarr.api/config/database/listenarr.db`
 - **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
-- **Backend**: http://localhost:5000
+- **Backend**: http://localhost:4545
 - **Frontend**: http://localhost:5173
 
 **Memory Safety Note:** .NET is a memory-managed language. The .NET Common Language Runtime (CLR) handles memory allocation and deallocation, inherently mitigating common memory safety issues like buffer overflows, use-after-free, and double-free vulnerabilities typically found in unmanaged languages (e.g., C/C++).

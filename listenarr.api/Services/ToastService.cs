@@ -47,6 +47,28 @@ namespace Listenarr.Api.Services
             }
         }
 
+        public async Task PublishNotificationAsync(string title, string message, string? icon = null, int? timeoutMs = null)
+        {
+            try
+            {
+                var notification = new
+                {
+                    id = Guid.NewGuid().ToString(),
+                    title = title ?? string.Empty,
+                    message = message ?? string.Empty,
+                    icon = icon ?? GetIconForLevel("info"),
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                    dismissed = false
+                };
+
+                await _hub.Clients.All.SendAsync("Notification", notification);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish notification: {Title}", title);
+            }
+        }
+
         private static string GetIconForLevel(string level)
         {
             return level?.ToLower() switch

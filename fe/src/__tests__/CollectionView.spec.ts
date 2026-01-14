@@ -85,4 +85,41 @@ describe('CollectionView', () => {
     expect(firstCard.find('.collection-title').text()).toBe('Book A')
     expect(firstCard.find('.collection-author').text()).toBe('Author A')
   })
+
+  it('shows toolbar on author collection detail page', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+
+    await router.push('/collection/author/Author%201')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Book A', authors: ['Author A'], imageUrl: 'a.jpg', files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(CollectionView, {
+      global: { plugins: [pinia, router], stubs: ['EditAudiobookModal', 'CustomSelect'] },
+    })
+
+    await new Promise((r) => setTimeout(r, 0))
+
+    const toolbar = wrapper.find('.toolbar')
+    expect(toolbar.exists()).toBe(true)
+
+
+    // Back button should be present and search should be removed
+    expect(toolbar.find('.toolbar-btn').exists()).toBe(true)
+    expect(toolbar.find('.toolbar-search').exists()).toBe(false)
+  })
 })

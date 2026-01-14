@@ -10,7 +10,7 @@ import { logger } from '@/utils/logger'
 // In DEV use localhost. In production prefer configured VITE_API_BASE_URL origin;
 // fall back to same-origin by using a relative '/api' which implies current host.
 const API_BASE_URL = import.meta.env.DEV
-  ? 'http://localhost:5000'
+  ? 'http://localhost:4545'
   : import.meta.env.VITE_API_BASE_URL
     ? import.meta.env.VITE_API_BASE_URL.replace('/api', '')
     : ''
@@ -53,10 +53,13 @@ class SignalRService {
     } catch {}
   }
   private connection: WebSocket | null = null
+  private settingsConnection: WebSocket | null = null
   private reconnectAttempts = 0
+  private settingsReconnectAttempts = 0
   private maxReconnectAttempts = 10
   private reconnectDelay = 2000
   private isConnecting = false
+  private isSettingsConnecting = false
   private messageId = 0
   private downloadUpdateCallbacks: Set<DownloadUpdateCallback> = new Set()
   private downloadListCallbacks: Set<DownloadListCallback> = new Set()
@@ -97,6 +100,7 @@ class SignalRService {
       dismissed?: boolean
     }) => void
   > = new Set()
+  private indexersUpdatedCallbacks: Set<(payload?: { created?: number; skipped?: number }) => void> = new Set()
   private pingInterval: number | null = null
   private visibilityListener: (() => void) | null = null
   // Connection state listeners (for UI to subscribe to connect/disconnect events)
@@ -176,6 +180,15 @@ class SignalRService {
         } catch {}
         try {
           setReconnectAttempts(0)
+        } catch {}
+
+        // Also attempt to establish the settings hub connection so the SPA receives settings-related broadcasts
+        try {
+          setTimeout(() => {
+            try {
+              this.connectSettings()
+            } catch {}
+          }, 100)
         } catch {}
       }
 
@@ -383,6 +396,17 @@ class SignalRService {
           this.notificationCallbacks.forEach((cb) => cb(notification))
         }
         break
+
+      case 'IndexersUpdated':
+        if (args && args[0]) {
+          const payload = args[0] as { created?: number; skipped?: number; indexers?: Array<{ id: number; name: string; baseUrl: string }> }
+          if (import.meta.env.DEV) console.info('[SignalR] IndexersUpdated payload:', payload)
+          this.indexersUpdatedCallbacks.forEach((cb) => cb(payload))
+        } else {
+          if (import.meta.env.DEV) console.info('[SignalR] IndexersUpdated (no payload)')
+          this.indexersUpdatedCallbacks.forEach((cb) => cb())
+        }
+        break
     }
   }
 
@@ -466,6 +490,12 @@ class SignalRService {
       this.connection.close()
       this.connection = null
     }
+
+    // Also close settings hub connection if present
+    if (this.settingsConnection) {
+      this.settingsConnection.close()
+      this.settingsConnection = null
+    }
     this.isConnecting = false
     try {
       for (const cb of Array.from(this.disconnectedListeners)) {
@@ -477,6 +507,80 @@ class SignalRService {
     try {
       setConnected(false)
     } catch {}
+  }
+
+  async connectSettings(): Promise<void> {
+    if (this.settingsConnection?.readyState === WebSocket.OPEN || this.isSettingsConnecting) return
+
+    this.isSettingsConnecting = true
+
+    const wsUrl = API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://')
+    let hubUrl = `${wsUrl}/hubs/settings`
+
+    try {
+      const sess = sessionTokenManager.getToken()
+      if (sess) {
+        const sep = hubUrl.includes('?') ? '&' : '?'
+        hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(sess)}`
+      } else {
+        const sc = await getStartupConfigCached(2000)
+        const apiKey = sc?.apiKey
+        const rawAuth = sc?.authenticationRequired ?? (sc as unknown as Record<string, unknown>)?.AuthenticationRequired
+        const authEnabled = typeof rawAuth === 'boolean' ? rawAuth : typeof rawAuth === 'string' ? rawAuth.toLowerCase() === 'enabled' || rawAuth.toLowerCase() === 'true' : false
+        if (apiKey && !authEnabled) {
+          const sep = hubUrl.includes('?') ? '&' : '?'
+          hubUrl = `${hubUrl}${sep}access_token=${encodeURIComponent(apiKey)}`
+        }
+      }
+    } catch (e) {
+      logger.debug('[SignalR] settings startupConfig or session read failed', e)
+    }
+
+    try {
+      if (import.meta.env.DEV) console.log('[SignalR] Connecting to settings hub:', hubUrl)
+      this.settingsConnection = new WebSocket(hubUrl)
+
+      this.settingsConnection.onopen = () => {
+        if (import.meta.env.DEV) console.log('[SignalR] Connected to settings hub')
+        this.settingsReconnectAttempts = 0
+        this.isSettingsConnecting = false
+        // Send handshake on the settings connection as well
+        const handshake = { protocol: 'json', version: 1 }
+        this.sendOn(this.settingsConnection, JSON.stringify(handshake) + '\x1e')
+      }
+
+      this.settingsConnection.onmessage = (ev) => {
+        // Reuse existing message handler
+        this.handleMessage(ev.data)
+      }
+
+      this.settingsConnection.onclose = () => {
+        if (import.meta.env.DEV) console.log('[SignalR] settings connection closed')
+        this.isSettingsConnecting = false
+        // Try to reconnect with exponential backoff
+        this.settingsReconnectAttempts++
+        const delay = this.reconnectDelay * Math.pow(1.5, this.settingsReconnectAttempts - 1)
+        setTimeout(() => this.connectSettings(), delay)
+      }
+
+      this.settingsConnection.onerror = (err) => {
+        console.error('[SignalR] settings WebSocket error:', err)
+      }
+    } catch (err) {
+      console.error('[SignalR] Failed to connect to settings hub:', err)
+      this.isSettingsConnecting = false
+      setTimeout(() => this.connectSettings(), this.reconnectDelay)
+    }
+  }
+
+  private sendOn(ws: WebSocket | null, data: string) {
+    try {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data)
+      }
+    } catch (e) {
+      console.warn('[SignalR] failed to send on socket', e)
+    }
   }
 
   // Public hooks for consumers to react to connection state changes.
@@ -603,6 +707,14 @@ class SignalRService {
     this.notificationCallbacks.add(callback)
     return () => {
       this.notificationCallbacks.delete(callback)
+    }
+  }
+
+  // Subscribe to indexer updates (triggered when indexers are added/modified externally)
+  onIndexersUpdated(callback: (payload?: { created?: number; skipped?: number; indexers?: Array<{ id: number; name: string; baseUrl: string }>; }) => void): () => void {
+    this.indexersUpdatedCallbacks.add(callback)
+    return () => {
+      this.indexersUpdatedCallbacks.delete(callback)
     }
   }
 

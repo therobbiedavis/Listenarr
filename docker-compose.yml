@@ -5,7 +5,7 @@ services:
     image: ghcr.io/therobbiedavis/listenarr:canary ## For Docker Hub, replace the image with docker.io/therobbiedavis/listenarr:canary
     user: "1001:1001"  ## Replace with your desired UID and GID
     ports:
-      - "5000:5000"
+      - "4545:4545"
     environment:
       # OPTIONAL: set logging level at runtime (overrides config file). Valid values: Verbose, Debug, Information, Warning, Error, Fatal
       # e.g. to enable debug logs in Docker: LISTENARR_LOG_LEVEL=Debug

@@ -144,6 +144,71 @@ describe('AddNewView pagination', () => {
     expect(advOptions).toContain('United Kingdom (UK)')
   })
 
+  it('defaults to title search for simple unprefixed queries (simple search)', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000999',
+          title: 'Dune Simple',
+          authors: [{ name: 'Frank Herbert' }],
+          imageUrl: 'http://imgsimple',
+        },
+      ],
+    })
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as { searchQuery?: string; performSearch?: () => Promise<void>; titleResults?: unknown[] }
+
+    // Simulate entering a simple unprefixed query in the unified search
+    vm.searchQuery = 'Dune Simple'
+
+    await vm.performSearch()
+    await wrapper.vm.$nextTick()
+
+    // The UX hint should show 'Searching by title' when no prefix is present
+    const hint = wrapper.find('#unified-search-hint')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('Searching by title')
+
+    expect(vm.titleResults.length).toBe(1)
+    const tr = vm.titleResults[0] as any
+    expect(tr.title).toBe('Dune Simple')
+  })
+
+  it('defaults to title search for simple unprefixed queries (advanced path)', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000999',
+          title: 'Dune Simple',
+          authors: [{ name: 'Frank Herbert' }],
+          imageUrl: 'http://imgsimple',
+        },
+      ],
+    })
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as { searchQuery?: string; performAdvancedSearch?: () => Promise<void>; titleResults?: unknown[] }
+
+    // Simulate entering a simple unprefixed query in the unified search
+    vm.searchQuery = 'Dune Simple'
+
+    await vm.performAdvancedSearch()
+    await wrapper.vm.$nextTick()
+
+    expect(vm.titleResults.length).toBe(1)
+    const tr = vm.titleResults[0] as any
+    expect(tr.title).toBe('Dune Simple')
+  })
+
   it('maps runtime from runtimeLengthMin (minutes) to seconds', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
@@ -213,6 +278,45 @@ describe('AddNewView pagination', () => {
     expect(vm.titleResults.length).toBe(1)
     const tr = vm.titleResults[0] as any
     expect(tr.searchResult.runtime).toBe(12 * 60)
+  })
+
+  it('renders formatted runtime string for advanced search results', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000127',
+          title: 'Example Long Book',
+          authors: [{ name: 'Some Author' }],
+          imageUrl: 'http://img5',
+          runtimeLengthMin: 620, // 10h 20m
+          language: 'english',
+        },
+      ],
+    })
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+      performAdvancedSearch?: () => Promise<void>
+      allAudimetaResults?: unknown[]
+      titleResults?: unknown[]
+    }
+
+    vm.showAdvancedSearch = true
+    vm.advancedSearchParams = { title: 'Example Long Book' }
+
+    await vm.performAdvancedSearch()
+    await wrapper.vm.$nextTick()
+
+    const statEl = wrapper.find('.title-results .title-result-card .stat-item')
+    expect(statEl.exists()).toBe(true)
+    expect(statEl.text()).toContain('10h')
+    expect(statEl.text()).toContain('20m')
   })
 
   it('shows metadata badge linking to internal Audimeta endpoint and source badge linking to Audible product', async () => {

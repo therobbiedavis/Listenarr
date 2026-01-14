@@ -20,7 +20,7 @@ Listenarr is an automated audiobook collection management system built as a full
 # Start both API and Web servers (recommended)
 npm run dev
 
-# Start only backend API (runs on http://localhost:5000)
+# Start only backend API (runs on http://localhost:4545)
 npm run dev:api
 
 # Start only frontend web (runs on http://localhost:5173)  
@@ -243,9 +243,9 @@ This produces a single deployment artifact containing both backend and frontend.
 - Docker contexts and paths are case-sensitive
 
 ### Port Configuration
-- Backend API: `http://localhost:5000` (development)
+- Backend API: `http://localhost:4545` (development)
 - Frontend Web: `http://localhost:5173` (development)  
-- Production: `http://localhost:5000` (single container serves both) 
+- Production: `http://localhost:4545` (single container serves both) 
 - macOS users: Port 5000 conflicts with Airplay, use `--urls` parameter to override
 
 ### Database Location

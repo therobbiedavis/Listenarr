@@ -56,7 +56,7 @@ docker run -d \
   ## Replace with your desired UID and GID
   --user 1001:1001 \
   --name listenarr \
-  -p 5000:5000 \
+  -p 4545:4545 \
   ## OPTIONAL: Used by Discord Bot
   -e LISTENARR_PUBLIC_URL=https://your-domain.com \
   -v listenarr_data:/app/config \
@@ -64,7 +64,7 @@ docker run -d \
 ```
 
 **Service will be available at:**
-- Web App: http://localhost:5000
+- Web App: http://localhost:4545
 
 **Available Tags (GHCR + Docker Hub mirror):**
 - ~~`latest` / `stable`~~ - Latest stable release (available soon)
@@ -81,7 +81,7 @@ services:
     image: ghcr.io/therobbiedavis/listenarr:canary
     user: "1001:1001"  ## Replace with your desired UID and GID
     ports:
-      - "5000:5000"
+      - "4545:4545"
     environment:
       - LISTENARR_PUBLIC_URL=https://your-domain.com ## OPTIONAL: Used by Discord Bot
     volumes:
@@ -123,7 +123,7 @@ chmod +x Listenarr.Api
 - Set environment variable: `LISTENARR_PUBLIC_URL=https://your-domain.com`
 
 **Service will be available at:**
-- Web App: http://localhost:5000
+- Web App: http://localhost:4545
 
 **Note:**
 - Pre-built executables are self-contained and include all dependencies
@@ -162,8 +162,8 @@ dotnet Listenarr.Api.dll
 4. Ensure Node.js is installed on the server
 
 **Service will be available at:**
-- Web App: http://localhost:5000 (or your configured port)
-LISTENARR_URL=http://localhost:5000 node index.js
+- Web App: http://localhost:4545 (or your configured port)
+LISTENARR_URL=http://localhost:4545 node index.js
 ### Manual Setup
 
 If you prefer to run the services separately:
@@ -186,7 +186,7 @@ npm run dev:web      # Start only frontend web
 ```
 
 **Services will be available at:**
-- Backend API: http://localhost:5000
+- Backend API: http://localhost:4545
 - Frontend Web: http://localhost:5173
 
 ## Discord bot (optional)
@@ -224,8 +224,8 @@ Run the bot standalone (development):
 ```bash
 cd listenarr.api/tools/discord-bot
 npm install
-# Point the helper at your running Listenarr instance (defaults to http://localhost:5000)
-LISTENARR_URL=http://localhost:5000 npm start
+# Point the helper at your running Listenarr instance (defaults to http://localhost:4545)
+LISTENARR_URL=http://localhost:4545 npm start
 ```
 
 Windows (PowerShell):
@@ -233,7 +233,7 @@ Windows (PowerShell):
 ```powershell
 cd listenarr.api\tools\discord-bot
 npm install
-$env:LISTENARR_URL = 'http://localhost:5000'
+$env:LISTENARR_URL = 'http://localhost:4545'
 npm start
 ```
 
@@ -256,7 +256,7 @@ To make the helper easier to run, it will automatically persist the Listenarr ba
 1. `LISTENARR_URL` environment variable (explicit)
 2. `listenarr.api/tools/discord-bot/.env` file with `LISTENARR_URL=` (created automatically on first run)
 3. Interactive prompt on first run (saved to `.env`)
-4. Fallback `http://localhost:5000`
+4. Fallback `http://localhost:4545`
 
 This means you can run the helper once and enter your public domain (for example `https://listenarr.example.com`) when prompted. The URL is saved to `listenarr.api/tools/discord-bot/.env` so you don't need to export environment variables on subsequent runs.
 

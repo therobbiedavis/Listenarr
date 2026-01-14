@@ -578,31 +578,57 @@ const loadingApiKey = ref(false)
 const copiedApiKey = ref(false)
 
 // Local reactive copy of settings to avoid mutating incoming prop directly
-import { reactive, watch } from 'vue'
+import { reactive, watch, nextTick } from 'vue'
 const localSettings = reactive<ApplicationSettings>({} as ApplicationSettings)
+
+// Prevent recursive update loops: when syncing from parent props we set this flag to
+// avoid emitting update:settings during the sync process.
+let isSyncing = false
 
 watch(
   () => props.settings,
   (val) => {
     if (val) {
+      isSyncing = true
       // Replace properties rather than reassigning the reactive object
       for (const key of Object.keys(localSettings) as Array<keyof ApplicationSettings>) {
         delete (localSettings as unknown as Record<string, unknown>)[key as string]
       }
       Object.assign(localSettings, val)
+      // Release syncing flag after the microtask so subsequent user-driven changes emit
+      nextTick(() => {
+        isSyncing = false
+      })
     } else {
+      isSyncing = true
       for (const key of Object.keys(localSettings) as Array<keyof ApplicationSettings>) {
         delete (localSettings as unknown as Record<string, unknown>)[key as string]
       }
+      nextTick(() => {
+        isSyncing = false
+      })
     }
   },
   { immediate: true, deep: true },
+)
+
+// Also watch the proxy toggle specifically so tests that mutate the parent object in-place
+// reliably propagate to the child without waiting for a full object replacement.
+watch(
+  () => props.settings?.useUsProxy,
+  (val) => {
+    if (typeof val !== 'undefined') {
+      localSettings.useUsProxy = val as boolean
+    }
+  },
+  { immediate: true },
 )
 
 // Emit updates upstream whenever the user changes a field
 watch(
   localSettings,
   (val) => {
+    if (isSyncing) return
     emit('update:settings', { ...val })
   },
   { deep: true },

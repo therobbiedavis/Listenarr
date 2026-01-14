@@ -132,7 +132,7 @@ The scripts will:
 - Logs are written to `listenarr.api/config/logs/listenarr-YYYYMMDD.log`; check them when diagnosing background services or importer behavior.
 
 **Default local URLs** (may vary if ports are in use):
-- **Backend API**: http://localhost:5000 (override with `--urls` on `dotnet run`)
+- **Backend API**: http://localhost:4545 (override with `--urls` on `dotnet run`)
 - **Frontend Web**: http://localhost:5173 (Vite will auto-select a different port if 5173 is in use)
 
 ### Manual Setup (Alternative)
@@ -143,7 +143,7 @@ If you prefer to start services separately:
 ```bash
 cd listenarr.api
 dotnet restore       # First time only
-dotnet run --urls http://localhost:5000
+dotnet run --urls http://localhost:4545
 ```
 
 **Terminal 2 - Frontend:**
@@ -215,7 +215,7 @@ docker-compose up --build
 ## Current Status
 - **Development**: The project is actively developed and can be run locally. Many features are implemented and the dev environment supports rapid iteration.
 - **Caveats**: There are known local-development pitfalls (e.g., multiple database files when running from different directories, hot-reload inconsistencies, and intermittent background import issues). When encountering problems, check logs and ensure you're running from the repository root.
-- **Backend API**: Typically available at `http://localhost:5000` when running locally
+- **Backend API**: Typically available at `http://localhost:4545` when running locally
 - **Frontend Web**: Typically available at `http://localhost:5173` (Vite may use alternate port if default is busy)
 - **Database**: SQLite at `listenarr.api/config/database/listenarr.db`
 - **Docker**: Ready for containerized deployment

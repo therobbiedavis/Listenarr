@@ -264,7 +264,7 @@
               <template v-else-if="searchQuery.toUpperCase().startsWith('SERIES:')"
                 >Searching by series</template
               >
-              <template v-else>Searching by title/author</template>
+              <template v-else>Searching by title</template>
             </span>
             <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
           </div>
@@ -1755,6 +1755,12 @@ const performAdvancedSearch = async () => {
       }
     }
 
+    // If no explicit prefixes were provided, treat the entire query as a title search
+    const hasExplicit = params.title || params.author || params.isbn || params.asin
+    if (!hasExplicit) {
+      params.title = query
+    }
+
     // Also include language if set
     if (advancedSearchParams.value.language) {
       params.language = advancedSearchParams.value.language
@@ -2708,11 +2714,15 @@ const retrySearch = async () => {
 //   }
 // }
 
-const formatRuntime = (minutes: number): string => {
-  if (!minutes) return 'Unknown'
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  return `${hours}h ${mins}m`
+// Input is provided as seconds for search results; convert to minutes for display
+const formatRuntime = (seconds: number): string => {
+  if (!seconds) return 'Unknown'
+  const totalMinutes = Math.floor(seconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours > 0 && mins > 0) return `${hours}h ${mins}m`
+  if (hours > 0) return `${hours}h`
+  return `${mins}m`
 }
 
 const capitalizeLanguage = (language: string | undefined): string => {

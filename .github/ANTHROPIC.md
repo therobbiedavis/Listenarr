@@ -7,7 +7,7 @@ Listenarr is a C# .NET 8.0 audiobook management system with Vue.js 3 frontend. S
 - **Run**: `npm run dev` from repository root
 - **Database**: `listenarr.api/config/database/listenarr.db`
 - **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
-- **Backend**: http://localhost:5000
+- **Backend**: http://localhost:4545
 - **Frontend**: http://localhost:5173
 
 ## Critical Patterns
