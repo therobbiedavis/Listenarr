@@ -23,8 +23,10 @@ namespace Listenarr.Api.Tests
 
             var provider = services.BuildServiceProvider(validateScopes: true);
 
-            var db = provider.GetRequiredService<ListenArrDbContext>();
-            var logger = provider.GetRequiredService<ILogger<ConfigurationService>>();
+            // Resolve scoped DB context from a scope (AddDbContext registers it as scoped)
+            using var scope = provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<ConfigurationService>>();
 
             var mockUser = new Mock<IUserService>();
             var mockStartup = new Mock<IStartupConfigService>();
@@ -68,5 +70,44 @@ namespace Listenarr.Api.Tests
             Assert.Single(afterPartial.Webhooks!);
             Assert.Equal("UnitWebhook", afterPartial.Webhooks![0].Name);
         }
+
+        [Fact]
+        public async Task InMemoryDb_Persists_Webhooks_Directly()
+        {
+            // Arrange - build service provider with in-memory DB
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddDbContext<ListenArrDbContext>(opts => opts.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+
+            var provider = services.BuildServiceProvider(validateScopes: true);
+
+            using var scope = provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+
+            // Act - ensure settings exist, set webhooks directly, save, read back
+            var settings = await db.ApplicationSettings.FirstOrDefaultAsync(s => s.Id == 1);
+            if (settings == null)
+            {
+                settings = new ApplicationSettings();
+                db.ApplicationSettings.Add(settings);
+                await db.SaveChangesAsync();
+            }
+
+            settings.Webhooks = new System.Collections.Generic.List<WebhookConfiguration>
+            {
+                new WebhookConfiguration { Name = "DirectWebhook", Url = "https://example.test/direct", Type = "Zapier" }
+            };
+
+            await db.SaveChangesAsync();
+
+            var reloaded = await db.ApplicationSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1);
+
+            // Assert
+            Assert.NotNull(reloaded);
+            Assert.NotNull(reloaded!.Webhooks);
+            Assert.Single(reloaded.Webhooks!);
+            Assert.Equal("DirectWebhook", reloaded.Webhooks![0].Name);
+        }
+
     }
 }
