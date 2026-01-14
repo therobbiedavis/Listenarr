@@ -434,7 +434,7 @@ namespace Listenarr.Api.Controllers
                     {
                         var names = createdIndexers.Select(i => i.Name).ToArray();
                         var message = names.Length > 0 ? $"Imported {created} indexer(s): {string.Join(", ", names)}" : $"Imported {created} indexer(s) successfully";
-                        await _toastService.PublishToastAsync("success", "Indexers", message, timeoutMs: 8000);
+                        await _toastService.PublishNotificationAsync("Indexers", message, icon: null, timeoutMs: 8000);
                     }
                     catch (Exception ex)
                     {
@@ -515,7 +515,7 @@ namespace Listenarr.Api.Controllers
             {
                 var names = indexers.Select(i => i.GetType().GetProperty("name")?.GetValue(i)?.ToString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s)).ToArray();
                 var message = names.Length > 0 ? $"Imported {created} indexer(s): {string.Join(", ", names)}" : $"Imported {created} indexer(s) successfully";
-                await _toastService.PublishToastAsync("success", "Indexers", message, timeoutMs: 8000);
+                await _toastService.PublishNotificationAsync("Indexers", message, icon: null, timeoutMs: 8000);
             }
             catch (Exception ex)
             {

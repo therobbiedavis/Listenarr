@@ -56,6 +56,12 @@ namespace Listenarr.Api.Tests
             // Verify a 'Indexers processed' log entry exists
             Assert.True(mockLogger.Invocations.Any(inv => inv.ToString().Contains("Indexers processed")), "Expected a log entry containing 'Indexers processed'");
             // Verify that raw payload was logged (redacted/truncated text should include the indexer name)
-            Assert.True(mockLogger.Invocations.Any(inv => inv.ToString().Contains("Unit Test Indexer")), "Expected a log entry containing the indexer name");        }
+            Assert.True(mockLogger.Invocations.Any(inv => inv.ToString().Contains("Unit Test Indexer")), "Expected a log entry containing the indexer name");
+
+            // Verify that a notification was published (activity dropdown) but avoid popping up a toast (prevents duplicate toasts)
+            mockToastService.Verify(
+                s => s.PublishNotificationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>()),
+                Times.Once);
+        }
     }
 }
