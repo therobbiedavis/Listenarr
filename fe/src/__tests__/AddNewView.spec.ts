@@ -215,6 +215,45 @@ describe('AddNewView pagination', () => {
     expect(tr.searchResult.runtime).toBe(12 * 60)
   })
 
+  it('renders formatted runtime string for advanced search results', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudimetaByTitleAndAuthor?: Mock }
+    apiService.searchAudimetaByTitleAndAuthor?.mockResolvedValue({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000127',
+          title: 'Example Long Book',
+          authors: [{ name: 'Some Author' }],
+          imageUrl: 'http://img5',
+          runtimeLengthMin: 620, // 10h 20m
+          language: 'english',
+        },
+      ],
+    })
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+      performAdvancedSearch?: () => Promise<void>
+      allAudimetaResults?: unknown[]
+      titleResults?: unknown[]
+    }
+
+    vm.showAdvancedSearch = true
+    vm.advancedSearchParams = { title: 'Example Long Book' }
+
+    await vm.performAdvancedSearch()
+    await wrapper.vm.$nextTick()
+
+    const statEl = wrapper.find('.title-results .title-result-card .stat-item')
+    expect(statEl.exists()).toBe(true)
+    expect(statEl.text()).toContain('10h')
+    expect(statEl.text()).toContain('20m')
+  })
+
   it('shows metadata badge linking to internal Audimeta endpoint and source badge linking to Audible product', async () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [] })
     const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })

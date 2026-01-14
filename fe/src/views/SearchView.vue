@@ -430,9 +430,11 @@ const formatFileSize = (bytes: number): string => {
   return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i]
 }
 
-const formatRuntime = (minutes: number): string => {
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
+const formatRuntime = (seconds: number): string => {
+  if (!seconds) return ''
+  const totalMinutes = Math.floor(seconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
   if (hours > 0 && mins > 0) {
     return `${hours}h ${mins}m`
   } else if (hours > 0) {
