@@ -114,7 +114,48 @@ export function useSearch() {
     } else if (detectedType === 'isbn') {
       results = await searchByISBN(query)
     } else {
-      results = await searchByTitle(query)
+      // For title-like queries, prefer the backend's advanced/title search which
+      // returns enriched SearchResult objects (Audimeta where available).
+      // Parse simple prefixes if present, otherwise treat the full query as a title.
+      const params: Record<string, unknown> = {}
+
+      const parts = query.split(/\s+/)
+      for (const part of parts) {
+        if (part.toUpperCase().startsWith('TITLE:')) {
+          params.title = part.substring(6).trim()
+        } else if (part.toUpperCase().startsWith('AUTHOR:')) {
+          params.author = part.substring(7).trim()
+        } else if (part.toUpperCase().startsWith('ISBN:')) {
+          params.isbn = part.substring(5).trim()
+        } else if (part.toUpperCase().startsWith('ASIN:')) {
+          params.asin = part.substring(5).trim()
+        }
+      }
+
+      // No explicit prefixes -> use whole query as title
+      const hasExplicit = Boolean(params.title || params.author || params.isbn || params.asin)
+      if (!hasExplicit) params.title = query
+
+      // Include language and a reasonable default pagination
+      params.language = searchLanguage.value
+      params.pagination = { page: 1, limit: 50 }
+
+      // Call the advanced search endpoint to get richer title results
+      try {
+        isSearching.value = true
+        searchError.value = ''
+        searchStatus.value = 'Searching for audiobooks and fetching metadata...'
+        const resp = await apiService.advancedSearch(params)
+        results = resp || []
+      } catch (err) {
+        searchError.value = err instanceof Error ? err.message : 'Failed to search for audiobooks'
+        throw err
+      } finally {
+        isSearching.value = false
+        setTimeout(() => {
+          searchStatus.value = ''
+        }, 1000)
+      }
     }
 
     try {

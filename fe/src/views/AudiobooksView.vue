@@ -191,6 +191,9 @@
                   decoding="async"
                   @error="handleImageError"
                 />
+                <div v-if="imagesLoading" class="image-loading-overlay">
+                  <PhSpinner class="ph-spin small" />
+                </div>
                 <div v-else class="no-cover">
                   <PhUser />
                 </div>
@@ -241,6 +244,9 @@
                         decoding="async"
                         @error="handleImageError"
                       />
+                      <div v-if="imagesLoading" class="image-loading-overlay">
+                        <PhSpinner class="ph-spin small" />
+                      </div>
                     </div>
                   </template>
                   <!-- Multiple covers: distribute across container using computed offset -->
@@ -259,6 +265,9 @@
                         decoding="async"
                         @error="handleImageError"
                       />
+                      <div v-if="imagesLoading" class="image-loading-overlay">
+                        <PhSpinner class="ph-spin small" />
+                      </div>
                     </div>
                   </template>
                 </div>
@@ -346,6 +355,9 @@
                   decoding="async"
                   @error="handleImageError"
                 />
+                <div v-if="imagesLoading" class="image-loading-overlay">
+                  <PhSpinner class="ph-spin small" />
+                </div>
                 <div class="status-overlay">
                   <div v-if="!showItemDetails" class="audiobook-title">
                     {{ safeText(audiobook.title) }}
@@ -978,6 +990,7 @@ async function ensureAuthorCover(authorName: string) {
 // Grouping mode
 const GROUP_BY_KEY = 'listenarr.groupBy'
 const groupBy = ref<'books' | 'authors' | 'series'>('books')
+const imagesLoading = ref(false) // show loading overlay while images rerender when grouping changes
 const showGroupMenu = ref(false)
 
 try {
@@ -1558,7 +1571,8 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
     logger.debug('Failed to update route query for group:', err)
   }
 
-  // Ensure DOM settles and recalc visible range for the virtual scroller
+  // Show image loading overlay and ensure DOM settles and recalc visible range for the virtual scroller
+  imagesLoading.value = true
   try {
     await nextTick()
     try {
@@ -1570,12 +1584,21 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
         metadata: { mode },
       })
     }
+
+    // Wait for visible images to finish loading (or timeout)
+    try {
+      await waitForImagesToLoad()
+    } catch (e) {
+      // ignore, we'll clear loading overlay regardless
+    }
   } catch (e) {
     errorTracking.captureException(e as Error, {
       component: 'AudiobooksView',
       operation: 'setGroupBy.scheduleObservation',
       metadata: { mode },
     })
+  } finally {
+    imagesLoading.value = false
   }
 
   // If switching to authors, kick off author lookups for missing covers
@@ -1603,6 +1626,52 @@ async function setGroupBy(mode: 'books' | 'authors' | 'series') {
 function navigateToCollection(collection: { name: string }) {
   const type = groupBy.value === 'authors' ? 'author' : 'series'
   router.push(`/collection/${type}/${encodeURIComponent(collection.name)}`)
+}
+
+async function waitForImagesToLoad(timeoutMs = 5000) {
+  // Collect images within the relevant container
+  const imgs: HTMLImageElement[] = []
+  if (groupBy.value === 'books') {
+    if (scrollContainer.value) {
+      imgs.push(...Array.from(scrollContainer.value.querySelectorAll<HTMLImageElement>('img.audiobook-poster, img.series-cover-image')))
+    }
+  } else {
+    const grouped = document.querySelector('.grouped-grid')
+    if (grouped) imgs.push(...Array.from(grouped.querySelectorAll<HTMLImageElement>('img')))
+  }
+
+  if (imgs.length === 0) return
+
+  await new Promise<void>((resolve) => {
+    let remaining = imgs.length
+    const onDone = () => {
+      remaining -= 1
+      if (remaining <= 0) resolve()
+    }
+
+    const timer = setTimeout(() => resolve(), timeoutMs)
+
+    imgs.forEach((img) => {
+      if (img.complete && img.naturalWidth && img.naturalWidth > 0) {
+        onDone()
+      } else {
+        const onLoad = () => {
+          cleanup()
+          onDone()
+        }
+        const onError = () => {
+          cleanup()
+          onDone()
+        }
+        const cleanup = () => {
+          img.removeEventListener('load', onLoad)
+          img.removeEventListener('error', onError)
+        }
+        img.addEventListener('load', onLoad)
+        img.addEventListener('error', onError)
+      }
+    })
+  })
 }
 
 function handleImageError(event: Event) {
@@ -2519,6 +2588,22 @@ defineExpose({
   border-radius: 6px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.image-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.45);
+  z-index: 10;
+}
+
+.image-loading-overlay .ph-spin.small {
+  width: 28px;
+  height: 28px;
+  font-size: 24px;
 }
 
 .audiobook-poster {

@@ -264,7 +264,7 @@
               <template v-else-if="searchQuery.toUpperCase().startsWith('SERIES:')"
                 >Searching by series</template
               >
-              <template v-else>Searching by title/author</template>
+              <template v-else>Searching by title</template>
             </span>
             <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
           </div>
@@ -1753,6 +1753,12 @@ const performAdvancedSearch = async () => {
       } else if (part.toUpperCase().startsWith('ASIN:')) {
         params.asin = part.substring(5).trim()
       }
+    }
+
+    // If no explicit prefixes were provided, treat the entire query as a title search
+    const hasExplicit = params.title || params.author || params.isbn || params.asin
+    if (!hasExplicit) {
+      params.title = query
     }
 
     // Also include language if set
