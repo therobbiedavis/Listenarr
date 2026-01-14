@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **SignalR**: Fixed missing SettingsHub client connections and ensured notifications are published when indexers are created.
+- **Add New / Search runtime formatting**: Fixed a miscalculation where search result runtimes (provided in seconds) were being treated as minutes in the Add New and Search views. Runtimes are now converted from seconds to minutes and formatted correctly (e.g., "10h 20m"); added a unit test verifying the formatted display.
+- **SettingsView / GeneralSettingsTab reactivity**: Fixed a recursive update/prop sync issue in `GeneralSettingsTab` by adding a syncing guard and a focused watcher for `useUsProxy` so in-place parent updates propagate reliably without creating a watch loop. This resolves the failing SettingsView unit tests.
+- **Tests**: Updated/added frontend unit tests to cover the runtime formatting and reactivity fixes; all frontend unit tests pass locally.
 
 ## [0.2.46] - 2026-01-07
 
