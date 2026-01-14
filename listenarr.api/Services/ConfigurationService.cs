@@ -246,6 +246,20 @@ namespace Listenarr.Api.Services
                     _dbContext.Entry(existing).CurrentValues.SetValues(settings);
                     // Manually update list property
                     existing.AllowedFileExtensions = settings.AllowedFileExtensions;
+
+                    // Explicitly update collection/complex properties so EF's current values
+                    // replacement doesn't inadvertently skip or null them (ensures conversions
+                    // and value comparers are respected across providers).
+                    // Only overwrite collection properties if the incoming payload includes them.
+                    if (settings.EnabledNotificationTriggers != null)
+                    {
+                        existing.EnabledNotificationTriggers = settings.EnabledNotificationTriggers;
+                    }
+
+                    if (settings.Webhooks != null)
+                    {
+                        existing.Webhooks = settings.Webhooks;
+                    }
                 }
                 else
                 {
