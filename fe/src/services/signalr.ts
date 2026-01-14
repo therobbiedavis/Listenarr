@@ -10,7 +10,7 @@ import { logger } from '@/utils/logger'
 // In DEV use localhost. In production prefer configured VITE_API_BASE_URL origin;
 // fall back to same-origin by using a relative '/api' which implies current host.
 const API_BASE_URL = import.meta.env.DEV
-  ? 'http://localhost:5000'
+  ? 'http://localhost:4545'
   : import.meta.env.VITE_API_BASE_URL
     ? import.meta.env.VITE_API_BASE_URL.replace('/api', '')
     : ''

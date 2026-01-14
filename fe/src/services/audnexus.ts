@@ -79,7 +79,7 @@ class AudnexusService {
       const response = await fetch(url, {
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'Listenarr/1.0.0',
+          'User-Agent': 'Listenarr/1.0.0.0',
         },
       })
 

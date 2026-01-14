@@ -122,10 +122,10 @@ Log.Logger = new Serilog.LoggerConfiguration()
 // Use Serilog for logging
 builder.Host.UseSerilog();
 
-// Configure URLs to listen on port 5000 (standard ASP.NET Core port) - can be overridden by --urls
+// Configure URLs to listen on port 4545 (main Listenarr port) - can be overridden by --urls
 if (!args?.Any(arg => arg.StartsWith("--urls")) ?? true)
 {
-    builder.WebHost.UseUrls("http://*:5000");
+    builder.WebHost.UseUrls("http://*:4545");
 }
 
 // Configure logging is now handled by Serilog above

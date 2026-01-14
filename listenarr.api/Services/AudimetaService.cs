@@ -14,7 +14,7 @@ namespace Listenarr.Api.Services
             _httpClient = httpClient;
             _logger = logger;
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Listenarr/1.0");
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Listenarr/1.0.0.0");
         }
 
         /// <summary>

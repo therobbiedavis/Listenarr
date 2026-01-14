@@ -736,7 +736,7 @@ namespace Listenarr.Api.Services.Adapters
                 // and cause the API to return error responses instead of the actual NZB file
                 
                 // Set User-Agent header - many indexers require this and will reject requests without it
-                request.Headers.Add("User-Agent", "Listenarr/1.0");
+                request.Headers.Add("User-Agent", "Listenarr/1.0.0.0");
 
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
                 

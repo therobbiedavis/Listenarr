@@ -8,7 +8,7 @@
   Usage: (from repo root)
     cd listenarr.api/tools/discord-bot
     npm install
-    LISTENARR_URL=http://localhost:5000 node index.js
+    LISTENARR_URL=http://localhost:4545 node index.js
 
   Notes:
   - This is a minimal reference implementation. In production you should handle secrets securely,
@@ -91,7 +91,7 @@ const sanitizeHtml = require('sanitize-html')
 // 1) process.env.LISTENARR_URL
 // 2) listenarr.api/tools/discord-bot/.env (key LISTENARR_URL)
 // 3) prompt the user (interactive) and persist to .env
-// 4) fallback to http://localhost:5000
+// 4) fallback to http://localhost:4545
 function readLocalEnvFile(envPath) {
   try {
     if (!fs.existsSync(envPath)) return null
@@ -141,7 +141,7 @@ async function resolveListenarrUrl() {
   const local = readLocalEnvFile(envPath)
   if (local) return local
   // prompt interactively and persist
-  const defaultUrl = 'http://localhost:5000'
+  const defaultUrl = 'http://localhost:4545'
   const chosen = await promptForListenarrUrl(defaultUrl)
   if (chosen && chosen.trim()) {
     writeLocalEnvFile(envPath, chosen.trim())
@@ -151,7 +151,7 @@ async function resolveListenarrUrl() {
 }
 
 // listenarrUrl will be resolved at startup (may prompt once and write tools/discord-bot/.env)
-let listenarrUrl = 'http://localhost:5000'
+let listenarrUrl = 'http://localhost:4545'
 resolveListenarrUrl().then(u => { listenarrUrl = (u || listenarrUrl).replace(/\/$/, '') }).catch(() => {})
 
 let currentSettings = null
@@ -1351,7 +1351,7 @@ async function start() {
   console.log('Starting Listenarr Discord bot (listenarr.api/tools/discord-bot)')
   // Resolve the Listenarr URL synchronously from env/.env before making any requests.
   // This avoids a race where the module-level resolver runs async and the initial
-  // fetchSettings() call happens with the default 'http://localhost:5000'.
+  // fetchSettings() call happens with the default 'http://localhost:4545'.
   try {
     const resolved = await resolveListenarrUrl()
     if (resolved && resolved.trim()) listenarrUrl = resolved.trim().replace(/\/$/, '')

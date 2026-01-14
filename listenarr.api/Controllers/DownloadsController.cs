@@ -27,6 +27,7 @@ public class DownloadsController : ControllerBase
     /// <summary>
     /// Retrieve cached torrent bytes (if cached) for a given download id (synchronous for tests)
     /// </summary>
+    [NonAction]
     public IActionResult GetCachedTorrent(string downloadId)
     {
         if (_cache == null)
@@ -46,6 +47,7 @@ public class DownloadsController : ControllerBase
     /// <summary>
     /// Retrieve cached announce URLs (sync for tests)
     /// </summary>
+    [NonAction]
     public IActionResult GetCachedAnnounces(string downloadId)
     {
         if (_cache == null)

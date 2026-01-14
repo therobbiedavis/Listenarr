@@ -83,7 +83,7 @@ npm run dev  # Start both API and frontend from repository root
 ### Critical Paths
 - **Database**: `listenarr.api/config/database/listenarr.db`
 - **Logs**: `listenarr.api/config/logs/listenarr-YYYYMMDD.log`
-- **Backend**: http://localhost:5000
+- **Backend**: http://localhost:4545
 - **Frontend**: http://localhost:5173
 
 ### Most Common Issues

@@ -66,7 +66,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 
 7. **Open your browser**
    - Frontend: [http://localhost:5173](http://localhost:5173)
-   - Backend API: [http://localhost:5000](http://localhost:5000)
+   - Backend API: [http://localhost:4545](http://localhost:4545)
 
 ### Debugging
 
@@ -74,7 +74,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 1. Open `listenarr.sln` in Visual Studio or Rider
 2. Set `listenarr.api` as the startup project
 3. Press F5 to start debugging
-4. The API will be available at [http://localhost:5000](http://localhost:5000)
+4. The API will be available at [http://localhost:4545](http://localhost:4545)
 
 Note: there is also a `watch` task available in the workspace tasks that runs `dotnet watch run` across the solution when you prefer a single task for backend hot-reloads.
 
@@ -85,7 +85,7 @@ Note: there is also a `watch` task available in the workspace tasks that runs `d
 
 #### Debugging on Mobile/Other Devices
 - Update the API URL in `fe/src/services/api.ts` to use your development machine's IP address instead of `localhost`
-- Example: `http://192.168.1.100:5000` instead of `http://localhost:5000`
+- Example: `http://192.168.1.100:4545` instead of `http://localhost:4545`
 
 ### Contributing Code
 
@@ -197,7 +197,7 @@ If you want to explore the API using Swagger:
    cd listenarr.api
    dotnet run
    ```
-2. Navigate to [http://localhost:5000/swagger](http://localhost:5000/swagger)
+2. Navigate to [http://localhost:4545/swagger](http://localhost:4545/swagger)
 3. You can test all API endpoints directly from the Swagger UI
 
 ### Project Structure

@@ -43,7 +43,7 @@ namespace Listenarr.Api.Services
 
             // Set default headers
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Listenarr/1.0");
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Listenarr/1.0.0.0");
         }
 
         /// <summary>
