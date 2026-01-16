@@ -2780,7 +2780,11 @@ namespace Listenarr.Api.Services
                     }
 
                     // Get torrents (with or without authentication)
-                    var torrentsResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info");
+                    // Extract category from client settings to filter torrents
+                    var (categoryParam, category) = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "?");
+                    QBittorrentHelpers.LogCategoryFiltering(_logger, category);
+                    
+                    var torrentsResponse = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info{categoryParam}");
                     if (!torrentsResponse.IsSuccessStatusCode) return items;
 
                     torrentsJson = await torrentsResponse.Content.ReadAsStringAsync();
