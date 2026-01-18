@@ -312,10 +312,7 @@
 
           <div class="form-group">
             <label>API Key (Server)</label>
-            <div class="input-group">
-              <ApiKeyControl :apiKey="props.startupConfig?.apiKey" :disabled="false" @update:apiKey="(newKey) => emit('update:startupConfig', { ...(props.startupConfig || {}), apiKey: newKey })" />
-
-            </div>
+            <ApiKeyControl :apiKey="props.startupConfig?.apiKey" :disabled="false" @update:apiKey="(newKey) => emit('update:startupConfig', { ...(props.startupConfig || {}), apiKey: newKey })" />
             <span class="form-help"
               >API key for authenticating external applications. Generate a new key if needed. Copy
               it to use with API clients.</span

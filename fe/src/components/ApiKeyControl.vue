@@ -1,31 +1,15 @@
 <template>
-  <div class="input-group api-key-control">
+  <div class="api-key-field">
     <PasswordInput
       v-model="internalKey"
       placeholder="API Key"
-      class="input-group-input"
+      class="api-key-input"
       :disabled="disabled"
     />
-    <div class="input-group-append">
+    <div class="api-key-buttons">
       <button
         type="button"
-        class="icon-button input-group-btn copy-btn"
-        :class="{ copied: copied }"
-        @click="copy"
-        :disabled="!internalKey"
-        :title="copied ? 'Copied' : 'Copy API key'"
-      >
-        <template v-if="copied">
-          <PhCheck />
-        </template>
-        <template v-else>
-          <PhFiles />
-        </template>
-      </button>
-
-      <button
-        type="button"
-        class="regenerate-button input-group-btn regen-btn"
+        class="regenerate-button regen-btn"
         @click="onRegenerate"
         :disabled="loading"
         :title="internalKey ? 'Regenerate API key' : 'Generate API key'"
@@ -39,7 +23,22 @@
         <template v-else>
           <PhPlus />
         </template>
-        <span v-if="!loading">{{ internalKey ? 'Regenerate' : 'Generate' }}</span>
+      </button>
+
+      <button
+        type="button"
+        class="icon-button copy-btn"
+        :class="{ copied: copied }"
+        @click="copy"
+        :disabled="!internalKey"
+        :title="copied ? 'Copied' : 'Copy API key'"
+      >
+        <template v-if="copied">
+          <PhCheck />
+        </template>
+        <template v-else>
+          <PhFiles />
+        </template>
       </button>
     </div>
   </div>
@@ -153,39 +152,73 @@ const onRegenerate = async () => {
 </script>
 
 <style scoped>
-.input-group.api-key-control {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.api-key-field {
+  position: relative;
+  width: 100%;
 }
 
-.input-group-append {
-  display: flex;
-  gap: 0.5rem;
+.api-key-field :deep(.password-input) {
+  padding-right: 8rem; /* Space for visibility toggle (3.5rem) + 2 buttons + gaps */
 }
 
-.icon-button.input-group-btn,
-.regenerate-button.input-group-btn {
+.api-key-field :deep(.password-toggle) {
+  right: 5.5rem; /* Position to the left of the api-key-buttons */
+}
+
+.api-key-buttons {
+  position: absolute;
+  right: 0.5rem; /* Rightmost position */
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 0.25rem;
+}
+
+.icon-button,
+.regenerate-button {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: #1a1a1a;
-  color: #fff;
+  justify-content: center;
+  padding: 0.5rem;
+  border: none;
+  background: none;
+  color: #868e96;
   cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 1.1rem;
 }
 
-.icon-button.input-group-btn:disabled,
-.regenerate-button.input-group-btn:disabled {
+.regenerate-button {
+  color: #f44336; /* Red hue for regenerate */
+}
+
+.icon-button {
+  color: #2196f3; /* Blue hue for copy */
+}
+
+.icon-button:hover,
+.regenerate-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.regenerate-button:hover {
+  color: #ff6b6b; /* Lighter red on hover */
+}
+
+.icon-button:hover {
+  color: #64b5f6; /* Lighter blue on hover */
+}
+
+.icon-button:disabled,
+.regenerate-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .icon-button.copied {
-  background: rgba(76, 175, 80, 0.08);
-  border-color: rgba(76,175,80,0.18);
+  color: #4caf50; /* Green for copied state */
 }
 
 .ph-spin {

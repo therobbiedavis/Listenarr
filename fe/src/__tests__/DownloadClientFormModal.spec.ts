@@ -28,7 +28,7 @@ describe('DownloadClientFormModal', () => {
 
     const passwordInput = wrapper.find('input[id="password"]')
     // debug
-    // eslint-disable-next-line no-console
+     
     console.log('HTML:', wrapper.html())
     expect(passwordInput.exists()).toBe(true)
   })

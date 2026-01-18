@@ -640,7 +640,7 @@ function startEditingDestination() {
 function finishEditingDestination() {
   try {
     const chosenRoot = resolveSelectedRootPath() || rootPath.value
-    let val = (formData.value.relativePath || '').trim()
+    const val = (formData.value.relativePath || '').trim()
 
     if (!chosenRoot) {
       // No root available — nothing to do
