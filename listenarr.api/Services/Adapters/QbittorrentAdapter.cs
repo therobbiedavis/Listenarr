@@ -395,9 +395,13 @@ namespace Listenarr.Api.Services.Adapters
                     return items;
                 }
 
+                // Extract category from client settings to filter torrents
+                var (categoryParam, category) = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
+                QBittorrentHelpers.LogCategoryFiltering(_logger, category);
+                
                 // Limit fields returned to reduce memory usage
                 var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
-                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields={Uri.EscapeDataString(fields)}", ct);
+                var torrentsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/info?fields={Uri.EscapeDataString(fields)}{categoryParam}", ct);
                 if (!torrentsResp.IsSuccessStatusCode) return items;
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);
