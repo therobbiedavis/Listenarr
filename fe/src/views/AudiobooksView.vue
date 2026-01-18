@@ -182,14 +182,27 @@
             <template v-if="groupBy === 'authors'">
               <div class="audiobook-poster-container">
                 <div class="series-count-badge">{{ collection.count }}</div>
+                <!-- Base: always show a cover (book cover or placeholder) so UI isn't empty -->
                 <img
-                  v-if="collection.coverUrl"
+                  class="audiobook-poster base-cover"
                   :src="apiService.getImageUrl(collection.coverUrl) || getPlaceholderUrl()"
                   :alt="collection.name"
-                  class="audiobook-poster"
                   loading="lazy"
                   decoding="async"
                   @error="handleImageError"
+                />
+
+                <!-- Overlay: author-specific image that fades in when available -->
+                <img
+                  v-if="(authorCoverOverrides && authorCoverOverrides[collection.name]) || (collection.coverUrl && collection.coverUrl.includes('/config/cache/images/authors/'))"
+                  class="audiobook-poster author-cover lazy-img"
+                  :data-src="apiService.getImageUrl(authorCoverOverrides[collection.name] || collection.coverUrl)"
+                  :src="getPlaceholderUrl()"
+                  :alt="collection.name"
+                  loading="lazy"
+                  decoding="async"
+                  @error="handleImageError"
+                  @load="onAuthorImageLoad"
                 />
                 <div v-if="imagesLoading" class="image-loading-overlay">
                   <PhSpinner class="ph-spin small" />
@@ -977,6 +990,12 @@ async function ensureAuthorCover(authorName: string) {
     } else if (info.asin) {
       authorCoverOverrides[authorName] = `/config/cache/images/authors/${info.asin}.jpg`
     }
+    // After setting an override, wait for DOM updates then re-run the lazy observer
+    // so images with newly-populated data-src attributes are observed/loaded.
+    try {
+      await nextTick()
+      observeLazyImages()
+    } catch {}
   } catch (e: unknown) {
     errorTracking.captureException(e as Error, {
       component: 'AudiobooksView',
@@ -1033,8 +1052,11 @@ const groupedCollections = computed(() => {
     if (key) {
       if (!groups.has(key)) {
         if (groupBy.value === 'authors') {
-          // Prefer override (fetched author image) first, then author ASIN, then book cover
-          let cover: string | undefined = undefined
+          // Start with the book cover as a default for compatibility, then prefer
+          // an override or author ASIN if available. `isAuthorCover` will indicate
+          // whether the URL is an author-specific image so the template can
+          // avoid rendering book covers while author images are pending.
+          let cover: string | undefined = book.imageUrl
           try {
             // Use override if we've already fetched author image for this name
             // `authorCoverOverrides` is a reactive map populated asynchronously below
@@ -1046,17 +1068,13 @@ const groupedCollections = computed(() => {
               // eslint-disable-next-line @typescript-eslint/ban-ts-comment
               // @ts-ignore
               cover = authorCoverOverrides[key]
+            } else {
+              try {
+                const asin = (book as unknown as { authorAsins?: string[] })?.authorAsins?.[0]
+                if (asin) cover = `/config/cache/images/authors/${asin}.jpg`
+              } catch {}
             }
           } catch {}
-
-          if (!cover) {
-            try {
-              const asin = (book as unknown as { authorAsins?: string[] })?.authorAsins?.[0]
-              if (asin) cover = `/config/cache/images/authors/${asin}.jpg`
-            } catch {}
-          }
-
-          if (!cover) cover = book.imageUrl
 
           groups.set(key, { name: key, count: 0, coverUrl: cover })
         } else {
@@ -1679,6 +1697,8 @@ function handleImageError(event: Event) {
     const img = event.target as HTMLImageElement
     if (!img) return
     try {
+      // If this image already successfully loaded previously, ignore later errors
+      if (img.dataset && img.dataset.loaded === 'true') return
       if ((img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone) return
       ;(img as unknown as { __imageFallbackDone?: boolean }).__imageFallbackDone = true
     } catch (e: unknown) {
@@ -1688,7 +1708,17 @@ function handleImageError(event: Event) {
       })
     }
     try {
-      img.src = getPlaceholderUrl()
+      // If this is an author overlay image, hide the overlay instead of
+      // replacing its `src` with the placeholder (which causes a visible
+      // placeholder to fade in over the base cover). Hiding preserves the
+      // base cover underneath.
+      if (img.classList && img.classList.contains('author-cover')) {
+        try {
+          img.style.opacity = '0'
+        } catch {}
+      } else {
+        img.src = getPlaceholderUrl()
+      }
     } catch {}
     try {
       img.removeAttribute('data-src')
@@ -1870,6 +1900,18 @@ function onCheckboxChange(audiobook: Audiobook, event: Event) {
   lastClickedIndex.value = currentIndex
 }
 
+function onAuthorImageLoad(event: Event) {
+  try {
+    const img = event.target as HTMLImageElement
+    if (!img) return
+    img.style.transition = 'opacity 300ms ease'
+    img.style.opacity = '1'
+    try {
+      if (img.dataset) img.dataset.loaded = 'true'
+    } catch {}
+  } catch {}
+}
+
 function handleCheckboxKeydown(audiobook: Audiobook, event: KeyboardEvent) {
   // Handle keyboard spacebar toggle and support Shift+Space range selection
   const currentIndex = audiobooks.value.findIndex((book) => book.id === audiobook.id)
@@ -1896,6 +1938,34 @@ defineExpose({
   showItemDetails,
 })
 </script>
+
+<style scoped>
+.audiobook-poster-container {
+  position: relative;
+  overflow: hidden;
+}
+.audiobook-poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.audiobook-poster.base-cover {
+  /* base layer */
+}
+.audiobook-poster.author-cover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  border-radius: 6px;
+}
+</style>
 
 <style scoped>
 .audiobooks-view {

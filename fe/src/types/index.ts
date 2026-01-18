@@ -51,6 +51,8 @@ export interface MetadataSearchResult extends BaseSearchResult {
 // Combines both indexer and metadata properties
 export interface SearchResult extends BaseSearchResult {
   // Indexer-specific properties
+    // Number of days to retain generated thumbnails (0 = use server default)
+    thumbnailRetentionDays?: number
   size: number
   seeders?: number
   leechers?: number

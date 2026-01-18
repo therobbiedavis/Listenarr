@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.48] - 2026-01-14
+### Fixed
+- **qBittorrent Test**: `qBittorrent` client test now attempts authentication when the unauthenticated `/api/v2/app/version` returns `403` and retries the request; valid credentials will now cause the test to succeed (e.g., when behind authentication or proxy).
+- **Download client test behavior**: The Test button on the **Download Client** modal now tests the client using the current form input values (unsaved edits), while the Test button on the download client card in the settings tab tests using the saved DB configuration values.
+
 
 ## [0.2.47] - 2026-01-13
 

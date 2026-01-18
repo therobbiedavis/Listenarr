@@ -145,7 +145,8 @@ namespace Listenarr.Api.Controllers
             {
                 try
                 {
-                    var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(metadata.Asin);
+                    // Pass metadata.ImageUrl so the cache service can download-and-move if the temp file isn't present
+                    var libraryImagePath = await _imageCacheService.MoveToLibraryStorageAsync(metadata.Asin, metadata.ImageUrl);
                     if (libraryImagePath != null)
                     {
                         imageUrl = $"/{libraryImagePath}";

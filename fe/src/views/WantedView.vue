@@ -174,7 +174,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
-import { apiService } from '@/services/api'
+import { apiService, ensureImageCached } from '@/services/api'
 import { errorTracking } from '@/services/errorTracking'
 import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/ManualSearchModal.vue'
@@ -268,13 +268,34 @@ onMounted(async () => {
   // Initialize virtual scrolling
   await nextTick()
   updateVisibleRange()
+
+  // Ensure images for the initially visible items are cached on the backend
+  const ensureVisibleCached = async () => {
+    try {
+      const toCheck = visibleWanted.value.slice(0, 50)
+      for (const item of toCheck) {
+        if (item?.imageUrl) void ensureImageCached(item.imageUrl)
+      }
+    } catch (e) {
+      logger.debug('ensureVisibleCached error', e)
+    }
+  }
+  void ensureVisibleCached()
 })
 
 // Watch the visible range (virtual scroll) to lazy-load images when the viewport changes
 watch(
   () => visibleRange.value,
   () => {
-    // No-op: native lazy loading handles image work, but we keep the watcher to retain potential hooks
+    // When the visible range changes, ensure new visible images are cached on the backend.
+    try {
+      const toCheck = visibleWanted.value.slice(0, 50)
+      for (const item of toCheck) {
+        if (item?.imageUrl) void ensureImageCached(item.imageUrl)
+      }
+    } catch (e) {
+      logger.debug('ensureVisibleRangeCached error', e)
+    }
   },
 )
 

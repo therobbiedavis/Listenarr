@@ -544,7 +544,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
-import { apiService } from '@/services/api'
+import { apiService, ensureImageCached } from '@/services/api'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { observeLazyImages, ensureVisibleImagesLoad } from '@/utils/lazyLoad'
@@ -774,6 +774,15 @@ onMounted(async () => {
 
       // Apply merged object reactively
       audiobook.value = merged
+
+      // If the imageUrl changed as part of the update, trigger a recache
+      try {
+        if (upd && (upd as any).imageUrl && (upd as any).imageUrl !== (prev as any).imageUrl) {
+          void ensureImageCached((upd as any).imageUrl)
+        }
+      } catch (e) {
+        logger.debug('ensureImageCached after update failed', e)
+      }
     }
     catch (e) {
       // Fallback: if merge fails, try a full reload
@@ -862,6 +871,13 @@ async function loadAudiobook() {
 // After loading audiobook, also fetch quality profiles so we can display the assigned profile
 async function afterLoad() {
   await loadQualityProfilesForDetail()
+
+  // Ensure the cover image is cached on the backend so missing images are fetched on demand
+  try {
+    void ensureImageCached(audiobook.value?.imageUrl)
+  } catch (e) {
+    logger.debug('ensureImageCached afterLoad failed', e)
+  }
 }
 
 

@@ -26,15 +26,27 @@ namespace Listenarr.Api.Controllers
     public class ImagesController : ControllerBase
     {
         private readonly IImageCacheService _imageCacheService;
+        private readonly IAudiobookMetadataService _audiobookMetadataService;
+        private readonly AudimetaService _audimetaService;
+        private readonly IAudnexusService _audnexusService;
+        private readonly IAudiobookRepository _audiobookRepository;
         private readonly ILogger<ImagesController> _logger;
         private readonly IWebHostEnvironment _environment;
 
         public ImagesController(
             IImageCacheService imageCacheService,
+            IAudiobookMetadataService audiobookMetadataService,
+            AudimetaService audimetaService,
+            IAudnexusService audnexusService,
+            IAudiobookRepository audiobookRepository,
             ILogger<ImagesController> logger,
             IWebHostEnvironment environment)
         {
             _imageCacheService = imageCacheService;
+            _audiobookMetadataService = audiobookMetadataService;
+            _audimetaService = audimetaService;
+            _audnexusService = audnexusService;
+            _audiobookRepository = audiobookRepository;
             _logger = logger;
             _environment = environment;
         }
@@ -78,37 +90,265 @@ namespace Listenarr.Api.Controllers
                 // Get the cached image path (checks library first, then temp)
                 var relativePath = await _imageCacheService.GetCachedImagePathAsync(identifier);
 
-                if (relativePath == null)
+                // If we found a temp cached image but the identifier corresponds to an audiobook in the library,
+                // attempt to move it into permanent library storage so library images don't live in /temp.
+                if (!string.IsNullOrWhiteSpace(relativePath) && relativePath.Contains("cache/images/temp/"))
                 {
-                    _logger.LogWarning("Image not found for identifier: {Identifier}", identifier);
-                    // Attempt to serve the frontend placeholder first (fe/public/placeholder.svg)
                     try
                     {
-                        var frontendPlaceholder = Path.Combine(_environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
-                        if (System.IO.File.Exists(frontendPlaceholder))
+                        var book = await _audiobookRepository.GetByAsinAsync(identifier);
+                        if (book != null)
                         {
-                            _logger.LogInformation("Serving frontend placeholder image for missing identifier: {Identifier}", identifier);
-                            Response.Headers["Cache-Control"] = "public, max-age=300";
-                            return PhysicalFile(frontendPlaceholder, "image/svg+xml");
-                        }
-
-                        // Fallback to backend wwwroot placeholder if frontend file not present
-                        var placeholderPath = Path.Combine(_environment.ContentRootPath, "wwwroot", "placeholder.svg");
-                        if (System.IO.File.Exists(placeholderPath))
-                        {
-                            _logger.LogInformation("Serving backend placeholder image for missing identifier: {Identifier}", identifier);
-                            Response.Headers["Cache-Control"] = "public, max-age=300";
-                            return PhysicalFile(placeholderPath, "image/svg+xml");
+                            _logger.LogInformation("Found temp cached image for library audiobook {Identifier}, attempting move to library storage", identifier);
+                            var moved = await _imageCacheService.MoveToLibraryStorageAsync(identifier);
+                            if (!string.IsNullOrWhiteSpace(moved))
+                            {
+                                // Prefer the moved library path when serving the image
+                                relativePath = moved;
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug(ex, "Failed to serve placeholder for missing image {Identifier}", identifier);
+                        _logger.LogWarning(ex, "Failed to move temp image to library for {Identifier}", identifier);
+                    }
+                }
+
+                if (relativePath == null)
+                {
+                    _logger.LogWarning("Image not found for identifier: {Identifier}", identifier);
+
+                    // Try to fetch metadata-driven image candidates and download on-demand
+                    try
+                    {
+                        var region = Request.Query["region"].ToString();
+                        if (string.IsNullOrWhiteSpace(region)) region = "us";
+
+                        var audimeta = await _audiobookMetadataService.GetAudimetaMetadataAsync(identifier, region, cache: true);
+                        string? candidateUrl = null;
+
+                        if (audimeta != null)
+                        {
+                            candidateUrl = audimeta.ImageUrl ?? audimeta.Description;
+                        }
+
+                        // If audimeta didn't yield an image, call GetMetadataAsync to allow other providers (Audnexus) to be used
+                        if (string.IsNullOrWhiteSpace(candidateUrl))
+                        {
+                            _logger.LogDebug("No image found in audimeta, attempting fallback GetMetadataAsync for {Identifier}", identifier);
+                            try
+                            {
+                                var metadataEnvelope = await _audiobookMetadataService.GetMetadataAsync(identifier, region, cache: true);
+                                if (metadataEnvelope != null)
+                                {
+                                    try
+                                    {
+                                        // If the service returned an AudimetaBookResponse directly
+                                        if (metadataEnvelope is global::Listenarr.Api.Services.AudimetaBookResponse directMeta)
+                                        {
+                                            candidateUrl = directMeta.ImageUrl ?? directMeta.Description;
+                                        }
+                                        else
+                                        {
+                                            // Try dynamic access
+                                            dynamic env = metadataEnvelope;
+                                            object? mdObj = env.metadata as object;
+
+                                            // If it's already the Audimeta type, use it
+                                            if (mdObj is global::Listenarr.Api.Services.AudimetaBookResponse mdMeta)
+                                            {
+                                                candidateUrl = mdMeta.ImageUrl ?? mdMeta.Description;
+                                            }
+                                            else if (mdObj != null)
+                                            {
+                                                // Try reflection for common property names
+                                                var t = mdObj.GetType();
+                                                var prop = t.GetProperty("ImageUrl") ?? t.GetProperty("Image") ?? t.GetProperty("image") ?? t.GetProperty("imageUrl");
+                                                if (prop != null)
+                                                {
+                                                    var v = prop.GetValue(mdObj)?.ToString();
+                                                    if (!string.IsNullOrWhiteSpace(v)) candidateUrl = v;
+                                                }
+                                            }
+                                        }
+
+                                        if (!string.IsNullOrWhiteSpace(candidateUrl))
+                                        {
+                                            _logger.LogInformation("Found image URL in fallback metadata source for identifier {Identifier}: {Url}", identifier, candidateUrl);
+                                        }
+                                        else
+                                        {
+                                            _logger.LogDebug("Fallback metadata returned no image URL for {Identifier}", identifier);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to parse fallback metadata envelope for {Identifier}", identifier);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("GetMetadataAsync returned null for {Identifier}", identifier);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Fallback metadata lookup failed for {Identifier}", identifier);
+                            }
+                        }
+
+                        // If no image found from book metadata, attempt author lookups (treating identifier as author name/asin)
+                        if (string.IsNullOrWhiteSpace(candidateUrl))
+                        {
+                            try
+                            {
+                                // 1) Audimeta author lookup by name
+                                var authorLookup = await _audimetaService.LookupAuthorAsync(identifier, region);
+                                if (authorLookup != null && !string.IsNullOrWhiteSpace(authorLookup.Image) && (authorLookup.Image.StartsWith("http://") || authorLookup.Image.StartsWith("https://")))
+                                {
+                                    candidateUrl = authorLookup.Image;
+                                    _logger.LogInformation("Found author image from Audimeta for identifier {Identifier}: {Url}", identifier, candidateUrl);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Audimeta author lookup failed for {Identifier}", identifier);
+                            }
+
+                            // 2) Audnexus author search fallback
+                            if (string.IsNullOrWhiteSpace(candidateUrl))
+                            {
+                                try
+                                {
+                                    // If identifier looks like an ASIN, prefer GetAuthorAsync to fetch the author directly
+                                    if (identifier != null && identifier.Length >= 10 && (identifier.StartsWith("B", StringComparison.OrdinalIgnoreCase) || identifier.All(char.IsLetterOrDigit)))
+                                    {
+                                        try
+                                        {
+                                            var authorResp = await _audnexusService.GetAuthorAsync(identifier, region, update: false);
+                                            if (authorResp != null && !string.IsNullOrWhiteSpace(authorResp.Image) && (authorResp.Image.StartsWith("http://") || authorResp.Image.StartsWith("https://")))
+                                            {
+                                                candidateUrl = authorResp.Image;
+                                                _logger.LogInformation("Found author image from Audnexus (by ASIN) for identifier {Identifier}: {Url}", identifier, candidateUrl);
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Audnexus GetAuthorAsync failed for ASIN {Identifier}", identifier);
+                                        }
+                                    }
+
+                                    // If still not found, fallback to searching by name
+                                    if (string.IsNullOrWhiteSpace(candidateUrl))
+                                    {
+                                        // Try to find stored author ASIN in database (match by author name) and prefer direct GET
+                                        try
+                                        {
+                                            var books = await _audiobookRepository.GetAllAsync();
+                                            var match = books.SelectMany(b => (b.Authors ?? new List<string>()).Select((name, idx) => new { book = b, name, idx }))
+                                                             .FirstOrDefault(x => string.Equals(x.name?.Trim(), identifier?.Trim(), StringComparison.OrdinalIgnoreCase) && ((x.book.AuthorAsins?.Count ?? 0) > 0));
+                                            if (match != null)
+                                            {
+                                                var authorAsin = match.book.AuthorAsins?.FirstOrDefault();
+                                                if (!string.IsNullOrWhiteSpace(authorAsin))
+                                                {
+                                                    try
+                                                    {
+                                                        var authorResp = await _audnexusService.GetAuthorAsync(authorAsin, region, update: false);
+                                                        if (authorResp != null && !string.IsNullOrWhiteSpace(authorResp.Image) && (authorResp.Image.StartsWith("http://") || authorResp.Image.StartsWith("https://")))
+                                                        {
+                                                            candidateUrl = authorResp.Image;
+                                                            _logger.LogInformation("Found author image from Audnexus by stored ASIN {Asin} for identifier {Identifier}: {Url}", authorAsin, identifier, candidateUrl);
+                                                        }
+                                                    }
+                                                    catch (Exception ex)
+                                                    {
+                                                        _logger.LogDebug(ex, "Audnexus GetAuthorAsync failed for ASIN {Asin}", authorAsin);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogDebug(ex, "Failed to lookup author ASINs in database for identifier {Identifier}", identifier);
+                                        }
+
+                                        // If still not found, fallback to searching by name
+                                        if (string.IsNullOrWhiteSpace(candidateUrl))
+                                        {
+                                            var authors = await _audnexusService.SearchAuthorsAsync(identifier!, region);
+                                            var first = authors?.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a.Image));
+                                            if (first != null && !string.IsNullOrWhiteSpace(first.Image) && (first.Image.StartsWith("http://") || first.Image.StartsWith("https://")))
+                                            {
+                                                candidateUrl = first.Image;
+                                                _logger.LogInformation("Found author image from Audnexus (search) for identifier {Identifier}: {Url}", identifier, candidateUrl);
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex, "Audnexus author search failed for {Identifier}", identifier);
+                                }
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(candidateUrl) && (candidateUrl.StartsWith("http://") || candidateUrl.StartsWith("https://")))
+                        {
+                            _logger.LogInformation("Attempting metadata-driven image download for identifier {Identifier} from {Url}", identifier, candidateUrl);
+                            try
+                            {
+                                _logger.LogDebug("Calling DownloadAndCacheImageAsync for {Identifier} from {Url}", identifier, candidateUrl);
+                                var downloaded = await _imageCacheService.DownloadAndCacheImageAsync(candidateUrl, identifier!);
+                                if (!string.IsNullOrWhiteSpace(downloaded))
+                                {
+                                    _logger.LogInformation("Downloaded metadata image for identifier: {Identifier}", identifier);
+                                    // Re-check cache
+                                    relativePath = await _imageCacheService.GetCachedImagePathAsync(identifier!);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to download metadata-driven image for {Identifier}", identifier);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Metadata-driven image download failed for {Identifier}", identifier);
                     }
 
-                    // Return NotFound with short caching to reduce repeated filesystem lookups by other clients
-                    Response.Headers["Cache-Control"] = "public, max-age=300";
-                    return NotFound(new { message = "Image not found" });
+                    if (relativePath == null)
+                    {
+                        // Attempt to serve the frontend placeholder first (fe/public/placeholder.svg)
+                        try
+                        {
+                            var frontendPlaceholder = Path.Combine(_environment.ContentRootPath, "..", "fe", "public", "placeholder.svg");
+                            if (System.IO.File.Exists(frontendPlaceholder))
+                            {
+                                _logger.LogInformation("Serving frontend placeholder image for missing identifier: {Identifier}", identifier);
+                                Response.Headers["Cache-Control"] = "public, max-age=300";
+                                return PhysicalFile(frontendPlaceholder, "image/svg+xml");
+                            }
+
+                            // Fallback to backend wwwroot placeholder if frontend file not present
+                            var placeholderPath = Path.Combine(_environment.ContentRootPath, "wwwroot", "placeholder.svg");
+                            if (System.IO.File.Exists(placeholderPath))
+                            {
+                                _logger.LogInformation("Serving backend placeholder image for missing identifier: {Identifier}", identifier);
+                                Response.Headers["Cache-Control"] = "public, max-age=300";
+                                return PhysicalFile(placeholderPath, "image/svg+xml");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to serve placeholder for missing image {Identifier}", identifier);
+                        }
+
+                        // Return NotFound with short caching to reduce repeated filesystem lookups by other clients
+                        Response.Headers["Cache-Control"] = "public, max-age=300";
+                        return NotFound(new { message = "Image not found" });
+                    }
                 }
 
                 // Build the full file path

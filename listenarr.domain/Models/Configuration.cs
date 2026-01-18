@@ -240,5 +240,7 @@ namespace Listenarr.Domain.Models
         /// Fuzzy similarity threshold used in relaxed containment mode (0.0 - 1.0).
         /// </summary>
         public double SearchFuzzyThreshold { get; set; } = 0.2;
+
+
     }
 }

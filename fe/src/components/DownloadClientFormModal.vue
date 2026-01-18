@@ -7,13 +7,11 @@
           {{ formData.type.toUpperCase() }}
         </h2>
         <button class="close-btn" @click="closeModal">
-          <i class="ph ph-x"></i>
+          <PhX />
         </button>
       </div>
-
       <div class="modal-body">
         <form @submit.prevent="handleSubmit">
-          <!-- Basic Information -->
           <div class="form-section">
             <h3>Basic</h3>
 
@@ -103,12 +101,12 @@
 
             <div class="form-group" v-if="requiresApiKey">
               <label for="apiKey">API Key *</label>
-              <input
+              <PasswordInput
                 id="apiKey"
                 v-model="formData.apiKey"
-                type="password"
-                required
                 placeholder="********"
+                required
+                class="admin-input"
               />
             </div>
 
@@ -129,12 +127,12 @@
 
               <div class="form-group">
                 <label for="password">Password</label>
-                <input
+                <PasswordInput
                   id="password"
                   v-model="formData.password"
-                  type="password"
                   placeholder="********"
                   :required="formData.type === 'nzbget'"
+                  class="admin-input"
                 />
                 <small v-if="formData.type === 'nzbget'"
                   >Use the NZBGet RPC password (default: nzbget).</small
@@ -314,19 +312,21 @@
 
       <div class="modal-footer">
         <button type="button" class="btn btn-danger" @click="handleDelete" v-if="editingClient">
-          <i class="ph ph-trash"></i>
+          <PhTrash />
           Delete
         </button>
         <button type="button" class="btn btn-secondary" @click="closeModal">
-          <i class="ph ph-x"></i>
+          <PhX />
           Cancel
         </button>
         <button type="button" class="btn btn-info" @click="testConnection" :disabled="testing">
-          <i :class="testing ? 'ph ph-spinner ph-spin' : 'ph ph-gear'"></i>
+          <PhSpinner v-if="testing" class="ph-spin" />
+          <PhGear v-else />
           {{ testing ? 'Testing...' : 'Test' }}
         </button>
         <button type="button" class="btn btn-primary" @click="handleSubmit" :disabled="saving">
-          <i :class="saving ? 'ph ph-spinner ph-spin' : 'ph ph-floppy-disk'"></i>
+          <PhSpinner v-if="saving" class="ph-spin" />
+          <PhFloppyDisk v-else />
           {{ saving ? 'Saving...' : 'Save' }}
         </button>
       </div>
@@ -336,6 +336,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import PasswordInput from '@/components/PasswordInput.vue'
+import { PhX, PhTrash, PhSpinner, PhGear, PhFloppyDisk } from '@phosphor-icons/vue'
 import type { DownloadClientConfiguration, DownloadClientSettings } from '@/types'
 import { useToast } from '@/services/toastService'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -507,9 +509,10 @@ const closeModal = () => {
 const testConnection = async () => {
   testing.value = true
   try {
-    // Build config with id from editing client or empty string for new clients
+    // For modal tests, use only the current form input values and do NOT include the stored client id.
+    // Including an id causes the server to merge missing fields from the DB (e.g., password),
+    // which we want to avoid when testing unsaved edits.
     const configToTest: DownloadClientConfiguration = {
-      id: props.editingClient?.id || '',
       ...formData.value,
     }
 

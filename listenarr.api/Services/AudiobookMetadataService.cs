@@ -13,15 +13,18 @@ namespace Listenarr.Api.Services
     {
         private readonly ISearchService _searchService;
         private readonly AudimetaService _audimetaService;
+        private readonly IAudnexusService _audnexusService;
         private readonly ILogger<AudiobookMetadataService> _logger;
 
         public AudiobookMetadataService(
             ISearchService searchService,
             AudimetaService audimetaService,
+            IAudnexusService audnexusService,
             ILogger<AudiobookMetadataService> logger)
         {
             _searchService = searchService;
             _audimetaService = audimetaService;
+            _audnexusService = audnexusService;
             _logger = logger;
         }
 
@@ -59,11 +62,39 @@ namespace Listenarr.Api.Services
                     {
                         result = await _audimetaService.GetBookMetadataAsync(asin, region, cache);
                     }
-                    else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase))
+                    else if (source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase) || source.BaseUrl.Contains("audnex", StringComparison.OrdinalIgnoreCase) || source.BaseUrl.Contains("audnexus", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Audnexus support placeholder (unimplemented)
-                        _logger.LogInformation("Audnexus support not yet implemented, trying next source");
-                        continue;
+                        // Use Audnexus service to fetch metadata
+                        try
+                        {
+                            var audnexusResult = await _audnexusService.GetBookMetadataAsync(asin, region, seedAuthors: true, update: false);
+                            if (audnexusResult != null)
+                            {
+                                // Convert AudnexusBookResponse to a general shape to return (reuse AudimetaBookResponse for compatibility where possible)
+                                var converted = new AudimetaBookResponse
+                                {
+                                    Asin = audnexusResult.Asin,
+                                    Title = audnexusResult.Title,
+                                    Subtitle = audnexusResult.Subtitle,
+                                    ImageUrl = audnexusResult.Image,
+                                    Publisher = audnexusResult.PublisherName,
+                                    LengthMinutes = audnexusResult.RuntimeLengthMin,
+                                    Language = audnexusResult.Language,
+                                    Explicit = audnexusResult.IsAdult ?? false,
+                                    Isbn = audnexusResult.Isbn,
+                                    ReleaseDate = audnexusResult.ReleaseDate,
+                                    Description = audnexusResult.Description ?? audnexusResult.Summary,
+                                    Authors = audnexusResult.Authors?.Select(a => new AudimetaAuthor { Asin = a.Asin, Name = a.Name, Region = audnexusResult.Region }).ToList(),
+                                    Narrators = audnexusResult.Narrators?.Select(n => new AudimetaNarrator { Name = n.Name }).ToList(),
+                                    Genres = audnexusResult.Genres?.Select(g => new AudimetaGenre { Asin = g.Asin, Name = g.Name, Type = g.Type }).ToList()
+                                };
+                                result = converted;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Audnexus lookup failed, trying next source");
+                        }
                     }
                     else
                     {

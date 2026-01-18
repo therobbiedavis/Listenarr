@@ -19,13 +19,13 @@
 
         <div class="form-row">
           <label class="form-label" for="password">Password</label>
-          <input
+          <PasswordInput
             id="password"
             class="form-input"
-            type="password"
             v-model="password"
             autocomplete="current-password"
             aria-required="true"
+            placeholder=""
           />
         </div>
 
@@ -52,12 +52,14 @@
 
 <script lang="ts">
 import { defineComponent, ref } from 'vue'
+import PasswordInput from '@/components/PasswordInput.vue'
 import { apiService } from '@/services/api'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 // Vite static import for the logo so bundler resolves the asset reliably
 
 export default defineComponent({
+  components: { PasswordInput },
   name: 'LoginView',
   setup() {
     const username = ref<string>('')

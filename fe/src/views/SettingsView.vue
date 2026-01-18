@@ -250,10 +250,9 @@
 
             <div class="form-group">
               <label for="api-key">API Key</label>
-              <input
+              <PasswordInput
                 id="api-key"
                 v-model="apiForm.apiKey"
-                type="password"
                 placeholder="Optional API key"
               />
               <small>Leave empty if not required</small>
@@ -360,6 +359,7 @@ import NotificationsTab from '@/views/settings/NotificationsTab.vue'
 import IndexersTab from '@/views/settings/IndexersTab.vue'
 import GeneralSettingsTab from '@/views/settings/GeneralSettingsTab.vue'
 import CustomSelect from '@/components/CustomSelect.vue'
+import PasswordInput from '@/components/PasswordInput.vue'
 import {
   PhFolder,
   PhListMagnifyingGlass,

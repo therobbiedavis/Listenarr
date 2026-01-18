@@ -154,7 +154,7 @@
               class="form-group"
             >
               <label for="apiKey">API Key</label>
-              <input id="apiKey" v-model="formData.apiKey" type="text" placeholder="Your API key" />
+              <PasswordInput id="apiKey" v-model="formData.apiKey" placeholder="Your API key" class="admin-input" />
             </div>
 
             <div v-if="formData.implementation !== 'InternetArchive'" class="form-group">
@@ -265,6 +265,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import PasswordInput from '@/components/PasswordInput.vue'
 import type { Indexer } from '@/types'
 import {
   createIndexer,

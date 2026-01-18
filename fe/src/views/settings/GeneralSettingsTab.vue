@@ -313,49 +313,8 @@
           <div class="form-group">
             <label>API Key (Server)</label>
             <div class="input-group">
-              <input
-                type="text"
-                :value="startupConfig?.apiKey || ''"
-                disabled
-                class="input-group-input"
-              />
-              <div class="input-group-append">
-                <button
-                  type="button"
-                  class="icon-button input-group-btn"
-                  :class="{ copied: copiedApiKey }"
-                  @click="copyApiKey"
-                  :disabled="!startupConfig?.apiKey"
-                  title="Copy API key"
-                >
-                  <template v-if="copiedApiKey">
-                    <PhCheck />
-                  </template>
-                  <template v-else>
-                    <PhFiles />
-                  </template>
-                </button>
-                <button
-                  type="button"
-                  class="regenerate-button input-group-btn"
-                  @click="regenerateApiKey"
-                  :disabled="loadingApiKey"
-                  :title="startupConfig?.apiKey ? 'Regenerate API key' : 'Generate API key'"
-                >
-                  <template v-if="loadingApiKey">
-                    <PhSpinner class="ph-spin" />
-                  </template>
-                  <template v-else-if="startupConfig?.apiKey">
-                    <PhArrowCounterClockwise />
-                  </template>
-                  <template v-else>
-                    <PhPlus />
-                  </template>
-                  <span v-if="!loadingApiKey">{{
-                    startupConfig?.apiKey ? 'Regenerate' : 'Generate'
-                  }}</span>
-                </button>
-              </div>
+              <ApiKeyControl :apiKey="props.startupConfig?.apiKey" :disabled="false" @update:apiKey="(newKey) => emit('update:startupConfig', { ...(props.startupConfig || {}), apiKey: newKey })" />
+
             </div>
             <span class="form-help"
               >API key for authenticating external applications. Generate a new key if needed. Copy
@@ -558,6 +517,8 @@ import {
   PhX,
 } from '@phosphor-icons/vue'
 
+import ApiKeyControl from '@/components/ApiKeyControl.vue'
+
 interface Props {
   settings: ApplicationSettings | null
   startupConfig: StartupConfig | null | undefined
@@ -574,8 +535,6 @@ const emit = defineEmits<{
 const toast = useToast()
 const showPassword = ref(false)
 const showProxySecurityModal = ref(false)
-const loadingApiKey = ref(false)
-const copiedApiKey = ref(false)
 
 // Local reactive copy of settings to avoid mutating incoming prop directly
 import { reactive, watch, nextTick } from 'vue'
@@ -672,81 +631,7 @@ const closeProxySecurityModal = () => {
   showProxySecurityModal.value = false
 }
 
-const copyApiKey = async () => {
-  const key = props.startupConfig?.apiKey
-  if (!key) return
-  try {
-    await navigator.clipboard.writeText(key)
-    copiedApiKey.value = true
-    setTimeout(() => {
-      copiedApiKey.value = false
-    }, 2000)
-  } catch (err) {
-    errorTracking.captureException(err as Error, {
-      component: 'GeneralSettingsTab',
-      operation: 'copyApiKey',
-    })
-  }
-}
 
-const regenerateApiKey = async () => {
-  const hasExistingKey = !!props.startupConfig?.apiKey
-
-  const confirmMessage = hasExistingKey
-    ? 'Regenerating the API key will immediately invalidate the existing key. Continue?'
-    : 'Generate a new API key for this server instance?'
-
-  const okRegenerate = await showConfirm(confirmMessage, 'API Key')
-  if (!okRegenerate) return
-
-  loadingApiKey.value = true
-  try {
-    let resp: { apiKey: string; message?: string }
-
-    if (!hasExistingKey) {
-      try {
-        resp = await apiService.generateInitialApiKey()
-        emit('update:startupConfig', { ...(props.startupConfig || {}), apiKey: resp.apiKey })
-        toast.info('API key', resp.message || 'API key generated - copied to clipboard')
-        try {
-          await navigator.clipboard.writeText(resp.apiKey)
-        } catch {}
-        return
-      } catch (initialErr) {
-        logger.debug(
-          'Initial API key generation failed, trying authenticated regeneration',
-          initialErr,
-        )
-      }
-    }
-
-    resp = await apiService.regenerateApiKey()
-    emit('update:startupConfig', { ...(props.startupConfig || {}), apiKey: resp.apiKey })
-    toast.info('API key', 'API key regenerated - copied to clipboard')
-    try {
-      await navigator.clipboard.writeText(resp.apiKey)
-    } catch {}
-  } catch (err) {
-    errorTracking.captureException(err as Error, {
-      component: 'GeneralSettingsTab',
-      operation: 'regenerateApiKey',
-    })
-    const status =
-      err && typeof err === 'object' && err !== null && 'status' in err
-        ? (err as { status: number }).status
-        : 0
-    if (status === 401 || status === 403) {
-      toast.error(
-        'Permission denied',
-        'You must be logged in as an administrator to regenerate the API key. Please login and try again.',
-      )
-    } else {
-      toast.error('API key failed', 'Failed to generate/regenerate API key')
-    }
-  } finally {
-    loadingApiKey.value = false
-  }
-}
 
 // Expose method for parent component
 defineExpose({

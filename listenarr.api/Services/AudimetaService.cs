@@ -49,7 +49,12 @@ namespace Listenarr.Api.Services
             {
                 var url = $"{BASE_URL}/series?cache=true&name={Uri.EscapeDataString(name)}&region={region}";
                 _logger.LogInformation("Searching audimeta.de for series name {Name}: {Url}", name, url);
-                var resp = await _httpClient.GetAsync(url);
+                var resp = await GetWithTimeoutAsync(url);
+                if (resp == null)
+                {
+                    _logger.LogWarning("Audimeta series search request timed out for name {Name}", name);
+                    return null;
+                }
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Audimeta series search returned status code {StatusCode} for name {Name}", resp.StatusCode, name);
@@ -72,7 +77,12 @@ namespace Listenarr.Api.Services
             {
                 var url = $"{BASE_URL}/series/books/{Uri.EscapeDataString(seriesAsin)}?cache=true&region={region}";
                 _logger.LogInformation("Fetching audimeta.de series books for ASIN {Asin}: {Url}", seriesAsin, url);
-                var resp = await _httpClient.GetAsync(url);
+                var resp = await GetWithTimeoutAsync(url);
+                if (resp == null)
+                {
+                    _logger.LogWarning("Audimeta series books request timed out for ASIN {Asin}", seriesAsin);
+                    return null;
+                }
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Audimeta series books returned status code {StatusCode} for series ASIN {Asin}", resp.StatusCode, seriesAsin);
@@ -96,7 +106,12 @@ namespace Listenarr.Api.Services
             var url = $"{BASE_URL}/book/{asin}?cache={useCache.ToString().ToLower()}&region={region}";
             if (!string.IsNullOrWhiteSpace(language)) url += $"&language={Uri.EscapeDataString(language)}";
             _logger.LogInformation("Fetching audiobook metadata from audimeta.de: {Url}", url);
-                var response = await _httpClient.GetAsync(url);
+                var response = await GetWithTimeoutAsync(url);
+                if (response == null)
+                {
+                    _logger.LogWarning("Audimeta API request timed out for ASIN {Asin}", asin);
+                    return null;
+                }
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Audimeta API returned status code {StatusCode} for ASIN {Asin}", response.StatusCode, asin);
@@ -170,7 +185,13 @@ namespace Listenarr.Api.Services
                 var authorLookupUrl = $"{BASE_URL}/author?cache=true&region={region}&name={Uri.EscapeDataString(author)}";
                 if (!string.IsNullOrWhiteSpace(language)) authorLookupUrl += $"&language={Uri.EscapeDataString(language)}";
                 _logger.LogInformation("Looking up author on audimeta.de: {Url}", authorLookupUrl);
-                var lookupResp = await _httpClient.GetAsync(authorLookupUrl);
+                var lookupResp = await GetWithTimeoutAsync(authorLookupUrl);
+                if (lookupResp == null)
+                {
+                    _logger.LogWarning("Author lookup request timed out for author {Author}", author);
+                    var fallbackUrl = $"{BASE_URL}/search?products_sort_by=Title&cache=true&page={page}&limit={limit}&query={Uri.EscapeDataString(title + " " + author)}&region={region}";
+                    return await ExecuteSearchAsync(fallbackUrl, $"{title} by {author} (page {page})");
+                }
                 if (!lookupResp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Author lookup returned status {Status} for author {Author}", lookupResp.StatusCode, author);
@@ -284,7 +305,12 @@ namespace Listenarr.Api.Services
             var authorLookupUrl = $"{BASE_URL}/author?cache=true&region={region}&name={Uri.EscapeDataString(author)}";
             if (!string.IsNullOrWhiteSpace(language)) authorLookupUrl += $"&language={Uri.EscapeDataString(language)}";
             _logger.LogInformation("Looking up author on audimeta.de: {Url}", authorLookupUrl);
-            var lookupResp = await _httpClient.GetAsync(authorLookupUrl);
+            var lookupResp = await GetWithTimeoutAsync(authorLookupUrl);
+            if (lookupResp == null)
+            {
+                _logger.LogWarning("Author lookup request timed out for author {Author}", author);
+                return null;
+            }
             if (!lookupResp.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Author lookup returned status {Status} for author {Author}", lookupResp.StatusCode, author);
@@ -337,7 +363,12 @@ namespace Listenarr.Api.Services
             {
                 var authorLookupUrl = $"{BASE_URL}/author?cache=true&region={region}&name={Uri.EscapeDataString(author)}";
                 _logger.LogInformation("Looking up author on audimeta.de: {Url}", authorLookupUrl);
-                var lookupResp = await _httpClient.GetAsync(authorLookupUrl);
+                var lookupResp = await GetWithTimeoutAsync(authorLookupUrl);
+                if (lookupResp == null)
+                {
+                    _logger.LogWarning("Author lookup request timed out for author {Author}", author);
+                    return null;
+                }
                 if (!lookupResp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Author lookup returned status {Status} for author {Author}", lookupResp.StatusCode, author);
@@ -429,7 +460,12 @@ namespace Listenarr.Api.Services
         {
             try
             {
-                var response = await _httpClient.GetAsync(url);
+                var response = await GetWithTimeoutAsync(url);
+                if (response == null)
+                {
+                    _logger.LogWarning("Audimeta search request timed out for: {SearchTerm}", searchTerm);
+                    return null;
+                }
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Audimeta search returned status code {StatusCode} for: {SearchTerm}", response.StatusCode, searchTerm);
@@ -530,6 +566,26 @@ namespace Listenarr.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error searching audimeta.de for: {SearchTerm}", searchTerm);
+                return null;
+            }
+        }
+
+        private async Task<HttpResponseMessage?> GetWithTimeoutAsync(string url, int timeoutSeconds = 5)
+        {
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+                var resp = await _httpClient.GetAsync(url, cts.Token);
+                return resp;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning(ex, "Audimeta request timed out for URL: {Url}", url);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error performing Audimeta HTTP request for URL: {Url}", url);
                 return null;
             }
         }

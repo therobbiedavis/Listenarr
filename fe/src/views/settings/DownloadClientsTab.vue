@@ -404,7 +404,11 @@ const toggleDownloadClientFunc = async (client: DownloadClientConfiguration) => 
 const testClient = async (client: DownloadClientConfiguration) => {
   testingClient.value = client.id
   try {
-    const result = await apiTestDownloadClient(client)
+    // Use the latest saved configuration from the store (DB values)
+    const storedClient =
+      configStore.downloadClientConfigurations.find((c) => c.id === client.id) || client
+
+    const result = await apiTestDownloadClient(storedClient)
     if (result.success) {
       toast.success(
         'Download client test',

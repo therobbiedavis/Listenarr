@@ -60,6 +60,9 @@ vi.mock('@/services/api', () => ({
     getQualityProfiles: vi.fn(async () => []),
     getApiConfigurations: vi.fn(async () => []),
   },
+  // Provide top-level named exports used by components (wrappers over apiService)
+  getRemotePathMappings: vi.fn(async () => []),
+  getRemotePathMappingsByClient: vi.fn(async (downloadClientId: string) => []),
 }))
 
 vi.mock('@/services/signalr', () => ({
